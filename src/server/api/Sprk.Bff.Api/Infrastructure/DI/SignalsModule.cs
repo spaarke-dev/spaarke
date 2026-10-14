@@ -52,11 +52,13 @@ public static class SignalsModule
             sp.GetRequiredService<ILogger<OntologyWriterDataverseClient>>()));
 
         // SignalWriter (task 030; spec FR-03/FR-14/NFR-08): writes sprk_signal via the dedicated client above,
-        // plus the SHARED sysadmin IGenericEntityService (GraphModule.AddGraphModule) for the one read that is
-        // metadata, not a Signal write — the grouping matter's owningbusinessunit (F25). Two DIFFERENT
-        // Dataverse connections, injected as two DIFFERENT types, so neither can be swapped for the other by
-        // accident. Task 039 (D-33): also uac-r2's IRecordOwnershipResolver (singleton, registered unconditionally by
-        // AddRecordOwnershipResolver) — the one owner of invariant I-6, reused, never re-derived here.
+        // plus the SHARED sysadmin IGenericEntityService (GraphModule.AddGraphModule) for the reads that are not a
+        // Signal write (the subject, its date, the catalog). Two DIFFERENT Dataverse connections, injected as two
+        // DIFFERENT types, so neither can be swapped for the other by accident. Task 039 / 143 (D-33, D-130): every
+        // Signal's owner is uac-r2's IRecordOwnershipResolver answer (singleton, registered unconditionally by
+        // AddRecordOwnershipResolver), applied as returned. Task 143 also hands it the IServiceScopeFactory, through which
+        // it resolves two SCOPED services already registered unconditionally by AddExternalAccess, per call:
+        // AssignedAccessStore (the D-134 assignee read) and SecureChildReconciler (the no-core re-own). No new registration.
         services.AddSingleton<SignalWriter>();
 
         // DecisionRecordWriter (task 040, FR-18..FR-22): the one append-only Decision Record per review, created through the same

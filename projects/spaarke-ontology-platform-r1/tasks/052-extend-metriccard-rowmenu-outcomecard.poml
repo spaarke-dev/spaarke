@@ -111,7 +111,7 @@
 
   <notes>spec.md FR-27, FR-28 (amended, D-24), FR-34. design.md section 1.3 is BINDING, not advisory, which is why the DocumentRowMenu/OutcomeCard drop needs the owner (C-10, O-7). Amended 2026-10-07 per reconciliation B.2 row 052. The criteria about DocumentRowMenu and OutcomeCard above apply only if the owner keeps them.</notes>
 
-  <completion>COMPLETED 2026-10-09: PR #1536 merged into docs/ontology-platform-design (d18177ef0) after independent review + fix round. MetricCard lane count filters (laneCountFilters) + C-9 RowActionMenu cleanup. Documented, not fixed (D-106): F-46, F-47.</completion>
+  <completion>COMPLETED 2026-10-09: PR #1536 merged into docs/ontology-platform-design (d18177ef0) after independent review + fix round. MetricCard lane count filters (laneCountFilters) + C-9 RowActionMenu cleanup. Documented, not fixed (D-106): DI-46, DI-47.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

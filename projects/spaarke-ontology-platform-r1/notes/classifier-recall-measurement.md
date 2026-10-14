@@ -183,7 +183,7 @@ warnings: `notes/074-run-results.json`.
   12/21 = **57.1%**, still below 80%. **The FAIL holds whatever the key's quality.**
 - Nothing was relabelled after the run.
 
-### 6.3 Root cause (high confidence): the deployed TRIAGE-EMAIL prompt is corrupted. Filed as F-53 / #1584
+### 6.3 Root cause (high confidence): the deployed TRIAGE-EMAIL prompt is corrupted. Filed as DI-53 / #1584
 
 Every one of the 92 TRIAGE-EMAIL calls logged `PromptSchemaRenderer: Failed to parse JPS schema; falling back to flat
 text rendering`. Diagnosis:
@@ -243,7 +243,7 @@ identity (System Administrator), HTTP 204 each.
 
 ### 6.6 🔔 Escalation: owner decisions needed (not taken here)
 
-1. **Repair the TRIAGE-EMAIL row** (#1584 / F-53). The Action belongs to email-communication-intelligence, and 072
+1. **Repair the TRIAGE-EMAIL row** (#1584 / DI-53). The Action belongs to email-communication-intelligence, and 072
    deliberately did not touch it. Recommended: restore `sprk_systemprompt` from the repo mirror with a verified direct
    write (`Deploy-ActionMirrors.ps1` cannot deploy a JPS mirror, mvp-technical-spec §16.2), read it back, confirm
    `PromptSchema` deserializes.
@@ -280,7 +280,7 @@ authoring contract (`docs/guides/JPS-AUTHORING-GUIDE.md`, "examples Section") de
 `triage-email.action.json` has used **object** example inputs since its first commit (`71ac39087`, task 022,
 2026-07-29). So this Action has **never** rendered on the JPS path. The 2026-09-29 corruption was a second,
 independent defect, and the repair, though necessary, could not on its own get the guidance into the prompt. Only
-`triage-email` among the repo mirrors has object example inputs. Added to #1584 (comment 6098080127) and F-53.
+`triage-email` among the repo mirrors has object example inputs. Added to #1584 (comment 6098080127) and DI-53.
 
 **What run 1 (§6, 21.8%) therefore measured:** the classifier with **no** guidance, no rendered constraints and a
 raw-JSON prompt. This was the deployed state before *and* after the corruption.

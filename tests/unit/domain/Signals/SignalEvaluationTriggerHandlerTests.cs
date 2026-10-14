@@ -228,7 +228,8 @@ public partial class SignalReevaluationJobTests
         await RunTriggerAsync(h, SignalTriggerKind.Classification, MatterId, CommunicationId);
 
         h.Org.CreatedPayloads.Should().ContainSingle()
-            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeNull("an ordinary matter's Signal keeps the writer's default owner; only a Secure matter names the owner team");
+            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId),
+                "task 143 (D-130): an ordinary matter's Signal is owned by the matter's business-unit team, not the Secure Record Owners team");
     }
 
     // =====================================================================================

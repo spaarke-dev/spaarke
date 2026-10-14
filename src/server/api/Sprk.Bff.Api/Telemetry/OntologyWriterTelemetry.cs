@@ -248,19 +248,16 @@ public static class OntologyWriterFailureReason
     /// is empty.</summary>
     public const string MatterLookupEmpty = "matter_lookup_empty";
 
-    /// <summary>The grouping matter has no <c>owningbusinessunit</c>.</summary>
-    public const string OwningBusinessUnitNotFound = "owning_business_unit_not_found";
+    /// <summary>Task 143 (D-130): a Signal with a core record does not read back with the ordinary team the ownership resolver
+    /// chose as its <c>ownerid</c> — after the create, or on a re-evaluation (reconcile) read (its core record moved business
+    /// unit, or the row was written before task 143). (Was <c>owning_business_unit_mismatch</c> while the writer set the business
+    /// unit directly.)</summary>
+    public const string OwnerMismatch = "owner_mismatch";
 
-    /// <summary>After create, the row's <c>owningbusinessunit</c> did not match the intended business unit —
-    /// most likely <c>EnableOwnershipAcrossBusinessUnits</c> is disabled in this environment, OR (R1, second
-    /// independent review) the row was found to have drifted on a RECONCILE (re-evaluation) read, not only on
-    /// the post-create read-back.</summary>
-    public const string OwningBusinessUnitMismatch = "owning_business_unit_mismatch";
-
-    /// <summary>The Signal was created, but reading its <c>owningbusinessunit</c> back to verify it (or, on
-    /// reconcile, re-reading it) itself failed (R1, second independent review) — distinct from
-    /// <see cref="OwningBusinessUnitMismatch"/>, which means the read SUCCEEDED and disagreed.</summary>
-    public const string OwningBusinessUnitReadBackFailed = "owning_business_unit_read_back_failed";
+    /// <summary>The Signal was created, but reading its owner back to verify it (or, on reconcile, re-reading the existing row)
+    /// itself failed (R1, second independent review) — distinct from a mismatch, which means the read SUCCEEDED and disagreed.
+    /// (Was <c>owning_business_unit_read_back_failed</c> before task 143.)</summary>
+    public const string OwnerReadBackFailed = "owner_read_back_failed";
 
     /// <summary>The message template could not be rendered strictly from the detection-time fact snapshot — a
     /// referenced token is absent, null, or a leftover placeholder survived rendering (§0.3; R2, second
@@ -268,9 +265,9 @@ public static class OntologyWriterFailureReason
     /// metered WITHOUT the rendered content (R2 removed the rendered string from the exception message).</summary>
     public const string SentenceTemplateInvalid = "sentence_template_invalid";
 
-    /// <summary>Task 039 (D-33): uac-r2's <c>RecordOwnershipResolver</c> refused an owner for the Signal (for
-    /// example a root flagged Secure but not isolated, or the Secure Record Owners team unresolved). The write is
-    /// SKIPPED — nothing is written — and logged at Warning on
+    /// <summary>Task 039 (D-33), task 143 (D-130): uac-r2's <c>RecordOwnershipResolver</c> refused an owner for the Signal, or
+    /// named no team (for example a root flagged Secure but not isolated, the Secure Record Owners team unresolved, or a parent
+    /// with no business-unit default team). The write is SKIPPED — nothing is written — and logged at Warning on
     /// <see cref="Sprk.Bff.Api.Services.Signals.OntologyWriterEvents.WriteSkippedOwnerRefused"/>.</summary>
     public const string OwnerRefused = "owner_refused";
 
@@ -300,17 +297,20 @@ public static class OntologyWriterFailureReason
     /// table's <c>sprk_recordtype_ref</c> read faulted. A fault is not "no catalog row", so the Signal is not written untyped.</summary>
     public const string SubjectPairUnresolved = "subject_pair_unresolved";
 
-    /// <summary>Task 037 (D-35): a subject with no core record is owned by the subject's owner, and that owner is neither a
-    /// system user nor a team (or is empty). The write is refused rather than owned by the writer.</summary>
+    /// <summary>Task 037 (D-35), task 143 (D-130, D-134): a subject with no core record, whose owner cannot be resolved — the
+    /// ownership resolver faulted, or a personal To Do's Assigned To could not be read while its own answer is ordinary. The write
+    /// is refused (fail closed) rather than owned by the writer or by a fallback.</summary>
     public const string NoCoreOwnerUnresolved = "no_core_owner_unresolved";
 
-    /// <summary>Task 037 (D-35): a no-core Signal does not read back with the subject's owner as its <c>ownerid</c>.</summary>
+    /// <summary>Task 037 (D-35), task 143: a no-core Signal does not read back with the resolver's team as its <c>ownerid</c>, or
+    /// the job's re-own of it to that team was refused (a row or team in the Secure Record business unit, or a user-owned row).</summary>
     public const string NoCoreOwnerMismatch = "no_core_owner_mismatch";
 
     /// <summary>Task 031: a system closure (ConditionCleared) of a Signal failed in Dataverse.</summary>
     public const string SignalCloseFailed = "signal_close_failed";
 
-    /// <summary>Task 031 (D-35): reassigning a no-core Signal to its item's current owner failed in Dataverse.</summary>
+    /// <summary>Task 031 (D-35), task 143: re-owning a no-core Signal to its item's current owner team failed (uac-r2's
+    /// <c>ReownOrdinaryRowAsync</c> answered Failed, or faulted).</summary>
     public const string SignalReassignFailed = "signal_reassign_failed";
 
     /// <summary>Task 031 (D-13): a <c>sprk_signal.sprk_dedupekey</c> under a policy is not

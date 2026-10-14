@@ -46,4 +46,4 @@ No 412 retry; missing version written anyway; reply/inquiry mismatch unchecked; 
 Release publish: 192 files both sides; 127,756,800 -> 127,809,460 bytes (+52.7 KB, whole publish dir) against a fresh build of the project-branch tip ec80b4e80, both from short paths.
 
 ## D-106 (not fixed)
-Caller-scoped tallies undercount (F-43); the Report Card has no reader yet; the publish-measurement baseline.
+Caller-scoped tallies undercount (DI-43); the Report Card has no reader yet; the publish-measurement baseline.

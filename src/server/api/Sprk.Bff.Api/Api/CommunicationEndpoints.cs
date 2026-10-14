@@ -53,6 +53,46 @@ public static class CommunicationEndpoints
     /// </summary>
     private static readonly TimeSpan DeduplicationWindow = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// <c>PATCH /api/communications/{id}/filing</c>'s handler: the ONE re-file core (<see cref="ChildRecordEndpoints.UpdateAsync"/>,
+    /// filing columns only - unchanged), then, after a successful 204, the association-confirmed Signal trigger (ontology D-48,
+    /// issue #1659): a communication classified first and filed to a matter now has that matter evaluated at once, not at the
+    /// nightly pass. The trigger lives HERE, not in the shared core, which also serves events and generic child records. The
+    /// response is the core's, unchanged: a refusal (400/403/404/409) enqueues nothing, and the trigger never fails the re-file.
+    /// </summary>
+    internal static async Task<IResult> RefileCommunicationAsync(
+        Guid id,
+        JsonElement body,
+        IDataverseUserClient user,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+        IGenericEntityService entities,
+        Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger? signalTrigger,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        // The matter BEFORE the write (a bounded app-only read, skipped without a trigger; never throws), so the trigger fires
+        // only when the filing changed and also re-evaluates the matter it left. Read before UpdateAsync can refuse: a refused
+        // PATCH costs one small read, and nothing else.
+        var before = await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+            .ReadMatterAsync(entities, signalTrigger, id, logger).ConfigureAwait(false);
+
+        var result = await ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
+            filingOnly: true).ConfigureAwait(false);
+
+        if (result is Microsoft.AspNetCore.Http.HttpResults.NoContent)
+        {
+            await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+                .EnqueueIfClassifiedOnMatterAsync(entities, signalTrigger, id, logger, before)
+                .ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
     public static IEndpointRouteBuilder MapCommunicationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/communications")
@@ -96,12 +136,13 @@ public static class CommunicationEndpoints
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+                [Microsoft.AspNetCore.Mvc.FromServices] IGenericEntityService entities,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger? signalTrigger,
                 HttpContext httpContext,
                 ILogger<Program> logger,
                 CancellationToken ct) =>
-                ChildRecordEndpoints.UpdateAsync(
-                    "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
-                    filingOnly: true))
+                RefileCommunicationAsync(
+                    id, body, user, ownership, restamper, children, entities, signalTrigger, httpContext, logger, ct))
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Refile)
             .WithName("RefileCommunication")

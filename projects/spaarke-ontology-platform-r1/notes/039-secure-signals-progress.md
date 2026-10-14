@@ -194,7 +194,7 @@ Reading the "since the deploy" column:
     - Run B-1: no secure-child dispatch at 01:28Z; the refresh trace is at 01:28:00.0026Z.
     - Log Analytics, last 3 days: 86 refreshes, 61 of them on an even minute. 42 of those 61 have **no** `secure-child-share-reconciliation` run in that minute.
   - The effect: about once an hour, every job due at the refresh moment skips one occurrence. For the two secure-child jobs, the "≤ 2 minutes" bound becomes about 4 minutes plus the run, for that one occurrence. This affects every table they cover, not just Signals.
-  - Owner of the code: platform scheduling (ADR-036). Filed by the main session as **#1575** (project issue log F-52).
+  - Owner of the code: platform scheduling (ADR-036). Filed by the main session as **#1575** (project issue log DI-52).
 - **Do not deploy a post-#1390 master BFF to demo or any customer environment** before the ontology schema is there (#1378). The PR says so.
 
 ## 8. Tests

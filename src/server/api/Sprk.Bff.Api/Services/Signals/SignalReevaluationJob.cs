@@ -333,11 +333,25 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         foreach (var hit in plan.RefusedHits)
         {
-            // D-38: a refusal, never a skip. Same EventId and metric as every writer refusal.
-            _logger.LogError(OntologyWriterEvents.WriteRefused,
-                "Signal writer refused for policy {PolicyCode} (reason={Reason}): the core record of {SubjectEntity} {SubjectId} " +
-                "cannot be derived. Nothing was written for it.", policy.Code, hit.CoreRefusalReason, hit.SubjectEntity, hit.SubjectId);
-            OntologyWriterTelemetry.RecordFailure(hit.CoreRefusalReason ?? OntologyWriterFailureReason.CoreRecordUnresolved);
+            // D-38: a refusal, never a skip. Same EventId and metric as every writer refusal, with the writer's escalation (its
+            // message and inner fault) attached. Task 143 (review F1): a no-core item's OWNER refusal or unresolved owner is
+            // named as such; its core record is not the problem.
+            var reason = hit.CoreRefusalReason ?? OntologyWriterFailureReason.CoreRecordUnresolved;
+            if (reason is OntologyWriterFailureReason.OwnerRefused or OntologyWriterFailureReason.NoCoreOwnerUnresolved)
+            {
+                _logger.LogError(OntologyWriterEvents.WriteRefused, hit.CoreRefusalCause,
+                    "Signal writer refused for policy {PolicyCode} (reason={Reason}): {SubjectEntity} {SubjectId} has no core record " +
+                    "and the owner of its Signal cannot be resolved (D-130, D-134). Nothing was written for it.",
+                    policy.Code, reason, hit.SubjectEntity, hit.SubjectId);
+            }
+            else
+            {
+                _logger.LogError(OntologyWriterEvents.WriteRefused, hit.CoreRefusalCause,
+                    "Signal writer refused for policy {PolicyCode} (reason={Reason}): the core record of {SubjectEntity} {SubjectId} " +
+                    "cannot be derived. Nothing was written for it.", policy.Code, reason, hit.SubjectEntity, hit.SubjectId);
+            }
+
+            OntologyWriterTelemetry.RecordFailure(reason);
         }
     }
 
@@ -372,17 +386,47 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }).ConfigureAwait(false);
         }
 
+        // Task 143 (review F2): a Signal whose re-own did not land this pass (refused, changed since read, gone, or failed: each
+        // already counted once) is not also reconciled, which would only meet the old owner and report the same Signal again.
+        var unsettledReowns = new HashSet<Guid>();
         foreach (var (signal, owner) in plan.Reassigns)
         {
+            unsettledReowns.Add(signal.Id);
             await GuardAsync(policy, "reassign", signal.SubjectId, counts, writerLogged: true, async () =>
             {
-                await _writer.ReassignNoCoreOwnerAsync(signal.Id, owner, policy.Code, ct).ConfigureAwait(false);
-                counts.Reassigned++;
+                // Task 143: the re-own goes through uac-r2's ReownOrdinaryRowAsync (via the writer), which refuses a Secure-BU row
+                // or team and a user-owned row; a refusal is already logged and metered by the writer and makes the run partial.
+                switch (await _writer.ReassignNoCoreOwnerAsync(signal.Id, owner, policy.Code, ct).ConfigureAwait(false))
+                {
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.Reowned:
+                        counts.Reassigned++;
+                        unsettledReowns.Remove(signal.Id);
+                        break;
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.AlreadyOwned:
+                        counts.Unchanged++;
+                        unsettledReowns.Remove(signal.Id);
+                        break;
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.NotFound
+                        or Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.Conflict:
+                        counts.ChangedSinceRead++;
+                        break;
+                    default:
+                        counts.Refused++;
+                        break;
+                }
             }).ConfigureAwait(false);
         }
 
         foreach (var (signal, hit) in plan.Reconciles)
         {
+            if (unsettledReowns.Contains(signal.Id))
+            {
+                _logger.LogInformation(
+                    "Policy {PolicyCode}: Signal {SignalId} was not reconciled because its re-own did not land this pass; the next pass retries both.",
+                    policy.Code, signal.Id);
+                continue;
+            }
+
             await GuardAsync(policy, "reconcile", hit.SubjectId, counts, writerLogged: false, async () =>
             {
                 var result = await _writer.WriteAsync(BuildRequest(policy, spec, hit, signal.Episode), ct).ConfigureAwait(false);

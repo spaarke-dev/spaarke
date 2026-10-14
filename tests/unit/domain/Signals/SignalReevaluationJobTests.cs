@@ -56,6 +56,8 @@ public partial class SignalReevaluationJobTests
     private static readonly Guid ProjectId = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000000b1");
     private static readonly Guid UserId = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000000c1");
     private static readonly Guid OtherUserId = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000000c2");
+    private static readonly Guid OtherTeamId = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000000d1");
+    private static readonly Guid OtherBusinessUnitId = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000000d2");
 
     private const string PolicyCode = "POL-COMMIT-BUDGET";
     private const string TodoPolicyCode = "POL-TODO-OVERDUE";
@@ -232,7 +234,7 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task Run_DoLanePolicy_IsEvaluated_AndAnOverdueToDoWithNoCoreRecord_IsOwnerOnly()
+    public async Task Run_DoLanePolicy_IsEvaluated_AndAnOverdueToDoWithNoCoreRecord_IsOwnedByTheResolversTeam_NeverItsUser()
     {
         var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
 
@@ -241,7 +243,8 @@ public partial class SignalReevaluationJobTests
         result.Success.Should().BeTrue();
         result.ResultJson.Should().Contain("\"doLanePolicies\":1");
         var created = h.Org.CreatedPayloads.Should().ContainSingle().Subject;
-        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", UserId));
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId),
+            "task 143 (D-129/D-130): the resolver's team for the To Do, never the To Do's user");
         created.Attributes.Should().NotContainKey("sprk_corerecordtype", "D-35: both core-record columns stay null");
         created.Attributes.Should().NotContainKey("sprk_corerecordid");
         created.GetAttributeValue<DateTime?>("sprk_duedate").Should().Be(new DateTime(2026, 10, 1));
@@ -286,7 +289,8 @@ public partial class SignalReevaluationJobTests
 
         result.Success.Should().BeTrue();
         h.Org.CreatedPayloads.Should().ContainSingle("D-33 withdrew D-15's skip: Restricted/Limited exclude only external contacts")
-            .Which.GetAttributeValue<EntityReference>("owningbusinessunit").Should().BeEquivalentTo(new EntityReference("businessunit", BusinessUnitId));
+            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId),
+                "task 143 (D-130): the matter's business-unit team, an ordinary answer");
     }
 
     [Fact]
@@ -392,11 +396,14 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task Run_NoCoreToDoReassigned_ReassignsItsSignalToTheCurrentOwner_Once()
+    public async Task Run_NoCoreToDoWhoseOwnerAnswerChanged_ReownsItsSignalToTheNewTeam_ThroughTheReconciler_Once()
     {
+        // Task 143: the item's answer moves to another ordinary team (its user moved unit, or D-134's assignee changed). The job
+        // re-owns the Signal through uac-r2's SecureChildReconciler.ReownOrdinaryRowAsync (the real one, over this World), as a
+        // conditional write on the version it read.
         var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
         await h.RunAsync();
-        h.Sysadmin.Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", OtherUserId) });
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
         h.Org.ResetCounts();
 
         var second = await h.RunAsync();
@@ -404,10 +411,178 @@ public partial class SignalReevaluationJobTests
         var third = await h.RunAsync();
 
         second.ResultJson.Should().Contain("\"reassigned\":1");
-        h.Org.Rows.Values.Single().GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(OtherUserId);
+        var row = h.Org.Rows.Values.Single();
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", OtherTeamId));
+        h.ReownApi.ConditionalWrites.Should().ContainSingle().Which.ETag.Should().Be("W/\"1\"", "conditional on the version the guard read");
         third.Success.Should().BeTrue();
         h.Org.WriteCalls.Should().Be(0, "logged once: the next pass sees no drift");
         h.Log.Count(e => e.EventId.Id == OntologyWriterEvents.NoCoreSignalReassigned.Id).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReown_ReconcilerFails_IsLoggedMeteredAndCountedRefused_NothingWritten()
+    {
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.Sysadmin.TeamBusinessUnits.Remove(OtherTeamId); // the target team cannot be read: the reconciler answers Failed
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.Success.Should().BeFalse();
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1");
+        h.ReownApi.ConditionalWrites.Should().BeEmpty();
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Error
+            && e.Message.Contains(OntologyWriterFailureReason.SignalReassignFailed));
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReown_RowChangedAfterTheGuardRead_IsAConflict_CountedChangedSinceRead_NothingWritten()
+    {
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.ReownApi.ChangeTheRowBeforeTheWrite = true;
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"changedSinceRead\":1");
+        h.Org.Rows.Values.Single().GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(DefaultTeamId, "412: nothing written");
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReown_ConflictWhileItsDateAlsoMoved_IsCountedOnce_TheReconcileWaitsForTheNextPass()
+    {
+        // Review F2: the To Do was reassigned AND re-dated in one day, so the plan holds a re-own and a reconcile for the same Signal.
+        // The re-own meets a 412 (counted changedSinceRead); the reconcile must not then meet the old owner and refuse it again.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.WithTodo(TodoId, due: new DateTime(2026, 10, 3), owner: new EntityReference("systemuser", UserId));
+        h.ReownApi.ChangeTheRowBeforeTheWrite = true;
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.Success.Should().BeTrue("a 412 race is not a failure");
+        second.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"refused\":0").And.Contain("\"updated\":0");
+        h.Log.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains(OntologyWriterFailureReason.CoreRecordChanged));
+        h.Log.Should().Contain(e => e.Message.Contains("was not reconciled because its re-own did not land"));
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReownThatLands_WhileItsDateAlsoMoved_StillReconcilesTheDate_InTheSamePass()
+    {
+        // Re-check K3 (positive control): only a re-own that did NOT land holds the reconcile back.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.WithTodo(TodoId, due: new DateTime(2026, 10, 3), owner: new EntityReference("systemuser", UserId));
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.Success.Should().BeTrue();
+        second.ResultJson.Should().Contain("\"reassigned\":1").And.Contain("\"updated\":1").And.Contain("\"refused\":0");
+        var row = h.Org.Rows.Values.Single();
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OtherTeamId);
+        row.GetAttributeValue<DateTime?>("sprk_duedate").Should().Be(new DateTime(2026, 10, 3));
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReownRefused_WhileItsDateAlsoMoved_IsCountedRefusedOnce_NoCoreRecordChangedReport()
+    {
+        // Re-check K3: a legacy user-owned Signal (refused by the reconciler) whose date also moved is one refusal, not two.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        var signal = h.Org.Rows.Values.Single();
+        signal["ownerid"] = new EntityReference("systemuser", UserId);
+        signal.Attributes.Remove("owningteam");
+        h.WithTodo(TodoId, due: new DateTime(2026, 10, 3), owner: new EntityReference("systemuser", UserId));
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.ResultJson.Should().Contain("\"refused\":1").And.Contain("\"updated\":0");
+        h.Log.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains(OntologyWriterFailureReason.CoreRecordChanged));
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReown_DataverseRefusesTheTeamsRead_IsMeteredAsAnAccessDenial()
+    {
+        // Review F1: F2's 0x80040299 on the re-own comes back from the reconciler as text (Failed); it is metered and logged as
+        // the access denial it is, not only as a generic re-own failure.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.ReownApi.WriteFault = new HttpRequestException("Read Privilege Check For Owner failed (0x80040299).");
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        using var metrics = new MetricCapture();
+        var second = await h.RunAsync();
+
+        second.Success.Should().BeFalse();
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1");
+        h.Org.Rows.Values.Single().GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(DefaultTeamId, "nothing was re-owned");
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Error
+            && e.Message.Contains(OntologyWriterFailureReason.DataverseAccessDenied) && e.Message.Contains("0x80040299"));
+        metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DataverseAccessDenied).Should().BeGreaterThanOrEqualTo(1);
+    }
+
+    [Theory]
+    [InlineData(false)] // the resolver refuses the To Do's owner
+    [InlineData(true)]  // the resolver faults while answering for it
+    public async Task Run_NoCoreItemWhoseOwnerCannotBeResolved_IsLoggedAsAnOwnerFailure_WithItsCause_NotAsACoreRecordFailure(bool fault)
+    {
+        // Review F1: the job meets a no-core item's owner refusal first, in DeriveCoreRecordAsync while it plans. The Error log
+        // says the OWNER cannot be resolved and carries the writer's escalation (the refusal code, or the inner fault).
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        if (fault) h.Ownership.FaultFor[TodoId] = new TimeoutException("the resolver's read timed out");
+        else h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Refused(Ownership.RecordOwnerRefusal.NoOwnerSource, "no default team");
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse();
+        h.Org.CreatedPayloads.Should().BeEmpty();
+        var reason = fault ? OntologyWriterFailureReason.NoCoreOwnerUnresolved : OntologyWriterFailureReason.OwnerRefused;
+        var entry = h.Log.Should().ContainSingle(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Error).Subject;
+        entry.Message.Should().Contain($"reason={reason}").And.Contain("the owner of its Signal cannot be resolved").And.NotContain("core record of");
+        var cause = entry.Exception.Should().BeOfType<SignalWriterEscalationException>().Subject;
+        if (fault) cause.InnerException.Should().BeOfType<TimeoutException>();
+        else cause.Message.Should().Contain(Ownership.RecordOwnerRefusal.NoOwnerSource);
+    }
+
+    [Theory]
+    [InlineData("secure-target")]  // the new team is in the Secure Record business unit: only the secure pass moves a row there
+    [InlineData("user-owned-row")] // a Signal written before task 143, owned by a user: the reconciler never re-owns it
+    public async Task Run_NoCoreReownTheReconcilerRefuses_WritesNothing_IsCountedRefused(string shape)
+    {
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        var signal = h.Org.Rows.Values.Single();
+        if (shape == "secure-target")
+        {
+            h.Sysadmin.SecureMatter(OtherMatterId);
+            h.Sysadmin.TeamBusinessUnits[OtherTeamId] = h.Sysadmin.SecureBusinessUnit;
+        }
+        else
+        {
+            signal["ownerid"] = new EntityReference("systemuser", UserId);
+            signal.Attributes.Remove("owningteam");
+        }
+
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1");
+        h.ReownApi.ConditionalWrites.Should().BeEmpty("a refusal writes nothing");
+        signal.GetAttributeValue<EntityReference>("ownerid").Id.Should().NotBe(OtherTeamId);
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Warning);
     }
 
     [Fact]
@@ -1447,14 +1622,14 @@ public partial class SignalReevaluationJobTests
         "sprk_todo", todoId, null, null,
         project is { } p
             ? new SignalCoreRecord("sprk_project", p, ProjectType, null)
-            : new SignalCoreRecord(null, Guid.Empty, null, new EntityReference("systemuser", UserId)),
+            : new SignalCoreRecord(null, Guid.Empty, null, new EntityReference("team", DefaultTeamId)),
         null, due, new Dictionary<string, object?>(), Array.Empty<SignalEvidenceRef>());
 
     private static ExistingSignal Existing(
         SignalHit hit, int episode, int status, int? resolution = null, DateTime? resolvedOn = null,
         DateTime? suppressedUntil = null, DateTime? due = null) => new(
         Guid.NewGuid(), "1", hit.SubjectEntity, hit.SubjectId, episode, status, resolution, resolvedOn, suppressedUntil, due,
-        hit.Core!.TypeRefId, hit.Core.IsNoCore ? null : hit.Core.Id, hit.Core.NoCoreOwner ?? new EntityReference("systemuser", UserId));
+        hit.Core!.TypeRefId, hit.Core.IsNoCore ? null : hit.Core.Id, hit.Core.NoCoreOwner ?? new EntityReference("team", DefaultTeamId));
 
     /// <summary>The real job, evaluator, writer, validator and core-ancestor resolver over the in-memory seams.</summary>
     // =====================================================================================
@@ -1910,6 +2085,12 @@ public partial class SignalReevaluationJobTests
         public World Sysadmin { get; } = new();
         public WriterOrg Org { get; } = new();
         public FakeOwnership Ownership { get; } = new();
+
+        /// <summary>Task 143: the D-134 link read (nobody linked unless a test says so).</summary>
+        public AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore Links { get; } = new();
+
+        /// <summary>Task 143: the reconciler's conditional owner write, over <see cref="Org"/>.</summary>
+        public ReownWebApi ReownApi { get; }
         public IDistributedCache Cache { get; } = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
         public List<LogEntry> Log { get; } = new();
         public SignalWriter Writer { get; }
@@ -1931,21 +2112,28 @@ public partial class SignalReevaluationJobTests
                         ["Ontology:Writer:ManagedIdentityClientId"] = writerClientId,
                     }).Build(),
                     Logger<OntologyWriterDataverseClient>());
+            // #1661: uac-r2's real synchronizer (its walk reads the same World), scoped as in ExternalAccessModule. Task 143: the
+            // writer's two scoped services, as the host registers them: the D-134 link read, and uac-r2's REAL reconciler over this
+            // World (its guard reads) and Org (its conditional owner write, ReownWebApi).
+            var configuration = new ConfigurationBuilder().Build();
+            ReownApi = new ReownWebApi(Org);
+            var services = new ServiceCollection();
+            services.AddScoped(_ => new Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer(
+                Sysadmin, null!, null!, configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>.Instance));
+            services.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(_ => Links);
+            services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
+                Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
+                configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance));
+            var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
-                Ownership, Clock, Logger<SignalWriter>());
+                Ownership, scopes, Clock, Logger<SignalWriter>());
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
-            // #1661: uac-r2's real synchronizer (its walk reads the same World), scoped as in ExternalAccessModule.
-            var configuration = new ConfigurationBuilder().Build();
-            var services = new ServiceCollection();
-            services.AddScoped(_ => new Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer(
-                Sysadmin, null!, null!, configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>.Instance));
-            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, configuration,
-                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), Logger<SignalSuppressionService>());
+            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, configuration, scopes, Logger<SignalSuppressionService>());
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
@@ -2068,7 +2256,7 @@ public partial class SignalReevaluationJobTests
         Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
             Ownership.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase));
 
-    internal sealed record LogEntry(LogLevel Level, EventId EventId, string Message);
+    internal sealed record LogEntry(LogLevel Level, EventId EventId, string Message, Exception? Exception = null);
 
     private sealed class SinkLogger<T>(List<LogEntry> sink) : ILogger<T>
     {
@@ -2076,7 +2264,7 @@ public partial class SignalReevaluationJobTests
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
-            lock (sink) sink.Add(new LogEntry(logLevel, eventId, formatter(state, exception)));
+            lock (sink) sink.Add(new LogEntry(logLevel, eventId, formatter(state, exception), exception));
         }
     }
 
@@ -2118,11 +2306,17 @@ public partial class SignalReevaluationJobTests
     private sealed class FakeOwnership : Ownership.IRecordOwnershipResolver
     {
         public Dictionary<Guid, Ownership.RecordOwnerResolution> AnswerFor { get; } = new();
+
+        /// <summary>Task 143: the resolver faults while answering for this record (a Dataverse read failure inside it).</summary>
+        public Dictionary<Guid, Exception> FaultFor { get; } = new();
+
         public List<Ownership.RecordOwnershipContext> Contexts { get; } = new();
 
         public Task<Ownership.RecordOwnerResolution> ResolveOwnerAsync(Ownership.RecordOwnershipContext context, CancellationToken ct)
         {
             Contexts.Add(context);
+            if (context.TargetRecordId is { } faulted && FaultFor.TryGetValue(faulted, out var fault))
+                return Task.FromException<Ownership.RecordOwnerResolution>(fault);
             return Task.FromResult(context.TargetRecordId is { } target && AnswerFor.TryGetValue(target, out var answer)
                 ? answer
                 : Ownership.RecordOwnerResolution.Owned(DefaultTeamId));
@@ -2179,6 +2373,16 @@ public partial class SignalReevaluationJobTests
         public Guid? SecureTeamId { get; private set; }
 
         private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
+
+        /// <summary>Task 143: this World's Secure Record business unit (answered once <see cref="SecureTeamId"/> exists).</summary>
+        public Guid SecureBusinessUnit => SecureBusinessUnitId;
+
+        /// <summary>Task 143: each team's business unit, for the reconciler's guard reads (<c>team</c> by <c>teamid</c>).</summary>
+        public Dictionary<Guid, Guid> TeamBusinessUnits { get; } = new()
+        {
+            [DefaultTeamId] = BusinessUnitId,
+            [OtherTeamId] = OtherBusinessUnitId,
+        };
 
         /// <summary>#1661: the Secure Record owner team exists and <paramref name="matterId"/> is a secure root it owns.</summary>
         public World SecureMatter(Guid matterId)
@@ -2340,6 +2544,18 @@ public partial class SignalReevaluationJobTests
                         result.Entities.Add(copy);
                     }
 
+                    break;
+                // Task 143: the reconciler's guard and read-back reads of one Signal (its owner columns and version) and of a team's unit.
+                case "sprk_signal" when Value("sprk_signalid") is Guid signalId && Org.Rows.TryGetValue(signalId, out var signalRow):
+                    var owned = new Entity("sprk_signal", signalId);
+                    foreach (var attribute in signalRow.Attributes) owned[attribute.Key] = attribute.Value;
+                    if (signalRow.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "systemuser" } owningUser)
+                        owned["owninguser"] = new EntityReference("systemuser", owningUser.Id);
+                    owned["versionnumber"] = long.Parse(Org.VersionOf(signalId), System.Globalization.CultureInfo.InvariantCulture);
+                    result.Entities.Add(owned);
+                    break;
+                case "team" when Value("teamid") is Guid teamId && TeamBusinessUnits.TryGetValue(teamId, out var teamUnit):
+                    result.Entities.Add(new Entity("team", teamId) { ["businessunitid"] = new EntityReference("businessunit", teamUnit) });
                     break;
                 // #1661: uac-r2's Secure Record owner team rule and its root read (owner team + sprk_issecure), only once a team exists.
                 case "businessunit" when SecureTeamId is not null:
@@ -2550,6 +2766,19 @@ public partial class SignalReevaluationJobTests
 
         public string VersionOf(Guid id) => _versions[id].ToString();
 
+        /// <summary>Task 143: another writer changed the row (its version moves, its owner does not).</summary>
+        public void Touch(Guid id) => _versions[id]++;
+
+        /// <summary>Task 143: the reconciler's owner write landing (Dataverse derives owningteam; the version moves).</summary>
+        public void Reown(Guid id, Guid teamId)
+        {
+            Apply(id, new Dictionary<string, object> { ["ownerid"] = new EntityReference("team", teamId) });
+            Rows[id]["owningteam"] = new EntityReference("team", teamId);
+            Rows[id]["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitOfTeam(teamId)); // Dataverse derives it
+            Rows[id].Attributes.Remove("owninguser");
+            Updates.Add((id, new Dictionary<string, object> { ["ownerid"] = new EntityReference("team", teamId) }));
+        }
+
         public Guid SeedSignal(string key, int status, int? resolution = null, DateTime? resolvedOn = null, Guid? coreId = null,
             DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null,
             DateTime? lastEvaluated = null)
@@ -2559,6 +2788,9 @@ public partial class SignalReevaluationJobTests
             {
                 ["sprk_dedupekey"] = key,
                 ["sprk_signalstatus"] = new OptionSetValue(status),
+                // Task 143 (D-130): every Signal is owned by the resolver's team; the unit derives from it.
+                ["ownerid"] = new EntityReference("team", DefaultTeamId),
+                ["owningteam"] = new EntityReference("team", DefaultTeamId),
                 ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
             };
             if (policyId is { } pid) row["sprk_policy"] = new EntityReference("sprk_policy", pid);
@@ -2606,7 +2838,7 @@ public partial class SignalReevaluationJobTests
             if (row.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "team" } team)
             {
                 row["owningteam"] = new EntityReference("team", team.Id);
-                row["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId);
+                row["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitOfTeam(team.Id));
             }
 
             Rows[id] = row;
@@ -2691,5 +2923,65 @@ public partial class SignalReevaluationJobTests
         public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) => throw new NotImplementedException();
         public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) => throw new NotImplementedException();
         public EntityCollection RetrieveMultiple(QueryBase query) => throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Task 143: the reconciler's Web API seam (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>), applied to <see cref="WriterOrg"/>:
+    /// the If-Match version must be the row's current one (else 412, <see cref="System.Data.DBConcurrencyException"/>), and the
+    /// payload must be the owner bind alone.
+    /// </summary>
+    /// <summary>The unit a team's row derives (the teams these doubles know).</summary>
+    private static Guid BusinessUnitOfTeam(Guid teamId) =>
+        teamId == SecureTeamId ? SecureBusinessUnitId : teamId == OtherTeamId ? OtherBusinessUnitId : BusinessUnitId;
+
+    private sealed class ReownWebApi : DataverseWebApiClient
+    {
+        private readonly WriterOrg _org;
+
+        public ReownWebApi(WriterOrg org)
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                new NoCredential())
+            => _org = org;
+
+        public List<(string EntitySet, Guid Id, string ETag)> ConditionalWrites { get; } = new();
+
+        /// <summary>Another writer changes the row between the reconciler's guard read and its write (the version moves).</summary>
+        public bool ChangeTheRowBeforeTheWrite { get; set; }
+
+        /// <summary>Dataverse refuses the write (e.g. F2's 0x80040299: the target team lacks Read on the table).</summary>
+        public Exception? WriteFault { get; set; }
+
+        public override Task UpdateIfMatchAsync(string entitySetName, Guid id, object entity, string etag, CancellationToken cancellationToken = default)
+        {
+            ConditionalWrites.Add((entitySetName, id, etag));
+            if (WriteFault is { } fault)
+                return Task.FromException(fault);
+            if (ChangeTheRowBeforeTheWrite && _org.Rows.ContainsKey(id))
+                _org.Touch(id);
+            if (!_org.Rows.ContainsKey(id))
+                throw new KeyNotFoundException($"{entitySetName}({id}) was not found.");
+            if (etag != $"W/\"{_org.VersionOf(id)}\"")
+                throw new System.Data.DBConcurrencyException($"{entitySetName}({id}) changed since it was read.");
+            var fields = (IDictionary<string, object>)entity;
+            fields.Keys.Should().Equal(new[] { "ownerid@odata.bind" }, "the re-own writes the owner and nothing else");
+            var bind = (string)fields["ownerid@odata.bind"];
+            _org.Reown(id, Guid.Parse(bind["/teams(".Length..^1]));
+            return Task.CompletedTask;
+        }
+
+        public override Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("the ordinary re-own is always conditional");
+    }
+
+    private sealed class NoCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("This double issues no HTTP.");
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("This double issues no HTTP.");
     }
 }
