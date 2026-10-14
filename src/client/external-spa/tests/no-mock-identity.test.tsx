@@ -38,11 +38,13 @@ const SLOW = { timeout: 60000 };
 let fetchUrls: string[];
 let nextStatus: number;
 let networkFault: boolean;
+let refusalBody: string;
 
 beforeEach(() => {
   fetchUrls = [];
   nextStatus = 200;
   networkFault = false;
+  refusalBody = 'refused';
   h.loginRedirect.mockClear();
   localStorage.clear();
   sessionStorage.clear();
@@ -54,7 +56,7 @@ beforeEach(() => {
       return new Response(
         nextStatus < 300
           ? JSON.stringify({ displayName: 'Live User', email: 'live@x.test', plane: 'ciam', entitlements: [] })
-          : 'refused',
+          : refusalBody,
         { status: nextStatus, headers: { 'Content-Type': 'application/json' } }
       );
     })
@@ -290,6 +292,25 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
       render(React.createElement(WorkspaceHomePage, { teamsHost: false }));
       expect(await screen.findByTestId(testId)).toBeTruthy();
       expect(document.body.textContent).not.toMatch(MOCK_IDENTITY);
+    },
+    SLOW
+  );
+
+  it.each([
+    ['sdap.access.deny.contact_not_invited', true],
+    ['sdap.access.deny.contact_inactive', false],
+  ] as const)(
+    'WorkspaceHomePage: a 403 %s shows the server guidance in the denied state: %s (task 185, owner Q9)',
+    async (reasonCode, showsDetail) => {
+      await load();
+      nextStatus = 403;
+      const detail = 'Open the invitation link from your email in this browser and sign in again.';
+      refusalBody = JSON.stringify({ status: 403, title: 'Forbidden', detail, reasonCode });
+      const { WorkspaceHomePage } = await import('../src/pages/WorkspaceHomePage');
+      render(React.createElement(WorkspaceHomePage, { teamsHost: false }));
+      const denied = await screen.findByTestId('bff-access-denied');
+      expect(denied.textContent?.includes(detail)).toBe(showsDetail);
+      expect(denied.textContent?.includes('You do not have access to this workspace')).toBe(!showsDetail);
     },
     SLOW
   );
