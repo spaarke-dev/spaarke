@@ -149,6 +149,61 @@ public class CommunicationThreadReadServiceTests
         msg.SentByName.Should().Be("Alice Attorney");
     }
 
+    // ── task 062 (owner check-2 issue 4): the sender name falls back to the creating user ──
+
+    private async Task<string?> SenderNameOf(Dictionary<string, JsonElement> row)
+    {
+        SetupMessages(row);
+        SetupAttachments();
+        SetupThreadName(null);
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+        return result.Messages.Single().SentByName;
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_RowWithOnlyCreatedBy_SentByNameIsTheCreatingUser()
+    {
+        // An MDA-sent message: sprk_sentby is empty and there is no creator contact; only createdby is set.
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), body: "from the MDA", createdByName: "Dana Dataverse")))
+            .Should().Be("Dana Dataverse");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_SentByWinsOverCreatorContactAndCreatedBy()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), sentBy: Guid.NewGuid(), sentByName: "Alice Attorney",
+                createdByContactName: "Pat Partner", createdByName: "Dana Dataverse")))
+            .Should().Be("Alice Attorney");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatorContactWinsOverCreatedBy_WhenNoSentBy()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByContactName: "Pat Partner", createdByName: "Dana Dataverse")))
+            .Should().Be("Pat Partner");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_RowWithNoNameAtAll_SentByNameIsNull()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), body: "anonymous"))).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_SelectsCreatedByLookup_ForTheSenderFallback()
+    {
+        string? sent = null;
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string, Guid, CancellationToken>((_, odata, _, _) => sent = odata)
+              .ReturnsAsync(new[] { MessageRow(Guid.NewGuid(), body: "x") });
+        SetupAttachments();
+        SetupThreadName(null);
+
+        await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        sent.Should().Contain("_createdby_value").And.NotContain("_createdby_value@", "the annotation is a header preference, not a $select column");
+    }
+
     [Fact]
     public async Task ReadThreadAsync_PrivilegedMessage_IsReturnedWithPrivilegeMetadataNotHidden()
     {
@@ -534,7 +589,8 @@ public class CommunicationThreadReadServiceTests
         Guid id, string? body = null, int? bodyFormat = null, int? type = null,
         string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
         int? direction = null, Guid? sentBy = null, string? sentByName = null,
-        string? subject = null, string? to = null, bool isPrivate = false)
+        string? subject = null, string? to = null, bool isPrivate = false,
+        string? createdByName = null, string? createdByContactName = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -559,6 +615,9 @@ public class CommunicationThreadReadServiceTests
         // broken in the env (IsValidODataAttribute=false) and is therefore neither selected nor read by the
         // service (messaging-r3 2026-07-22). ParseMessageRow reads SentByName from THIS annotation.
         if (sentByName is not null) row["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El(sentByName);
+        // Task 062: the creating user (the row's createdby lookup) and the creator contact (task 034) names.
+        if (createdByName is not null) row["_createdby_value@OData.Community.Display.V1.FormattedValue"] = El(createdByName);
+        if (createdByContactName is not null) row["_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue"] = El(createdByContactName);
         return row;
     }
 

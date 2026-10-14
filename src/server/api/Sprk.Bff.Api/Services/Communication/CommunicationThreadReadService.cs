@@ -136,6 +136,13 @@ public sealed class CommunicationThreadReadService
     // (the contact's name) is the sender name when sprk_sentby is unset.
     private const string CreatedByContactValue = "_sprk_createdbycontact_value";
     private const string CreatedByContactFormattedValue = "_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue";
+    // spaarke-SPA-external-access-platform-r3 task 062 (owner check-2 issue 4): a message created in the model-driven app has
+    // neither sprk_sentby nor a creator contact, so the sender name was null ("Unknown sender", bell "Someone"). The row's
+    // createdby (the creating systemuser) FormattedValue is the last fallback: sprk_sentby name -> creator contact name ->
+    // createdby name -> null. Only the display name is projected (the annotation); the id is selected solely so Dataverse
+    // returns the annotation and is never mapped to a DTO field.
+    private const string CreatedByValue = "_createdby_value";
+    private const string CreatedByFormattedValue = "_createdby_value@OData.Community.Display.V1.FormattedValue";
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -212,7 +219,7 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — it is broken in the env (IsValidODataAttribute=false) and 400s the
             // whole read. The sender display name instead comes from the _sprk_sentby_value lookup's FormattedValue
             // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
@@ -515,7 +522,7 @@ public sealed class CommunicationThreadReadService
 
         columns.AddRange(new[]
         {
-            DirectionField, SentByValue, CreatedByContactValue, CreatedOnField, InternalOnlyField, PrivilegeField,
+            DirectionField, SentByValue, CreatedByContactValue, CreatedByValue, CreatedOnField, InternalOnlyField, PrivilegeField,
             StatusCodeAttribute,
         });
         return string.Join(',', columns.Concat(regardingValues));
@@ -1017,7 +1024,7 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — broken in the env (IsValidODataAttribute=false) → 400 → 500 on the
             // by-regarding + filtered-query paths. Sender name comes from the _sprk_sentby_value FormattedValue
             // annotation instead (see ReadThreadAsync + ParseMessageRow) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         // Active-only (round-8): deactivated (soft-deleted) messages must drop out of every by-regarding / filtered
@@ -1286,8 +1293,11 @@ public sealed class CommunicationThreadReadService
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
             CreatedByContactId = TryGuid(row, CreatedByContactValue),
-            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
-            SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
+            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read;
+            // else (task 062) the creating user's name (an MDA-sent message stamps neither); else null.
+            SentByName = TryString(row, SentByFormattedValue)
+                ?? TryString(row, CreatedByContactFormattedValue)
+                ?? TryString(row, CreatedByFormattedValue),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),

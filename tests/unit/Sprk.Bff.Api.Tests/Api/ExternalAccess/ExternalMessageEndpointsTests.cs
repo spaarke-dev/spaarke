@@ -243,7 +243,7 @@ public class ExternalMessageEndpointsTests
         // notification feed's read drops them.
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
-            "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
+            "_sprk_createdbycontact_value,_createdby_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
             "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&");
         _impersonated.VerifyNoOtherCalls();
     }
