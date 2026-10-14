@@ -110,13 +110,13 @@ row plus `Apply-WorklistGridConfiguration.ps1`, with no code change (criterion 4
 
 ## Review (one adversarial pass, sonnet, read-only)
 
-No F1-F3. One F4, disclosed above: membership is not proven on rows (blocked on the dev write approval) -> filed [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), F-72. K-class, not fixed: a stamp that lapsed under a minute ago is in no set for up to a minute (K1/K2, decision 3); `-RequireRow` is ignored without `-Verify`; the ps1 lint and the C# `Problems` check overlap (K3); the live seam is opt-in so a CI pass means skipped (K4). Fixed from the review: the closed-set note tells 038 that auto-closures are included (`sprk_resolutiontype` is selected); `-Verify` now reports an inactive row.
+No F1-F3. One F4, disclosed above: membership is not proven on rows (blocked on the dev write approval) -> filed [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), DI-72. K-class, not fixed: a stamp that lapsed under a minute ago is in no set for up to a minute (K1/K2, decision 3); `-RequireRow` is ignored without `-Verify`; the ps1 lint and the C# `Problems` check overlap (K3); the live seam is opt-in so a CI pass means skipped (K4). Fixed from the review: the closed-set note tells 038 that auto-closures are included (`sprk_resolutiontype` is selected); `-Verify` now reports an inactive row.
 
 ## Deferred / noticed (not fixed here, D-106/D-127)
 
 - **New-environment seeding.** `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiDataGridSeeder.cs`
   seeds the reconciliation grid configurations for a new customer environment; the worklist row (id 5010) is not in it, so a freshly
   provisioned environment will have no worklist row until it is added or the apply script is run. Dev only is in scope for the MVP; filed as
-  [#1836](https://github.com/spaarke-dev/spaarke/issues/1836) (`ontology-deferred`), recorded as F-71 in `defer-issues.md`.
-- Membership on rows: [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), F-72.
+  [#1836](https://github.com/spaarke-dev/spaarke/issues/1836) (`ontology-deferred`), recorded as DI-71 in `defer-issues.md`.
+- Membership on rows: [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), DI-72.
 - `isValidDataGridConfiguration` + `GridConfigurationService` list the worklist row in the section picker for `sprk_signal` (see "Row shape").
