@@ -731,6 +731,16 @@ public sealed partial class SignalWriter
         return false;
     }
 
+    /// <summary>
+    /// K1 (task 143 follow-up): true when <paramref name="ex"/> is a privilege refusal that a redelivery cannot change, so a caller
+    /// counts it apart from the failures a retry can fix. It is <see cref="IsDataverseAccessDenied"/> EXCLUDING a
+    /// <see cref="SignalWriterEscalationException"/>: the writer wraps reads and resolver faults (the owner read-back, the duplicate-key
+    /// reconcile read, the no-core resolver, the assignee read) in an escalation whose inner fault can be a denial, but those are the
+    /// writer's own refusals of an unknown state and stay retryable. The ONE definition for the job and the closure service.
+    /// </summary>
+    internal static bool IsDeterministicPrivilegeRefusal(Exception ex) =>
+        ex is not SignalWriterEscalationException && IsDataverseAccessDenied(ex);
+
     /// <summary>The message fallback of <see cref="IsDataverseAccessDenied"/>, also used on a reconciler's refusal text.</summary>
     internal static bool IsAccessDeniedMessage(string? m) =>
         !string.IsNullOrEmpty(m) && (

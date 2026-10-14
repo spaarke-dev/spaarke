@@ -298,6 +298,108 @@ public partial class SignalReevaluationJobTests
         h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerAccessDenied);
     }
 
+    private static System.ServiceModel.FaultException<OrganizationServiceFault> OwnerPrivilegeFault() => new(
+        new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040299), Message = "Read Privilege Check For Owner failed" },
+        "Read Privilege Check For Owner failed");
+
+    [Fact]
+    public async Task Nightly_WhenTheCreateIsDenied_IsAWarningNotASecondError_AndTheRunStillFails()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.CreateFault = OwnerPrivilegeFault();
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("the heartbeat stays failed until the privilege is fixed");
+        h.Log.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.WriteRefused,
+            "the writer's one Error carries the refusal");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == OntologyWriterEvents.EvaluatorPolicyFailed);
+        h.Log.Should().NotContain(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.EvaluatorPolicyFailed,
+            "the job does not add a second Error for the same refusal");
+    }
+
+    [Fact]
+    public async Task Trigger_WhenTheSupersedeCloseIsDenied_CompletesTheMessage_NoRetry()
+    {
+        // The in-pass Superseded close runs in SignalClosureService, not in the job's own ApplyAsync: its denial is classified there.
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate); // the Signal now cites a superseded version
+        h.Org.ConditionalUpdateFault = OwnerPrivilegeFault();
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.BudgetRevision, MatterId, RevisionId);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerFailed);
+        h.Log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId == SignalTriggerEvents.HandlerAccessDenied);
+    }
+
+    [Fact]
+    public async Task ClosureService_CountsADeniedCloseApart_AndATransientOneNot()
+    {
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+
+        h.Org.ConditionalUpdateFault = OwnerPrivilegeFault();
+        var denied = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
+        h.Org.ConditionalUpdateFault = new TimeoutException("The request channel timed out.");
+        var transient = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
+
+        denied.Should().Be(new SignalClosureOutcome(0, 0, 1, AccessDenied: 1));
+        transient.Should().Be(new SignalClosureOutcome(0, 0, 1), "a transient failure is not a privilege refusal");
+    }
+
+    [Fact]
+    public async Task Trigger_WhenTheCloseIsDenied_CompletesTheMessage_NoRetry()
+    {
+        var h = new Harness().WithPathBPolicy(); // no hit: the open Signal would be closed ConditionCleared
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+        h.Org.ConditionalUpdateFault = OwnerPrivilegeFault();
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.BudgetRevision, MatterId, RevisionId);
+
+        outcome.Status.Should().Be(JobStatus.Completed, "a denied close is refused the same way on a redelivery");
+        h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerFailed);
+        h.Log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId == SignalTriggerEvents.HandlerAccessDenied);
+        h.Log.Should().NotContain(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.EvaluatorPolicyFailed);
+    }
+
+    [Fact]
+    public async Task Trigger_WhenOneWriteIsDenied_AndAnotherFailsTransiently_StillFailsTheMessage()
+    {
+        // Two Decide-lane policies about the same matter: POL-DENIED's create is refused for a privilege, POL-FLAKY's times out.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Sysadmin.AddPolicy("POL-FLAKY", SignalWriter.LaneDecide, true, PathBBody, PathBTemplate);
+        h.Org.CreateFaultFor = entity => entity.GetAttributeValue<string>("sprk_dedupekey")!.StartsWith("POL-FLAKY", StringComparison.Ordinal)
+            ? new TimeoutException("The request channel timed out.")
+            : OwnerPrivilegeFault();
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.Classification, MatterId, CommunicationId);
+
+        outcome.Status.Should().Be(JobStatus.Failed, "the transient failure is retryable, and the denied write does not hide it");
+        h.Org.CreateCalls.Should().Be(2);
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId == SignalTriggerEvents.HandlerFailed);
+    }
+
+    [Fact]
+    public async Task Trigger_WhenAReadBackIsDeniedInsideAWriterEscalation_IsNotCountedAsDenied_AndStillRetries()
+    {
+        // The create lands; the owner read-back that follows is denied. The writer wraps that in an escalation (OwnerReadBackFailed):
+        // an unknown state, not a deterministic refusal of the write, so the message is redelivered.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.RetrieveFault = OwnerPrivilegeFault();
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.Classification, MatterId, CommunicationId);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerAccessDenied);
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId == SignalTriggerEvents.HandlerFailed);
+    }
+
     [Fact]
     public void Trigger_WhenOnlySomeWritesAreDenied_AndAnotherFailsTransiently_StillRetries()
     {

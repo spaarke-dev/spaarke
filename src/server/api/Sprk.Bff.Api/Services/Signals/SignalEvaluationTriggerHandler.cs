@@ -199,12 +199,13 @@ public sealed class SignalEvaluationTriggerHandler : IJobHandler
             if (result.AccessDenied > 0)
             {
                 // K1: a privilege refusal is a defined outcome, not a fault. Completing the message is the only honest answer: a
-                // redelivery is refused the same way until an administrator fixes the team's role, and would only repeat the Error.
-                // The writer's WriteRefused Error (once) names the owner team; the nightly pass writes the Signal once it is fixed.
+                // redelivery is refused the same way until an administrator fixes the privilege, and would only repeat the Error.
+                // The writer's WriteRefused Error (once) carries the reason, the exception and, for a create or re-own, the owner team;
+                // the nightly pass writes the Signal once the privilege is fixed.
                 _logger.LogWarning(SignalTriggerEvents.HandlerAccessDenied,
                     "[SIGNAL-TRIGGER] {Kind} trigger for {SubjectEntity} {SubjectId} completed WITHOUT {AccessDenied} Signal write(s): " +
-                    "Dataverse refused them (reason={Reason}). Not retried: grant the owner team's role Read on sprk_signal " +
-                    "(the owner team is on the preceding WriteRefused log); the nightly pass picks the subject up after that.",
+                    "Dataverse refused them (reason={Reason}). Not retried: a redelivery is refused the same way. See the preceding " +
+                    "WriteRefused log for the record and team; the nightly pass picks the subject up once the privilege is fixed.",
                     kind, subjectEntity, subjectId, result.AccessDenied, OntologyWriterFailureReason.DataverseAccessDenied);
             }
 

@@ -2759,6 +2759,15 @@ public partial class SignalReevaluationJobTests
         /// <summary>K1: when set, every create throws exactly this (a typed Dataverse fault, say), instead of the plain failure.</summary>
         public Exception? CreateFault { get; set; }
 
+        /// <summary>K1: like <see cref="CreateFault"/>, but chosen per create by its payload (null: the create succeeds).</summary>
+        public Func<Entity, Exception?>? CreateFaultFor { get; set; }
+
+        /// <summary>K1: when set, every conditional update (a close, a stamp) throws exactly this.</summary>
+        public Exception? ConditionalUpdateFault { get; set; }
+
+        /// <summary>K1: when set, every row read through the writer's client throws exactly this (the owner read-back after a create).</summary>
+        public Exception? RetrieveFault { get; set; }
+
         public void ResetCounts()
         {
             CreateCalls = 0;
@@ -2823,6 +2832,11 @@ public partial class SignalReevaluationJobTests
                 throw CreateFault;
             }
 
+            if (CreateFaultFor?.Invoke(entity) is { } createFault)
+            {
+                throw createFault;
+            }
+
             if (FailCreates)
             {
                 throw new InvalidOperationException("Simulated Dataverse failure on the create.");
@@ -2856,7 +2870,7 @@ public partial class SignalReevaluationJobTests
         }
 
         public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken) =>
-            Task.FromResult(Rows[id]);
+            RetrieveFault is not null ? throw RetrieveFault : Task.FromResult(Rows[id]);
 
         public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken)
         {
@@ -2868,6 +2882,11 @@ public partial class SignalReevaluationJobTests
                     return Task.FromResult<OrganizationResponse>(response);
                 case UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } update:
                     var target = update.Target;
+                    if (ConditionalUpdateFault is not null)
+                    {
+                        throw ConditionalUpdateFault;
+                    }
+
                     if (FailConditionalUpdates)
                     {
                         throw new InvalidOperationException("Simulated Dataverse failure on the conditional update.");

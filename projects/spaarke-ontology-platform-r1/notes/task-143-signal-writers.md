@@ -169,3 +169,22 @@ absolute path.
 
 The mutation script restores files with an older mtime. Because of that, an incremental build after a mutation run can keep
 the last mutant. The final verification therefore used `--no-incremental`.
+
+## Follow-up K1/K2 (uac-r2 known limits on PR #1834; branch `fix/ontology-143-k1-k2`)
+
+- **K1.** A deterministic Dataverse privilege refusal (`0x80040299` / `0x80040220`) is no longer retried by the event trigger.
+  `SignalWriter.IsDeterministicPrivilegeRefusal` (typed fault first, message fallback second, a `SignalWriterEscalationException`
+  that merely wraps a denial excluded) is the one classifier. The job counts it in `RunCounts.AccessDenied` (a subset of `Refused`,
+  so the nightly heartbeat still reads failed); `SubjectEvaluationResult.NeedsRetry` is `PolicyFailures > 0 || Refused > AccessDenied`;
+  `SignalClosureOutcome.AccessDenied` carries the same for the Superseded / PolicyRetired closes. The handler completes the message
+  and logs one Warning (`SignalTriggerEvents.HandlerAccessDenied`, 50345). The writer's existing Error names the owner team.
+- **Limit: message-substring fallback.** The classifier falls back to message text (`0x80040220`, `0x80040299`, "does not have ... right",
+  "Privilege Check") after the typed code. A transient fault whose message contains one of those phrases would be completed instead of
+  redelivered; the nightly pass is the backstop. Typed first stays the order; tighten only if a real false match is seen (DI-72).
+- **Out of scope, by reason.** Suppression-stamp failures are `PolicyFailures` that mix partition reads and counts with writes; a stamp
+  only updates `sprk_suppresseduntil` on an existing row, so it cannot hit the owner-Read check. Deterministic skipped/owner refusals
+  still retry until dead-letter (DI-72, #1846). The BU-default-team Read check is DI-71 (#1845).
+- **K2.** `OwnerParityShapes` gained `ordinary-core-secure-stamp-parent` and `secure-todo`. The secure project of the first shape reaches
+  both writers only as a core-ancestor stamp (it is not a lookup on the directory's To Do row), so dropping the stamp parents from the
+  Signal writer's question fails it.
+

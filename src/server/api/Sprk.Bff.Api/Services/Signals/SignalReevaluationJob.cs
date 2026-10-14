@@ -473,13 +473,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             counts.Refused++;
-            if (SignalWriter.IsDataverseAccessDenied(ex))
+            if (SignalWriter.IsDeterministicPrivilegeRefusal(ex))
             {
                 // K1 (task 143 follow-up): a privilege refusal (0x80040299 / 0x80040220) is deterministic: the same write is refused
                 // the same way on a redelivery, so it is counted apart from the refusals a retry can change (SubjectEvaluationResult
-                // does not retry on it). The writer already logged it at Error with the exception and its owner team, and metered it
-                // as dataverse_access_denied, so this is a Warning without a second Error or a second metric. The nightly run still
-                // counts it Refused: the misconfigured team stays a failed heartbeat until its role is fixed.
+                // does not retry on it). The writer already logged it at Error with the exception (and, for a create or re-own, the
+                // owner team) and metered it as dataverse_access_denied, so this is a Warning without a second Error or a second metric.
+                // A writer escalation that merely WRAPS a denial (a read-back or resolver fault) is not this case and stays retryable.
+                // The nightly run still counts it Refused: the misconfigured team stays a failed heartbeat until its role is fixed.
                 counts.AccessDenied++;
                 _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
                     "Signal {Action} refused for policy {PolicyCode}, subject {SubjectId} (reason={Reason}); nothing was changed for it. " +
@@ -787,6 +788,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             if (retired) RetiredClosed += outcome.Closed; else SupersededClosed += outcome.Closed;
             ChangedSinceRead += outcome.ChangedSinceRead;
             Refused += outcome.Failed;
+            AccessDenied += outcome.AccessDenied;
             PolicyFailures += outcome.PolicyFailures;
         }
 
