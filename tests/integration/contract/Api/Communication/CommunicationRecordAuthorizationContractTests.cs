@@ -921,6 +921,41 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             .And.NotContain($"rights sprk_invoices({invoice})");
     }
 
+    // Fix round 4 (K3): step 3b keys on "no association" as `associations is not { Length: > 0 }`, so an EMPTY array (not
+    // just null) must still check the thread's record - the send files under it either way.
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnEmptyAssociationsArray_StillChecksTheThreadsRecord_Is403WithoutAppendTo()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read); // may read the matter, may not file against it
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, emptyAssociations: true)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnEmptyAssociationsArray_AndAppendToOnItsRecord_IsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, emptyAssociations: true)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
     [Fact]
     public async Task Send_IntoARecordThreadWithAnAssociationOfItsOwn_ChecksTheAssociation_NotTheThreadsRecord()
     {
@@ -1235,7 +1270,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         string[]? attachments = null,
         Guid? threadId = null,
         Guid? inheritFrom = null,
-        (string Type, Guid Id)? association = null) => new
+        (string Type, Guid Id)? association = null,
+        bool emptyAssociations = false) => new
         {
             to = new[] { "recipient@outside.com" },
             subject = "Re: the matter",
@@ -1245,7 +1281,9 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             attachmentDocumentIds = attachments,
             threadId,
             inheritRegardingFromCommunicationId = inheritFrom,
-            associations = association is { } a ? new[] { new { entityType = a.Type, entityId = a.Id } } : null,
+            associations = association is { } a
+                ? new object[] { new { entityType = a.Type, entityId = a.Id } }
+                : emptyAssociations ? Array.Empty<object>() : null,
         };
 
     private static object BulkBody(string[]? attachments = null, (string Type, Guid Id)? association = null) => new

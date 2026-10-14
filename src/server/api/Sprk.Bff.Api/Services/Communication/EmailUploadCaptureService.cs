@@ -227,14 +227,20 @@ public sealed class EmailUploadCaptureService
             //    as the send path (CommunicationService). Best-effort (NFR-02/NFR-04): the record already exists. ──
             var threadId = await ResolveThreadAsync(communicationId, envelope, ct);
 
-            // ── Internal-only (task 065 fix round 3, owner 2026-10-14): BuildCommunicationEntity wrote the row
-            //    internal-only because its thread was unknown. Lower it only when the thread resolved and reads Open. The
-            //    upload envelope carries no In-Reply-To / References (see ResolveThreadAsync), so there is no parent to
-            //    check and the capture can never join a parent's thread. Fail closed, non-fatal. ──
-            if (_genericEntityService is not null)
+            // ── Internal-only (task 065 fix round 3/4, owner 2026-10-14): BuildCommunicationEntity wrote the row
+            //    internal-only because its thread was unknown. Lower it only when the thread resolved and reads Open AND the
+            //    parent it replies to is explicitly shareable. The parent is known only when the upload carries In-Reply-To /
+            //    References (optional EmailMetadata fields; the current add-in sends none): then the SAME rule as the mailbox
+            //    path applies (CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync). With no headers the
+            //    capture follows CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable. Fail closed, non-fatal. ──
+            if (_genericEntityService is not null && threadId is not null)
             {
+                var parentNotShareable = HasReplyHeaders(envelope)
+                    ? await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
+                        _communicationService, _genericEntityService, envelope, _logger, ct)
+                    : !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
                 await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
-                    _genericEntityService, communicationId, threadId, parentNotShareable: false, _logger, ct);
+                    _genericEntityService, communicationId, threadId, parentNotShareable, _logger, ct);
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture
@@ -274,9 +280,10 @@ public sealed class EmailUploadCaptureService
 
     /// <summary>
     /// Gives the captured email a thread through the shared resolution and grants it to that thread's audience (#1629: the
-    /// audience the resolution fixed). The upload envelope carries no reply-chain headers (In-Reply-To / References), which
-    /// are what the email key strategy joins on, so in practice a capture starts a new thread anchored to the record it is
-    /// filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
+    /// audience the resolution fixed). The upload envelope carries reply-chain headers (In-Reply-To / References, which the
+    /// email key strategy joins on) only when the client sends the optional <see cref="EmailMetadata.InReplyTo"/> /
+    /// <see cref="EmailMetadata.References"/>; the current add-in sends none, so in practice a capture starts a new thread
+    /// anchored to the record it is filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
     /// </summary>
     private async Task<Guid?> ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
     {
@@ -308,6 +315,14 @@ public sealed class EmailUploadCaptureService
         }
     }
 
+    private static bool HasReplyHeaders(NormalizedMessage envelope) =>
+        !string.IsNullOrWhiteSpace(envelope.InReplyTo) || envelope.References.Count > 0;
+
+    private static IReadOnlyList<string> SplitReferences(string? references) =>
+        string.IsNullOrWhiteSpace(references)
+            ? Array.Empty<string>()
+            : references.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     /// <summary>
     /// Maps the upload DTO (<see cref="EmailMetadata"/>) to the channel-neutral <see cref="NormalizedMessage"/>
     /// envelope — the SINGLE upload→envelope boundary (mirrors <see cref="GraphMessageNormalizer.Normalize"/>).
@@ -331,6 +346,9 @@ public sealed class EmailUploadCaptureService
             BodyText = isHtml ? GraphMessageNormalizer.HtmlToPlainText(body) : body,
             BodyHtml = isHtml ? body : null,
             InternetMessageId = email.InternetMessageId,
+            // Task 065 fix round 4: optional reply headers (the current add-in sends none). Blank = absent.
+            InReplyTo = string.IsNullOrWhiteSpace(email.InReplyTo) ? null : email.InReplyTo.Trim(),
+            References = SplitReferences(email.References),
             ConversationId = email.ConversationId,
             SentAt = email.SentDate ?? email.ReceivedDate,
             Attachments = MapAttachments(email.Attachments),

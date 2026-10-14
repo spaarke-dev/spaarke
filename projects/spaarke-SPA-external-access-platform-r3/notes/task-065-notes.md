@@ -367,3 +367,60 @@ Filtered run in `Sprk.Bff.Api.Tests` (`Communication|SecureChildOwnership|Unifie
 - The guard suggested under "Fix the class" (an ArchTest requiring every `new Entity("sprk_communication")` in `Services/Communication` to set
   `sprk_isinternalonly`) is still not built. With the inbound writers fixed, it would now have no known violations to baseline.
 - Publish-size delta not measured (no new package, endpoint, service or DI registration).
+
+## Fix round 4 (re-check findings)
+
+Step 0: merged `work/spaarke-SPA-external-access-platform-r3` (master + UAC task 185, #1827) into the worktree. Two content conflicts, both
+"keep both sides": `CommunicationService.BuildDataverseRecordAsync` (`sprk_body` now `request.SystemMail?.StoredBody ?? request.Body`, task 185, next to
+`sprk_isinternalonly = RequestedInternalOnly(request)`) and `SendCommunicationRequest` (`IsInternalOnly` and the internal `SystemMail` property).
+Build with `-warnaserror` clean after the merge.
+
+### Changes
+
+- **F1 part 1 - upload capture computes the parent rule.** `EmailMetadata` gains optional `InReplyTo` and `References` (`Models/Office/SaveRequest.cs:191,198`;
+  additive, the current add-in sends neither, and the Office add-in client is untouched). `BuildEnvelope` maps them
+  (`EmailUploadCaptureService.cs:350-351`; `References` is split on whitespace, blank is absent). When the envelope carries either,
+  `CaptureWithOutcomeAsync` (`:238-243`) uses the mailbox path's `HasParentNotExplicitlyShareableAsync`; it now runs only when a thread resolved.
+  Because the envelope now carries the headers, the email key strategy can also join the parent's thread for such a save (the Private-thread floor covers that).
+- **F1 part 2 - the owner-pending no-headers decision is ONE line:** `CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable = true`
+  (`CommunicationInternalOnlyFloor.cs:39`). `true` is today's behaviour (a header-less add-in save is lowered when its thread is Open); `false` keeps every
+  header-less add-in save internal-only. It lives in the floor (not as a private const in the capture service) because the filing sweep (K1) needs the
+  same answer, so a single line flips both.
+- **F3** - the "no entity service" case now also verifies the other Dataverse service (`dv`) received no `sprk_isinternalonly` update, and that the capture
+  itself completed (`InboundInternalOnlyFlagTests`, `EmailUpload_CaptureWithoutAThreadOrTheServiceToCheckIt_StaysInternalOnly`).
+- **K2** - `MessagingIngestor.cs:~147-163` catches `OperationCanceledException` around `LowerWhenSafeAsync` the way the neighbouring post-create steps do: the
+  row stays `true`, a warning is logged, participants and enrichment still run, and no retry creates a second row. The helper docs
+  (`CommunicationInternalOnlyFloor.cs:20-22,122-123`) now say cancellation propagates (faults never escape).
+- **K1 (sweep)** - `ThreadResolver.ResolveMissingThreadAsync` (`:1083-1100`) lowers an Incoming row through the shared `LowerWhenSafeAsync` after it gives
+  the row a thread (the reconcile now also reads `sprk_direction` and `sprk_graphmessageid`). Only an explicit Incoming direction is lowered.
+- **K3 tests** - mailbox parent rule walking `References` (In-Reply-To absent, newest unknown, parent older); Graph-id fallback for the parent lookup; In-Reply-To
+  set but the parent not in Dataverse; a Message send with `InReplyToMessageId` never looks up the ancestor (nor reads a parent thread); authorization filter
+  step 3b with `associations: []` (403 without AppendTo on the thread's record, sent with it).
+
+### Contradictions and decisions the brief did not settle
+
+- **The sweep cannot read the parent.** A received row stores neither In-Reply-To nor References (only an outbound row stamps `sprk_inreplyto`), so "same parent
+  rule" cannot be evaluated from the row. The sweep therefore treats a row WITH a Graph message id (a mailbox email whose headers were lost) as "cannot
+  evaluate" and keeps it `true` (fail closed), and a row WITHOUT one (an add-in save, header-less by construction) follows the owner-pending constant above.
+  If the owner decides a header-less add-in save stays internal-only, the one flip also makes the sweep keep every row `true`.
+- **In-Reply-To set but the parent not in Dataverse lowers.** Confirmed as the code's behaviour and the helper's documented rule ("a message with no known
+  ancestor has no parent"); the rule is unchanged. The existing "nullrow" case (parent FOUND but its row unreadable) is the one that stays `true`.
+- The mailbox call site (`IncomingCommunicationProcessor.ResolveThreadAndShareabilityAsync`) has the same unguarded cancellation as the ingestor had. Not in scope
+  (a retry there dedups on the Graph id and returns early, so the row stays `true` and is never lowered). Reported, not changed.
+
+### Known limits (recorded, not fixed)
+
+- **Unconditional lowering.** `LowerWhenSafeAsync` writes `sprk_isinternalonly = false` without re-reading the row's current value, so a form edit that sets the
+  flag during the ~1 s window between create and lowering would be overwritten. No automated writer sets the flag after create, and a person editing a row
+  that was created a second ago is theoretical. The same applies to the sweep: a person who marks a still-threadless received email Internal only, and then files
+  it, has the mark overwritten when the sweep lowers it (add-in row on an Open thread).
+- A header-less add-in save, and a sweep of one, is partner-visible by default until the owner decides (constant above).
+
+### Tests
+
+New: 3 `EmailUpload_*` parent/References cases (+ blank-headers and no-headers controls), F3 strengthened, 2 K2 cancellation cases + 1 helper-contract case,
+4 sweep tests (`ThreadResolverTests`, 6 cases), 3 mailbox K3 tests (5 cases), 1 Message-send ancestor case, 2 authorization 3b empty-array cases.
+Seeding: the old `MessagingIngestor`/`ThreadResolver` made the cancellation and the sweep-lowering tests fail (3); making the capture ignore the reply headers
+made the 3 header tests fail; restored. Filtered run
+(`Communication|InboundInternalOnly|DataverseRecordCreation|CommunicationServiceMessageSend|CommunicationRecordAuthorization|Office|Messaging|ThreadResolver`):
+0 failed / 2278 passed / 9 skipped (the skips are pre-existing integration-gated tests). `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.

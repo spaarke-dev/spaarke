@@ -1734,6 +1734,77 @@ public class ThreadResolverTests
             communicationId, ThreadAssignment.Anchored(created, "sprk_matter", matter), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── Task 065 fix round 4 (K1): the filing sweep lowers a RECEIVED email it gave a thread, or it stays hidden for good ──
+
+    private const int DirectionIncoming = 100000000;
+    private const int DirectionOutgoing = 100000001;
+
+    private static bool IsLowering(Dictionary<string, object> d) =>
+        d.Count == 1 && d.TryGetValue("sprk_isinternalonly", out var v) && Equals(v, false);
+
+    private async Task<Guid> SweepThreadlessEmailAsync(int? direction, string? graphMessageId, int? threadPrivacy)
+    {
+        var communicationId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var email = SetupFiledEmail(communicationId, threadId: null, "sprk_matter", matter);
+        if (direction is { } d)
+            email["sprk_direction"] = new OptionSetValue(d);
+        if (graphMessageId is not null)
+            email["sprk_graphmessageid"] = graphMessageId;
+        var created = SetupThreadCreateCapture(out _);
+        var thread = new DataverseEntity("sprk_communicationthread") { Id = created };
+        if (threadPrivacy is { } p)
+            thread["sprk_privacystate"] = new OptionSetValue(p);
+        SetupReconcileThreadRead(created, thread);
+
+        await CreateFilingSut(true, new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        return communicationId;
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingAddInEmail_GivenAnOpenThread_IsLoweredToNotInternalOnly()
+    {
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => IsLowering(d)), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingMailboxEmail_ParentUnknown_StaysInternalOnly()
+    {
+        // A mailbox email (it has a Graph message id) keeps no In-Reply-To / References on its row, so the sweep cannot
+        // evaluate its parent: fail closed.
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: "AAMk-graph-1", threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(DirectionOutgoing)]
+    [InlineData(null)] // an unread direction is not "Incoming": fail closed
+    public async Task ReconcileThreadForFiling_ThreadlessEmailNotKnownToBeIncoming_IsNeverLowered(int? direction)
+    {
+        var id = await SweepThreadlessEmailAsync(direction, graphMessageId: null, threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(100000001)] // Private
+    [InlineData(null)]  // no privacy value
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingEmail_GivenAPrivateOrUnmarkedThread_StaysInternalOnly(int? privacy)
+    {
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: privacy);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmailWithNoThread_DoesNothing()
     {

@@ -509,6 +509,8 @@ public sealed class ThreadResolver : IThreadResolver
 
     private const string CommunicationTypeField = "sprk_communicationtype";
     private const string SubjectField = "sprk_subject";
+    private const string DirectionField = "sprk_direction";
+    private const string GraphMessageIdField = "sprk_graphmessageid";
     private const string OwningTeamField = "owningteam";
     private const string OwnerIdField = "ownerid";
     private const string PrivacyStateField = "sprk_privacystate";
@@ -537,6 +539,8 @@ public sealed class ThreadResolver : IThreadResolver
             columns.Add(ThreadLookupOnCommunication);
             columns.Add(CommunicationTypeField);
             columns.Add(SubjectField);
+            columns.Add(DirectionField);
+            columns.Add(GraphMessageIdField);
             var email = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
 
             if (email.GetAttributeValue<OptionSetValue>(CommunicationTypeField)?.Value != (int)CommunicationType.Email)
@@ -1077,6 +1081,22 @@ public sealed class ThreadResolver : IThreadResolver
         _logger.LogInformation(
             "Filing reconcile gave the threadless email {CommunicationId} thread {ThreadId}", communicationId, assignment.ThreadId);
         await GrantAsync(communicationId, assignment, ct);
+
+        // Task 065 fix round 4 (K1): a RECEIVED email is written internal-only until its thread is known; this sweep is the
+        // last chance to lower it, or it stays hidden from partners for good. Same shared rule as the capture paths: lower
+        // only when the thread reads Open AND the parent is not a blocker. A received row stores no In-Reply-To /
+        // References, so the sweep cannot read its parent: a row with a Graph message id is a mailbox email whose headers
+        // were lost, so it stays internal-only (cannot evaluate = fail closed); a row without one is an add-in save, which
+        // is header-less by construction and follows the owner-pending AddInSaveWithoutReplyHeadersIsShareable decision.
+        // Only an explicit Incoming direction is lowered; fail closed otherwise. Never throws except on cancellation.
+        var isIncoming = email.GetAttributeValue<OptionSetValue>(DirectionField)?.Value == (int)CommunicationDirection.Incoming;
+        if (isIncoming)
+        {
+            var isMailboxRow = !string.IsNullOrWhiteSpace(email.GetAttributeValue<string>(GraphMessageIdField));
+            var parentNotShareable = isMailboxRow || !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
+            await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                _entityService, communicationId, assignment.ThreadId, parentNotShareable, _logger, ct);
+        }
     }
 
     /// <summary>

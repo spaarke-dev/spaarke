@@ -144,10 +144,22 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         // PersistAsync wrote the row internal-only because its thread was unknown. Lower it to shareable only when the
         // thread resolved AND reads explicitly Open. A chat message carries no parent (AcsEventNormalizer sets InReplyTo
         // null); a non-blank InReplyTo cannot be resolved here, so it keeps the row internal-only.
-        await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
-            _genericEntityService, communicationId, resolvedThreadId,
-            parentNotShareable: !string.IsNullOrWhiteSpace(request.Message.InReplyTo),
-            _logger, cancellationToken);
+        // Cancellation is caught like every other post-create step below: the row exists, so it stays internal-only (true)
+        // and processing completes rather than escaping and letting a retry create a duplicate row (fix round 4).
+        try
+        {
+            await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                _genericEntityService, communicationId, resolvedThreadId,
+                parentNotShareable: !string.IsNullOrWhiteSpace(request.Message.InReplyTo),
+                _logger, cancellationToken);
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Internal-only lowering cancelled (non-fatal; the row stays internal-only) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                communicationId, request.CorrelationId);
+        }
 
         // ── Participant index (task 050 / FR-08 / ADR-048) — BEST-EFFORT, NON-FATAL + IDEMPOTENT ──
         // Write one sprk_communicationparticipant row per (message × person/address × role) so the participant=

@@ -17,7 +17,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <c>EmailUploadCaptureService</c>, <c>IncomingCommunicationProcessor</c>) create their row <c>true</c> and call
 /// <see cref="LowerWhenSafeAsync"/> once the thread is known. A received item that joins a Private thread, a thread with
 /// no privacy value or an unreadable thread, or that replies to a parent not explicitly shareable, stays <c>true</c>.</para>
-/// <para><b>Fail closed.</b> Every read fault here answers "not safe": the row stays <c>true</c>. Nothing here throws.</para>
+/// <para><b>Fail closed.</b> Every read fault here answers "not safe": the row stays <c>true</c>. No fault is thrown;
+/// cancellation is the one exception and propagates as <see cref="OperationCanceledException"/>, so a caller that must
+/// finish its own work after the row exists catches it (<c>MessagingIngestor</c> does).</para>
 /// <para>Visibility to partners then comes from the external read itself (it filters by the regarding record and the
 /// caller's access to it) plus this flag. Workforce contacts and CIAM contacts are both non-systemuser callers, so the one
 /// read-side filter (<c>CommunicationThreadReadService.FilterExternalMessagesAsync</c>) hides <c>true</c>/<c>null</c> from both.</para>
@@ -25,6 +27,16 @@ namespace Sprk.Bff.Api.Services.Communication;
 internal static class CommunicationInternalOnlyFloor
 {
     internal const string InternalOnlyField = "sprk_isinternalonly";
+
+    /// <summary>
+    /// PENDING OWNER DECISION (task 065 fix round 4, F1 part 2): whether an add-in save that carries NO In-Reply-To and no
+    /// References may be lowered to partner-visible when its thread is Open. <c>true</c> keeps today's behaviour (the
+    /// current add-in sends no headers, so the parent is unknown and the capture is treated as having none). Flip this ONE
+    /// value to <c>false</c> to keep every header-less add-in save internal-only instead. Used by the upload capture and by
+    /// the filing sweep (<c>ThreadResolver.ResolveMissingThreadAsync</c>) for a row the add-in created. A save that DOES
+    /// carry headers is unaffected: it always follows the parent rule.
+    /// </summary>
+    internal const bool AddInSaveWithoutReplyHeadersIsShareable = true;
 
     /// <summary>
     /// True only when the thread row reads Open. Private, a missing privacy value and a null row are all false (the same
@@ -107,7 +119,8 @@ internal static class CommunicationInternalOnlyFloor
     /// <summary>
     /// Lowers a received communication from <c>true</c> (written at create, before its thread was known) to <c>false</c>,
     /// only when its thread was resolved AND reads explicitly Open AND <paramref name="parentNotShareable"/> is false. In
-    /// every other case, including a failed update, the row stays <c>true</c>. Never throws.
+    /// every other case, including a failed update, the row stays <c>true</c>. A fault never escapes; cancellation does
+    /// (<see cref="OperationCanceledException"/> propagates).
     /// </summary>
     internal static async Task LowerWhenSafeAsync(
         IGenericEntityService entities, Guid communicationId, Guid? threadId, bool parentNotShareable,

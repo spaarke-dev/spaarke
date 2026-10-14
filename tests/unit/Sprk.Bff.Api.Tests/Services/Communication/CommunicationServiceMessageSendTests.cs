@@ -471,6 +471,31 @@ public class CommunicationServiceMessageSendTests
         persisted!.GetAttributeValue<string>("sprk_inreplyto").Should().Be("parent-comm-id-123");
     }
 
+    // ── task 065 fix round 4 (K3): the in-reply-to ancestor floor is an EMAIL rule (CommunicationService.ApplyReplyParentThreadFloorAsync).
+    //    A Message send with InReplyToMessageId stamps the id but never looks the ancestor up. ──
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithInReplyToMessageId_SkipsTheEmailAncestorLookup()
+    {
+        var comm = new Mock<ICommunicationDataverseService>();
+        comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        Entity? persisted = null;
+        var entity = EntityServiceCreating();
+        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => persisted = e)
+            .ReturnsAsync(Guid.NewGuid());
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(), communicationDataverse: comm.Object);
+
+        await sut.SendAsync(MessageRequest() with { InReplyToMessageId = "parent-comm-id-123" }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<string>("sprk_inreplyto").Should().Be("parent-comm-id-123");
+        comm.Verify(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        comm.Verify(c => c.GetCommunicationByGraphMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        entity.Verify(
+            s => s.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.Is<string[]>(c => c.Contains("sprk_communicationthread")), It.IsAny<CancellationToken>()),
+            Times.Never, "no ancestor thread is read for a Message send");
+    }
+
     // ── task 065 (external-access r3, owner 2026-10-13): the persisted message carries an EXPLICIT internal-only
     //    flag and its sender, so the external read (which hides a row whose flag is unset — fail closed) shows it ──
 
