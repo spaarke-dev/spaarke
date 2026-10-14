@@ -1006,10 +1006,13 @@ public class ExternalNotificationFeedTests
         var query = _queries.Should().ContainSingle().Subject!;
         var select = query[..query.IndexOf('&')];
         select.Should().Be(
-            "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,createdon," +
+            "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,_createdby_value,createdon," +
             "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value," +
             "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
+        // Task 062 rework: createdby is expanded to its applicationid + accessmode so the sender-name fallback can tell a
+        // person from the BFF's application user (nothing else of the user is read).
+        query.Should().Contain("&$expand=createdby($select=applicationid,accessmode)&");
     }
 
     [Fact]

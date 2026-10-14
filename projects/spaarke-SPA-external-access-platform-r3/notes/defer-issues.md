@@ -207,6 +207,60 @@ On `spaarke-bff-dev`, `SpeContainerMembershipSync.RemoveRevokedJitGrantsAsync` t
 
 ---
 
+### ISS-007 — Service-request documents are indexed with no parent (not findable from the record)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-14 |
+| **Source** | R3 task 063, second adversarial pass |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1839 |
+
+**Description**
+
+A document filed only to a Service Request is indexed with no parent. `DocumentIndexParentResolver` excludes the service-request link by design (`:76-77`), and `IntermediateTypes` (`:67-71`) lists only event and communication. Cross-record search (`scope=all`) drops rows with no parent (`SemanticSearchEndpoints.cs:592-598`), and `scope=entity` fails closed (`:503-505`). The document is reachable only through per-document, caller-trimmed surfaces gated by Read on the `sprk_document` row. No exposure; a findability gap. This is pre-existing, and it now also covers external uploads (task 063).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/DocumentIndexParentResolver.cs:56-95`
+- `src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs:503-505, 592-598`
+
+**Suggested fix**: a service-request hop through its regarding/core stamps (`CoreAncestorResolver.cs:284-293`); re-check secure-record handling; backfill the index.
+
+**Estimated effort**: half a day to a day, plus backfill.
+**Blockers**: none.
+**Related**: task 063.
+
+---
+
+### ISS-008 — Unused sprk_communication_send web resource maps Message to Email
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-10-14 |
+| **Source** | R3 task 065 trace of the model-driven message send |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1840 |
+
+**Description**
+
+No committed ribbon or form references `Sprk.Communication.Send`; `CommunicationActions/index.ts:8` says that control replaced it. The model-driven Message form sends through `CommunicationMessageActions`. The script's type switch (`:412-423`) sends Message (100000004) as "Email". If it is ever re-wired, a message goes out as a real email and creates a second Email record. As dead code, it misleads anyone tracing the send path.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_communication_send` (`:400-464`)
+- `src/client/pcf/CommunicationActions/index.ts:8`
+
+**Suggested fix**: confirm on dev that no command bar references it; remove it from the solution, or map 100000004 to "Message".
+
+**Estimated effort**: 1-2 hours.
+**Blockers**: none.
+**Related**: task 065.
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |

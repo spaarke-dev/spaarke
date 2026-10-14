@@ -57,7 +57,12 @@ export function entityIcon(entity: string): React.ReactElement {
 }
 
 /** Default "Link another record" catalog, derived from the canonical `TODO_REGARDING_CATALOG` (no live `sprk_recordtype_ref` query needed — `PolymorphicPicker` only uses `logicalName` functionally; `recordTypeRefId`/`regardingField` are display/key metadata). */
-export const DEFAULT_LINK_CATALOG: RecordTypeCatalogEntry[] = TODO_REGARDING_CATALOG.map(c => ({
+/** Types an email is never linked to here (owner 2026-10-13): an email is not filed under another communication or a document. */
+const NOT_EMAIL_LINK_TARGETS: ReadonlySet<string> = new Set(['sprk_communication', 'sprk_document']);
+
+export const DEFAULT_LINK_CATALOG: RecordTypeCatalogEntry[] = TODO_REGARDING_CATALOG.filter(
+  c => !NOT_EMAIL_LINK_TARGETS.has(c.entityType)
+).map(c => ({
   recordTypeRefId: c.entityType,
   displayName: entityLabel(c.entityType),
   logicalName: c.entityType,

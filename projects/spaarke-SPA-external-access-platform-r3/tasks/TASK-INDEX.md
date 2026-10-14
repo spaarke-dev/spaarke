@@ -30,7 +30,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | ✅ [done] | 041 | O/h | FULL | Wave 4 |
 | 044 | A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link + key | P4b | 🔲 [open] | none (owner-gated dev import) | S/h | STANDARD | A9 Wave 1 |
-| 045 | BFF WorkforceHome scheme, ExternalCollaboration only, census ArchTest, must-reject tests | P4b | 🔲 [open] | none | O/h | FULL | A9 Wave 1 |
+| 045 | BFF WorkforceHome scheme, ExternalCollaboration only, census ArchTest, must-reject tests | P4b | ✅ [done] merged e6f6c6cd7; ships only with 046 (resolver denies WorkforceHome until then) | none | O/h | FULL | A9 Wave 1 |
 | 046 | BFF home principal resolution (link, contact by tid+oid, registration_required, guards d/e) | P4b | 🔲 [open] | 044, 045 | O/h | FULL | A9 Wave 2 |
 | 047 | BFF registration endpoint POST /api/v1/external/registration | P4b | 🔲 [open] | 046 | O/h | FULL | A9 Wave 3 |
 | 048 | BFF link endpoint POST /api/v1/external/workforce/link (dual-token proof) | P4b | 🔲 [open] | 046 (after 047: shared files) | O/h | FULL | A9 Wave 4 |
@@ -46,13 +46,13 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | 🔲 [open] | 047, 048 | S/xh | FULL | A9 Wave 5 |
 | 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | 🔲 [open] | 044 | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🚫 [cancelled] superseded by ADR-028 A9 (047 + 058) | 003 + owner decision | O/h | FULL | — |
-| 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
-| 062 | Message sender name falls back to createdby (check-2 #4) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
-| 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
-| 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
+| 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK2 |
+| 062 | Message sender name falls back to createdby (check-2 #4) | P5b | ✅ [done] merged a379d71fa; live check of the createdby expand after the BFF deploy | none | S/h | FULL | CHK2 |
+| 063 | External upload queued for indexing + profile (check-2 #5) | P5b | ✅ [done] merged 70f7649db; reaches dev with the next BFF deploy | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
+| 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | ✅ [done] merged 15f2dc686; reaches dev with the next BFF deploy | none | S/h | FULL | CHK3 |
 | 065 | MDA message send carries "Internal only" (default No) + sender (check-3 #5) | P5b | 🔲 [open] | none | O/h | FULL | CHK3 |
-| 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
-| 067 | Service Request automatic numbers RQST-{SEQNUM:4} (check-2 #3) | P5b | 🔲 [open] | none (owner yes 2026-10-13; dev apply gated) | S/h | STANDARD | CHK3 |
+| 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK3 |
+| 067 | Service Request automatic numbers RQST-{SEQNUM:4} (check-2 #3) | P5b | ✅ [done] dev applied 2026-10-13 (next value 3); owner create-test pending | none (owner yes 2026-10-13; dev apply gated) | S/h | STANDARD | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | 🔲 [open] | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |

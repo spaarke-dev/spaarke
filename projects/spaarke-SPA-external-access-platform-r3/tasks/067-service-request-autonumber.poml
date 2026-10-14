@@ -4,7 +4,7 @@
     <title>Service Request automatic numbers: sprk_servicerequestnumber AutoNumberFormat RQST-{SEQNUM:4} (check-2 issue 3)</title>
     <phase>5b Owner check fixes</phase>
     <gate>startable (owner 2026-10-13: "yes service requests should get automatic numbers"); the dev apply is shown to the owner with its rollback before it runs</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Dataverse column setting in the solution plus an owner-gated dev apply; no C# or TS</rigor-reason>
     <model-tier>sonnet</model-tier>

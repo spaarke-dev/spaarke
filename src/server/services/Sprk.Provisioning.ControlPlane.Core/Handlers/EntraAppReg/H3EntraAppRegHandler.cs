@@ -63,7 +63,7 @@
 // level (design.md line 119's row literally says "Entra app registration
 // (~14 grants)" as the umbrella description spanning both handlers); the
 // concrete SDK-surface table is the authoritative per-handler boundary.
-// H3's own real consent verifier instead covers the 5 DELEGATED
+// H3's own real consent verifier instead covers the DELEGATED
 // (OAuth2PermissionScope) grants — EntraAppRegPermissionCatalog.cs.
 //
 // SCOPE DEVIATION #2 (Dataverse app-user assignment — Path C, avoid
@@ -261,7 +261,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         {
             var diagnostic =
                 $"EntraAppRegOptions:ExpectedDelegatedScopeCount is {_options.ExpectedDelegatedScopeCount} — MUST be >= 1. " +
-                "Configuration drift; defaults to 5 per EntraAppRegPermissionCatalog.All.";
+                "Configuration drift; defaults to EntraAppRegPermissionCatalog.All.Count.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 EntraAppRegRejectionCodes.NullAppRoleIdInCatalog, diagnostic, cancellationToken).ConfigureAwait(false);
         }

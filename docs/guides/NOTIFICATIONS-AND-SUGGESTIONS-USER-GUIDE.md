@@ -68,7 +68,7 @@ Needed by the **Communication Workspace**, *not* by suggestions.
 
 | Add | Why |
 |---|---|
-| Mark external users **`systemuser.sprk_isexternal` = Yes** (two-option, default *No*) — B2B guests with `scripts/Set-ExternalFlagForB2BGuests.ps1` | Since unified-access-control-r2 task 114 (owner round 67) a **blank flag is INTERNAL**: an external licensed user left blank receives internal-only content. Internal users need no backfill. |
+| Mark external users **`systemuser.sprk_isexternal` = Yes** (two-option, default *No*) — outsider B2B guests with `scripts/Set-ExternalFlagForB2BGuests.ps1` (`-CustomerTenantIds` on a Model 1 stamp, where the customer's own staff are guests and stay internal; `-AllGuestsExternal` elsewhere) | Since unified-access-control-r2 task 114 (owner round 67) a **blank flag is INTERNAL**: an external licensed user left blank receives internal-only content. Internal users need no backfill. |
 | **`sprk_communicationrule`** table present | The `communication-assessed` policy gate reads it; deny-by-default without rules. |
 | **023 R-5 fan-out security sign-off** (named human) before enabling in a real environment | Fan-out is a compliance surface — a mis-targeted envelope is an incident. |
 

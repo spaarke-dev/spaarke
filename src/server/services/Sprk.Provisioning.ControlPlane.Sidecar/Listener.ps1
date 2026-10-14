@@ -24,6 +24,16 @@
               assignments = EVERY "Application *" role the app holds (not only `roles`), each
               marked inExpectedScope; an unknown scope group is outcome Failure.
 
+      POST /ensure-customer-mailbox   (H14m, task 263; same headers)
+        Body: { tenantId, organization, appId (stamp identity), scopeGroupId, expectedScopeGroupName
+                (Spaarke-AppAccess-{customerId}), name (sprk-{customerId}-mail), displayName, primarySmtpAddress,
+                roles: [..], correlationId }
+        200:  { outcome: Success|AlreadyCompliant|Drift|Failure, created, verified,
+                authorization: [{ role, inScope }], conflicts: [..], diagnostic }
+
+      POST /read-customer-mailbox     (H13, task 263; read-only; same headers and body)
+        200:  { outcome: Success|Failure, exists, conflicts: [..], authorization: [..], diagnostic }
+
     One request at a time: an apply and a T4 read queue behind each other's Exchange connect
     (seconds). timeoutSeconds is advisory — the Worker's HttpClient.Timeout is the bound.
 
@@ -115,8 +125,8 @@ while ($listener.IsListening) {
             Write-TextResponse $response 200 $(if ($settings.Missing.Count -gt 0) { "degraded: missing $($settings.Missing -join ', ')" } else { 'ok' })
             continue
         }
-        if ($route -notin 'POST /apply-mailbox-access', 'POST /read-mailbox-access') {
-            Write-JsonResponse $response 404 @{ outcome = 'Failure'; diagnostic = "Unknown route: $route. Served: GET /healthz, POST /apply-mailbox-access, POST /read-mailbox-access." }
+        if ($route -notin 'POST /apply-mailbox-access', 'POST /read-mailbox-access', 'POST /ensure-customer-mailbox', 'POST /read-customer-mailbox') {
+            Write-JsonResponse $response 404 @{ outcome = 'Failure'; diagnostic = "Unknown route: $route. Served: GET /healthz, POST /apply-mailbox-access, POST /read-mailbox-access, POST /ensure-customer-mailbox, POST /read-customer-mailbox." }
             continue
         }
         if ($settings.Missing.Count -gt 0) {
@@ -139,7 +149,11 @@ while ($listener.IsListening) {
             continue
         }
         # Validate BEFORE reading any field (StrictMode: a missing property would throw -> 500).
-        $errors = if ($route -eq 'POST /apply-mailbox-access') { Test-ApplyRequest -Body $body } else { Test-ReadRequest -Body $body }
+        $errors = switch ($route) {
+            'POST /apply-mailbox-access' { Test-ApplyRequest -Body $body }
+            'POST /read-mailbox-access' { Test-ReadRequest -Body $body }
+            default { Test-CustomerMailboxRequest -Body $body }   # both customer-mailbox routes take the same body
+        }
         if ($errors.Count -gt 0) { Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = ($errors -join '; ') }; continue }
         $organization = [string]$body.organization   # required + shape-checked above; never the tenant GUID
 
@@ -148,6 +162,18 @@ while ($listener.IsListening) {
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Invoke-MailboxAccessApply -Request $body } }
             catch { $result = @{ outcome = 'Failure'; createdCount = 0; assignments = @(); conflicts = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /apply-mailbox-access' -Fields @{ outcome = $result.outcome; createdCount = $result.createdCount }
+        }
+        elseif ($route -eq 'POST /ensure-customer-mailbox') {
+            Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /ensure-customer-mailbox' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; scopeGroupId = $body.scopeGroupId; name = $body.name }
+            try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Invoke-CustomerMailboxEnsure -Request $body } }
+            catch { $result = @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /ensure-customer-mailbox' -Fields @{ outcome = $result.outcome; created = $result.created; verified = $result.verified }
+        }
+        elseif ($route -eq 'POST /read-customer-mailbox') {
+            Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /read-customer-mailbox' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; name = $body.name }
+            try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Get-CustomerMailboxState -Request $body } }
+            catch { $result = @{ outcome = 'Failure'; exists = $false; conflicts = @(); authorization = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /read-customer-mailbox' -Fields @{ outcome = $result.outcome; exists = $result.exists }
         }
         else {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /read-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId }

@@ -4,7 +4,7 @@
     <title>Message sender name falls back to the creating user (check-2 issue 4: "Unknown sender", bell "Someone")</title>
     <phase>5b Owner check-2 fixes</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag bff-api; modifies a shared BFF read service</rigor-reason>
     <model-tier>sonnet</model-tier>

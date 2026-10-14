@@ -277,6 +277,9 @@ public static class HandlerRunInputs
                 // T227c: I4 compares the BFF's container settings with it (absent → I4 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
+                // T263: the customer mailbox check reads the mailbox at this address with this display name (absent -> Inconclusive).
+                RunInput.Intake(IntakeParameterCatalog.CommunicationDefaultMailbox, required: false),
+                RunInput.Intake(IntakeParameterCatalog.DisplayName, required: false),
                 // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
                 // first sign-in of a customer employee).
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
@@ -288,6 +291,13 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),   // T251: H14a registers the identity in Exchange
+                // T263 (H14m): the customer's shared mailbox — its display name and address are intake values (the
+                // address is the SAME communicationDefaultMailbox H4 writes to KV: one producer), and its account row
+                // goes to the Dataverse H5 adopted, written as the BFF app registration H3 created (the H7/H7b identity).
+                RunInput.Intake(IntakeParameterCatalog.DisplayName),
+                RunInput.Intake(IntakeParameterCatalog.CommunicationDefaultMailbox),
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
             ],
         };
 }
