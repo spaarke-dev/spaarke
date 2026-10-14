@@ -20,7 +20,7 @@
  * The code is never logged, and never written anywhere but this one sessionStorage entry.
  */
 
-import { readCustomerQueryKey } from './backend-selection';
+import { hasSingleConfiguredBackend, readCustomerQueryKey } from './backend-selection';
 
 /** The parameter the invite link carries the code in: `#invite=` (§12 I-12), or `?invite=` (accepted as a fallback). */
 export const INVITE_QUERY_PARAM = 'invite';
@@ -130,13 +130,21 @@ function readStored(): StoredInviteCode | null {
 
 /**
  * The stored code to send to `backend`, or null. Only on the CIAM plane, and only to the customer the invite link
- * named (any customer when the link named none).
+ * named (any customer when the link named none). Pass 1 K1: when this SPA's backend directory is exactly ONE backend
+ * (e.g. the `default` dev entry), that backend is the only one the link can mean, so a different `customer` key still
+ * matches. With several backends a different key never matches.
  */
 export function inviteCodeFor(backend: { plane: string; customerKey: string }): string | null {
   if (backend.plane !== 'ciam') return null;
   const stored = readStored();
   if (!stored) return null;
-  if (stored.customerKey !== null && stored.customerKey !== backend.customerKey) return null;
+  if (
+    stored.customerKey !== null &&
+    stored.customerKey !== backend.customerKey &&
+    !hasSingleConfiguredBackend('ciam')
+  ) {
+    return null;
+  }
   return stored.code;
 }
 

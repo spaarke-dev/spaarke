@@ -56,6 +56,9 @@ beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   land('/');
+  // Two configured backends unless a test says otherwise (pass 1 K1 depends on how many the directory holds).
+  vi.stubEnv('VITE_USE_DIRECTORY_SERVICE', '');
+  vi.stubEnv('VITE_BACKENDS', JSON.stringify([CONTOSO, FABRIKAM]));
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -69,6 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('captureInviteCode', () => {
@@ -227,6 +231,39 @@ describe('inviteCodeFor', () => {
     expect(invite.inviteCodeFor({ plane: 'workforce', customerKey: 'contoso' })).toBeNull();
   });
 
+  // Pass 1 K1: a single-backend SPA (e.g. the `default` dev entry) is the only backend the link can mean.
+  it('with exactly ONE configured backend, a different customer key still matches', async () => {
+    vi.stubEnv('VITE_BACKENDS', JSON.stringify([{ ...CONTOSO, customerKey: 'default' }]));
+    const { invite } = await load();
+    land(`/?customer=acme#invite=${CODE}`);
+    invite.captureInviteCode();
+
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'default' })).toBe(CODE);
+    expect(invite.inviteCodeFor({ plane: 'workforce', customerKey: 'default' })).toBeNull();
+  });
+
+  it('with several backends a different key never matches; a link with no key matches any', async () => {
+    const { invite } = await load();
+    land(`/?customer=acme#invite=${CODE}`);
+    invite.captureInviteCode();
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBeNull();
+
+    land(`/#invite=${CODE}`);
+    invite.captureInviteCode();
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'fabrikam' })).toBe(CODE);
+  });
+
+  it('behind the T240c directory flag the single-backend match never applies', async () => {
+    vi.stubEnv('VITE_BACKENDS', JSON.stringify([{ ...CONTOSO, customerKey: 'default' }]));
+    vi.stubEnv('VITE_USE_DIRECTORY_SERVICE', 'true');
+    const { invite } = await load();
+    land(`/?customer=acme#invite=${CODE}`);
+    invite.captureInviteCode();
+
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'default' })).toBeNull();
+  });
+
   it('a tampered stored entry is ignored', async () => {
     const { invite } = await load();
     sessionStorage.setItem(invite.INVITE_CODE_STORAGE_KEY, JSON.stringify({ code: 'short', customerKey: null }));
@@ -289,6 +326,18 @@ describe('bff-client carries the code', () => {
 
     expect(fetches.map(f => f.inviteHeader)).toEqual([undefined, undefined]);
     expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
+  });
+
+  it('a single-backend SPA sends the code although the link named another customer key (pass 1 K1)', async () => {
+    vi.stubEnv('VITE_BACKENDS', JSON.stringify([{ ...CONTOSO, customerKey: 'default' }]));
+    const { invite, selection, bff } = await load();
+    land(`/?customer=acme#invite=${CODE}`);
+    invite.captureInviteCode();
+    selection.activateBackend('ciam', { ...CONTOSO, customerKey: 'default' });
+
+    await bff.bffApiCall('/api/v1/external/me/entitlements');
+
+    expect(fetches.map(f => f.inviteHeader)).toEqual([CODE]);
   });
 
   it('no stored code → no header', async () => {
