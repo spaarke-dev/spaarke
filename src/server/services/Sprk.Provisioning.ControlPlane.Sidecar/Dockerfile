@@ -75,7 +75,9 @@
 # -----------------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0-azurelinux3.0 AS pwsh-tool
 
-ARG PWSH_VERSION=7.6.5
+# 7.6.7 (2026-10-14): 7.6.5's bundled packages failed the image Trivy gate with 4 fixed HIGH CVEs
+# (CVE-2026-84008, -96958, -96959, -96960 in pwsh.deps.json). Bump the pin when the gate reports pwsh packages.
+ARG PWSH_VERSION=7.6.7
 
 RUN dotnet tool install --tool-path /opt/powershell PowerShell --version ${PWSH_VERSION}
 
