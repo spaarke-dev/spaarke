@@ -596,3 +596,71 @@ Run 2026-10-13 15:03–15:45Z against spaarke-bff-dev (healthz 200) and spaarked
 - **(O-184-3)** No CIAM sign-in has happened since the deploy, so the live E11 intent gate (`contact_not_invited`, a marker bind, a grant bind) has not been observed. It needs a real CIAM sign-in, which the agent cannot perform.
 
 **Clean-up:** none needed. Nothing was created. The CIAM Test User contact `394fda9f…` is unchanged (versionnumber 26691587, marker null, no flag written).
+
+## #1827 / task 185 live gate (2026-10-14)
+
+Run 2026-10-14 14:05–14:13Z against spaarke-bff-dev (healthz 200) and spaarkedev1, at master `6da771b96`. Read-only except for the BFF's own idempotent invite. The live E11 CIAM sign-in was **not run**: it needs a real CIAM sign-in, so it goes on the owner checklist.
+
+**Identities.** All existing ones, as for 184:
+- admin (`az` default, `1d02f31c…`, System Administrator, so its reads of the secured columns are authoritative);
+- testuser1 (`8d7bad7a…`, `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`, delegated Dataverse token; its only team is "Spaarke Business Unit 1");
+- the CIAM Test User contact `394fda9f…` (spaarkedev@gmail.com, oid `b720e239…`, plane External, bound).
+
+**Tokens.** `api://1e40baad…/.default` for the BFF, plus `az` tokens for Dataverse, App Insights and the Kudu VFS read (ARM resource). All were held in memory only and never printed or stored.
+
+**No writes.** There was no Entra, Key Vault, app-setting, role or tenant-config write, and no prod or non-dev vault read. The gate created no Dataverse row and no CIAM user. Its only BFF write was the admin `POST /invite` below, which answered AlreadyProvisioned with no side effect. No invite code was seen, and the hash column was reported only as null or non-null (every value was null).
+
+**Files.** Session scratchpad `gate185/`:
+- `g0.py`: the Kudu deployment record and the DLL string scan, done in memory.
+- `gate185.py` and `gate185.log`: G2, G3 live, G4 and G5.
+- `g3b.py`: testuser1's secured-attribute privileges.
+- `ai.py`, `g1*.kql`, `g2*.kql` and their `.out` files: App Insights.
+- `schema/`: `Set-ExternalInviteCodeHashSchema.ps1` and `common/DataverseSolutionMembership.ps1` as at `6da771b96`, with `verify.log`. The worktree branch does not contain the script, so it ran from this copy.
+
+Three App Insights queries first failed because of the harness, not the BFF. `az.cmd` is a batch file, so cmd.exe read `<id>` and `|` inside the KQL as redirections, and it split the multi-line `let` queries. They were rewritten and rerun, and the results below come from the reruns.
+
+**The build is #1827.**
+- Kudu OneDeploy `9089065e…` ran 14:02:33–14:02:36Z. The single instance `39ab6951…` logged "Now listening" and "Application started" at 14:03:03Z, with no startup exception.
+- The deployed `Sprk.Bff.Api.dll` is 17,573,376 B (184's was 17,521,152 B), SHA-256 `38dc1ccec4b2088ed94ad8f0f94b0bf8d39506f1889b0faa5414d8480d479f3c`.
+- It contains every 185-only literal. These were grepped at `6da771b96` first, and none is present at `06b3654a0` (184). They sit in the DLL as UTF-16 user strings:
+
+  | Literal | Source |
+  |---|---|
+  | `X-Spaarke-Invite-Code` | `CallerPrincipalResolver.cs:549`, `CorsModule.cs:130` |
+  | `sdap.access.invite.email_not_sent` | `GrantInviteResult.cs:59` |
+  | `sdap.access.invite.ciam_not_configured` | `GrantInviteResult.cs:65` |
+  | `sprk_externalinvitecodehash` | `ContactBindingDecision.cs:1291` |
+  | `spaarke.invite-code.v1` | `InviteCode.cs:45` |
+  | `[invitation link removed]` | `RegistrationEmailService.cs:201` |
+  | `NeedsInternalInvite` | the I-4 grant-response status |
+
+**The column on dev.** `contact.sprk_externalinvitecodehash` was created 2026-10-14T00:40:17Z, with metadata id `94470fcf…`. It is String, max 100, `IsSecured = true`, `IsAuditEnabled = false` and `IsValidForAdvancedFind = false`. Its field permissions:
+- **Spaarke BFF-Managed Field Readers** `42e542c8…`: **no field-permission row**, so it grants nothing. Its members are 6 teams (Secure Record, Spaarke Business Unit 1, Spaarke Demo, Spaarke Dev 1, Spaarke Test 1, Spaarke) and no users.
+- **Spaarke BFF-Managed Field Writers** `917b64c5…`: read, create and update 4. Its members are only the 2 BFF app users, `# mi-bff-api-dev` (`5967251e…`) and `SDAP-BFF-SPE-API` (`1e40baad…`), and no team.
+- **System Administrator** `572329c1…`: read, create and update 4, the platform default. It lists the team "Spaarke Demo" (#1343) and about 50 users, nearly all platform service app users. The others are Ralph Schroeder, Delegated Admin, the disabled `# Admin Development` and the decommissioned `# spaarke-bff-api-prod` (`92ecc702…`, see O-185-3).
+- **No contact on dev holds a hash or a marker.** `sprk_externalinvitecodehash ne null` returns 0 rows and `sprk_externalinvitedon ne null` returns 0 rows.
+
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| G0 | Build identity | **PASS** | See "The build is #1827" above. The deployment record, the DLL size and the five required literals (plus `[invitation link removed]` and `NeedsInternalInvite`) were read through Kudu VFS. No literal is in 184's source. |
+| G1 | Startup and regression | **PASS** | **Startup:** "Application started" at 14:03:03Z, with no startup exception. **Exceptions from 13:52Z (10 min before the deploy) to 14:13Z:** only two kinds, both pre-existing. (1) Graph "Invalid hostname for this tenancy" (the known orphan container, a steady 12/h before and after the deploy). (2) One `RedisConnectionException` at 14:04:40Z, "could not renew the scheduler lease for 'secure-child-reconciliation'", during the cold start. The same exception appears once a day on 10-09, 10-12 and 10-13 and 25 times on 10-06; it is transient and outside 185's surface. **New exceptions:** none. **5xx since the deploy:** 0. Requests since 13:52Z: `/healthz` 200, `GET /` 401 and the gate's own calls. **No code or hash in telemetry:** a 14-day scan of traces, exceptions, requests, dependencies and customEvents (about 7.7 M items, which also covers the earlier 185 builds deployed during review) found **0** matches for the stored-hash shape `v1.<22>.<43>`, **0** for the code-in-link shape `invite=<43 chars>` and **0** for the header name. The "invite" traces since the deploy carry only IDs, the email, a status and the token audience and issuer: `[EXT-INVITE] Onboarding external user …`, `[EXT-INVITE] Contact 394fda9f… … already has a CIAM oid bound — skipping account creation`, `[DELEGATION] ALLOWED …` and the G5 "No Authorization header …" lines. **CIAM:** **no `ciamlogin`-issuer token and no `[ID-BIND]` trace since the deploy.** The last CIAM token was 2026-10-13T20:20:40Z, about 18 h before the deploy, from an SPA session in which all 101 binds were `ResolveByOid` (an already-bound contact). The live E11 code-gated bind (`contact_not_invited`, a marker-and-code bind, the consume) is therefore **not observed**. |
+| G2 | AlreadyProvisioned unchanged | **PASS** | **Before:** `394fda9f…` oid `b720e239…`, plane 100000000, statecode 0, marker null, **hash null**, versionnumber 26691587, modifiedon 2026-10-02T17:48:44Z. **The call:** admin `POST /api/v1/external-access/invite` {spaarkedev@gmail.com, project `54fb306c…` (Standard, non-secure)} → **200** `{"contactId":"394fda9f…","inviteRedeemUrl":"https://green-dune-0c4f1221e.7.azurestaticapps.net","status":"AlreadyProvisioned","emailSent":null,"emailErrorCode":null}` (op `3834b766…`, 14:11:15Z). Both new fields are present and null, as `fe25cd36c` specifies, and `inviteRedeemUrl` is the BASE portal URL, with no code. **After:** identical in every field (marker null, hash null, versionnumber 26691587, modifiedon unchanged). **Dependencies of the op:** token and OIDC metadata, WhoAmI, RetrievePrincipalAccess, `sprk_projects` GET, one Organization.svc RetrieveMultiple on `sprk_project`, contacts GET and systemusers GET. There was **no Graph call** (so no `POST /users`), **no contact PATCH** and no exception, and no Graph call or contact write happened in any operation after 14:11Z. **No email:** `sprk_communications` created since 14:11:13Z: 0 rows. |
+| G3 | Field security of the hash | **PASS (metadata, profiles, `-Verify`, the platform's own privilege view, live read path); value leg NOT AVAILABLE** | **Metadata and profiles:** see "The column on dev" above. Readers have no row, Writers have 4/4/4 with only the 2 BFF app users, and the System Administrator default applies (#1343 for Spaarke Demo). **`-Verify`:** checked first. Every `Invoke-DvWrite` in the script sits behind an `elseif ($Verify)` / `if ($Verify) { continue }` / `$IsDryRun` guard, `$IsDryRun` is true under `-Verify`, `PublishXml` runs only under `-Apply`, and the dot-sourced helper issues only GETs. `-Verify` also needs `-BffApplicationIds`, so it ran with `5967251e…,1e40baad…` and answered **VERIFY PASS, exit 0**: field-secured, auditing off, Advanced Find off, Readers no permission, Writers 4/4/4, no stranger, and the column plus both profiles in SpaarkeCore and SpaarkeMaster. **The platform's view:** `systemusers(testuser1)/RetrievePrincipalAttributePrivileges()`, as admin and as testuser1 itself, lists 52 secured-attribute privileges. They include the marker (read 4, create 0, update 0) and **do not include the hash**, so testuser1 has no privilege on it. **Live:** testuser1's delegated `GET contacts?$select=contactid,sprk_externalinvitecodehash` → **200, 2 rows, the column key present in both, null in both** (no 403). A `$filter=sprk_externalinvitecodehash ne null` → 200 []. Per-record reads of `8e9918a9…` and `2e419a4f…` → 200, hash null. **The value leg:** no contact on dev holds a hash (the admin's `ne null` also returns 0), so a masked null and a readable null look the same. Writing a hash takes an invite to an unbound contact, which writes the marker and either creates a CIAM user or takes the ExistingAccount branch (184's O-184-1). Both are outside the gate's limits, so it was not attempted. |
+| G4 | Migration count (goal 6) | **PASS: 0** | Admin, read-only. `sprk_externalinvitedon ne null and sprk_externalinvitecodehash eq null`: **0 rows, no ids**. The full release-note query (adding `sprk_externalobjectid eq null and statecode eq 0`): 0. `sprk_externalinvitedon ne null`: 0. This matches design §8's 2026-10-13 count. No contact on dev needs a re-invite. |
+| G5 | Unauthenticated | **PASS** | No token: `GET` and `POST /api/v1/external-access/invite` → 401; `GET` and `POST /api/v1/external-access/invite-and-grant` → 401; `POST /api/v1/external-access/grant` → 401; each answers `WWW-Authenticate: Bearer`. `POST /invite` with no token and a junk 43-char `X-Spaarke-Invite-Code` → 401. `GET /healthz` → 200. App Insights logs each 401 as "No Authorization header on …" and nothing else. |
+| — | Live E11 CIAM sign-in | **NOT RUN (owner checklist)** | It needs a real CIAM sign-in through the new invite link. None reached the BFF after the deploy (G1). |
+
+**Defects found in #1827:** none.
+
+**Observations:**
+- **(O-185-1) The live code-gated bind is unproven on dev until the owner runs it.** It needs:
+  1. an invite to an unbound contact, which writes the marker and the hash and sends the email with `#invite=`;
+  2. a CIAM sign-in through that link, which binds and clears the hash;
+  3. a second sign-in, or another account, without the code, which is denied with `contact_not_invited`.
+
+  These steps also give the G3 value leg: once a hash exists, testuser1's read of it should come back null while the admin's comes back non-null. The ExistingAccount constraint is the same as O-184-1.
+- **(O-185-2) The System Administrator profile can read and write the hash** (the platform default), as with 184's marker. Any System Administrator, and every member of the "Spaarke Demo" team (#1343; its members are all disabled today), could set a hash of their own on an unbound contact. **#1343 now also covers `sprk_externalinvitecodehash`.** No new issue. The script's PASS line, "only the BFF can read or write it", reports this default as INFO rather than FAIL, which is the design (§3).
+- **(O-185-3) The decommissioned `spaarke-bff-api-prod` app user (`92ecc702…`) is still a dev System Administrator.** This is already recorded as a residual item in `docs/assessments/azure-prod-stack-decommission-2026-08-31.md`, where its service principal is `accountEnabled: false`, so it cannot get a token. It is not 185's concern. No new issue.
+- **(O-185-4) An unreadable secured column does not refuse a filter.** testuser1's `$filter` on the hash answered 200 [] rather than an error. With no hash on dev, this cannot show whether Dataverse evaluates the filter against the masked value. It belongs to O-185-1's value leg.
+
+**Clean-up:** none needed. Nothing was created. The CIAM Test User contact `394fda9f…` is unchanged: versionnumber 26691587, marker null, hash null, no flag written.

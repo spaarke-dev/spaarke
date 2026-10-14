@@ -148,4 +148,12 @@ Server side: G1 and G2 PASSED on 2026-10-13 (see `batch5-live-gates-2026-10-08.m
    - (b) prove it on a second environment during provisioning's T240d cross-customer review (recommended; it is the real case). **Owned by provisioning** as T240d's live acceptance check (their `notes/t240d-ciam-external-contacts-design.md` §10), using dev plus the first stamp once T240d's H3c and H4b wire that stamp to CIAM. It runs with your OK at that time;
    - (c) accept the offline proof (`ExistingCiamAccountInviteTests` and the PR's mutation tests).
    **PASS:** outcome `ExistingAccount`; the marker is written; no oid is bound; a "sign in with your existing account" email is sent; no new CIAM user is created.
-2. **E11 bind on first sign-in (needs a CIAM sign-in, which agents can't do).** Invite a fresh, unbound contact, then sign in to the external SPA with that CIAM account within 30 days. **PASS:** you get access, and the contact now carries the oid. A contact with no grant and no current invite instead gets `contact_not_invited`.
+2. **E11 bind on first sign-in: superseded by §12** (since task 185, a bind also needs the invite code from the email link). Invite a fresh, unbound contact, then sign in to the external SPA with that CIAM account within 30 days. **PASS:** you get access, and the contact now carries the oid. A contact with no grant and no current invite instead gets `contact_not_invited`.
+
+## 12. First sign-in through the invite link (task 185, #1827, on dev since 2026-10-14)
+
+Server side PASSED on 2026-10-14 (G0–G5, `batch5-live-gates-2026-10-08.md`). No contact on dev needed a re-invite (G4 count 0). The bind itself needs a real CIAM sign-in:
+1. **Bind with the code.** Invite a fresh, unbound contact (internal user, `/invite` or a grant). Open the email and use **its link** (it ends in `#invite=…`), then sign in or sign up with that CIAM account. **PASS:** you get access; the contact now carries the oid; its stored code hash is cleared.
+2. **No code, no bind.** Sign in with the same kind of fresh invited contact, but open the plain portal URL instead of the email link. **PASS:** no access (`contact_not_invited`), and nothing is bound.
+3. **Code used once.** After step 1, open the same email link again in a private window and sign in with a *different* CIAM account. **PASS:** no access.
+4. **The masked hash (optional, after step 1's invite and before the sign-in).** As testuser1, read that contact's `sprk_externalinvitecodehash`. **PASS:** masked or not returned.

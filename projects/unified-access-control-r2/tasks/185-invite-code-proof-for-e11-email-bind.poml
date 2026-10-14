@@ -3,7 +3,7 @@
   <metadata>
     <title>Invite-code proof for E11: binding a CIAM sign-in by email requires the single-use code from this environment's own invite email, which closes account squatting</title>
     <phase>Session 28 — UAC (owner round 97, 2026-10-13)</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Identity binding and cross-customer tenant isolation, plus a new secret-bearing column and an External SPA sign-in change.</rigor-reason>
     <model-tier>opus</model-tier>
