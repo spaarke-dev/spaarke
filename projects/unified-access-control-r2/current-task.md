@@ -40,4 +40,4 @@
 - F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
 
 ## Not started
-136, 036, 037, 039, 099, 090 wrap-up, and 013/058 bookkeeping. (178 moved to uac-secure-project-r3.)
+036, 099, 090 wrap-up, and 013/058 bookkeeping. 136, 037 and 039 are gate-only (checklist §14). (178 moved to uac-secure-project-r3.)
