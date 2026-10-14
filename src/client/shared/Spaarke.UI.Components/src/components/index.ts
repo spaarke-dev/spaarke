@@ -331,3 +331,8 @@ export * from './ConsoleKit';
 // one IssueLine per Work Item; data-driven variants). spaarke-ontology-platform-r1
 // task 051 (FR-25/FR-28, D-24).
 export * from './Worklist';
+
+// DecisionWizard - the decision wizard: one WizardShell consumer for every Decide and Do decision,
+// mounted in-app (D-26), posting one review to the commit route (D-17). spaarke-ontology-platform-r1
+// task 058 (FR-26, FR-28).
+export * from './DecisionWizard';
