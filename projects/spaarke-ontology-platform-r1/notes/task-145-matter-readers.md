@@ -72,6 +72,24 @@ detail on an existing Signal whose witness later moves into a secure family. Eac
 - Task 144's report-only tables do not apply: they hold stamp writes, and evidence is not a stamp.
 - The run result counts `evidenceRedacted`. A write failure is metered `signal_evidence_redact_failed`.
 
+**Sweep after the policy loop (uac-r2 F1 on #1874 = pass 2 F2).** Several paths stop an IN-FORCE policy before its own
+redaction:
+- an invalid rule;
+- no current version or lane (thrown);
+- a version not in force;
+- a partition skip in the suppression pass;
+- `hitPartitions is null` (placing the hits faulted);
+- `PartitionsUnavailable` from the dismissal-facts/count read;
+- any other exception.
+
+`SweepStoredEvidenceAsync` therefore runs after the loop. It covers every in-force policy code the run has not yet sent
+through `RedactStoredEvidenceAsync`, then the Off/Retired policies (`RedactPoliciesNotInForceAsync` goes through the same
+sweep).
+- **Once per policy per run:** `RunCounts.EvidenceRedactionAttempted` is set when a policy's redaction starts, whatever the
+  outcome. The sweep skips those policies, so a family-read fault in the policy's own pass is not retried within the run.
+- **Faults:** a sweep that cannot read a policy's Signals writes nothing, counts a policy failure and logs at Error, so the run
+  fails visibly. A family-read fault inside the sweep is handled by `RedactStoredEvidenceAsync` the same way.
+
 ## 3. Stamp backfill (criterion 4)
 
 **What it means (K1).** The typed core columns are never copied into the stamp:
@@ -123,7 +141,7 @@ without `-Apply` about 10 minutes later: `stampEmpty` should be 0 on both tables
 | `SignalSuppressionTests.T145_ASignalAndAWitnessBothUndetermined_AreNeverTheSameFamily_AndGiveNoDetail` | review F3: two Undetermined families are never equal | fails with the Undetermined guards removed → pass |
 | `SignalReevaluationJobTests.Run_T145_AReconcileOfAWitnessAlsoFiledUnderASecureProject_AttemptsNoSubjectOrSender` | review F3: a reconcile's create-first payload is filtered too | fails with `Writable` removed from the reconcile → pass |
 | `DecisionCommitServiceTests.T145_AProjectCoresDecision_HasNoMatter_EvenWhenATypedSprkMatterIsSet` | review F3: only a matter core gives the decision a matter | fails under `MatterId => Core?.Id` → pass |
-| Pester `Invoke-OntologyStampBackfill.Tests.ps1` (8) | the backfill classification, with must-fire and must-not-fire cases | new |
+| Pester `Invoke-OntologyStampBackfill.Tests.ps1` (10) | the backfill classification, with must-fire and must-not-fire cases; `Get-AppSettingValue` throws on a non-zero `az` exit and returns the trimmed value on success (pass 2 K5) | new |
 
 The existing `Run_PathBHit_WritesOneWitnessLinePerExistsClause…` stays as the ordinary control.
 
@@ -136,6 +154,35 @@ Review F1 (option A), through the job's real write path:
 | `Run_T145F1_AWitnessThatStaysInTheSignalsFamily_KeepsItsDetail` | Ordinary, same family: no write, and the detail stays. With a Secure team present, this is also the create-path ordinary control. |
 | `Run_T145F1_AFamilyReadFault_LeavesTheStoredLinesUntouchedThatPass_AndTheNextPassClearsThem` | A fault writes nothing (`policyFailures:1`, `SuppressionEvents.Failed` logged); the next pass clears. |
 | `Run_T145F1_ASignalChangedSinceTheRead_IsNotOverwritten_AndOnceResolvedIsStillRedactedNextPass` | A person's resolve between read and write wins (`changedSinceRead:1`, nothing written unconditionally). The next pass redacts the now **resolved** Signal. |
+
+uac-r2 F1 / pass 2 F2 (the in-force sweep). Each test stores the witness's detail on an ordinary Signal, re-files the witness
+under secure X, and breaks the policy's own pass one way. It then asserts:
+- one conditional write of `sprk_evidencerefs` only (ref kept, text and source gone);
+- `evidenceRedacted:1`;
+- the run still failing.
+
+| Test | Stop path |
+|---|---|
+| `Run_T145Sweep_AnInvalidRule_StillHasItsStoredEvidenceRedacted` | the validator gate (`invalidPolicies:1`) |
+| `Run_T145Sweep_ACurrentVersionNoLongerInForce_…` | `PolicyVersionNotInForce` early return (`policyFailures:1`: the sweep added none) |
+| `Run_T145Sweep_NoCurrentVersion_Thrown_…` | thrown "no current version" (caught per policy) |
+| `Run_T145Sweep_APartitionSkipInTheSuppressionPass_…` | #1661 skip (one businessunit timeout) |
+| `Run_T145Sweep_AFaultPlacingTheHits_…` | `hitPartitions is null` (a timeout after the suppression pass) |
+| `Run_T145Sweep_ADismissalFactsReadFailure_…` | `PartitionsUnavailable` from the Decision Record facts read |
+| `Run_T145Sweep_APolicyThatReachedItsOwnRedaction_IsNotSweptAgain` | not twice: one write, `policyFailures:0` |
+
+Mutation: dropping the in-force sweep turns all six stop-path tests red. The not-twice test does not catch removal of the
+skip, because the redaction is monotonic and the row is re-read, so a second pass writes nothing. The skip is kept for cost
+and for one count.
+
+Other items from this round:
+- **pass 2 K1:** `SignalSuppressionTests.T145_AWitnessFiledUnderSecureXButStillOwnedByAnOrdinaryTeam_IsInXsFamily_AndGivesNoDetail`.
+  This is the re-own window. The partition is `Secure([X])`, not Undetermined, and the detail is cleared. It is red under an
+  owner-based family check.
+- **uac-r2 K4:** `CoreAncestorStampReconciliationJobTests.ReportOnlyTables_ACommaAlone_HoldsNothing_TheBackfillRelease`.
+- **pass 2 audit K:** the ArchTest `SpaarkeRoleAuditReadGuardTests` (3 tests: the scan, must-fire, must-not-fire).
+  - It scans the 12 role XMLs in `src/dataverse/solutions/SpaarkeMaster/Roles`.
+  - The scan turns red when `prvReadRecordAuditHistory` is added to `Spaarke Core User.xml`.
 
 The job fixture now makes matter M a readable ordinary root (`OrdinaryMatterBesideSecureX`). Without it the walk could not name
 M's family, every line was undetermined, and the earlier `Run_T145_…SecureProject…` tests would have passed even for an ordinary
@@ -161,8 +208,19 @@ Mutations killed:
 - **Scoped re-check of the F1 fix.** It was done in-session, because the concurrent-subagent cap refused a reviewer agent. It
   found one gap: the Signals of Off or Retired policies were never read, so they were never redacted. Fixed in `a13204cd9`
   (`SignalClosureService.PoliciesNotInForceAsync` is extracted, so "not in force" stays one query).
-- **Pass 2 is REQUIRED** because this is tenant-isolation-class work (the D-123 secure-family wall; CLAUDE.md §8.5). It was NOT
-  run: the concurrent-subagent cap refused the launch twice. It must run before merge.
+- **Pass 2** (adversarial-reviewer, Opus, launched by the main session on `3835015ed`). It is required for tenant-isolation-class
+  work (CLAUDE.md §8.5). Its findings:
+  - F2: the same as uac-r2 F1, plus the hit-placement and facts-read paths. Fixed in `a96404372`.
+  - F1, audit history: reclassified K by the main session; see K-145-11.
+  - K1: a fixture test, `88663a29e`.
+  - K2 and K3: §7.
+  - K4: handed to 038.
+  - K5: `2e2f4ab7b`.
+- **uac-r2 review of #1874 at `3835015ed`** (changes requested):
+  - F1, the in-force sweep: `a96404372`.
+  - K4, the comma release test: `10bba2fe1`.
+  - The #1871 premise correction: §6.
+  - K1 to K3 accepted: §7.
 
 ## 5. Component justification (CLAUDE.md §11)
 
@@ -201,7 +259,7 @@ counter `evidenceRedacted`:
 
 Published size: the measurement is in the PR body.
 
-## 6. Review F1: evidence is written at create only — DECIDED: F1 → A in 145, B in 038, DR snapshot deferred to the owner
+## 6. Review F1: evidence is written at create only — DECIDED: F1 → A in 145, B in 038; DR snapshot not a leak (corrected)
 
 Adversarial review pass 1 (2026-10-14) found the following.
 - `SignalWriter` writes `sprk_evidencerefs` only on create, so the create-time filter did not protect an existing Signal whose
@@ -213,10 +271,16 @@ Adversarial review pass 1 (2026-10-14) found the following.
 - **A (done here):** the stored-evidence redaction pass (§2). On a fault it leaves the lines untouched for that pass (defer, never
   widen).
 - **B:** the read-time filter belongs to task 038's Signal read route. 038's agent owns it; this task does not touch 038's code.
-- **Decision Record `sprk_factsnapshot`:** unchanged in 145, and nothing is written to existing Decision Records. Deferred to the
-  owner as **DI-78** ([#1871](https://github.com/spaarke-dev/spaarke/issues/1871)). The question: redact an append-only Decision
-  Record's snapshot by a service write after a re-file, or store communication evidence in Decision Record snapshots as references
-  only, without subject and sender.
+- **Decision Record `sprk_factsnapshot`: not a leak (premise corrected by uac-r2; verified in code).** DI-78
+  ([#1871](https://github.com/spaarke-dev/spaarke/issues/1871)) is closed as not planned. The snapshot is
+  `{facts, decidedBy.role, because}`:
+  - `facts` is each resolved Signal's own `sprk_factsnapshot` (`DecisionCommitService.FactValues`, `DecisionRecordWriter.cs:963`);
+  - a Signal's fact snapshot is written once from `SignalEvaluator.cs:285-299`. That is the subject's `when`/threshold columns,
+    the derived value and the rule's literals; it is the only producer;
+  - it never holds evidence `text`/`source`;
+  - the wizard's `factSnapshot` (`decisionRecording.ts:101`) is session state, not persisted.
+
+  Pass 1's third point therefore did not hold. The Decision Record writes nothing new.
 
 ## 7. Known limits and items for uac-r2
 
@@ -237,6 +301,29 @@ Adversarial review pass 1 (2026-10-14) found the following.
   ([#1873](https://github.com/spaarke-dev/spaarke/issues/1873)).
 - **K-145-7. Redaction cost.** Each pass walks the families of every Signal of the policy whose stored evidence still has
   detail. Once cleared, a line is never walked again, but a Signal whose detail stays in its family is walked every pass.
+- **K-145-8. uac-r2 K1 (accepted). A family-read fault leaves the detail until the next pass.** The pass writes nothing and
+  counts the policy in `PolicyFailures`, so the run fails visibly. The sweep does not retry a policy in the same run.
+- **K-145-9. uac-r2 K2 (accepted). If-Match covers only the Signal row.** The redaction is conditional on the Signal's version,
+  not on the witness's. A witness re-filed after the families were read is caught by the next nightly pass.
+- **K-145-10. uac-r2 K3 (accepted). `ref`, `asOf`, `kind` and `clause` stay on a cleared line.** This is the same as K-145-1.
+- **K-145-11. Pass 2 F1, reclassified K by the main session: audit history keeps the redacted text.**
+  - Live in spaarkedev1 (2026-10-14): org audit is on, and `sprk_signal.sprk_evidencerefs` and
+    `sprk_decisionrecord.sprk_factsnapshot` are column-audited. So the value from before a redaction stays in audit rows.
+  - Reading them needs `prvReadRecordAuditHistory`. None of Spaarke Basic User, Spaarke Core User, Spaarke Console User or
+    Basic User holds it; only admin-class roles do, and those already read every row.
+  - Guard: the ArchTest `SpaarkeRoleAuditReadGuardTests` fails if a source-controlled Spaarke role grants
+    `prvReadRecordAuditHistory` or `prvReadAuditSummary`. A role edited live in an environment is outside it.
+  - Owner decision (schema): turn off audit on both columns, and whether to purge the existing rows. Filed as **DI-81**
+    ([#1879](https://github.com/spaarke-dev/spaarke/issues/1879)).
+- **K-145-12. Pass 2 K2. Redaction is permanent, but Undetermined can be temporary.** If a matter is un-secured before uac-r2
+  re-owns its children, its Signals are Secure-owned with no root for a while, so they lose legitimate in-family detail for good
+  (`KeepsDetail`). This errs safe (never wider).
+- **K-145-13. Pass 2 K3. A Signal whose dedupe-key policy code matches no `sprk_policy` is never read by either pass.** That
+  happens when the policy is deleted or its code edited in Dataverse. Its stored detail is then never redacted. No BFF path
+  renames or deletes policies.
+- **Pass 2 K4, handed to task 038.** `EvidenceLine.tsx:82-87` renders a redacted line (no `text`) as tier Missing, "No value
+  recorded", which misstates a withheld witness as absent. It is not wired to production yet. 038 owns it, with the read-time
+  filter B; 145 does not touch it.
 - **K-145-4. Stale stamps are not counted.** The dry run counts only *empty* stamps on intermediate-filed rows. A stamp that is
   set but stale needs the subject's root, which is the job's derivation; it appears in the job's report-only log
   (`traces | where message has "[CORE-ANCESTOR-RECON] stale mode=report-only"`).
