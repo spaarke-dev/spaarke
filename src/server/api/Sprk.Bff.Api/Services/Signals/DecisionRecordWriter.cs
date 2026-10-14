@@ -197,7 +197,7 @@ public static class DecisionRecordEvents
     /// <summary>Error: the writer refused (nothing written), or the create failed. Properties: reason only, never fact values.</summary>
     public static readonly EventId WriteRefused = new(50310, nameof(WriteRefused));
 
-    /// <summary>Error: a Secure-team create read back with another owner. The row exists (append-only); uac-r2's reconcile corrects the owner.</summary>
+    /// <summary>Error: a Secure-team create read back with another owner. The row exists (append-only except the live stamp columns, task 144 C2); uac-r2's reconcile corrects the owner.</summary>
     public static readonly EventId SecureOwnerMismatch = new(50311, nameof(SecureOwnerMismatch));
 }
 
@@ -220,7 +220,7 @@ public sealed class DecisionRecordRefusedException : Exception
 }
 
 /// <summary>
-/// Writes the ONE append-only <c>sprk_decisionrecord</c> a review produces (task 040; spec FR-18, FR-19, FR-20, FR-22,
+/// Writes the ONE <c>sprk_decisionrecord</c> a review produces (append-only except the live stamp columns, task 144 C2) (task 040; spec FR-18, FR-19, FR-20, FR-22,
 /// FR-50, FR-51; D-17, D-33, D-34, D-36, D-39).
 /// </summary>
 /// <remarks>
@@ -228,8 +228,11 @@ public sealed class DecisionRecordRefusedException : Exception
 /// derived here from task 036's catalog and never from the client: Dismissal when nothing was taken and no Next step was
 /// created; Judgement when any taken action or any Next step is Judgement; Routine otherwise. An action code the catalog does
 /// not know is refused, never defaulted (the option set is closed).</para>
-/// <para><b>Append-only.</b> The writer only ever calls <c>CreateAsync</c>. No human role and not this identity holds Write or
-/// Delete on the table, and this class has no update path.</para>
+/// <para><b>Append-only except the live stamp columns (task 144, C2).</b> The core-ancestor restamper re-writes the record's
+/// FR-26 stamp (<c>sprk_regarding{matter,project,workassignment,servicerequest}</c>) when its subject is re-filed, and uac-r2's
+/// reconcile re-owns it (both under the BFF's own identity); the decision context (D-34) is never written again. The writer only
+/// ever calls <c>CreateAsync</c>. No human role and not this writer identity holds Write or Delete on the table, and this class
+/// has no update path.</para>
 /// <para><b>Ownership.</b> uac-r2's <see cref="IRecordOwnershipResolver"/> is asked with EVERY parent the record sits under: the
 /// core record (if any), the record's own subject, every core its filing derives (task 142, contract C3) and the subject of every
 /// Signal the record resolves (<see cref="DecisionRecordRequest.SignalSubjects"/>),
@@ -723,7 +726,7 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// After a Secure-team create, reads <c>owningteam</c> back. A mismatch cannot be corrected on an append-only row and a
+    /// After a Secure-team create, reads <c>owningteam</c> back. A mismatch cannot be corrected by the writer (the row is append-only except the live stamp columns) and a
     /// failure here must not make the route retry into a duplicate, so it is logged at Error and metered, and the record id is
     /// still returned: uac-r2's secure-child reconcile re-owns the row (the table is registered in its lineage).
     /// </summary>
