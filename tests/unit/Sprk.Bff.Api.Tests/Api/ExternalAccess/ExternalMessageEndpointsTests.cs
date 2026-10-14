@@ -244,7 +244,9 @@ public class ExternalMessageEndpointsTests
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
             "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
-            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&");
+            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value" +
+            // Task 187: the message's other parents, whose LIVE roots the rule takes in.
+            ",_sprk_communicationthread_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&");
         _impersonated.VerifyNoOtherCalls();
     }
 

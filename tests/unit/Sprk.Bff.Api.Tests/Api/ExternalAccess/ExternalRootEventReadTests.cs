@@ -342,6 +342,10 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + "&$select=sprk_eventid,sprk_eventname,sprk_duedate,statuscode,createdon,_sprk_regardingproject_value"
             + ",_sprk_regardingmatter_value,_sprk_regardingworkassignment_value"
             + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+            // Task 187: the event's other parents, whose LIVE roots the rule takes in.
+            + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
+            + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
+            + ",_sprk_regardingreportcard_value"
             + "&$orderby=sprk_duedate asc,sprk_eventid asc");
     }
 
@@ -452,6 +456,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>Every request URL (unescaped). A denied request leaves this empty.</summary>
         public ConcurrentQueue<string> Urls { get; } = new();
 
+        /// <summary>Task 187: every request as "METHOD url" (unescaped), so a test can assert nothing was written.</summary>
+        public ConcurrentQueue<string> Requests { get; } = new();
+
         /// <summary>When set, every request answers with this status.</summary>
         public HttpStatusCode? Fault { get; set; }
 
@@ -520,6 +527,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             lock (_sets) _sets.Clear();
             lock (_filing) { _filing.Clear(); _recordTypes.Clear(); }
             Urls.Clear();
+            Requests.Clear();
             FilingReadLog.Clear();
             Fault = null;
             FlagFault = null;
@@ -620,6 +628,28 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         }
 
         private readonly Dictionary<string, Guid> _recordTypes = new();
+
+        /// <summary>
+        /// Task 187: a record in the FILING world (what the live-parent walk reads app-only), filed through each
+        /// <paramref name="lookups"/> entry (column, target table, id), e.g. a communication whose <c>sprk_regardingmatter</c>
+        /// names a matter. The HTTP side is unaffected. A record not added here is one the walk's read does not return.
+        /// </summary>
+        public void AddFilingRow(string table, Guid id, params (string Column, string Target, Guid Id)[] lookups)
+        {
+            var row = new Entity(table, id);
+            foreach (var (column, target, targetId) in lookups)
+                row[column] = new EntityReference(target, targetId);
+            lock (_filing) _filing[(table, id)] = row;
+        }
+
+        /// <summary>Task 187: sets one column of a seeded HTTP-side row (e.g. a to-do's <c>_sprk_regardingcommunication_value</c>).</summary>
+        public void SetColumn(string set, string idColumn, string id, string column, object? value)
+        {
+            lock (_sets)
+            {
+                _sets[set].Single(r => string.Equals(r[idColumn] as string, id, StringComparison.OrdinalIgnoreCase))[column] = value;
+            }
+        }
 
         /// <summary>
         /// Seeds a root record (project, matter, work assignment) with its <c>sprk_issecure</c>. A <c>null</c> flag is OMITTED
@@ -798,6 +828,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         {
             var url = Uri.UnescapeDataString(request.RequestUri!.ToString());
             Urls.Enqueue(url);
+            Requests.Enqueue($"{request.Method} {url}");
 
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));

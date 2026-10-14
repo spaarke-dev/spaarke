@@ -842,6 +842,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          + ",_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value"
                          + ",_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon"
                          + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+                         // Task 187: the document's other parents, whose LIVE roots the rule takes in.
+                         + ",_sprk_canonicaldocument_value,_sprk_invoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value"
+                         + ",_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedinvoice_value,_sprk_relatedtodo_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 

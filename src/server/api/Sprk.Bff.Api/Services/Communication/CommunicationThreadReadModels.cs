@@ -151,7 +151,11 @@ public sealed record RecentRecordMessage(ThreadMessageDto Message, string Entity
 /// when the row is not filed to that root). The external reads hand these to the caller's multi-root rule so a message also
 /// filed to a root the caller cannot read is withheld (fix round for r3 task 039).
 /// </summary>
-public sealed record MessageRootLookups(string? Project, string? Matter, string? WorkAssignment);
+/// <para>Task 187 (owner round 99, D-123): <paramref name="Parents"/> are the row's other parent lookups (its thread, and the
+/// invoice, event, analysis, budget or report card it regards), whose LIVE roots join the rule; the stamps are a copy.</para>
+public sealed record MessageRootLookups(
+    string? Project, string? Matter, string? WorkAssignment,
+    IReadOnlyList<Sprk.Bff.Api.Infrastructure.ExternalAccess.LiveParentLookup>? Parents = null);
 
 /// <summary>
 /// The caller's multi-root rule for one external message read (r3 task 039; owner decision 2026-10-12, option B). The read

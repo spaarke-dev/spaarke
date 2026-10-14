@@ -153,6 +153,9 @@ public class ExternalDataService
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+        // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
+        // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
+        [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
     }
 
     /// <summary>
@@ -179,6 +182,9 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+        // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
+        // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
+        [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
     }
 
     // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
@@ -211,6 +217,9 @@ public class ExternalDataService
         [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+        // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
+        // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
+        [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
     }
 
     private sealed class ContactRow
@@ -267,14 +276,28 @@ public class ExternalDataService
         IConfiguration configuration,
         TokenCredential credential,
         ILogger<ExternalDataService> logger,
-        IGenericEntityService? filing = null)
+        IGenericEntityService? filing = null,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
         _filing = filing;
+        // Task 187: which lineage lookups a parent table has in this environment (the 6h-cached metadata probe the stamp path
+        // uses), so the live-parent walk never selects a column a later schema adds. Without one (a test double), every
+        // lookup of the lineage map is taken as present.
+        _columnProbe = columns is not null
+            ? columns.ProbeColumnsAsync
+            : (table, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling.TryGetValue(table, out var lookups)
+                    ? lookups.Keys
+                    : Array.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase));
     }
+
+    /// <summary>Task 187: the column probe the live-parent walk reads parent tables through (see the constructor).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe _columnProbe;
 
     // ---------------------------------------------------------------------------
     // Project queries
@@ -425,9 +448,13 @@ public class ExternalDataService
         var url = BuildDocumentListUrl(GetApiUrl(), parentKind, parentId);
 
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
-        var links = read.Rows.Select(DocumentLinksOf).ToList();
-        var flags = await ReadSecureRootFlagsAsync(caller, links.Select(l => l.Links), ct);
-        var readable = read.Rows.Where((_, i) => links[i].SecureRootsReadableBy(caller, flags)).ToList();
+        // Task 187: the document's own root links stay the primary input; its other parents (the related event,
+        // communication, to-do, invoice ...) are read too, and their LIVE roots join the rule.
+        var links = read.Rows.Select(r => DocumentLinksOf(r).ForRoute(parentKind, parentId)).ToList();
+        var live = await ReadLiveParentRootsAsync(links.Select(l => l.LiveParents), ct);
+        var roots = links.Select(l => l.RuleInput(live)).ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
+        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
@@ -438,7 +465,7 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
             Value = readable.Select(MapDocument).ToList(),
-            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
         };
     }
 
@@ -449,11 +476,29 @@ public class ExternalDataService
     /// </summary>
     private static bool FlagReadCutListShort(SecureRootFlags flags, int withheld) => withheld > 0 && !flags.IsComplete;
 
+    /// <summary>
+    /// Task 187: <see cref="FlagReadCutListShort"/> for a list that also resolved its rows' live parents: a withheld row may be
+    /// missing only because a flag read OR a live-parent read could not decide, so the list says <c>Truncated</c>.
+    /// </summary>
+    private static bool RuleReadCutListShort(SecureRootFlags flags, LiveParentRoots live, int withheld) =>
+        withheld > 0 && (!flags.IsComplete || !live.IsComplete);
+
+    private const string TodoTable = "sprk_todo";
+    private const string EventTable = "sprk_event";
+    private const string DocumentTable = "sprk_document";
+
+    /// <summary>Task 187: <c>,col1,col2...</c>, a child table's live-parent lookups to append to a list <c>$select</c>.</summary>
+    private static string LiveParentSelectSuffix(string childTable) =>
+        string.Concat(ExternalMultiRootRule.LiveParentSelect(childTable).Select(c => "," + c));
+
     private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
         new(
             row.SprkProjectidValue, row.SprkRelatedprojectValue,
             row.SprkMatterValue, row.SprkRelatedmatterValue,
-            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue);
+            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue)
+        {
+            Parents = ExternalMultiRootRule.LiveParentsOf(DocumentTable, row.Extra),
+        };
 
     /// <summary>
     /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
@@ -490,17 +535,53 @@ public class ExternalDataService
         };
 
         /// <summary>
-        /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to; <paramref name="flags"/>
-        /// are the secure flags read for the request (<see cref="ReadSecureRootFlagsAsync"/>).
+        /// Task 187: the document's parent lookups that are NOT root links (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/>
+        /// of <c>sprk_document</c>: the related event, communication, to-do, agreement, invoice, the parent and canonical
+        /// document ...), whose LIVE roots join the rule. <c>null</c>: none were read.
         /// </summary>
-        public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags) =>
-            ExternalMultiRootRule.SecureRootsReadable(caller, flags, Links);
+        public IReadOnlyList<LiveParentLookup>? Parents { get; init; }
+
+        /// <summary>The parents as live-parent read input (empty when none).</summary>
+        internal IReadOnlyList<LiveParentLookup> LiveParents => Parents ?? Array.Empty<LiveParentLookup>();
+
+        /// <summary>
+        /// The rule input: the six root links ∪ the live roots of <see cref="Parents"/>. <paramref name="live"/> <c>null</c>
+        /// resolves nothing, so a document naming a parent is withheld (fail closed).
+        /// </summary>
+        public ChildRowRoots RuleInput(LiveParentRoots? live) => ChildRowRoots.Of(Links, Parents, live ?? LiveParentRoots.Empty);
+
+        /// <summary>
+        /// Task 187, owner decision 2026-10-11 (option A) kept: on an INVOICE route the caller was authorized for the invoice
+        /// through the union of its parents, so that invoice is not walked again as one of the document's parents (it would
+        /// put every parent of the invoice in the rule). Every other parent still is. A root route changes nothing.
+        /// </summary>
+        internal DocumentRootLinks ForRoute(DocumentParentKind parentKind, Guid routeParentId) =>
+            parentKind != DocumentParentKind.Invoice || Parents is null
+                ? this
+                : this with
+                {
+                    Parents = Parents
+                        .Where(p => !(string.Equals(p.Table, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+                                      && Guid.TryParse(p.LookupValue, out var id) && id == routeParentId))
+                        .ToArray(),
+                };
+
+        /// <summary>
+        /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to, and (task 187) on every
+        /// secure LIVE root of its other parents; <paramref name="flags"/> are the secure flags read for the request
+        /// (<see cref="ReadSecureRootFlagsAsync"/>) over <see cref="RuleInput"/>.
+        /// </summary>
+        public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags, LiveParentRoots? live = null) =>
+            ExternalMultiRootRule.ChildRowReadable(caller, flags, RuleInput(live));
 
         /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
         internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
             Raw(row, SelectColumns[0]), Raw(row, SelectColumns[1]),
             Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
-            Raw(row, SelectColumns[4]), Raw(row, SelectColumns[5]));
+            Raw(row, SelectColumns[4]), Raw(row, SelectColumns[5]))
+        {
+            Parents = ExternalMultiRootRule.LiveParentsOf(DocumentTable, row),
+        };
 
         private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
         {
@@ -537,8 +618,8 @@ public class ExternalDataService
         /// Read on every SECURE root it is filed to (<paramref name="flags"/>: the request's secure-flag read). False answers
         /// the route's one "not part of this record" response.
         /// </summary>
-        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller, SecureRootFlags flags) =>
-            IsUnder(routeParentId) && Roots.SecureRootsReadableBy(caller, flags);
+        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller, SecureRootFlags flags, LiveParentRoots? live = null) =>
+            IsUnder(routeParentId) && Roots.SecureRootsReadableBy(caller, flags, live);
     }
 
     /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
@@ -551,7 +632,8 @@ public class ExternalDataService
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,"
                      + "_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value,"
                      + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
-                     + CreatorStampSelect;
+                     + CreatorStampSelect
+                     + LiveParentSelectSuffix(DocumentTable); // task 187: the parents whose live roots the rule takes in
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -816,6 +898,7 @@ public class ExternalDataService
         var binding = GetDocumentParentBinding(parentKind);
         var columns = new[] { "sprk_documentname", binding.LookupValueAttribute }
             .Concat(DocumentRootLinks.SelectColumns)
+            .Concat(ExternalMultiRootRule.LiveParentSelect(DocumentTable)) // task 187
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -825,7 +908,8 @@ public class ExternalDataService
         var name = row.TryGetValue("sprk_documentname", out var n) && n.ValueKind == JsonValueKind.String
             ? n.GetString()
             : null;
-        return new DocumentScopeRead(GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row));
+        return new DocumentScopeRead(
+            GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row).ForRoute(parentKind, GuidValue(row, binding.LookupValueAttribute) ?? Guid.Empty));
     }
 
     /// <summary>
@@ -1507,12 +1591,19 @@ public class ExternalDataService
         // Fix round for task 039: a to-do under an invoice of secure matter M and project P is stamped with BOTH roots, so
         // the project route used to list M's to-do to a reader of P alone. Listed only if the caller holds Read on every
         // SECURE root the to-do carries (ExternalMultiRootRule, owner option B); a single-root to-do lists exactly as before.
-        var stamps = read.Rows
-            .Select(r => ExternalMultiRootRule.Stamps(
-                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+        // Task 187 (owner round 99, D-123): the stamp is a COPY, so the to-do's parents (the communication, document, event,
+        // invoice ... it is filed under) are read too and their LIVE roots join the rule: a carrier to-do (its pair names
+        // ordinary M, its sprk_regardingcommunication a communication under secure X) and a stale copy are withheld.
+        var parents = read.Rows.Select(r => ExternalMultiRootRule.LiveParentsOf(TodoTable, r.Extra)).ToList();
+        var live = await ReadLiveParentRootsAsync(parents, ct);
+        var roots = read.Rows
+            .Select((r, i) => ChildRowRoots.Of(
+                ExternalMultiRootRule.Stamps(
+                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
+                parents[i], live))
             .ToList();
-        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
-        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
+        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
@@ -1523,7 +1614,7 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
             Value = readable.Select(MapTodo).ToList(),
-            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
         };
     }
 
@@ -1553,7 +1644,8 @@ public class ExternalDataService
                      "_sprk_regardingproject_value,_sprk_regardingmatter_value," +
                      "_sprk_regardingworkassignment_value," +
                      "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl," +
-                     CreatorStampSelect; // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
+                     CreatorStampSelect + // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
+                     LiveParentSelectSuffix(TodoTable); // task 187: the parents whose live roots the rule takes in
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
@@ -1588,7 +1680,7 @@ public class ExternalDataService
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
-        var (readable, flags) = await ReadableEventsAsync(read.Rows, caller, ct);
+        var (readable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
@@ -1599,7 +1691,7 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalEventDto>
         {
             Value = readable.Select(MapEvent).ToList(),
-            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
         };
     }
 
@@ -1616,15 +1708,20 @@ public class ExternalDataService
     /// document, message and feed lists. The delete-own rule (<c>AuthorizeDeleteOwnAsync</c>) stays "Read on EVERY parent"
     /// (FR-26).</para>
     /// </remarks>
-    private async Task<(List<EventRow> Rows, SecureRootFlags Flags)> ReadableEventsAsync(
+    private async Task<(List<EventRow> Rows, SecureRootFlags Flags, LiveParentRoots Live)> ReadableEventsAsync(
         IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
     {
-        var stamps = rows
-            .Select(r => ExternalMultiRootRule.Stamps(
-                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+        // Task 187: the stamped roots plus the live roots of the event's parents (see GetTodosAsync).
+        var parents = rows.Select(r => ExternalMultiRootRule.LiveParentsOf(EventTable, r.Extra)).ToList();
+        var live = await ReadLiveParentRootsAsync(parents, ct);
+        var roots = rows
+            .Select((r, i) => ChildRowRoots.Of(
+                ExternalMultiRootRule.Stamps(
+                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
+                parents[i], live))
             .ToList();
-        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
-        return (rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList(), flags);
+        var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
+        return (rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList(), flags, live);
     }
 
     /// <summary>
@@ -1637,6 +1734,151 @@ public class ExternalDataService
         IEnumerable<IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>> rowRoots,
         CancellationToken ct = default) =>
         ExternalMultiRootRule.ReadFlagsAsync(GetNonSecureRootsAsync, caller, rowRoots, _logger, ct);
+
+    /// <summary>
+    /// Task 187: the live roots of the distinct parents a set of rows carries
+    /// (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/> over <see cref="GetLiveParentRootsAsync"/>): one bounded,
+    /// batched walk for the whole page, none when no row names a parent. Fails closed (see the rule).
+    /// </summary>
+    public Task<LiveParentRoots> ReadLiveParentRootsAsync(
+        IEnumerable<IEnumerable<LiveParentLookup>> rowParents, CancellationToken ct = default) =>
+        ExternalMultiRootRule.ReadLiveParentsAsync(GetLiveParentRootsAsync, rowParents, _logger, ct);
+
+    /// <summary>
+    /// Task 187 (owner round 99, D-123; #1857): of <paramref name="parents"/> (child-table records a row is filed under), the
+    /// LIVE roots at the top of each one's filing, read APP-ONLY.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The walk.</b> The ONE lineage map (<see cref="Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling"/>, the
+    /// lookups <c>SecureChildReconciler</c>'s secure-if-any follows), climbed by
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.ParentLineageWalk.TopsOfManyAsync"/>: level by level, one query per parent
+    /// table per level (<c>id IN (…)</c>, chunked by 200), selecting only that table's lineage lookups. A project, matter or
+    /// work assignment ends the climb without a read: whether it is (effectively) secure is the secure-flag read's to decide
+    /// (<see cref="GetNonSecureRootsAsync"/>), which runs once over the union.</para>
+    /// <para><b>Bounded, fail closed.</b> At most <see cref="ExternalMultiRootRule.MaxLiveParentReads"/> records and
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.ParentLineageWalk.MaxDepth"/> levels. A parent whose filing reaches a record
+    /// that faulted, did not come back or lies past a bound is left out of the answer (unresolved), and every row filed under
+    /// it is withheld. No filing reader means nothing is resolved.</para>
+    /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real walk over a fake reader.</para>
+    /// </remarks>
+    public virtual async Task<LiveParentRootsRead> GetLiveParentRootsAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var empty = new Dictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>>();
+        if (parents.Count == 0)
+            return new LiveParentRootsRead(empty);
+        if (_filing is null)
+        {
+            _logger.LogError(
+                "[EXT-LIVEPARENT] No filing reader is configured; {Count} parent(s) cannot be resolved (fail closed).", parents.Count);
+            return new LiveParentRootsRead(empty, Faulted: true);
+        }
+
+        var walk = new Sprk.Bff.Api.Services.Dataverse.ParentLineageWalk(_filing, _columnProbe, Array.Empty<string>());
+        var (tops, faulted) = await walk
+            .TopsOfManyAsync(parents, Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot, ExternalMultiRootRule.MaxLiveParentReads, ct)
+            .ConfigureAwait(false);
+
+        var resolved = new Dictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>>();
+        var undetermined = 0;
+        foreach (var (parent, answer) in tops)
+        {
+            if (answer.Status != Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Found)
+            {
+                undetermined++;
+                continue;
+            }
+
+            resolved[parent] = answer.Tops
+                .Where(t => Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot(t.Table))
+                .Select(t => (RootTypeOf(t.Table), t.Id))
+                .Distinct()
+                .ToList();
+        }
+
+        if (undetermined > 0)
+        {
+            _logger.LogWarning(
+                "[EXT-LIVEPARENT] {Undetermined} of {Count} parent(s) have a filing that could not be decided (faulted={Faulted}); "
+                + "rows filed under them are withheld.", undetermined, tops.Count, faulted);
+        }
+
+        return new LiveParentRootsRead(resolved, faulted);
+
+        static ExternalGrantRootType RootTypeOf(string table) =>
+            Enum.GetValues<ExternalGrantRootType>()
+                .First(t => string.Equals(ExternalGrantRoot.LogicalNameFor(t), table, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Task 187: the answer of <see cref="CheckLiveParentsAsync"/>.</summary>
+    public enum LiveParentDecision
+    {
+        /// <summary>The zero value on purpose: an unset decision refuses.</summary>
+        Withheld = 0,
+
+        /// <summary>The caller holds Read on every SECURE root of the row's stamps and of its parents' live roots.</summary>
+        Readable = 1,
+
+        /// <summary>A read the decision needed failed: nothing may be written, and the route says "try again".</summary>
+        Unavailable = 2,
+    }
+
+    /// <summary>
+    /// Task 187: the single-row form of the live-parent rule, for the to-do PATCH and the to-do / event delete-own routes:
+    /// reads the row's stamps and parent lookups, resolves the parents' live roots and the secure flags, and decides with
+    /// <see cref="ExternalMultiRootRule.ChildRowReadable"/>. A row that is absent is <see cref="LiveParentDecision.Withheld"/>
+    /// (the routes' own checks already refuse it); a read that failed is <see cref="LiveParentDecision.Unavailable"/>.
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam).</remarks>
+    public virtual async Task<LiveParentDecision> CheckLiveParentsAsync(
+        DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var binding = GetDeletableBinding(kind);
+        if (kind is not (DeletableKind.Todo or DeletableKind.Event))
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "The live-parent check covers to-dos and events.");
+
+        Dictionary<string, JsonElement>? row;
+        try
+        {
+            row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(BuildLiveParentCheckUrl(GetApiUrl(), kind, id), ct);
+        }
+        catch (DataverseUnavailableException)
+        {
+            return LiveParentDecision.Unavailable;
+        }
+
+        if (row is null)
+            return LiveParentDecision.Withheld;
+
+        var stamps = ExternalMultiRootRule.Stamps(
+            RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
+            RawLookup(row, "_sprk_regardingworkassignment_value"));
+        var parents = ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row);
+        var live = await ReadLiveParentRootsAsync(new[] { parents }, ct);
+        var roots = ChildRowRoots.Of(stamps, parents, live);
+        var flags = await ReadSecureRootFlagsAsync(caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
+        if (ExternalMultiRootRule.ChildRowReadable(caller, flags, roots))
+            return LiveParentDecision.Readable;
+
+        // Withheld for its roots, or only because a read could not decide: a write route answers the second as unavailable.
+        return live.Faulted || !flags.IsComplete ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
+
+        static string? RawLookup(IReadOnlyDictionary<string, JsonElement> r, string column) =>
+            !r.TryGetValue(column, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                ? null
+                : v.ValueKind == JsonValueKind.String ? v.GetString() : ExternalMultiRootRule.UnresolvedParent;
+    }
+
+    /// <summary>The single-row read <see cref="CheckLiveParentsAsync"/> sends: the three stamps and every live-parent lookup. Pure.</summary>
+    internal static string BuildLiveParentCheckUrl(string apiUrl, DeletableKind kind, Guid id)
+    {
+        var binding = GetDeletableBinding(kind);
+        var columns = new[] { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" }
+            .Concat(ExternalMultiRootRule.LiveParentSelect(binding.EntityLogicalName));
+        return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
+    }
 
     /// <summary>
     /// Of <paramref name="roots"/>, the ones whose EFFECTIVE secure status, read APP-ONLY, is not secure (owner decision
@@ -1806,7 +2048,8 @@ public class ExternalDataService
         // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
         var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
                      + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
-                     + CreatorStampSelect;
+                     + CreatorStampSelect
+                     + LiveParentSelectSuffix(EventTable); // task 187: the parents whose live roots the rule takes in
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
         return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";

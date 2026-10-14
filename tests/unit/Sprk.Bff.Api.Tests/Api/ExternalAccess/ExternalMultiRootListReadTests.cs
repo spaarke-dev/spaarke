@@ -856,13 +856,17 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         foreach (var module in modules)
         {
             module.RootRuleAttributes.Should().BeEquivalentTo(
-                module.EffectiveDimensions.Select(d => d.Attribute).Concat(module.AdditionalRootLookups.Select(l => l.Attribute)));
+                module.EffectiveDimensions.Select(d => d.Attribute).Concat(module.AdditionalRootLookups.Select(l => l.Attribute))
+                    .Concat(module.LiveParentAttributes));
         }
 
+        // Task 187: plus the document's other parents, whose LIVE roots the rule takes in.
         Registry().FindByEntity("sprk_document")!.RootRuleAttributes.Should().BeEquivalentTo(new[]
         {
             "sprk_project", "sprk_matter", "sprk_workassignment",
             "sprk_relatedproject", "sprk_relatedmatter", "sprk_relatedworkassignment",
+            "sprk_canonicaldocument", "sprk_invoice", "sprk_parentdocument", "sprk_relatedagreement",
+            "sprk_relatedcommunication", "sprk_relatedevent", "sprk_relatedinvoice", "sprk_relatedtodo",
         });
     }
 

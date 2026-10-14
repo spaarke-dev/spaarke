@@ -1002,6 +1002,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         public ConcurrentDictionary<(DeletableKind Kind, Guid Id), DeleteTarget> Targets { get; } = new();
 
+        /// <summary>Task 187: what the live-parent check answers per row (Readable when a test sets nothing).</summary>
+        public ConcurrentDictionary<(DeletableKind Kind, Guid Id), LiveParentDecision> LiveParents { get; } = new();
+
+        public override Task<LiveParentDecision> CheckLiveParentsAsync(
+            DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default) =>
+            Task.FromResult(LiveParents.TryGetValue((kind, id), out var decision) ? decision : LiveParentDecision.Readable);
+
         public ConcurrentDictionary<Guid, Guid> Requesters { get; } = new();
 
         public Exception? TargetFault { get; set; }
@@ -1038,6 +1045,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             UnreadableRelationship = null;
             ServiceRequestDeletes.Clear();
             Targets.Clear();
+            LiveParents.Clear();
             Requesters.Clear();
             States.Clear();
             Volatile.Write(ref _requesterAndStateReads, 0);

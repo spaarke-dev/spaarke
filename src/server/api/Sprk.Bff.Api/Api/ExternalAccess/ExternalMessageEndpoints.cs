@@ -302,7 +302,7 @@ public static class ExternalMessageEndpoints
 
         return GetMessagesCoreAsync(
             root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
-            logger, ct);
+            logger, ct, dataService.GetLiveParentRootsAsync);
     }
 
     /// <summary>
@@ -320,7 +320,8 @@ public static class ExternalMessageEndpoints
         CommunicationThreadReadService threadReadService,
         NonSecureRootReader readNonSecureRoots,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        LiveParentRootReader? readLiveParents = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
@@ -351,7 +352,7 @@ public static class ExternalMessageEndpoints
             var read = await threadReadService
                 .ReadRegardingAppOnlyAsync(
                     messageRoot.EntityLogicalName, id, principal.SystemUserId,
-                    RootsReadableFor(messageRoot, principal, readNonSecureRoots, logger), ct)
+                    RootsReadableFor(messageRoot, principal, readNonSecureRoots, logger, readLiveParents), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -390,10 +391,11 @@ public static class ExternalMessageEndpoints
     /// (requester scope).
     /// </remarks>
     internal static MessageRootsFilter RootsReadableFor(
-        MessageRoot root, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
+        MessageRoot root, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
+        LiveParentRootReader? readLiveParents = null) =>
         string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
             ? (_, _) => Task.FromResult<Func<MessageRootLookups, bool>>(_ => true)
-            : SecureRootsFilter(principal, readNonSecureRoots, logger);
+            : SecureRootsFilter(principal, readNonSecureRoots, logger, readLiveParents);
 
     /// <summary>
     /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
@@ -401,16 +403,28 @@ public static class ExternalMessageEndpoints
     /// <see cref="ExternalMultiRootRule.SecureRootsReadable(CallerPrincipal, SecureRootFlags, string?, string?, string?)"/>.
     /// Shared by the thread read and the notification feed.
     /// </summary>
+    /// <remarks>Task 187 (owner round 99, D-123; #1857): the stamps are a COPY, so the live roots of each row's other
+    /// parents (<see cref="MessageRootLookups.Parents"/>) are resolved in one bounded batch first
+    /// (<paramref name="readLiveParents"/>; none given resolves nothing, so a row naming a parent is withheld) and the rule
+    /// decides over the union (<see cref="ExternalMultiRootRule.ChildRowReadable"/>).</remarks>
     internal static MessageRootsFilter SecureRootsFilter(
-        CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
+        CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
+        LiveParentRootReader? readLiveParents = null) =>
         async (candidates, ct) =>
         {
+            var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
+                readLiveParents, candidates.Select(r => r.Parents ?? Array.Empty<LiveParentLookup>()), logger, ct)
+                .ConfigureAwait(false);
             var flags = await ExternalMultiRootRule.ReadFlagsAsync(
                 readNonSecureRoots, principal,
-                candidates.Select(r => ExternalMultiRootRule.Stamps(r.Project, r.Matter, r.WorkAssignment)),
+                candidates.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)RuleInput(r, live)),
                 logger, ct).ConfigureAwait(false);
-            return r => ExternalMultiRootRule.SecureRootsReadable(principal, flags, r.Project, r.Matter, r.WorkAssignment);
+            return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live));
         };
+
+    /// <summary>Task 187: one message row's rule input, its stamps and its parents' live roots.</summary>
+    private static ChildRowRoots RuleInput(MessageRootLookups row, LiveParentRoots live) =>
+        ChildRowRoots.Of(ExternalMultiRootRule.Stamps(row.Project, row.Matter, row.WorkAssignment), row.Parents, live);
 
     /// <summary>
     /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside

@@ -1017,8 +1017,13 @@ public static class ExternalProjectDataEndpoints
     {
         if (!document.IsUnder(routeParentId))
             return false;
-        var flags = await dataService.ReadSecureRootFlagsAsync(caller, new[] { document.Roots.Links }, ct);
-        return document.IsReadableUnder(routeParentId, caller, flags);
+        // Task 187: the live roots of the document's other parents join its own root links (one bounded walk, then the one
+        // secure-flag read over the union).
+        var live = await dataService.ReadLiveParentRootsAsync(new[] { document.Roots.LiveParents }, ct);
+        var roots = document.Roots.RuleInput(live);
+        var flags = await dataService.ReadSecureRootFlagsAsync(
+            caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
+        return document.IsReadableUnder(routeParentId, caller, flags, live);
     }
 
     /// <summary>
@@ -1688,12 +1693,15 @@ public static class ExternalProjectDataEndpoints
         // one expression means a future root type cannot be added to the scope branch while being
         // forgotten in the rights branch.
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this to-do",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
-                });
+            return DenyTodoWrite();
+
+        // Task 187 (owner round 99, D-123; #1857): the to-do's root is its STAMP, a copy. A to-do whose live parent (the
+        // communication, document, event, invoice ... it is filed under) sits under a SECURE root the caller cannot read is
+        // behind that root's wall, so it is refused with the same response, and nothing is written. A read that could not
+        // decide refuses too (fail closed).
+        if (await dataService.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Todo, id, callerContext, ct)
+            != ExternalDataService.LiveParentDecision.Readable)
+            return DenyTodoWrite();
 
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
@@ -1706,6 +1714,15 @@ public static class ExternalProjectDataEndpoints
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }
+
+    /// <summary>The ONE refusal of a to-do PATCH: out of scope, too few rights, or (task 187) behind a live parent's secure root.</summary>
+    private static IResult DenyTodoWrite() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "You do not have access to this to-do",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+            });
 
     // -------------------------------------------------------------------------------------------
     // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)
@@ -1789,6 +1806,25 @@ public static class ExternalProjectDataEndpoints
                 logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: no Read on its {ParentKind} {ParentId}",
                     kind, id, parent.Kind, parent.Id);
                 return DenyDeleteOwn();
+            }
+        }
+
+        // (3) Task 187 (owner round 99, D-123): a to-do or event whose LIVE parent sits under a SECURE root the caller cannot
+        //     read is behind that root's wall (the creator may have lost access through a re-file). Refused with the same
+        //     403; a read that could not decide is the 503, never a delete.
+        if (kind is ExternalDataService.DeletableKind.Todo or ExternalDataService.DeletableKind.Event)
+        {
+            switch (await dataService.CheckLiveParentsAsync(kind, id, caller, ct))
+            {
+                case ExternalDataService.LiveParentDecision.Readable:
+                    break;
+                case ExternalDataService.LiveParentDecision.Unavailable:
+                    logger.LogWarning("[EXT-DELETE] {Kind} {Id}: its live parents could not be checked; nothing deleted", kind, id);
+                    return DeleteOwnUnavailable();
+                default:
+                    logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: a live parent is under a secure record the caller cannot read",
+                        kind, id);
+                    return DenyDeleteOwn();
             }
         }
 

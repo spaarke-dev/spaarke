@@ -191,7 +191,34 @@ public sealed class ExternalModuleDescriptor
     /// would fail open), then returns only the columns the caller requested. Fix round for r3 task 039, F1.
     /// </summary>
     public IEnumerable<string> RootRuleAttributes =>
-        EffectiveDimensions.Select(d => d.Attribute).Concat(AdditionalRootLookups.Select(l => l.Attribute));
+        EffectiveDimensions.Select(d => d.Attribute).Concat(AdditionalRootLookups.Select(l => l.Attribute))
+            .Concat(LiveParentAttributes);
+
+    /// <summary>
+    /// Task 187 (owner round 99, D-123): for a module with <see cref="RequireReadOnSecureRoots"/>, the row's parent lookups
+    /// whose LIVE roots join the rule (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/> of <see cref="RecordEntity"/>:
+    /// for a document, its related event, communication, to-do, agreement, invoice, parent and canonical document ...).
+    /// Projected server-side with the other rule attributes and stripped from the response. Empty for any other module.
+    /// </summary>
+    public IEnumerable<string> LiveParentAttributes =>
+        RequireReadOnSecureRoots
+            ? ExternalMultiRootRule.LiveParentLookupsOf(RecordEntity).Select(l => l.Column)
+            : Enumerable.Empty<string>();
+
+    /// <summary>Task 187: one module row's parent lookups (<see cref="LiveParentAttributes"/>) as live-parent read input.</summary>
+    public LiveParentLookup[] LiveParents(IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!RequireReadOnSecureRoots)
+            return Array.Empty<LiveParentLookup>();
+
+        return ExternalMultiRootRule.LiveParentsOf(RecordEntity, attribute =>
+        {
+            if (!row.TryGetValue(attribute, out var raw) || raw is null)
+                return null; // not filed there
+            return TryGetAttributeId(row, attribute, out var id) ? id.ToString() : ExternalMultiRootRule.UnresolvedParent;
+        });
+    }
 
     /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
@@ -254,9 +281,12 @@ public sealed class ExternalModuleDescriptor
     /// <param name="secureRootFlags">For a module with <see cref="RequireReadOnSecureRoots"/>: the secure flags read for these
     /// rows (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/> over <see cref="RootLinks"/>; synchronous here, so the
     /// caller pre-fetches them). <c>null</c> knows nothing: every linked root the caller cannot read counts as secure.</param>
+    /// <param name="liveParents">Task 187: the live roots read for these rows' parents
+    /// (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/> over <see cref="LiveParents"/>). <c>null</c> resolves nothing:
+    /// a row naming a parent is withheld (fail closed).</param>
     public IReadOnlyList<IReadOnlyDictionary<string, object?>> ScopeRows(
         CallerPrincipal principal, IEnumerable<IReadOnlyDictionary<string, object?>> rows,
-        SecureRootFlags? secureRootFlags = null)
+        SecureRootFlags? secureRootFlags = null, LiveParentRoots? liveParents = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         ArgumentNullException.ThrowIfNull(rows);
@@ -285,7 +315,8 @@ public sealed class ExternalModuleDescriptor
                 {
                     // OR across dimensions — one match is enough, unless the module also requires Read on every SECURE root
                     // the row is filed to (ExternalMultiRootRule, owner decision 2026-10-12, option B).
-                    if (!RequireReadOnSecureRoots || ExternalMultiRootRule.SecureRootsReadable(principal, flags, RootLinks(row)))
+                    if (!RequireReadOnSecureRoots
+                        || ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(row, liveParents)))
                         scoped.Add(row);
                     break;
                 }
@@ -302,6 +333,12 @@ public sealed class ExternalModuleDescriptor
     /// closed). An attribute that is not a root is not part of the rule. The fetch endpoint passes these for every row to
     /// <see cref="ExternalMultiRootRule.ReadFlagsAsync"/> before <see cref="ScopeRows"/>.
     /// </summary>
+    /// <summary>
+    /// Task 187: one module row's rule input: <see cref="RootLinks"/> ∪ the live roots of <see cref="LiveParents"/>.
+    /// </summary>
+    public ChildRowRoots RuleInput(IReadOnlyDictionary<string, object?> row, LiveParentRoots? liveParents) =>
+        ChildRowRoots.Of(RootLinks(row), LiveParents(row), liveParents ?? LiveParentRoots.Empty);
+
     public (ExternalGrantRootType Root, string? LookupValue)[] RootLinks(IReadOnlyDictionary<string, object?> row)
     {
         ArgumentNullException.ThrowIfNull(row);
