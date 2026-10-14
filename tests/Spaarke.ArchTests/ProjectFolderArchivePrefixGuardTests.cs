@@ -9,7 +9,7 @@ namespace Spaarke.ArchTests;
 /// <para><b>Why a fitness function.</b> Projects used to be archived by renaming <c>projects/&lt;slug&gt;</c> to
 /// <c>projects/x-&lt;slug&gt;</c>. The rename broke every link to the project (the Issue's Quick Links, the board's
 /// Project Folder field, links from other projects and from skills) and made history-based tools see a brand-new
-/// project on archive day (<c>scripts/ai-cost/backfill-tasks-planned.py</c> had to learn to follow renames). Owner
+/// project on archive day (<c>scripts/ai-cost/backfill-tasks-planned.py</c> (PR #1842) had to learn to follow renames). Owner
 /// decision 2026-10-14: stop renaming; see <c>.claude/skills/devops-project-archive/SKILL.md</c> step 5.</para>
 ///
 /// <para><b>Ratchet.</b> The 37 <c>x-</c> folders that existed on 2026-10-14 are listed in
