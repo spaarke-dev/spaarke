@@ -473,6 +473,44 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_NoCoreReownThatLands_WhileItsDateAlsoMoved_StillReconcilesTheDate_InTheSamePass()
+    {
+        // Re-check K3 (positive control): only a re-own that did NOT land holds the reconcile back.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.WithTodo(TodoId, due: new DateTime(2026, 10, 3), owner: new EntityReference("systemuser", UserId));
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.Success.Should().BeTrue();
+        second.ResultJson.Should().Contain("\"reassigned\":1").And.Contain("\"updated\":1").And.Contain("\"refused\":0");
+        var row = h.Org.Rows.Values.Single();
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OtherTeamId);
+        row.GetAttributeValue<DateTime?>("sprk_duedate").Should().Be(new DateTime(2026, 10, 3));
+    }
+
+    [Fact]
+    public async Task Run_NoCoreReownRefused_WhileItsDateAlsoMoved_IsCountedRefusedOnce_NoCoreRecordChangedReport()
+    {
+        // Re-check K3: a legacy user-owned Signal (refused by the reconciler) whose date also moved is one refusal, not two.
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        var signal = h.Org.Rows.Values.Single();
+        signal["ownerid"] = new EntityReference("systemuser", UserId);
+        signal.Attributes.Remove("owningteam");
+        h.WithTodo(TodoId, due: new DateTime(2026, 10, 3), owner: new EntityReference("systemuser", UserId));
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+
+        var second = await h.RunAsync();
+
+        second.ResultJson.Should().Contain("\"refused\":1").And.Contain("\"updated\":0");
+        h.Log.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains(OntologyWriterFailureReason.CoreRecordChanged));
+    }
+
+    [Fact]
     public async Task Run_NoCoreReown_DataverseRefusesTheTeamsRead_IsMeteredAsAnAccessDenial()
     {
         // Review F1: F2's 0x80040299 on the re-own comes back from the reconciler as text (Failed); it is metered and logged as
