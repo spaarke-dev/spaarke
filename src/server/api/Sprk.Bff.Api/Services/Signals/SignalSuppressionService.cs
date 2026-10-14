@@ -505,8 +505,9 @@ public sealed class SignalSuppressionService
 
             var witnesses = detailed.SelectMany(h => h.Evidence).Where(HasDetail)
                 .Select(l => WitnessOf(l.Ref)).OfType<(string Table, Guid Id)>().Distinct().ToList();
+            // ReadSubjectRowsAsync reads only the subject pair; the item's row is an in-memory reference to the witness, never written.
             var rows = await ReadSubjectRowsAsync(
-                witnesses.Select(w => new PartitionItem(new Entity("sprk_signal"), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
+                witnesses.Select(w => new PartitionItem(new Entity(w.Table, w.Id), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
             var readable = witnesses.Where(rows.ContainsKey).ToList();
             var witnessPartitions = await PartitionsAsync(
                 readable.Select(w => new PartitionItem(rows[w], rows[w].GetAttributeValue<EntityReference>("owningteam"), null, Guid.Empty)).ToList(),
