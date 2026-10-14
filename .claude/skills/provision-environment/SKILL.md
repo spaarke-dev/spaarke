@@ -1201,7 +1201,7 @@ sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-0
 
 The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
 
-**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`, `spaarke-demo` for `environment=demo`. Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
+**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`. No registry env exists for `environment=demo`: the old `spaarke-demo` environment was retired 2026-10-14 (D35), and the demo is now the ACME stamp, which this skill provisions on the dev control plane (registry `spaarkedev1`). Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
 
 **Preferred path — Dataverse MCP** (`mcp__dataverse__create_record`). The payload MUST include the 4 NOT-NULL fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`) OR Dataverse returns 400. Registry columns added in task 023 (deployed 2026-08-26 SESSION 13) + `sprk_customerid` added by companion `scripts/Add-CustomerIdColumn.ps1` (task 199 reconciliation) provide the remaining fields.
 
