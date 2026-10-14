@@ -24,7 +24,8 @@
 - Dev control plane `rg-spaarke-platform-dev`: master `67c80623f` (2026-10-13). The Api is swapped to production and the Worker deployed. The sidecar image was built from `d39c066c3` (H14m endpoints). `CustomerRunGuard__Enabled=True`.
 - Spaarke Exchange Admin (app 46670ee2, Exchange SP b5d396bb) holds `Spaarke App RBAC Admin`, `View-Only Recipients`, and the D32 roles `Spaarke Shared Mailbox Create` and `Spaarke Scope Group Membership` (scope `Spaarke Customer Scope Groups`). There is a leftover delegating `sprk-exoadmin-deleg-MailboxSettingsRead` (harmless; remove at the next maintenance).
 - Store: SpaarkeMaster **1.2.2.0** latest (2026-10-14, managed sha256 `691d1dd1…f630f2fb`). It carries `contact.sprk_externalinvitedon` and its field-security profiles. It does NOT carry `sprk_externalinvitecodehash` (UAC #1827, not merged), which needs the next release before T240d production. The workforce role `Spaarke Internal Contact User (Workforce)` is excluded until UAC 186 closes.
-- Demo BFF `spaarke-bff-demo` is stopped (.NET 8). Retire it after T186.
+- Demo BFF `spaarke-bff-demo` is stopped (.NET 8). D27 (owner 2026-10-05): demo is rebuilt by T186. Delete it after T186, with the owner's OK.
+- PR #1838 (pre-T186: ISS-018 F6 H3 delegated ids + ISS-025 H7b S22) MERGED 2026-10-14 (master `630373cbb`). Next: redeploy the dev control plane from `630373cbb` (owner OK per deploy), then T186 via `/provision-environment`.
 - T240d spike S1 objects: all deleted (the owner deleted the test user and the spike enterprise app).
 
 ## 📋 Remaining
