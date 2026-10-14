@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -82,6 +83,10 @@ public sealed record WorklistGroup(WorklistCoreRecord? Core, bool NotFiled, IRea
 public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string? TypeLabel, string? Name, string? Number);
 
 /// <summary>One Work Item: display columns only (D-23, task 051 #1513, task 052 #1536 F4).</summary>
+/// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
+/// witness rule (D-123): a line whose witness is not in the Signal's own known secure family has no <c>text</c> or <c>source</c> and
+/// carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather than absent. Null when nothing is stored or the
+/// stored value is not a JSON array.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -121,8 +126,10 @@ public sealed record WorklistItemRow(
 /// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
 /// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
 /// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
-/// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per flagged Decide-subject table per chunk, plus one
-/// catalog query. Nothing is cached across callers.</para>
+/// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
+/// catalog query; and, only for returned rows whose evidence carries detail, the app-only secure-family placement of those
+/// Signals and their witnesses (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
 {
@@ -208,17 +215,20 @@ public sealed class SignalReadService
     private readonly IIdentityNormalizationService _identity;
     private readonly TimeProvider _clock;
     private readonly ILogger<SignalReadService> _logger;
+    private readonly SignalSuppressionService _families;
 
     public SignalReadService(
         IDataverseUserClient user,
         IGenericEntityService entities,
         IIdentityNormalizationService identity,
+        SignalSuppressionService families,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _families = families ?? throw new ArgumentNullException(nameof(families));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -240,17 +250,26 @@ public sealed class SignalReadService
             return SignalReadResult.Unavailable("caller_identity_fault");
         }
 
-        // (2) The caller's linked contact (the person columns are contact lookups). A fault narrows "mine" to the owner and
-        // creator parts; it never widens anything.
-        Guid? contactId = null;
+        // (2) The caller's linked contact (the person columns are contact lookups). Under D-129 records are team-owned, so most of
+        // the caller's own work matches only on an assignee column: a contact that cannot be READ (a fault, as opposed to a user
+        // with no linked contact) is 503, never a Do lane silently missing that work.
+        Guid? contactId;
         try
         {
-            contactId = (await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false)).ContactId is { } c && c != Guid.Empty ? c : null;
+            var person = await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
+            if (person.ContactUnreadable)
+            {
+                _logger.LogWarning("Signal read: the caller's linked contact could not be read; unavailable.");
+                return SignalReadResult.Unavailable("caller_contact_fault");
+            }
+
+            contactId = person.ContactId is { } c && c != Guid.Empty ? c : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); assignee parts omitted.",
+            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
                 ex.GetType().Name);
+            return SignalReadResult.Unavailable("caller_contact_fault");
         }
 
         try
@@ -345,7 +364,8 @@ public sealed class SignalReadService
                 }
                 else
                 {
-                    visible.Add(new VisibleRow(row, key != Guid.Empty && subjects.FlaggedDecide.Contains(key), null));
+                    var decide = key != Guid.Empty && subjects.Decide.TryGetValue(key, out var found) ? found : null;
+                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact));
                 }
             }
 
@@ -354,6 +374,10 @@ public sealed class SignalReadService
             {
                 visible = await PartitionClosedAsync(visible, set == WorklistSet.ClosedToday, ct).ConfigureAwait(false);
             }
+
+            // (9) The witness rule at read time (D-123; task 145 review F1, option B): a stored line keeps its subject and sender only
+            // while its witness is in the Signal's own known secure family.
+            visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
@@ -490,6 +514,13 @@ public sealed class SignalReadService
                 if (IsCallerUnresolved(response.ErrorCode))
                 {
                     return new FetchPages(rows, SignalReadResult.CallerUnresolved);
+                }
+
+                if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && page > 1)
+                {
+                    // Page 1 was readable, so this is not "no Read on sprk_signal": never rank the pages already read as the list.
+                    _logger.LogWarning("Signal read: page {Page} of the Signal query was refused after page 1 was read; unavailable.", page);
+                    return new FetchPages(rows, SignalReadResult.Unavailable("signal_query_failed"));
                 }
 
                 if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
@@ -666,13 +697,13 @@ public sealed class SignalReadService
 
     private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact);
 
-    private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, HashSet<Guid> FlaggedDecide, SignalReadResult? Outcome);
+    private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
 
     private async Task<SubjectReads> ReadSubjectsAsync(
         IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, Guid callerId, Guid? contactId, CancellationToken ct)
     {
         var mine = new Dictionary<Guid, MineSubject>();
-        var flagged = new HashSet<Guid>();
+        var decide = new Dictionary<Guid, MineSubject>();
 
         // Do lane: per rule table, the subject ids typed to it, plus every untyped id (a GUID matches in its own table only).
         var doRows = rows.Where(r => r.Lane == DecisionLane.Do && r.SubjectId is not null).ToList();
@@ -697,7 +728,7 @@ public sealed class SignalReadService
                 var result = ReadAccessRows(response, "Do-lane subject");
                 if (result.Outcome is { } failure)
                 {
-                    return new SubjectReads(mine, flagged, failure);
+                    return new SubjectReads(mine, decide, failure);
                 }
 
                 foreach (var subject in result.Rows)
@@ -712,7 +743,9 @@ public sealed class SignalReadService
             }
         }
 
-        // Decide lane: only the flag. A subject the caller cannot read is simply not flagged; the row stays (D-15 checks the core).
+        // Decide lane: the flag and, for the closed sets' per-item day (D-25 as amended by D-129), the subject's individual (its
+        // Assigned To contact, OwnedChildWrite.ForPersonColumns). A subject the caller cannot read is simply not flagged and has no
+        // assignee (its day is UTC); the row stays (D-15 checks the core).
         foreach (var byTable in rows.Where(r => r.Lane == DecisionLane.Decide && r.SubjectId is not null)
                      .GroupBy(r => SubjectTable(r, catalog))
                      .Where(g => g.Key is { } t && HighPriorityTables.Contains(t)))
@@ -720,27 +753,32 @@ public sealed class SignalReadService
             var table = byTable.Key!;
             var entitySet = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
             var pk = $"{table}id";
+            var person = OwnedChildWrite.ForPersonColumns.TryGetValue(table, out var column)
+                && string.Equals(column.RelatedTable, "contact", StringComparison.Ordinal) ? column.Column : null;
+            var select = $"{pk},{HighPriorityColumn}" + (person is null ? string.Empty : $",_{person}_value");
             foreach (var chunk in byTable.Select(r => r.SubjectId!.Value).Distinct().Chunk(IdChunk))
             {
                 var response = await _user.GetAsync(
-                    $"{entitySet}?$select={pk}&$filter={InFilter(pk, chunk)} and {HighPriorityColumn} eq true", ct).ConfigureAwait(false);
+                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Decide-lane subject");
                 if (result.Outcome is { } failure)
                 {
-                    return new SubjectReads(mine, flagged, failure);
+                    return new SubjectReads(mine, decide, failure);
                 }
 
                 foreach (var subject in result.Rows)
                 {
                     if (TryReadGuid(subject, pk, out var id) && chunk.Contains(id))
                     {
-                        flagged.Add(id);
+                        decide[id] = new MineSubject(
+                            subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
+                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null);
                     }
                 }
             }
         }
 
-        return new SubjectReads(mine, flagged, null);
+        return new SubjectReads(mine, decide, null);
     }
 
     /// <summary>The subject's table from its <c>sprk_regardingrecordtype</c> catalog row; null when untyped or not cataloged.</summary>
@@ -810,6 +848,102 @@ public sealed class SignalReadService
         }
 
         return kept;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (9) the witness rule at read time (D-123)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Each returned row's stored witness lines, judged now (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>): a
+    /// line that carries a <c>text</c> or <c>source</c> keeps them only when its witness is in the Signal's own known secure family;
+    /// otherwise both are removed and the line carries <c>"withheld": true</c> (kind, ref, tier, as-of and clause stay). A fault in
+    /// that judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
+    /// is returned as null: what it holds cannot be judged line by line.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
+    {
+        var parsed = new Dictionary<Guid, JsonArray?>();
+        var asked = new List<(Guid SignalId, IReadOnlyList<string> References)>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Row.EvidenceRefs) || parsed.ContainsKey(row.Row.SignalId))
+            {
+                continue;
+            }
+
+            var lines = ParseEvidence(row.Row.EvidenceRefs);
+            parsed[row.Row.SignalId] = lines;
+            var references = lines?.OfType<JsonObject>().Where(HasDetail).Select(RefOf).OfType<string>().ToList();
+            if (references is { Count: > 0 })
+            {
+                asked.Add((row.Row.SignalId, references));
+            }
+        }
+
+        if (parsed.Count == 0)
+        {
+            return rows;
+        }
+
+        var shown = asked.Count == 0 ? new Dictionary<Guid, IReadOnlySet<string>>() : await _families.WitnessDetailShownOnReadAsync(asked, ct).ConfigureAwait(false);
+        var withheld = 0;
+        var result = new List<VisibleRow>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!parsed.TryGetValue(row.Row.SignalId, out var lines))
+            {
+                result.Add(row);
+                continue;
+            }
+
+            if (lines is null)
+            {
+                result.Add(row with { Row = row.Row with { EvidenceRefs = null } });
+                continue;
+            }
+
+            var keep = shown is not null && shown.TryGetValue(row.Row.SignalId, out var set) ? set : null;
+            var copy = (JsonArray)lines.DeepClone();
+            foreach (var line in copy.OfType<JsonObject>().Where(HasDetail))
+            {
+                if (keep is not null && RefOf(line) is { } reference && keep.Contains(reference))
+                {
+                    continue;
+                }
+
+                line.Remove("text");
+                line.Remove("source");
+                line["withheld"] = true;
+                withheld++;
+            }
+
+            result.Add(row with { Row = row.Row with { EvidenceRefs = copy.ToJsonString() } });
+        }
+
+        if (withheld > 0)
+        {
+            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (another or an undetermined secure family; D-123).", withheld);
+        }
+
+        return result;
+
+        static bool HasDetail(JsonObject line) => line["text"] is not null || line["source"] is not null;
+
+        static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
+    private static JsonArray? ParseEvidence(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json) is JsonArray lines && lines.All(l => l is JsonObject) ? lines : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------

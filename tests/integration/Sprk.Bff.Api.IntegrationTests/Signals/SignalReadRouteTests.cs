@@ -221,7 +221,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         AllItems(await OkAsync(world, Alice)).Should().HaveCount(150);
         world.Requests.Count(r => r.StartsWith("sprk_matters?", StringComparison.Ordinal)
-                && !r.Contains("sprk_highpriority eq true", StringComparison.Ordinal))
+                && !r.Contains("sprk_highpriority", StringComparison.Ordinal))
             .Should().Be(2, "150 matter ids in chunks of SignalReadService.IdChunk (100), never one query per row");
     }
 
@@ -393,7 +393,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var world = new World();
         var readable = world.Matter(readers: [Alice]);
         var hidden = world.Matter(readers: [Bob]);
-        var now = DateTimeOffset.UtcNow;
+        var now = world.Now;
         var today = world.Signal(Decide, core: (MatterType, readable), sets: ["closedToday", "closedEarlier"], resolvedOn: now.AddSeconds(-1));
         var earlier = world.Signal(Decide, core: (MatterType, readable), sets: ["closedToday", "closedEarlier"], resolvedOn: now.AddHours(-49));
         world.Signal(Decide, core: (MatterType, hidden), sets: ["closedToday", "closedEarlier"], resolvedOn: now.AddMinutes(-5));
@@ -409,6 +409,166 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         Ids(suppressedBody).Should().Equal(suppressed);
         suppressedBody.GetProperty("set").GetString().Should().Be("suppressed");
         Ids(await OkAsync(world, Alice)).Should().Equal(open);
+    }
+
+    [Fact]
+    public async Task ClosedSets_ADoItem_IsTodayOrEarlierByItsAssigneesZone_NotUtc()
+    {
+        // D-25 as amended by D-129. 02:30 UTC on Oct 14 is 22:30 on Oct 13 in New York. Resolved 23:00 UTC Oct 13 = 19:00 Oct 13 ET:
+        // today for an Eastern assignee, earlier by the UTC date.
+        var world = new World { Now = DateTimeOffset.Parse("2026-10-14T02:30:00Z", System.Globalization.CultureInfo.InvariantCulture) };
+        world.EasternUserOf(AliceContact);
+        var m = world.Matter(readers: [Alice]);
+        var resolved = DateTimeOffset.Parse("2026-10-13T23:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var s = world.Signal(Do, core: (MatterType, m), subject: (EventType, world.Event(owner: Team, assignedTo: AliceContact)),
+            sets: ["closedToday", "closedEarlier"], resolvedOn: resolved);
+
+        Ids(await OkAsync(world, Alice, "?set=closedToday")).Should().Equal([s], "its assignee's day is still Oct 13");
+        Ids(await OkAsync(world, Alice, "?set=closedEarlier")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClosedSets_ADecideItem_UsesItsSubjectsAssignedToZone_AndUtcWithoutOne()
+    {
+        // F4 (review): a Decide item's individual is its subject's Assigned To (D-129; sprk_assignedtointernal on a matter).
+        var world = new World { Now = DateTimeOffset.Parse("2026-10-14T02:30:00Z", System.Globalization.CultureInfo.InvariantCulture) };
+        world.EasternUserOf(BobContact);
+        var assigned = world.Matter(readers: [Alice], assignedToInternal: BobContact);
+        var unassigned = world.Matter(readers: [Alice]);
+        var resolved = DateTimeOffset.Parse("2026-10-13T23:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var eastern = world.Signal(Decide, core: (MatterType, assigned), sets: ["closedToday", "closedEarlier"], resolvedOn: resolved);
+        var utc = world.Signal(Decide, core: (MatterType, unassigned), sets: ["closedToday", "closedEarlier"], resolvedOn: resolved);
+
+        Ids(await OkAsync(world, Alice, "?set=closedToday")).Should().Equal([eastern]);
+        Ids(await OkAsync(world, Alice, "?set=closedEarlier")).Should().Equal([utc], "no assignee: the UTC date decides");
+    }
+
+    [Fact]
+    public async Task DoRow_OnACoreTheCallerCannotRead_IsAbsentEvenWhenTheSubjectIsTheirOwn()
+    {
+        // F2 (review): isolates the core check for Do rows — the subject (Alice's own event) is readable and hers.
+        var world = new World();
+        var hidden = world.Matter(readers: [Bob]);
+        var mine = world.Event(owner: Alice);
+        world.Signal(Do, core: (MatterType, hidden), subject: (EventType, mine));
+        AllItems(await OkAsync(world, Alice)).Should().BeEmpty("the core record (a matter Alice cannot open) decides, not the subject");
+    }
+
+    [Fact]
+    public async Task ContactThatCannotBeRead_Is503_NeverADoLaneWithoutTheAssignedWork()
+    {
+        // F1 (review): team-owned work matches only on the assignee column, so a contact fault would otherwise hide it.
+        foreach (var world in new[] { new World { ContactUnreadable = true }, new World { ContactThrows = true } })
+        {
+            var m = world.Matter(readers: [Alice]);
+            world.Signal(Do, core: (MatterType, m), subject: (EventType, world.Event(owner: Team, assignedTo: AliceContact)));
+            var response = await GetAsync(world, Alice);
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+            (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        }
+    }
+
+    [Fact]
+    public async Task ASignalPageRefusedAfterTheFirst_Is503_NotTheFirstPageAsTheList()
+    {
+        var world = new World { PageSize = 1, DenySignalPagesFrom = 2 };
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m));
+        world.Signal(Decide, core: (MatterType, m));
+        (await GetAsync(world, Alice)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The witness rule at read time (D-123; task 145 review F1, option B)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private const string WitnessSubject = "Rate increase from Firm LLP";
+    private const string WitnessSender = "partner@firm.example";
+
+    private static string EvidenceQuoting(params Guid[] communications) => JsonSerializer.Serialize(communications.Select((id, i) => new
+    {
+        kind = "communication",
+        @ref = $"sprk_communication:{id:D}",
+        tier = "Fact",
+        text = WitnessSubject,
+        source = WitnessSender,
+        asOf = "2026-10-05T09:15:00Z",
+        clause = $"all[{i}]",
+    }));
+
+    private static List<JsonElement> EvidenceOf(JsonElement body, Guid signalId) =>
+        JsonSerializer.Deserialize<JsonElement>(AllItems(body).Single(i => i.GetProperty("signalId").GetGuid() == signalId)
+            .GetProperty("evidenceRefs").GetString()!).EnumerateArray().ToList();
+
+    [Fact]
+    public async Task AWitnessReFiledUnderASecureFamily_IsShownWithoutSubjectOrSender_AndMarkedWithheld()
+    {
+        var world = new World { SecureTeamExists = true };
+        var m = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", m, secure: false);
+        var secureProject = Guid.NewGuid();
+        world.AppRoot("sprk_project", secureProject, secure: true);
+        // Filed to M when the Signal was written; since re-filed under secure project X (and re-owned by the Secure team).
+        var refiled = world.AppCommunication(secureOwned: true,
+            ("sprk_regardingmatter", "sprk_matter", m), ("sprk_regardingproject", "sprk_project", secureProject));
+        var ordinary = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(refiled, ordinary));
+        world.AppSignal(s, m, secureOwned: false);
+
+        var lines = EvidenceOf(await OkAsync(world, Alice), s);
+
+        lines[0].TryGetProperty("text", out _).Should().BeFalse("the witness is in project X's family, not M's");
+        lines[0].TryGetProperty("source", out _).Should().BeFalse();
+        lines[0].GetProperty("withheld").GetBoolean().Should().BeTrue("so the UI says withheld, not 'no value recorded'");
+        lines[0].GetProperty("ref").GetString().Should().Be($"sprk_communication:{refiled:D}");
+        lines[0].GetProperty("asOf").GetString().Should().Be("2026-10-05T09:15:00Z");
+        lines[0].GetProperty("clause").GetString().Should().Be("all[0]");
+        lines[1].GetProperty("text").GetString().Should().Be(WitnessSubject, "an ordinary witness of an ordinary Signal keeps its detail");
+        lines[1].GetProperty("source").GetString().Should().Be(WitnessSender);
+        lines[1].TryGetProperty("withheld", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AWitnessInTheSignalsOwnSecureFamily_KeepsItsDetail()
+    {
+        var world = new World { SecureTeamExists = true };
+        var secureMatter = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", secureMatter, secure: true);
+        var own = world.AppCommunication(secureOwned: true, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+        var s = world.Signal(Decide, core: (MatterType, secureMatter), evidence: EvidenceQuoting(own));
+        world.AppSignal(s, secureMatter, secureOwned: true);
+
+        var line = EvidenceOf(await OkAsync(world, Alice), s).Single();
+        line.GetProperty("text").GetString().Should().Be(WitnessSubject);
+        line.GetProperty("source").GetString().Should().Be(WitnessSender);
+        line.TryGetProperty("withheld", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WhenTheFamiliesCannotBeRead_EveryDetailIsWithheld_AndTheListIsUnchanged()
+    {
+        var world = new World { SecureTeamExists = true };
+        var m = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", m, secure: false);
+        var ordinary = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(ordinary));
+        // No app-only Signal row: its family cannot be placed, so nothing is shown (fail closed), and the item is still listed.
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().Equal(s);
+        var line = EvidenceOf(body, s).Single();
+        line.TryGetProperty("text", out _).Should().BeFalse();
+        line.GetProperty("withheld").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvidenceThatIsNotAJsonArray_IsNotReturned()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: "{\"text\":\"" + WitnessSubject + "\"}");
+        AllItems(await OkAsync(world, Alice)).Single().GetProperty("evidenceRefs").ValueKind.Should().Be(JsonValueKind.Null);
+        _ = s;
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -522,6 +682,22 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         public Guid? ActingAs { get; set; }
         public int PageSize { get; init; } = 5000;
+
+        /// <summary>The route's clock (TimeProvider): noon UTC by default, so "today" never flakes around midnight.</summary>
+        public DateTimeOffset Now { get; init; } = DateTimeOffset.Parse("2026-10-14T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>The caller's contact could not be READ (identity service fault flags), or the resolve throws.</summary>
+        public bool ContactUnreadable { get; init; }
+        public bool ContactThrows { get; init; }
+
+        /// <summary>From this page on, the Signal query is refused (0: never).</summary>
+        public int DenySignalPagesFrom { get; init; }
+
+        /// <summary>App-only Dataverse (the secure-family walk, the time-zone reads): rows by table, evaluated by condition.</summary>
+        public List<Entity> AppRows { get; } = [];
+        public bool SecureTeamExists { get; set; }
+        public Dictionary<Guid, Guid> UserOfContact { get; } = [];
+        public Dictionary<Guid, int> ZoneCodeOfUser { get; } = [];
         public List<string> Requests { get; } = [];
         public HashSet<string> FaultingTables { get; } = new(StringComparer.Ordinal);
         public Dictionary<Guid, string[]> TableDenied { get; } = [];
@@ -532,7 +708,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         public static readonly Dictionary<string, Guid> Contacts = new()
         {
-            [Alice.ToString()] = AliceContact, [Bob.ToString()] = BobContact, [Carol.ToString()] = CarolContact,
+            [Alice.ToString()] = AliceContact,
+            [Bob.ToString()] = BobContact,
+            [Carol.ToString()] = CarolContact,
         };
 
         public static readonly Dictionary<Guid, (string Logical, string Label, string? Display, string? Number)> Catalog = new()
@@ -553,32 +731,41 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             return id;
         }
 
-        public Guid Matter(Guid[] readers, string? name = null, string? number = null, bool highPriority = false) =>
+        public Guid Matter(Guid[] readers, string? name = null, string? number = null, bool highPriority = false, Guid? assignedToInternal = null) =>
             Record("sprk_matter", readers, new()
             {
                 ["sprk_mattername"] = name ?? $"Matter {++_number}",
                 ["sprk_matternumber"] = number ?? $"MAT-{_number:0000}",
                 ["sprk_highpriority"] = highPriority,
+                ["_sprk_assignedtointernal_value"] = assignedToInternal,
             });
 
         public Guid Event(Guid owner, Guid? assignedTo = null, Guid? createdBy = null, Guid[]? readers = null) =>
             Record("sprk_event", readers ?? [Alice, Bob, Carol], new()
             {
-                ["_ownerid_value"] = owner, ["_sprk_assignedto_value"] = assignedTo, ["_sprk_createdbyperson_value"] = createdBy,
+                ["_ownerid_value"] = owner,
+                ["_sprk_assignedto_value"] = assignedTo,
+                ["_sprk_createdbyperson_value"] = createdBy,
                 ["sprk_highpriority"] = false,
             });
 
         public Guid Todo(Guid owner, Guid? assignedTo = null, Guid[]? readers = null, bool highPriority = false) =>
             Record("sprk_todo", readers ?? [owner == Team ? Alice : owner], new()
             {
-                ["_ownerid_value"] = owner, ["_sprk_assignedto_value"] = assignedTo, ["sprk_highpriority"] = highPriority,
+                ["_ownerid_value"] = owner,
+                ["_sprk_assignedto_value"] = assignedTo,
+                ["sprk_highpriority"] = highPriority,
             });
 
         public Guid WorkAssignment(Guid createdBy, Guid assignedToInternal, Guid[] readers) =>
             Record("sprk_workassignment", readers, new()
             {
-                ["_ownerid_value"] = Team, ["_sprk_createdbyperson_value"] = createdBy, ["_sprk_assignedtointernal_value"] = assignedToInternal,
-                ["sprk_name"] = "WA", ["sprk_workassignmentnumber"] = $"WA-{++_number}", ["sprk_highpriority"] = false,
+                ["_ownerid_value"] = Team,
+                ["_sprk_createdbyperson_value"] = createdBy,
+                ["_sprk_assignedtointernal_value"] = assignedToInternal,
+                ["sprk_name"] = "WA",
+                ["sprk_workassignmentnumber"] = $"WA-{++_number}",
+                ["sprk_highpriority"] = false,
             });
 
         public Guid Signal(
@@ -625,6 +812,106 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
             Signals.Add((id, sets ?? [lane == Decide ? "decide" : "do"], row));
             return id;
+        }
+
+        // ── app-only Dataverse (the secure-family walk and the time-zone reads), evaluated by condition ─────────────────
+
+        public static readonly Guid SecureTeamId = Guid.Parse("5ec0be00-0000-4000-8000-000000000001");
+        public static readonly Guid OrdinaryTeamId = Guid.Parse("0e1a7100-0000-4000-8000-000000000002");
+        private static readonly Guid SecureBuId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
+        private const int EasternZoneCode = 35;
+
+        /// <summary>A root (matter or project) as uac-r2's walk reads it: <c>sprk_issecure</c> and its owner.</summary>
+        public void AppRoot(string table, Guid id, bool secure)
+        {
+            var row = new Entity(table, id) { ["sprk_issecure"] = secure };
+            if (secure) row["owningteam"] = new EntityReference("team", SecureTeamId);
+            else row["owninguser"] = new EntityReference("systemuser", Guid.NewGuid());
+            AppRows.Add(row);
+        }
+
+        /// <summary>A communication filed by <paramref name="lookups"/>, owned by the Secure team or an ordinary team.</summary>
+        public Guid AppCommunication(bool secureOwned, params (string Column, string Table, Guid Id)[] lookups)
+        {
+            var row = new Entity("sprk_communication", Guid.NewGuid())
+            {
+                ["owningteam"] = new EntityReference("team", secureOwned ? SecureTeamId : OrdinaryTeamId),
+            };
+            foreach (var (column, table, id) in lookups) row[column] = new EntityReference(table, id);
+            AppRows.Add(row);
+            return row.Id;
+        }
+
+        /// <summary>The Signal row as the app-only partition read sees it (as SignalWriter writes it: dedupe key, owner, lineage).</summary>
+        public void AppSignal(Guid signalId, Guid matterId, bool secureOwned)
+        {
+            AppRows.Add(new Entity("sprk_signal", signalId)
+            {
+                ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey("POL-TEST", "sprk_matter", matterId.ToString("D"), 1),
+                ["ownerid"] = new EntityReference("team", secureOwned ? SecureTeamId : OrdinaryTeamId),
+                ["sprk_matter"] = new EntityReference("sprk_matter", matterId),
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+            });
+        }
+
+        /// <summary>A user (linked to <paramref name="contact"/>) whose Dataverse zone is US Eastern.</summary>
+        public void EasternUserOf(Guid contact)
+        {
+            var user = Guid.NewGuid();
+            UserOfContact[contact] = user;
+            ZoneCodeOfUser[user] = EasternZoneCode;
+        }
+
+        public EntityCollection AppOnly(QueryExpression q)
+        {
+            switch (q.EntityName)
+            {
+                case "businessunit":
+                    return SecureTeamExists
+                        ? new EntityCollection([new Entity("businessunit", SecureBuId) { ["name"] = SecureRecordOwnerTeam.DefaultBusinessUnitName }])
+                        : new EntityCollection();
+                case "team":
+                    return SecureTeamExists
+                        ? new EntityCollection([new Entity("team", SecureTeamId)
+                        {
+                            ["businessunitid"] = new EntityReference("businessunit", SecureBuId), ["name"] = SecureRecordOwnerTeam.DefaultOwnerTeamName,
+                            ["teamtype"] = new OptionSetValue(SecureRecordOwnerTeam.OwnerTeamType), ["isdefault"] = false,
+                        }])
+                        : new EntityCollection();
+                case "systemuser":
+                    var contact = q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_primarycontact")?.Values[0] as Guid?;
+                    return contact is { } c2 && UserOfContact.TryGetValue(c2, out var user)
+                        ? new EntityCollection([new Entity("systemuser", user)])
+                        : new EntityCollection();
+                case "timezonedefinition":
+                    return q.Criteria.Conditions.Any(c => c.AttributeName == "timezonecode" && Equals(c.Values[0], EasternZoneCode))
+                        ? new EntityCollection([new Entity("timezonedefinition", Guid.NewGuid()) { ["standardname"] = "Eastern Standard Time" }])
+                        : new EntityCollection();
+                default:
+                    var result = new EntityCollection();
+                    foreach (var row in AppRows.Where(r => r.LogicalName == q.EntityName && Matches(r, q.Criteria))) result.Entities.Add(row);
+                    return result;
+            }
+        }
+
+        private static bool Matches(Entity row, FilterExpression filter)
+        {
+            var parts = filter.Conditions.Select(c => Matches(row, c)).Concat(filter.Filters.Select(f => Matches(row, f))).ToList();
+            return parts.Count == 0 || (filter.FilterOperator == LogicalOperator.Or ? parts.Any(p => p) : parts.All(p => p));
+        }
+
+        private static bool Matches(Entity row, ConditionExpression c)
+        {
+            object? actual = c.AttributeName == row.LogicalName + "id" ? row.Id : (row.Contains(c.AttributeName) ? row[c.AttributeName] : null);
+            actual = actual switch { OptionSetValue o => o.Value, EntityReference er => er.Id, _ => actual };
+            return c.Operator switch
+            {
+                ConditionOperator.Equal => Equals(actual, c.Values[0]),
+                ConditionOperator.In => c.Values.Any(v => Equals(actual, v)),
+                ConditionOperator.Null => actual is null,
+                ConditionOperator.NotNull => actual is not null,
+                _ => throw new NotSupportedException(c.Operator.ToString()),
+            };
         }
 
         public DataverseUserResponse Answer(string path)
@@ -680,6 +967,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 .Where(s => !SignalReaders.TryGetValue(s.Id, out var readers) || readers.Contains(me))
                 .Select(s => s.Row).ToList();
             var page = int.TryParse(fetch.Root!.Attribute("page")?.Value, out var p) ? p : 1;
+            if (DenySignalPagesFrom > 0 && page >= DenySignalPagesFrom)
+            {
+                return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
+            }
+
             var slice = all.Skip((page - 1) * PageSize).Take(PageSize).ToList();
             var body = new Dictionary<string, object?> { ["value"] = slice };
             if (all.Count > page * PageSize)
@@ -710,12 +1002,23 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             throw new InvalidOperationException("The read route never writes.");
     }
 
-    private sealed class FakeIdentity : IIdentityNormalizationService
+    private sealed class FakeIdentity(WorklistFactory factory) : IIdentityNormalizationService
     {
-        public Task<PersonIdentity> ResolveAsync(Guid systemUserId, CancellationToken ct) =>
-            Task.FromResult(new PersonIdentity(systemUserId, World.Contacts.TryGetValue(systemUserId.ToString(), out var c) ? c : null));
+        public Task<PersonIdentity> ResolveAsync(Guid systemUserId, CancellationToken ct)
+        {
+            if (factory.World.ContactThrows) throw new TimeoutException("contact read timed out");
+            return Task.FromResult(factory.World.ContactUnreadable
+                // As IdentityNormalizationService reports a contact-binding read that failed: no contact, and the fault flag.
+                ? new PersonIdentity(systemUserId) { Faults = IdentityReadFaults.ContactBinding }
+                : new PersonIdentity(systemUserId, World.Contacts.TryGetValue(systemUserId.ToString(), out var c) ? c : null));
+        }
 
         public Task InvalidateAsync(Guid systemUserId, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class WorldClock(WorklistFactory factory) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => factory.World.Now;
     }
 
     public sealed class WorklistFactory : DataverseIntegrationTestFixture
@@ -746,8 +1049,12 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                             ["sprk_recorddisplaynamefield"] = World.Catalog[id].Display,
                             ["sprk_regardingrecordnumberfield"] = World.Catalog[id].Number,
                         }).ToList()),
-                    _ => new EntityCollection(),
+                    _ => World.AppOnly(q),
                 });
+            DataverseServiceMock
+                .Setup(s => s.RetrieveAsync("usersettings", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid user, string[] _, CancellationToken _) =>
+                    World.ZoneCodeOfUser.TryGetValue(user, out var code) ? new Entity("usersettings", user) { ["timezonecode"] = code } : null!);
             DataverseServiceMock
                 .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string logical, CancellationToken _) => logical + "s");
@@ -761,7 +1068,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 services.RemoveAll<IDataverseUserClient>();
                 services.AddScoped<IDataverseUserClient>(_ => new FakeUserClient(this));
                 services.RemoveAll<IIdentityNormalizationService>();
-                services.AddSingleton<IIdentityNormalizationService, FakeIdentity>();
+                services.AddSingleton<IIdentityNormalizationService>(_ => new FakeIdentity(this));
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(new WorldClock(this));
             });
         }
 

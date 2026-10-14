@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// schema already pinned by <c>SignalWriter</c> / <c>DecisionRecordWriter</c>; the real-schema pairing for these columns is the
 /// existing <c>SignalWriterSeamTests</c> and the 031/040 live proofs (this task adds no column).
 /// </remarks>
-public class SignalSuppressionTests
+public partial class SignalSuppressionTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 12, 9, 0, 0, TimeSpan.Zero);
     private static readonly Guid PolicyId = Guid.Parse("4d204810-61bf-f111-aaaf-0022482913fc");

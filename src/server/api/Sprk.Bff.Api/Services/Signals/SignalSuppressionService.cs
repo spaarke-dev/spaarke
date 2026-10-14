@@ -1010,4 +1010,130 @@ public sealed class SignalSuppressionService
 
         return found;
     }
+
+    // ── Ontology task 038 (task 145 review F1, option B; D-123; uac-r2 #1747 finding e): the witness rule at READ time ──────────
+
+    /// <summary>
+    /// Which of each Signal's witness references may still show their detail (a communication's subject and sender) to the readers
+    /// of that Signal, judged NOW: a reference keeps its detail only when its witness row's secure family is KNOWN and EQUAL to the
+    /// Signal's own family (D-123; the same rule as the evaluator's write-time check, task 145). Evidence is written once, so a
+    /// witness re-filed under a secure family afterwards would otherwise show detail its Signal's readers may no longer see until the
+    /// job's next pass. Both families come from THE partition truth (<see cref="PartitionsAsync"/>): the Signal is read app-only
+    /// with its lineage lookups and owner, the witness row with its lookups and owner. A reference that names no lineage child, a
+    /// witness or Signal row that cannot be read, or an undetermined family on either side keeps nothing. No Secure Record owner
+    /// team in this environment: every family is ordinary and every reference keeps its detail. A fault (an ambiguous team, a walk
+    /// that does not complete, a read failure) returns null, logged at Warning: the caller then withholds every line's detail
+    /// (fail closed), never shows it.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> (the one partition truth) and
+    /// <see cref="ReadSubjectRowsAsync"/>; task 145's <c>EvidenceWithinPartitionAsync</c> / <c>StoredEvidenceToRedactAsync</c> apply
+    /// the same rule to hits and stored rows but are not on this branch's base. Extension: the private helpers below
+    /// (<see cref="ReadWitnessFamiliesOnReadAsync"/>, <see cref="WitnessDetailWithinFamily"/>, <see cref="WitnessOnRead"/>) mirror
+    /// 145's <c>WitnessFamiliesAsync</c> / <c>KeepsDetail</c> / <c>WitnessOf</c> line for line and fold into them when 145 merges
+    /// (one rule, one helper). Cost of doing nothing: until the job's next pass, a matter's readers see the subject and sender of a
+    /// communication that has since been filed under another secure family (D-123).</remarks>
+    internal async Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> WitnessDetailShownOnReadAsync(
+        IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(signals);
+        var shown = new Dictionary<Guid, IReadOnlySet<string>>();
+        var wanted = signals.Where(s => s.References.Count > 0).GroupBy(s => s.SignalId)
+            .Select(g => (SignalId: g.Key, References: g.SelectMany(s => s.References).Distinct(StringComparer.Ordinal).ToList()))
+            .ToList();
+        if (wanted.Count == 0) return shown;
+
+        try
+        {
+            // No Secure Record owner team in this environment: every family is ordinary (PartitionsAsync's own rule).
+            if (await ResolveSecureTeamAsync(ct).ConfigureAwait(false) is not { } secureTeam)
+            {
+                foreach (var (id, references) in wanted) shown[id] = references.ToHashSet(StringComparer.Ordinal);
+                return shown;
+            }
+
+            // The Signals as stored, app-only, with what the walk needs. The caller's own reads have already admitted these rows; this
+            // read only places them and returns nothing of them.
+            var rows = new Dictionary<Guid, Entity>();
+            foreach (var chunk in wanted.Select(w => w.SignalId).Chunk(InChunk))
+            {
+                var query = new QueryExpression("sprk_signal")
+                {
+                    ColumnSet = new ColumnSet(new[] { "sprk_dedupekey", "ownerid" }.Concat(SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+                foreach (var row in (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities) rows[row.Id] = row;
+            }
+
+            var placed = wanted.Where(w => rows.ContainsKey(w.SignalId)).ToList();
+            var signalFamilies = await PartitionsAsync(placed.Select(w => ItemOf(rows[w.SignalId])).ToList(), ct).ConfigureAwait(false);
+            var familyOfWitness = await ReadWitnessFamiliesOnReadAsync(placed.SelectMany(w => w.References), secureTeam, ct).ConfigureAwait(false);
+
+            for (var i = 0; i < placed.Count; i++)
+            {
+                shown[placed[i].SignalId] = placed[i].References
+                    .Where(r => WitnessDetailWithinFamily(signalFamilies[i], r, familyOfWitness))
+                    .ToHashSet(StringComparer.Ordinal);
+            }
+
+            // A Signal the app-only read did not return is absent: it keeps nothing.
+            return shown;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(SuppressionEvents.Failed,
+                "Signal read: the secure families of {Count} Signal(s)' witnesses could not be read ({ExceptionType}); every witness line is shown without its detail (D-123, fail closed).",
+                wanted.Count, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>Task 038 copy of task 145's <c>WitnessFamiliesAsync</c> (fold into it when 145 merges): the secure family of each
+    /// witness the <paramref name="references"/> name, from its row as read and THE partition truth. A witness that names no lineage
+    /// table, or whose row cannot be read, is absent (its detail is never shown).</summary>
+    private async Task<Dictionary<(string, Guid), SuppressionPartition>> ReadWitnessFamiliesOnReadAsync(
+        IEnumerable<string?> references, Guid secureTeam, CancellationToken ct)
+    {
+        var witnesses = references.Select(WitnessOnRead).OfType<(string Table, Guid Id)>().Distinct().ToList();
+        var familyOfWitness = new Dictionary<(string, Guid), SuppressionPartition>();
+        if (witnesses.Count == 0) return familyOfWitness;
+
+        // ReadSubjectRowsAsync reads only the subject pair; the item's row is an in-memory reference to the witness, never written.
+        var rows = await ReadSubjectRowsAsync(
+            witnesses.Select(w => new PartitionItem(new Entity(w.Table, w.Id), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
+        var readable = witnesses.Where(rows.ContainsKey).ToList();
+        var witnessPartitions = await PartitionsAsync(
+            readable.Select(w => new PartitionItem(rows[w], rows[w].GetAttributeValue<EntityReference>("owningteam"), null, Guid.Empty)).ToList(),
+            ct).ConfigureAwait(false);
+        for (var i = 0; i < readable.Count; i++)
+        {
+            familyOfWitness[readable[i]] = rows[readable[i]].GetAttributeValue<EntityReference>("owningteam")?.Id == secureTeam
+                ? witnessPartitions[i]
+                : SuppressionPartition.Ordinary;
+        }
+
+        return familyOfWitness;
+    }
+
+    /// <summary>Task 038 copy of task 145's <c>KeepsDetail</c>: both families KNOWN and EQUAL (Undetermined equals nothing).</summary>
+    private static bool WitnessDetailWithinFamily(
+        SuppressionPartition signalFamily, string? reference, IReadOnlyDictionary<(string, Guid), SuppressionPartition> familyOfWitness) =>
+        !signalFamily.IsUndetermined
+        && WitnessOnRead(reference) is { } witness
+        && familyOfWitness.TryGetValue(witness, out var witnessFamily)
+        && !witnessFamily.IsUndetermined
+        && witnessFamily == signalFamily;
+
+    /// <summary>Task 038 copy of task 145's <c>WitnessOf</c>: the (table, id) a <c>{table}:{id}</c> reference names when the table
+    /// is a lineage child the walk can start from; otherwise null (its detail is then never shown).</summary>
+    private static (string Table, Guid Id)? WitnessOnRead(string? reference)
+    {
+        var separator = reference?.IndexOf(':', StringComparison.Ordinal) ?? -1;
+        if (separator <= 0) return null;
+        var table = reference![..separator].ToLowerInvariant();
+        return SecureChildLineage.IsChild(table) && !string.Equals(table, SignalLineage.LogicalName, StringComparison.Ordinal)
+            && Guid.TryParse(reference[(separator + 1)..], out var id) && id != Guid.Empty
+                ? (table, id)
+                : null;
+    }
 }
