@@ -13,7 +13,7 @@ Requires:
 - Read access to the target Key Vault
 
 .PARAMETER Environment
-The environment to sync (dev | demo). Defaults to dev.
+The environment to sync (dev). Defaults to dev. The old demo environment was retired 2026-10-14.
 
 .PARAMETER ManifestPath
 Path to the YAML manifest relative to repo root. Defaults to config/spaarke-resources.yaml.
@@ -23,12 +23,11 @@ Path to write the secrets JSON relative to repo root. Defaults to config/secrets
 
 .EXAMPLE
 ./scripts/Sync-LocalConfig.ps1
-./scripts/Sync-LocalConfig.ps1 -Environment demo
 #>
 
 [CmdletBinding()]
 param(
-    [ValidateSet('dev', 'demo')]
+    [ValidateSet('dev')]
     [string]$Environment = 'dev',
 
     [string]$ManifestPath = 'config/spaarke-resources.yaml',

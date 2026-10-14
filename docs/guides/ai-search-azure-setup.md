@@ -506,24 +506,24 @@ See [`spec.md` FR-19](../../projects/spaarke-ai-azure-setup-dev-r1/spec.md) for 
 
 Per the [two-tier naming policy (NFR-03 / NFR-10)](../architecture/AI-SEARCH-INDEX-CATALOG.md#1-naming-convention), top-level resources are env-suffixed for global DNS uniqueness; sub-resources (indexes) are env-agnostic — the same canonical index names exist in every environment, scoped by the parent search service hostname.
 
-| Setting | Dev | Staging | Prod | Demo |
-|---|---|---|---|---|
-| **AI Search service** | `spaarke-search-dev` | `spaarke-search-staging` | `spaarke-search-prod` | `spaarke-search-demo` |
-| **Resource group (AI Search)** | `spe-infrastructure-westus2` | `rg-spaarke-staging` | `rg-spaarke-prod` | `rg-spaarke-demo` |
-| **Region** | `westus2` | `westus2` (TBD) | `westus2` (TBD) | TBD |
-| **SKU** | Standard | TBD (Standard min) | TBD (Standard min) | TBD |
-| **Key Vault (BFF)** | `spaarke-spekvcert` | TBD | `sprk-platform-prod-kv` | TBD |
-| **Key Vault RG** | `SharePointEmbedded` (eastus — cross-region KV ref works) | TBD | TBD | TBD |
-| **KV secret name (admin key)** | `AiSearch--AdminKey` | `AiSearch--AdminKey` | `AiSearch--AdminKey` | `AiSearch--AdminKey` |
-| **BFF App Service** | `spaarke-bff-dev` | `spaarke-bff-staging` | `spaarke-bff-prod` | `spaarke-bff-demo` |
-| **BFF App Service RG** | `rg-spaarke-dev` | `rg-spaarke-staging` | `rg-spaarke-prod` | `rg-spaarke-demo` |
-| **BFF Managed Identity** | `mi-bff-api-dev` | `mi-bff-api-staging` | `mi-bff-api-prod` | `mi-bff-api-demo` |
-| **BFF MI principalId** | `9fd47efb-7962-492b-ac44-e5ccd0268ebb` | (resolve via `az identity show`) | (resolve via `az identity show`) | (resolve via `az identity show`) |
-| **OpenAI resource** | `spaarke-openai-dev` (eastus) | TBD | TBD | TBD |
-| **OpenAI embedding deployment** | `text-embedding-3-large` (3072-dim) | `text-embedding-3-large` | `text-embedding-3-large` | `text-embedding-3-large` |
-| **Service Bus namespace** | (env-specific — verify per FR-21 #3) | TBD | TBD | TBD |
+| Setting | Dev | Staging | Prod |
+|---|---|---|---|
+| **AI Search service** | `spaarke-search-dev` | `spaarke-search-staging` | `spaarke-search-prod` |
+| **Resource group (AI Search)** | `spe-infrastructure-westus2` | `rg-spaarke-staging` | `rg-spaarke-prod` |
+| **Region** | `westus2` | `westus2` (TBD) | `westus2` (TBD) |
+| **SKU** | Standard | TBD (Standard min) | TBD (Standard min) |
+| **Key Vault (BFF)** | `spaarke-spekvcert` | TBD | `sprk-platform-prod-kv` |
+| **Key Vault RG** | `SharePointEmbedded` (eastus — cross-region KV ref works) | TBD | TBD |
+| **KV secret name (admin key)** | `AiSearch--AdminKey` | `AiSearch--AdminKey` | `AiSearch--AdminKey` |
+| **BFF App Service** | `spaarke-bff-dev` | `spaarke-bff-staging` | `spaarke-bff-prod` |
+| **BFF App Service RG** | `rg-spaarke-dev` | `rg-spaarke-staging` | `rg-spaarke-prod` |
+| **BFF Managed Identity** | `mi-bff-api-dev` | `mi-bff-api-staging` | `mi-bff-api-prod` |
+| **BFF MI principalId** | `9fd47efb-7962-492b-ac44-e5ccd0268ebb` | (resolve via `az identity show`) | (resolve via `az identity show`) |
+| **OpenAI resource** | `spaarke-openai-dev` (eastus) | TBD | TBD |
+| **OpenAI embedding deployment** | `text-embedding-3-large` (3072-dim) | `text-embedding-3-large` | `text-embedding-3-large` |
+| **Service Bus namespace** | (env-specific — verify per FR-21 #3) | TBD | TBD |
 
-**Per `NFR-05`**: this project explicitly excludes prod and demo work — those columns are placeholders for future environment factory work (`spaarke-environment-factory-r1` is the downstream consumer of this guide). Do NOT run `Deploy-AllIndexes.ps1` against prod or demo during the `spaarke-ai-azure-setup-dev-r1` project execution window.
+**Per `NFR-05`**: this project explicitly excludes prod work — that column is a placeholder for future environment factory work (`spaarke-environment-factory-r1` is the downstream consumer of this guide). Do NOT run `Deploy-AllIndexes.ps1` against prod or demo during the `spaarke-ai-azure-setup-dev-r1` project execution window.
 
 ### Per-customer (sub-tenant) variables
 

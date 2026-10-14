@@ -76,7 +76,8 @@ name_templates:
   # Future r2 evaluation: introduce dedicated registry envs.
   registryDvUrl:
     dev: https://spaarkedev1.crm.dynamics.com
-    demo: https://spaarke-demo.crm.dynamics.com # placeholder; not yet provisioned
+    # demo: none — the old demo Dataverse env (spaarke-demo.crm.dynamics.com) was retired 2026-10-14; the demo is now the ACME
+    # stamp built by provisioning (T186), so a "demo" control-plane tier has no registry env until one is chosen.
     prod: https://spaarke-registry-prod.crm.dynamics.com # placeholder; not yet provisioned
 
 # --- Azure management groups (ADR-027 "MUST use Azure Management Groups for common policy across customer

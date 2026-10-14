@@ -27,7 +27,7 @@ public interface IContainerLogFetcher
     /// output yet). Throws on infrastructure fault (401/403/5xx from Kudu,
     /// network error, cancellation).
     /// </summary>
-    /// <param name="appServiceName">App Service name (e.g. "spaarke-bff-demo").</param>
+    /// <param name="appServiceName">App Service name (e.g. "spaarke-bff-dev").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The raw docker log text (best-effort — may be truncated).</returns>
     Task<string> FetchDockerLogsAsync(string appServiceName, CancellationToken cancellationToken);
