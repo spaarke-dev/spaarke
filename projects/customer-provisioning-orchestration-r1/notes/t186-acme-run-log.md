@@ -49,8 +49,8 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 |---|---|---|
 | Dataverse environment `spaarke-demo` | deleted by the owner | 2026-10-14 |
 | `spaarke-bff-demo`, `spaarke-demo-plan` | deleted | 2026-10-14 |
-| `spaarke-demo-sbus`, `spaarke-openai-demo`, `spaarke-docintel-demo`, `spaarke-cosmos-demo-ai`, `spaarke-bff-redis-demo`, `spaarke-demo-insights` | deletion requested (0 calls/messages in 30 days) | 2026-10-14 |
-| `mi-bff-api-demo`, `spaarke-demo-logs`, apps "Spaarke BFF API - Demo" `da03fe1a…` / "Spaarke UI - Demo" `8d356f5b…` | to delete after the above | — |
+| `spaarke-demo-sbus`, `spaarke-openai-demo`, `spaarke-docintel-demo`, `spaarke-cosmos-demo-ai`, `spaarke-bff-redis-demo`, `spaarke-demo-insights` | deleted (0 calls/messages in 30 days beforehand) | 2026-10-14 |
+| `mi-bff-api-demo` (no role assignments), `spaarke-demo-logs` (no diagnostic setting of a kept resource pointed at it; 14-day soft delete), apps "Spaarke BFF API - Demo" `da03fe1a…` (object `9956f721`) / "Spaarke UI - Demo" `8d356f5b…` (object `1db66fd4`; Entra deleted items, 30 days) | deleted | 2026-10-14 |
 | 10 test accounts `@demo.spaarke.com` (`ralph.logotest`, `e2e.test`, `e2e.test2`, `test.user`, `test.user2`, `demo.final`, `ribbon.test`, `ralph.test`, `final.test`, `full.e2e`) | deleted (Entra recycle bin, 30 days) | 2026-10-14 |
 | Registry row "Demo 1" | already inactive — kept (rows are never deleted) | — |
 | **Kept** | `WestUS2Plan`, `spaarke-linkedin-refresh`, `spaarke-content-reminder`, `sprkdemosa`, `sprk-demo-kv`, Smart Detection action group (website functions); Syntex account `1f3cfdfb` (owner); group "Spaarke Demo Users" `745bfdf6` (dev BFF demo approvals); real users Jessica, Lori, Chelsea; `demo@` (approved sender mailbox); `uac.child.user` (UAC test user) | — |
