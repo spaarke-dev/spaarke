@@ -58,7 +58,7 @@
 import * as React from "react";
 import { makeStyles, Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
-import { ThreePaneLayout, InAppWizardHost, useUiScale } from "@spaarke/ui-components";
+import { ThreePaneLayout, InAppWizardHost, DecisionWizardHost, useUiScale } from "@spaarke/ui-components";
 import { authenticatedFetch as spaarkeAuthenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 import type { EntityContext, EntityType } from "@spaarke/ai-context";
 import {
@@ -963,6 +963,19 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                 tenantId={tenantId || undefined}
                 uiScale={uiScale}
                 renderers={IN_APP_WIZARD_RENDERERS}
+              />
+              {/*
+               * ontology-platform-r1 task 058 (D-26, D-17): the ONE in-app host for the decision wizard.
+               * The worklist widget raises an open-item event when a line is opened and calls
+               * `launchDecisionWizard({ ...event, loadItem, lookup })`; this host then opens the wizard in
+               * SprkModal here (never a navigateTo code page, never WizardModal). The widget (task 059) owns
+               * the Signal read route (task 038), so it brings the item reader and the lookup search with
+               * the launch. Renders nothing until a launch.
+               */}
+              <DecisionWizardHost
+                authenticatedFetch={spaarkeAuthenticatedFetch}
+                bffBaseUrl={bffBaseUrl}
+                uiScale={uiScale}
               />
             </PaneCollapseContext.Provider>
            </AnalysisLaunchContext.Provider>

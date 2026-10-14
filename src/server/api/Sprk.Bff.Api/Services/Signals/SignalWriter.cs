@@ -489,6 +489,7 @@ public sealed partial class SignalWriter
             throw new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request));
 
         var cleanSubjectId = request.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
+        Guid? ownerTeamId = null; // named on the privilege refusal below: the team whose role lacks Read on sprk_signal
 
         try
         {
@@ -511,6 +512,7 @@ public sealed partial class SignalWriter
             // no-core item's in D-134's order. A refusal (or an answer naming no team) writes nothing at all, not even a
             // re-evaluation touch.
             var owner = await ResolveOwnerAsync(core, subjectEntity, request.SubjectId, request.RequestedBy, ct).ConfigureAwait(false);
+            ownerTeamId = owner.OwningTeamId;
             if (!owner.IsOwned)
             {
                 var refusalCode = owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource;
@@ -694,8 +696,9 @@ public sealed partial class SignalWriter
         catch (Exception ex) when (IsDataverseAccessDenied(ex))
         {
             _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
-                "Signal writer refused for policy {PolicyCode} (reason={Reason}).",
-                request.PolicyCode, OntologyWriterFailureReason.DataverseAccessDenied);
+                "Signal writer refused for policy {PolicyCode} (reason={Reason}, ownerTeam={OwnerTeamId}): the team's role lacks a " +
+                "privilege on sprk_signal (a redelivery cannot fix it).",
+                request.PolicyCode, OntologyWriterFailureReason.DataverseAccessDenied, ownerTeamId);
             OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.DataverseAccessDenied);
             throw;
         }
@@ -719,6 +722,12 @@ public sealed partial class SignalWriter
                 return true;
             }
 
+            // The shared Web API client throws a bare HttpRequestException (status only) for a 403 on an owner write.
+            if (e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden })
+            {
+                return true;
+            }
+
             if (IsAccessDeniedMessage(e.Message))
             {
                 return true;
@@ -727,6 +736,16 @@ public sealed partial class SignalWriter
 
         return false;
     }
+
+    /// <summary>
+    /// K1 (task 143 follow-up): true when <paramref name="ex"/> is a privilege refusal that a redelivery cannot change, so a caller
+    /// counts it apart from the failures a retry can fix. It is <see cref="IsDataverseAccessDenied"/> EXCLUDING a
+    /// <see cref="SignalWriterEscalationException"/>: the writer wraps reads and resolver faults (the owner read-back, the duplicate-key
+    /// reconcile read, the no-core resolver, the assignee read) in an escalation whose inner fault can be a denial, but those are the
+    /// writer's own refusals of an unknown state and stay retryable. The ONE definition for the job and the closure service.
+    /// </summary>
+    internal static bool IsDeterministicPrivilegeRefusal(Exception ex) =>
+        ex is not SignalWriterEscalationException && IsDataverseAccessDenied(ex);
 
     /// <summary>The message fallback of <see cref="IsDataverseAccessDenied"/>, also used on a reconciler's refusal text.</summary>
     internal static bool IsAccessDeniedMessage(string? m) =>
@@ -964,8 +983,8 @@ public sealed partial class SignalWriter
         {
             var faultReason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalReassignFailed;
             _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
-                "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId} (reason={Reason}).",
-                policyCode, signalId, faultReason);
+                "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}, owner team {OwnerTeamId} (reason={Reason}).",
+                policyCode, signalId, owner.Id, faultReason);
             OntologyWriterTelemetry.RecordFailure(faultReason);
             throw;
         }
@@ -988,14 +1007,22 @@ public sealed partial class SignalWriter
             case OrdinaryRowReownOutcome.Failed:
                 // Task 143 (review F1): the reconciler returns Dataverse's refusal as text, so it is classified on that text the way
                 // IsDataverseAccessDenied classifies an exception's message (F2's 0x80040299 is metered as the access denial it is).
-                var failedReason = IsAccessDeniedMessage(result.Detail)
+                // K1 (re-own, uac-r2 review): in production the owner write goes through the shared Web API client, which maps only
+                // 412 and 404 and throws a bare HttpRequestException("... 403 (Forbidden).") for a privilege refusal: no Dataverse code
+                // in the text. The reconciler therefore also returns the write's HTTP status; a 403 is the access denial.
+                var forbidden = result.WriteFailureStatusCode == System.Net.HttpStatusCode.Forbidden;
+                var failedReason = forbidden || IsAccessDeniedMessage(result.Detail)
                     ? OntologyWriterFailureReason.DataverseAccessDenied
                     : OntologyWriterFailureReason.SignalReassignFailed;
                 _logger.LogError(OntologyWriterEvents.WriteRefused,
-                    "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}: {Detail} (reason={Reason}).",
-                    policyCode, signalId, result.Detail, failedReason);
+                    "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}, owner team {OwnerTeamId}: {Detail} (reason={Reason}).",
+                    policyCode, signalId, owner.Id, result.Detail, failedReason);
                 OntologyWriterTelemetry.RecordFailure(failedReason);
-                throw new InvalidOperationException($"The no-core Signal {signalId:D} could not be re-owned: {result.Detail}");
+                var reownFailure = $"The no-core Signal {signalId:D} could not be re-owned: {result.Detail}";
+                throw forbidden
+                    // The inner 403 is what IsDataverseAccessDenied / IsDeterministicPrivilegeRefusal read, so the job counts it AccessDenied.
+                    ? new InvalidOperationException(reownFailure, new HttpRequestException(result.Detail, null, System.Net.HttpStatusCode.Forbidden))
+                    : new InvalidOperationException(reownFailure);
         }
 
         return result.Outcome;

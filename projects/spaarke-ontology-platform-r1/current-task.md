@@ -1,49 +1,49 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-13 (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-14 (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
-> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership via RecordOwnershipResolver) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-133). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`. Sub-agents never edit this file.
+> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; **D-138 owner approvals**) and §6 gotchas.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-138). Deferred work: one self-contained GitHub issue per item,
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-78**; lanes may take 78+).
+> Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
-| **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | 2026-10-14: merged #1834 (143) `96fec5d7b` and #1841 (F-nn → DI-nn rename) `aeaaed68f`. #1844 (050) is conflict-resolved at `2c44154d7` and merges on green; its live apply waits for the owner's dev-data approval. Running after the session restart (resumed): 058 (`C:/wts-058`), the 143 K1/K2 follow-up (`C:/wts-143k`), 148 (`C:/wts-148`). Next: 144 once uac-r2's C4/C7 PR lands; 042 after the K1/K2 follow-up. Merge with `scratchpad/merge-when-green3.sh`. |
+| **Task** | Orchestrating ontology lanes toward the 035 BFF deploy → 146 live gate → 059/055 Console deploy. |
+| **Blocker** | None from the owner (D-138 answered everything). |
+| **Next Action** | Wait for agents 038, 042, 145 (PRs → uac-r2 review → merge). Merge watchers run for #1865 (041) and #1869 (061). When 145 merges: run **035** (deploy BFF to dev, D-126 procedure below). |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **050** worklist grid row | #1844 `2c44154d7` | merging on green | live apply after owner OK |
-| **058** decision wizard | — | running (resumed) | PR → review → merge |
-| **143 K1/K2** follow-up | — | running (resumed) | PR → merge |
-| **148** assignee reconciler | — | running (resumed; opus, 2 passes) | PR → uac-r2 → merge |
+| **038** Signal read route (opus) | — | running; also adds read-time evidence redaction (145 F1 option B) | PR → uac-r2 → merge |
+| **042** gate → DR writer | — | running; main-session decision A+C: additive `WriteGateDecisionAsync`, Judgement both paths, confirmedby/policyversion/gatesessionid null, correlation id in factsnapshot, criterion 4 amended (owner may override) | PR → uac-r2 → merge |
+| **145** matter readers, evidence leak | — (local `fcb930525`) | running; F1 → option A (monotonic redaction pass in the job); DR snapshot redaction deferred to the owner as a new issue | PR → uac-r2 → merge |
+| **041** append-only live test | #1865 `7bc1ab688` | main-session review CLEAN; merging on green | mark done |
+| **061** Do-lane policies | #1869 `f34f50058` | merging on green; 4 policies on dev, `sprk_enabled=No`; grammar gained a null test (`9b382ede0`) | mark done |
 
-Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (DI-49, #1718); merge on log evidence with a PR comment.
+Merge: `scratchpad/merge-when-green3.sh <pr> <full sha> docs/ontology-platform-design` (ignores the informational Code Quality job; exits on HEAD MOVED).
 
-## Child-record contract (tasks 140–146)
+## Deploy plan (D-126, D-138 approved)
 
-- **UAC 182** (lineage + census) carries the one-line `DecisionRecordWriter.cs` `LineageColumnByCoreEntity` typed-core filter (option b: conditions are the exact filter, the existing test unchanged, a new regression test, and a note in the PR body). It runs `merge-tree` against `85f430366` and sends the PR URL and sha. Its census exempts `sprk_budgetrevision` creator-person per **#1777**.
-- The DR lineage row is inert until 142 writes the subject lookups. **142 must ship the two-wall refusal in the same PR** that first writes them (#1778; this is a constraint in the 142 POML).
-- Sequence: 141 → 142/143 → 144 → 145 → 146. 146 waits for the 6 h metadata cache key.
+1. **035 BFF** after 145 merges: merge current master into the deploy branch (dev runs master `8a1f3bb11` exactly, uac-r2 confirmed, so nothing of theirs is off master), schema pre-flight on the target, hash-verify. **Before deploying, message word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`) with the SHA and the restart time — the owner is UATing add-ins on dev.** Also tell uac-r2, and R3 external access (`spaarke-wt-spa-external-access-platform-e0`): R3 deployed `4e23edeb2` (master + unmerged R3 tasks 062–065) to dev on 2026-10-14; our master-based deploy removes those, so message R3 before AND after so it can redeploy on top.
+2. After 035: run 144's stamp job and 148's reconciler **report-only** on dev, record it, and send it to uac-r2. If CLEAN, enable on dev (D-138 delegates this): `CoreAncestor__StampReconciliation__ReportOnlyTables=","` (= 145's `scripts/Invoke-OntologyStampBackfill.ps1 -Apply`) and `Ontology__TodoAssigneeOwner__WritesEnabled=true`.
+3. **146** live gate after 035 and the 6 h DR metadata cache key.
+4. **059** worklist widget (needs 038) → **055** Console deploy (needs 059, 043, 035) → 049, 064, 105.
 
-## D-134/D-135 work
+## Done today (2026-10-14)
 
-- **#1665 MERGED** `aeb9e0973` (task 043 ✅; D-134 included).
-- **Task 148** (reconciler) is written. uac-r2 provides `SecureChildReconciler.ReownOrdinaryRowAsync` in its own PR (owner sign-off; we review it).
-- **Task 147** (budget revision creator-person) starts once #1780 merges.
+#1844 (050, row live on dev), #1858 (148), #1862 (144), #1854 (143 K1/K2; #1855 closed), #1856 (058). DI-77 (#1868): the dev `sprk_recordtype_ref` row for `sprk_workassignment` was fixed to `sprk_name` (other environments are still open).
 
-## Waiting / owner
+## Owner items still open
 
-- **D-137 (owner, 2026-10-13):** Q25 approved (#1747 merging); Q26 done (Basic User on the Dev 1/Test 1 default teams; #1776 closed); Q23 confirmed via D-135; Q24 Reviewed only; Q22 event individual = `sprk_assignedto` (038/059 POMLs updated); Q11 + Q15 recommended options.
-- **Q7: DONE 2026-10-13** (passed at `4356397a2`; zz-037 = 0). Re-run recipe: env `SIGNALS_LIVE_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`. Filter `FullyQualifiedName~SignalWriterSeamTests.WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate&DisplayName~sprk_todo`. Afterwards, zz-037 rows must be 0.
-- **Q8:** #1111 to master after 035 + 055.
-- Owner decisions page https://claude.ai/artifact/ADCv42eKukX2BQx7d62Mop (Q1–Q19 answered).
+- The DR `sprk_factsnapshot` after a re-file into secure (145 F1): redact via a service write, or store references only. 145 files it as an issue.
+- Q8: #1111 to master after 035 + 055.
 
 ## Coordination
 
-uac-r2: post on #1355 **and** SendMessage `spaarke-wt-unified-access-control-r2-1d`. Their K2 is #1730 (keep 403 `caller_unresolved`). Issues today: #1757, #1761, #1766–#1778.
+- uac-r2 = `spaarke-wt-unified-access-control-r2-ac` (also post on #1355). Security F (#1857) is fixed by them in master `8a1f3bb11` (PR #1861). Secure-family owner team per family = their project uac-secure-project-r3 (owner round 100b).
+- word-add-in = `spaarke-wt-spaarkeai-word-add-in-r1-ea` (notify before any dev BFF deploy).

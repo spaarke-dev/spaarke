@@ -248,6 +248,14 @@ public enum OrdinaryRowReownOutcome
 /// <see cref="OrdinaryRowReownOutcome.AlreadyOwned"/>.</param>
 public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, string? Detail)
 {
+    /// <summary>
+    /// The HTTP status of the Dataverse owner write that failed, when it failed with one (a 403 is a privilege refusal);
+    /// <c>null</c> otherwise. Additive (ontology task 143 follow-up): <see cref="Detail"/> keeps only the exception message, and
+    /// the shared Web API client's message for a 403 carries no Dataverse error code, so a caller cannot classify the refusal
+    /// from the text alone.
+    /// </summary>
+    public System.Net.HttpStatusCode? WriteFailureStatusCode { get; init; }
+
     /// <summary>True when the row is owned by the team now (re-owned, or already).</summary>
     public bool IsOwnedByTeam => Outcome is OrdinaryRowReownOutcome.Reowned or OrdinaryRowReownOutcome.AlreadyOwned;
 }
@@ -577,12 +585,16 @@ public sealed class SecureChildReconciler
         var ownerBind = new Dictionary<string, object> { [OwnerBindColumn] = $"/teams({teamId:D})" };
         try
         {
+            System.Net.HttpStatusCode? writeStatus = null;
             var fault = await WriteOwnerAndReadBackAsync(
                 name, id, DataversePrincipalRef.Team(teamId),
                 c => _webApi.UpdateIfMatchAsync(lineage.EntitySet, id, ownerBind, etag, c),
                 lineage.EntitySet, $"reown-ordinary-row:{name}:{id:D}", ct,
-                decisiveRefusal: ex => ex is System.Data.DBConcurrencyException or KeyNotFoundException).ConfigureAwait(false);
-            return fault is null ? Result(OrdinaryRowReownOutcome.Reowned) : Result(OrdinaryRowReownOutcome.Failed, fault);
+                decisiveRefusal: ex => ex is System.Data.DBConcurrencyException or KeyNotFoundException,
+                onWriteFault: ex => writeStatus = (ex as System.Net.Http.HttpRequestException)?.StatusCode).ConfigureAwait(false);
+            return fault is null
+                ? Result(OrdinaryRowReownOutcome.Reowned)
+                : Result(OrdinaryRowReownOutcome.Failed, fault) with { WriteFailureStatusCode = writeStatus };
         }
         catch (System.Data.DBConcurrencyException)
         {
@@ -622,7 +634,8 @@ public sealed class SecureChildReconciler
     /// </remarks>
     private async Task<string?> WriteOwnerAndReadBackAsync(
         string table, Guid id, DataversePrincipalRef expected, Func<CancellationToken, Task> write, string? entitySet,
-        string evictionReason, CancellationToken ct, Func<Exception, bool>? decisiveRefusal = null)
+        string evictionReason, CancellationToken ct, Func<Exception, bool>? decisiveRefusal = null,
+        Action<Exception>? onWriteFault = null)
     {
         string? writeFault = null;
         try
@@ -633,6 +646,7 @@ public sealed class SecureChildReconciler
                                    && decisiveRefusal?.Invoke(ex) != true)
         {
             writeFault = ex.Message;
+            onWriteFault?.Invoke(ex);
             _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] Dataverse refused the owner write on {Table} {Id} ({Owner}).",
                 table, id, Describe(expected));
         }

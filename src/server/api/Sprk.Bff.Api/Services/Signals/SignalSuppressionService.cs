@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
@@ -265,7 +266,11 @@ public sealed class SignalSuppressionService
 
     /// <summary>A hit's Signal row as <see cref="SignalWriter"/> would write it: the subject's regarding lookup, and <c>sprk_matter</c>
     /// when the core record is a matter (no owner yet: the writer's resolver decides it from the same truth, so the subject's owner stands
-    /// in for it).</summary>
+    /// in for it). Ontology task 144 (uac-r2 #1746 K7): a Signal now carries the core-ancestor stamp of its subject's family
+    /// (<see cref="CoreAncestorResolver.StampSourceColumns"/>), and the core record is one of the records that stamp names (the writer
+    /// takes it from the subject's stamps), so the probe carries the core's stamp column too: a project or work-assignment core is reached
+    /// directly, as a matter core is through <c>sprk_matter</c>, and a hit on a secure one is placed in its secure partition, never
+    /// Ordinary.</summary>
     private static PartitionItem ItemOf(string policyCode, SignalHit hit)
     {
         // partition probe, never created; id is the hit's identity (182 census: not a create site)
@@ -276,6 +281,13 @@ public sealed class SignalSuppressionService
         }
 
         if (hit.Core is { Entity: "sprk_matter" } core) row["sprk_matter"] = new EntityReference("sprk_matter", core.Id);
+        if (hit.Core is { Entity: { } coreEntity, Id: var coreId } && coreId != Guid.Empty
+            && CoreAncestorResolver.CoreAncestorLookups.FirstOrDefault(l => l.EntityType == coreEntity).LookupAttribute is { } stampColumn
+            && !row.Contains(stampColumn))
+        {
+            row[stampColumn] = new EntityReference(coreEntity, coreId);
+        }
+
         return new PartitionItem(row, null, hit.SubjectEntity, hit.SubjectId, OwnerFromSubject: true);
     }
 

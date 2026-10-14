@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="149" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Gate Decision Records: one per decision (idempotent on retry), written by an ADR-004 queue job after the gate acts (D-139)</title>
+    <phase>4 Decision Record</phase>
+    <gate>blocked: #1878 (task 042) merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves a secure-family record write onto a queue; changes a shipped consumer's behaviour; adds a job handler.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-patterned: copy an existing IJobHandler and the existing DR writer entry point; the contract is fully specified here.</model-tier-reason>
+    <effort>xhigh</effort>
+    <deps>042</deps>
+    <tags>bff-api,job,dataverse,security,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Task 042 writes the communications-gate Decision Record inline in enrichment step 5, before the RI action, and writes a second record when enrichment retries. The owner decided (D-139): one record per gate decision, and the write moves to an ADR-004 queue job after the gate acts.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>The gate enqueues its decision and acts immediately; an ADR-004 job writes exactly one Decision Record per (communication, gate outcome); a retry of enrichment or of the job writes nothing new; uac-r2 has reviewed.</goal>
+
+  <context>
+    <background>D-139 (notes/decisions.md); 042 notes `notes/task-042-wire-writer-into-rulegated-consumer.md` (uac-r2 review K2/K4 and the request counts). The writer entry point is `DecisionRecordWriter.WriteGateDecisionAsync` (042); do not change `WriteAsync`.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs (RuleGatedAssessedConsumer: the inline call ~:323 becomes an enqueue)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (WriteGateDecisionAsync: add the idempotency check)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorRestampJobHandler.cs (REFERENCE: the IJobHandler shape, JobTypeName, registration, poison/retry handling — copy it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs (dispatch; read only)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>042's inline call in RuleGatedAssessedConsumer; CoreAncestorRestampJobHandler is the nearest IJobHandler; no job writes Decision Records.</existing>
+    <extension>The handler is new because no existing job type carries a gate decision; it reuses WriteGateDecisionAsync unchanged apart from the idempotency check, and the existing Service Bus processor.</extension>
+    <cost-of-doing-nothing>At mail volume each email spends ~6-9 Dataverse requests inline on the shared app identity before the RI action (throttling risk), and every enrichment retry writes a duplicate record that inflates per-matter counts (D-139).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-139">Exactly one Decision Record per (communication id, gate outcome). The idempotency key is deterministic from those two values, NOT the per-run EvaluationId (CommunicationRuleGate.cs:118 makes a new one each run). Before create, the job looks up an existing gate record by that key and writes nothing if found; store the key in an existing column if one fits (check `sprk_decisionrecord` columns live, read-only); if none fits, STOP — a new column is a schema change needing the owner.</constraint>
+    <constraint source="D-139">The gate decides and runs the RI action without waiting on the record. The enqueue happens before the authorize/deny branch so both paths enqueue; an enqueue failure is logged and metered and never changes the gate outcome or the RI action.</constraint>
+    <constraint source="ADR-004">Job handler per the reference: idempotent, retry-safe, poison after the standard attempts. Job payload carries ids and the gate's decision values only — never communication subject or sender text (D-123).</constraint>
+    <constraint source="042">All 042 semantics stay: Judgement both paths; action null on deny; confirmedby, policyversion, gatesessionid null; unfiled communication → refused at Information (`gate_dr_skipped_unfiled`); owner via RecordOwnershipResolver; one CreateAsync site (the 142/042 ArchTests stay green, extended for the job if needed, never weakened).</constraint>
+    <constraint source="bff-extensions">Placement statement, publish-size delta vs a fresh master build, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read the reference handler and 042's consumer and writer code.</step>
+    <step order="2">Add the job type and handler; replace the inline call with the enqueue.</step>
+    <step order="3">Add the idempotency lookup in the gate entry point.</step>
+    <step order="4">Tests, mutation checks, size delta, PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">An authorize and a deny each enqueue one job and the RI action runs without awaiting the record write.</criterion>
+    <criterion testable="true">Processing the same job twice, or two jobs for the same (communication, outcome), creates exactly one Decision Record.</criterion>
+    <criterion testable="true">A different outcome for the same communication (deny, then authorize after a rule change) creates a second record.</criterion>
+    <criterion testable="true">An enqueue failure leaves the gate outcome and the RI action unchanged and is logged and metered.</criterion>
+    <criterion testable="true">The job payload contains no communication subject or sender text.</criterion>
+    <criterion testable="true">An unfiled communication: the job writes nothing and logs at Information with `gate_dr_skipped_unfiled`.</criterion>
+    <criterion testable="true">The single-create-site ArchTests stay green.</criterion>
+    <criterion testable="false">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in the notes. Seeding proof on the idempotency check only.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If no existing `sprk_decisionrecord` column can hold the idempotency key, STOP: a new column needs the owner.</trigger>
+    <trigger>If the enqueue cannot happen before the branch without modifying CommunicationRuleGate's decision logic, STOP.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+</task>
