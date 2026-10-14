@@ -212,10 +212,19 @@ public class TodoAssigneeOwnerReconciliationJobTests
     [InlineData("secure-owned")]
     [InlineData("refused-by-reown")]              // a per-family team in the Secure BU: only UAC's guard knows it
     [InlineData("record-resolved-secure-signal")] // the DR's resolved Signal sits under a secure matter (uac-r2 F1)
-    public async Task SecureCases_AreNeverWritten(string shape)
+    [InlineData("secure-parent-non-core")]        // the same guards for a To Do filed under a non-core record (D-135 K2)
+    [InlineData("secure-owned-non-core")]
+    public async Task SecureCases_AreNeverWritten(string variant)
     {
         PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
         LinkAssignee(Eligible(Assignee));
+        var shape = variant.Replace("-non-core", string.Empty, StringComparison.Ordinal);
+        if (shape != variant)
+        {
+            _world.Add("sprk_document", Document, ("owningteam", new EntityReference("team", GeneralTeam)));
+            _world.Set("sprk_todo", Todo, "sprk_regardingdocument", new EntityReference("sprk_document", Document));
+        }
+
         var table = shape == "record-resolved-secure-signal" ? "sprk_decisionrecord" : "sprk_signal";
         var owner = shape switch { "secure-owned" => SecureTeam, "refused-by-reown" => SecureFamilyTeam, _ => GeneralTeam };
         var id = Row(table, owner,
@@ -386,6 +395,46 @@ public class TodoAssigneeOwnerReconciliationJobTests
         _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "148: a To Do whose core cannot be derived for a data reason — refused, never written, not carried")]
+    public async Task PermanentCoreRefusal_IsRefused_NotCarried()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        _world.Add("sprk_document", Document, ("owningteam", new EntityReference("team", GeneralTeam)));
+        _world.Set("sprk_todo", Todo, "sprk_regardingdocument", new EntityReference("sprk_document", Document));
+        var signal = Row("sprk_signal", OtherBuTeam);
+        var job = Job(writes: "true", coreReadFindsNoRow: true); // CoreAncestorResult.IsPermanent
+
+        var first = await job.ExecuteAsync(Context(), CancellationToken.None);
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        var second = await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(first).GetProperty("skippedRefused").GetInt32().Should().Be(1);
+        Result(first).GetProperty("unverified").GetInt32().Should().Be(0, "a data condition is not a fault to retry");
+        Result(second).GetProperty("carriedToDos").GetInt32().Should().Be(0, "a permanent refusal is not carried");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(OtherBuTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "148: a To Do's rows past the page bound — the rows read are decided, the run is partial, nothing is carried")]
+    public async Task PageBound_DecidesTheRowsRead_RunIsPartial()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var signals = new[] { Row("sprk_signal", GeneralTeam), Row("sprk_signal", GeneralTeam) };
+        var job = Job(writes: "true", pageSize: 1, maxPages: 1);
+
+        var run = await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("truncated").GetBoolean().Should().BeTrue();
+        Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusPartial);
+        Result(run).GetProperty("reowned").GetInt32().Should().Be(1, "the row that was read is decided, not dropped with its batch");
+        signals.Count(s => _world.OwnerOf("sprk_signal", s) == DataversePrincipalRef.Team(OtherBuTeam)).Should().Be(1);
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        var next = await job.ExecuteAsync(Context(), CancellationToken.None);
+        Result(next).GetProperty("carriedToDos").GetInt32().Should().Be(0, "the rest waits for the nightly recompute");
+    }
+
     [Fact(DisplayName = "148: the Signal table's columns cannot be probed — the nightly pass never writes a DR past its unchecked resolved Signals")]
     public async Task SignalProbeFault_DecisionRecordIsNotWrittenPastItsResolvedSignals()
     {
@@ -438,13 +487,18 @@ public class TodoAssigneeOwnerReconciliationJobTests
         return id;
     }
 
-    private TodoAssigneeOwnerReconciliationJob Job(string? writes, string? failingProbeOf = null)
+    private TodoAssigneeOwnerReconciliationJob Job(
+        string? writes, string? failingProbeOf = null, bool coreReadFindsNoRow = false, int? pageSize = null, int? maxPages = null)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => _world);
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
             {
+                // The core-ancestor read of the To Do (its root columns, not the assignee helper's read): no row, a DATA
+                // condition the resolver reports as permanent (CoreAncestorResult.IsPermanent).
+                if (coreReadFindsNoRow && table == "sprk_todo" && !columns.Contains("sprk_assignedto"))
+                    return Task.FromResult<Entity>(null!);
                 var query = new QueryExpression(table) { ColumnSet = new ColumnSet(columns) };
                 query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
                 return _world.Answer(query).Entities.SingleOrDefault() is { } row
@@ -476,10 +530,15 @@ public class TodoAssigneeOwnerReconciliationJobTests
         if (writes is not null)
             settings[TodoAssigneeOwnerReconciliationJob.WritesEnabledConfigKey] = writes;
 
-        return new TodoAssigneeOwnerReconciliationJob(
+        var job = new TodoAssigneeOwnerReconciliationJob(
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), cores, ownership, _clock,
             new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
-            NullLogger<TodoAssigneeOwnerReconciliationJob>.Instance);
+            NullLogger<TodoAssigneeOwnerReconciliationJob>.Instance)
+        {
+            ScanPageSize = pageSize ?? TodoAssigneeOwnerReconciliationJob.PageSize,
+            ScanMaxPages = maxPages ?? TodoAssigneeOwnerReconciliationJob.MaxPages,
+        };
+        return job;
     }
 
     private static JobRunContext Context() =>
