@@ -323,19 +323,19 @@ public sealed class ExternalModuleDescriptor
     }
 
     /// <summary>
-    /// The multi-root rule's input for one module row: each root-typed scope attribute and each
-    /// <see cref="AdditionalRootLookups"/> entry as (root, raw lookup). An absent or null attribute is "not filed" (Dataverse
-    /// omits a null attribute); a populated value that is not a GUID is marked malformed, which the rule withholds (fail
-    /// closed). An attribute that is not a root is not part of the rule. The fetch endpoint passes these for every row to
-    /// <see cref="ExternalMultiRootRule.ReadFlagsAsync"/> before <see cref="ScopeRows"/>.
-    /// </summary>
-    /// <summary>
     /// Task 187: one module row's rule input (a module with <see cref="RequireReadOnSecureRoots"/>): <see cref="RootLinks"/> ∪
     /// the live roots of the row's parent lookups, which <see cref="ChildRowRoots"/> derives from the row itself.
     /// </summary>
     public ChildRowRoots RuleInput(IReadOnlyDictionary<string, object?> row, LiveParentRoots? liveParents) =>
         ChildRowRoots.Of(RecordEntity, row, RootLinks(row), liveParents ?? LiveParentRoots.Empty);
 
+    /// <summary>
+    /// The multi-root rule's input for one module row: each root-typed scope attribute and each
+    /// <see cref="AdditionalRootLookups"/> entry as (root, raw lookup). An absent or null attribute is "not filed" (Dataverse
+    /// omits a null attribute); a populated value that is not a GUID is marked malformed, which the rule withholds (fail
+    /// closed). An attribute that is not a root is not part of the rule. The fetch endpoint passes these for every row to
+    /// <see cref="ExternalMultiRootRule.ReadFlagsAsync"/> before <see cref="ScopeRows"/>.
+    /// </summary>
     public (ExternalGrantRootType Root, string? LookupValue)[] RootLinks(IReadOnlyDictionary<string, object?> row)
     {
         ArgumentNullException.ThrowIfNull(row);
