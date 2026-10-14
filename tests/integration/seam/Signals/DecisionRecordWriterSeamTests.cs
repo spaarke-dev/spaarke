@@ -46,7 +46,26 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         var client = new OntologyWriterDataverseClient(() => _dv.WriterClient, NullLogger<OntologyWriterDataverseClient>.Instance);
         var sysadmin = new OperatorAdapter(_dv.OperatorClient);
         var ownership = new RecordOwnershipResolver(sysadmin, new ConfigurationBuilder().Build(), NullLogger<RecordOwnershipResolver>.Instance);
-        return new DecisionRecordWriter(client, ownership, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
+        // Task 142: uac-r2's REAL core-ancestor resolver (every stamp column exists on sprk_decisionrecord live, task 140) and the
+        // shared regarding builder typing the pair from the LIVE sprk_recordtype_ref catalog (the production query's filter).
+        var coreAncestors = new CoreAncestorResolver(
+            sysadmin,
+            (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+            NullLogger<CoreAncestorResolver>.Instance);
+        var recordTypes = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(async (name, ct) =>
+        {
+            var query = new QueryExpression("sprk_recordtype_ref")
+            {
+                ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, name);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
+        });
+        return new DecisionRecordWriter(
+            client, ownership, coreAncestors, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
     }
 
     /// <summary>Name prefix of the To Do the no-core test creates as its subject; <see cref="DisposeAsync"/> sweeps by it.</summary>

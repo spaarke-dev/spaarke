@@ -47,7 +47,8 @@
                      or relationship counts as included when its table is in the solution with rootcomponentbehavior = 0
                      ("include subcomponents") — the false negative the batch-4 live run found in task 133's verify
                      (notes/batch4-live-gates-2026-10-03.md) is not repeated here. A table listed in $SolutionHomes
-                     (sprk_budgetrevision: its column travels in SpaarkeMaster and OntologyPlatformSolution, which hold the
+                     (sprk_budgetrevision, sprk_decisionrecord: their column travels in SpaarkeMaster and
+                     OntologyPlatformSolution, which hold the
                      whole table, not in SpaarkeCore) is checked against THOSE solutions instead, read-only: a gap there is
                      reported, never written, so SpaarkeCore is not reported as a false gap. For such a table -Apply
                      NEVER creates a missing column or relationship (that would put them in SpaarkeCore, the wrong
@@ -65,11 +66,11 @@
     such a BFF to it.
 
     ⚠️ DEPLOY ORDER — a SECOND HARD gate (D-136, ontology task 147). A BFF build carrying ontology task 147 stamps
-    sprk_createdbyperson on every budget revision the ontology writer creates (and 142/143 do the same for Decision Records
-    and Signals). The writer is not a BFF user, so without the narrow profile every such create is refused by field
+    sprk_createdbyperson on every budget revision the ontology writer creates, task 142 on every Decision Record, and 143
+    does the same for Signals. The writer is not a BFF user, so without the narrow profile every such create is refused by field
     security. In every target environment the profile "Spaarke Ontology Writer Field Writers" must exist, with the writer as
     its only member and the three 4/4/4 rows, BEFORE that BFF deploys: run -Apply, then -Verify to exit 0. For an
-    environment other than dev, sprk_budgetrevision.sprk_createdbyperson itself must first arrive by importing
+    environment other than dev, sprk_budgetrevision.sprk_createdbyperson and sprk_decisionrecord.sprk_createdbyperson must first arrive by importing
     SpaarkeMaster / OntologyPlatformSolution (this script will not create it).
 
     ⚠️ A business unit created later needs its default team added to the reader profile (re-run -Apply).
@@ -152,7 +153,7 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -182,7 +183,10 @@ function Find-CreatorPersonRelationship([string]$Table, [scriptblock]$Read) {
 # tables is in BOTH solutions below, each of which holds the whole table, and not in SpaarkeCore. For such a table section (d)
 # checks those solutions instead of SpaarkeCore, so it does not report a false gap -- and never writes to them (a product
 # solution's membership is the owner's call).
-$SolutionHomes = @{ sprk_budgetrevision = @('SpaarkeMaster', 'OntologyPlatformSolution') }
+$SolutionHomes = @{
+    sprk_budgetrevision = @('SpaarkeMaster', 'OntologyPlatformSolution')
+    sprk_decisionrecord = @('SpaarkeMaster', 'OntologyPlatformSolution')   # ontology task 142 (D-135), as 147 did for the budget revision
+}
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -436,7 +440,7 @@ foreach ($t in $Tables) {
 Write-Host "`n(c2) $OntologyWriterProfileName (D-136)"
 foreach ($t in $OntologyWriterTables) {
     $a = $attrs[$t]
-    if (-not $a -and $t -notin $Tables) { $a = Try-DvGet (ColumnAttributePath $t) }   # decisionrecord / signal: not in $Tables yet (tasks 142/143)
+    if (-not $a -and $t -notin $Tables) { $a = Try-DvGet (ColumnAttributePath $t) }   # signal: not in $Tables yet (task 143)
     if (-not $a) {
         if ($t -in $Tables) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "grant $OntologyWriterProfileName on $t.$Column (after the column exists)" }
         else { Report 'FAIL' "$t.$Column does not exist in this environment: import the owning solution first (D-135) -- $OntologyWriterProfileName cannot cover it" }

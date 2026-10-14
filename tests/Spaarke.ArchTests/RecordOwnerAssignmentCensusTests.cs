@@ -235,20 +235,21 @@ public class RecordOwnerAssignmentCensusTests
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
         // ── Task 182 (ontology child-record contract C7, audit F4): the ontology writers, as they stand at the head of
-        // docs/ontology-platform-design. Each entry says what the code does TODAY. The two Pending waivers are not a way
-        // to turn the build green: they name the ontology task that routes the writer (contract §4), and that task
-        // moves its entry to Routed when it lands. ──────────────────────────────────────────────────────────────────────
+        // docs/ontology-platform-design. Each entry says what the code does TODAY. A Pending waiver is not a way
+        // to turn the build green: it names the ontology task that routes the writer (contract §4), and that task
+        // moves its entry to Routed when it lands (142 moved the Decision Record's). ─────────────────────────────────────
         new CensusEntry("DecisionActionExecutors.cs", "sprk_budgetrevision", 1, Disposition.Routed,
             "Ontology task 044 (D-33/D-38): ReviseBudgetExecutor resolves the revision's owner through "
             + "IRecordOwnershipResolver in its preflight (secure-if-any over the matter and the budget), refuses before any "
             + "write when no owner is resolved, and writes the answer onto the row with ApplyTo before the create."),
-        new CensusEntry("DecisionRecordWriter.cs", "sprk_decisionrecord", 1, Disposition.Waived,
-            "Pending ontology task 142 (contract C3, audit F1/F2/F3). Today the decision record's owner is "
-            + "RecordOwnershipResolver's answer as returned over all parents (the core record, the item's subject and "
-            + "every Signal's subject), never the writer identity or a user. A personal no-core To Do's record goes to "
-            + "its Assigned To's business-unit team (D-134), with secure-parent precedence. Task 142 still owes the "
-            + "subject lookups, the two-wall refusal (#1778) and the census flip to Routed.",
-            WaiverKind.Pending),
+        new CensusEntry("DecisionRecordWriter.cs", "sprk_decisionrecord", 1, Disposition.Routed,
+            "Ontology task 142 (contract C1/C2/C3/C9, audit F1/F2/F3): WriteAsync files the record under its subject through "
+            + "the shared regarding builder, stamps it from the subject (CoreAncestorResolver), and writes "
+            + "RecordOwnershipResolver's answer over EVERY parent (the core record, the record's subject, every derived core "
+            + "and every resolved Signal's subject) onto the row with ApplyTo, with the deciding user as RequestedBy; a "
+            + "refusal or a fault writes nothing. A personal no-core To Do's record goes to its Assigned To's business-unit "
+            + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
+            + "families (#1778) before any write."),
         new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Waived,
             "Pending ontology task 143 (contract C3, audit F2/F3). Today only a secure answer of the resolver (core "
             + "record, subject as parent) is applied (ApplyTo). An ordinary Signal keeps the writer identity as owner with "
@@ -2052,6 +2053,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
+        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
@@ -2110,8 +2112,9 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Empty(MissingCreatorPersonColumn(created,
             new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" }));
 
-        // The real stamped set carries the budget revision (ontology task 147), so it is not reported.
+        // The real stamped set carries the budget revision (ontology task 147) and the Decision Record (task 142), so neither is reported.
         Assert.Contains("sprk_budgetrevision", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
+        Assert.Contains("sprk_decisionrecord", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
     }
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]

@@ -1201,6 +1201,28 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task Task142_PartitionsOfSignals_PlaceEachSignalInItsOwnFamily_InOrder_ThroughUac2sRealWalk()
+    {
+        // The decision route's two-wall check (contract C9) reads this: two secure projects under one readable matter are two
+        // families, an ordinary Signal is a third, and a Secure-owned Signal under no secure root cannot be placed.
+        var s = new Store();
+        var inA = s.Open(MatterId, Guid.NewGuid(), secure: true, family: Store.ProjectA);
+        var inB = s.Open(MatterId, Guid.NewGuid(), secure: true, family: Store.ProjectB);
+        var alsoInA = s.Open(MatterId, Guid.NewGuid(), secure: true, family: Store.ProjectA);
+        var ordinary = s.Open(MatterId, Guid.NewGuid(), secure: false);
+        var orphanSubject = Guid.NewGuid();
+        s.Subject(orphanSubject, owner: Store.SecureOwner);
+        var orphan = s.Open(MatterId, orphanSubject, secure: true);
+
+        var families = await s.Service.PartitionsOfSignalsAsync([inA, inB, alsoInA, ordinary, orphan], default);
+
+        families.Should().Equal(FamilyA, FamilyB, FamilyA, SuppressionPartition.Ordinary, SuppressionPartition.Undetermined);
+
+        s.FailReads = true;
+        await s.Service.Invoking(x => x.PartitionsOfSignalsAsync([inA, inB], default)).Should().ThrowAsync<Exception>("a fault is never an answer");
+    }
+
+    [Fact]
     public async Task R4_TwoSecureFamilies_UnderOneReadableMatter_EachHaveTheirOwnCount()
     {
         var s = new Store();
