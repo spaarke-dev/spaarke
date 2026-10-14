@@ -10,7 +10,7 @@
 | Field | Value |
 |---|---|
 | **Active task** | none — **076** (30-day SC measurements) is next, gated at cutover+30d = **2026-10-29** |
-| **Status** | 075 complete (owner ruling, soak passed). 077 complete: `sdap-ci.yml` retired on branch `work/ci-retire-sdap-ci` (PR "ci: retire legacy sdap-ci.yml (CI remediation tasks 075 + 077)"). The PR must merge **after #1837** (it uses `.github/actions/quality-alert`). |
+| **Status** | 075 complete (owner ruling, soak passed). 077 complete: `sdap-ci.yml` retired on branch `work/ci-retire-sdap-ci` (PR #1863). The PR must merge **after #1837** (it uses `.github/actions/quality-alert`). |
 | **Next Action** | Merge master into the branch once #1837 lands and confirm `CI Standalone Checks` goes green; apply the `.claude/` edits listed in the PR body (main session). On/after 2026-10-29 run 076. |
 
 ### Critical context
