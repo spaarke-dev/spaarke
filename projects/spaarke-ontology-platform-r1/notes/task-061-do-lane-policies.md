@@ -157,7 +157,7 @@ outside this task's approved writes, so it was NOT edited: it is filed (#1868, D
 
 | Suite | Result |
 |---|---|
-| `--filter FullyQualifiedName~Signals` (unit, full) | 1540 passed, 0 failed (the live seam facts return immediately without the env vars) |
+| `--filter FullyQualifiedName~Signals` (unit, full, after merging origin/docs/ontology-platform-design `bcd5824a8`) | 1562 passed, 0 failed (the live seam facts return immediately without the env vars) |
 | `NullTestGrammarTests` + `SignalReevaluationJobWorkAssignmentResponseTests` | 40 (incl. 3 end-to-end through the real job: raise, close ConditionCleared with no Decision Record, no raise on a pre-existing response) |
 | `DoLanePolicyDefinitionTests` | 30 |
 | `Spaarke.ArchTests` `PredicateCompilerCallerGuard` + `Signal` | 7 passed |
