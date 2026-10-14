@@ -49,7 +49,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
 | 062 | Message sender name falls back to createdby (check-2 #4) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
 | 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
-| 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
+| 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | ✅ [done] merged 15f2dc686; reaches dev with the next BFF deploy | none | S/h | FULL | CHK3 |
 | 065 | MDA message send carries "Internal only" (default No) + sender (check-3 #5) | P5b | 🔲 [open] | none | O/h | FULL | CHK3 |
 | 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
 | 067 | Service Request automatic numbers RQST-{SEQNUM:4} (check-2 #3) | P5b | 🔲 [open] | none (owner yes 2026-10-13; dev apply gated) | S/h | STANDARD | CHK3 |

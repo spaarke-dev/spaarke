@@ -4,7 +4,7 @@
     <title>External document lists fail when a document has a type: read sprk_documenttype as an option set (check-3 item 1)</title>
     <phase>5b Owner check fixes</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag bff-api; fixes a defect on the external read path</rigor-reason>
     <model-tier>sonnet</model-tier>
