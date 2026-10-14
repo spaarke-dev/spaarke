@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
-| **Running** | UAC reviews of ontology PR #1878 (task 042, DR for the comms rule gate). Waiting on ontology's fix SHA for #1874 (145 F1: early-return policies skip the stored-evidence redaction). |
-| **Next Action** | Re-check #1874's fix diff when it arrives; reply on #1878. Then pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). Re-run 187's document leg once SPA-r3's 064 doc-type fix is on master. |
+| **Running** | Nothing. The ontology reviews are done: #1874 (145) CLEAN at `75114b170`, #1878 (042) CLEAN at `72fe75054`. Ontology merges them. Their D-139 follow-up PR (one DR per gate decision, written by an ADR-004 job) comes to UAC for review. |
+| **Next Action** | Re-run 187's document leg on dev (read-only) once SPA-r3's deploy `4e23edeb2` is live; they will say when. Then pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). |
 
 ## Done this session
 - **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
