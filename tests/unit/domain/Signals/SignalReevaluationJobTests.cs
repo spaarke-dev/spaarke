@@ -532,6 +532,26 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_T145F1_ASignalOfAPolicySwitchedOffLater_IsStillRedacted_ThoughThePolicyIsNotEvaluated()
+    {
+        // An Off or Retired policy is never evaluated again, so its Signals reach the redaction only through the not-in-force sweep.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001aa");
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, secureProject);
+        h.Sysadmin.SwitchOff(PolicyCode);
+        RefileTheWitnessUnder(h, secureProject);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ResultJson.Should().Contain("\"policiesEvaluated\":0").And.Contain("\"policyRetiredClosed\":1").And.Contain("\"evidenceRedacted\":1");
+        var row = h.Org.Rows[signal.Id];
+        row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionPolicyRetired);
+        row.GetAttributeValue<string>("sprk_evidencerefs").Should().NotContain("Rate increase").And.NotContain("partner@firm.example")
+            .And.Contain($"sprk_communication:{Lower(CommunicationId)}");
+    }
+
+    [Fact]
     public async Task Run_T145F1_AWitnessThatStaysInTheSignalsFamily_KeepsItsDetail()
     {
         var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
@@ -2590,6 +2610,9 @@ public partial class SignalReevaluationJobTests
 
             return this;
         }
+
+        /// <summary>Task 145 F1: the policy is switched Off (sprk_enabled = No) after its Signals were raised.</summary>
+        public void SwitchOff(string code) => _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code)["sprk_enabled"] = false;
 
         public Guid PolicyIdOf(string code) => _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code).Id;
 

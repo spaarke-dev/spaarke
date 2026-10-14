@@ -120,14 +120,7 @@ public sealed class SignalClosureService
     /// </summary>
     internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(CancellationToken ct)
     {
-        var policies = new Dictionary<Guid, string>();
-        foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
-        {
-            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode") };
-            query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
-            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            foreach (var row in rows.Entities) policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-        }
+        var policies = await PoliciesNotInForceAsync(ct).ConfigureAwait(false);
 
         var total = SignalClosureOutcome.None;
         foreach (var (policyId, code) in policies)
@@ -148,6 +141,22 @@ public sealed class SignalClosureService
         }
 
         return total;
+    }
+
+    /// <summary>Every policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The one query of
+    /// "not in force": the Off/Retired close above and the job's stored-evidence redaction of those policies' Signals (task 145).</summary>
+    internal async Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct)
+    {
+        var policies = new Dictionary<Guid, string>();
+        foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
+        {
+            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode") };
+            query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in rows.Entities) policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+        }
+
+        return policies;
     }
 
     private static bool IsSuperseded(ExistingSignal signal, Guid currentVersionId) =>

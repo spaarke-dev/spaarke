@@ -111,6 +111,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
 
         var success = counts.IsSuccess;
         var duration = Finish(context, counts, started, success);
@@ -293,7 +294,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
-            await RedactStoredEvidenceAsync(policy, existing, counts, ct).ConfigureAwait(false);
+            await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -679,9 +680,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <c>changedSinceRead</c> and retried next pass; when the families cannot be read nothing is written (a policy failure, retried
     /// next pass); a write failure is a refusal. Evidence is not a stamp, so task 144's report-only tables do not apply.
     /// </summary>
-    private async Task RedactStoredEvidenceAsync(PolicyRow policy, IReadOnlyList<ExistingSignal> signals, RunCounts counts, CancellationToken ct)
+    private async Task RedactStoredEvidenceAsync(string policyCode, IReadOnlyList<ExistingSignal> signals, RunCounts counts, CancellationToken ct)
     {
-        var redactions = await _suppression.StoredEvidenceToRedactAsync(policy.Code, signals, ct).ConfigureAwait(false);
+        var redactions = await _suppression.StoredEvidenceToRedactAsync(policyCode, signals, ct).ConfigureAwait(false);
         if (redactions is null)
         {
             counts.PolicyFailures++;
@@ -696,18 +697,57 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 counts.Refused++;
                 _logger.LogWarning(
                     "Policy {PolicyCode}: Signal {SignalId} has stored evidence to clear but no version was read, so it cannot be written conditionally; the next pass retries.",
-                    policy.Code, signal.Id);
+                    policyCode, signal.Id);
                 continue;
             }
 
             try
             {
-                if (await _writer.RedactEvidenceAsync(signal.Id, signal.RowVersion, redacted, policy.Code, ct).ConfigureAwait(false)) counts.EvidenceRedacted++;
+                if (await _writer.RedactEvidenceAsync(signal.Id, signal.RowVersion, redacted, policyCode, ct).ConfigureAwait(false)) counts.EvidenceRedacted++;
                 else counts.ChangedSinceRead++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 counts.Refused++; // logged and metered by the writer
+            }
+        }
+    }
+
+    /// <summary>
+    /// Task 145 (review F1): a policy that is Off or Retired is never evaluated, so its Signals (closed PolicyRetired, or resolved
+    /// before) would never pass through <see cref="RedactStoredEvidenceAsync"/> again. The nightly pass reads them, after the Off/Retired
+    /// close, and redacts them by the same rule. A policy whose Signals cannot be read is a policy failure, retried next pass.
+    /// </summary>
+    private async Task RedactPoliciesNotInForceAsync(RunCounts counts, CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, string> policies;
+        try
+        {
+            policies = await _closure.PoliciesNotInForceAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Policies that are Off or Retired could not be read ({ExceptionType}); their Signals' stored evidence was not checked this run.",
+                ex.GetType().Name);
+            return;
+        }
+
+        foreach (var code in policies.Values.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var signals = await ReadPolicySignalsAsync(code, counts, ct).ConfigureAwait(false);
+                await RedactStoredEvidenceAsync(code, signals, counts, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "Policy {PolicyCode} is not in force and its Signals could not be read ({ExceptionType}); their stored evidence was not checked this run.",
+                    code, ex.GetType().Name);
             }
         }
     }
