@@ -5,7 +5,7 @@ techStack: [github-actions, dotnet, azure, dataverse]
 appliesTo: [".github/workflows/", "ci-cd", "build status", "pipeline"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-14
 ---
 
 # CI/CD Pipeline Skill
