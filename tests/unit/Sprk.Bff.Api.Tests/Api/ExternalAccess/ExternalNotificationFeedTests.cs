@@ -934,6 +934,33 @@ public class ExternalNotificationFeedTests
         Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(plain));
     }
 
+    // Task 187 fix round 1 (R2): a feed message's OTHER parent lookups are parsed and their LIVE roots decide. A message on P
+    // whose sprk_regardinginvoice / sprk_regardingevent names a record filed under secure matter X is not reported to a
+    // reader of P alone; it is to a reader of P and X.
+    [Theory]
+    [InlineData("_sprk_regardinginvoice_value", "sprk_invoice", "sprk_matter")]
+    [InlineData("_sprk_regardingevent_value", "sprk_event", "sprk_regardingmatter")]
+    public async Task AMessageWhoseOtherParentIsUnderSecureX_IsNotInTheFeedOfAPOnlyReader_ButIsForAPAndXReader(
+        string column, string parentTable, string parentRootColumn)
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var parent = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow(parentTable, parent, (parentRootColumn, "sprk_matter", secure));
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var carrier = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        carrier[column] = El(parent.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _data.Name(secure, "Matter X");
+
+        Body(await Feed(Ciam(me, project: project))).Value.Select(i => i.Id)
+            .Should().Equal(new[] { IdOf(plain) }, "the message's live parent is under secure X, which the caller cannot read");
+        Body(await Feed(Ciam(me, project: project, matter: secure))).Value.Select(i => i.Id)
+            .Should().Equal(IdOf(carrier), IdOf(plain));
+    }
+
     // Main-session decision 2026-10-12: "secure" means EFFECTIVELY secure (UAC-r2 task 174). A stamped work assignment W whose
     // OWN flag is false but which is filed under a secure matter is secure, even when the message carries no stamp for it.
     [Theory]

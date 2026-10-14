@@ -150,10 +150,15 @@ public class ExternalMessageEndpointsTests
             : throw new RecordNotFoundException(entity, id);
     }
 
-    private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null) =>
-        ExternalMessageEndpoints.GetMessagesCoreAsync(
+    // Task 187 fix round 1 (R2): the live-parent reader is passed as the route passes it (GetMessagesAsync), the REAL walk over
+    // _roots' filing world, so a message row's parent lookups are parsed, walked and decided as in production.
+    private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
-            _roots.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+    }
 
     /// <summary>A lookup value as RecordService projects it.</summary>
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
@@ -460,6 +465,50 @@ public class ExternalMessageEndpointsTests
         var id = Guid.NewGuid();
         var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
         row["_sprk_regardingmatter_value"] = JsonSerializer.SerializeToElement<string?>(null);
+        SetupMessages(row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(id.ToString("D"));
+    }
+
+    // ── task 187 fix round 1 (R2): a message row's OTHER parent lookups are parsed and their LIVE roots decide ──
+    // A message on P's thread whose sprk_regardinginvoice / sprk_regardingevent names a record filed under secure matter X is
+    // behind X's wall (SecureChildReconciler's secure-if-any), whatever its stamps say.
+
+    [Theory]
+    [InlineData("_sprk_regardinginvoice_value", "sprk_invoice", "sprk_matter")]
+    [InlineData("_sprk_regardingevent_value", "sprk_event", "sprk_regardingmatter")]
+    public async Task AMessageWhoseOtherParentIsUnderSecureX_IsWithheld_FromAPOnlyReader_AndListed_ForAPAndXReader(
+        string column, string parentTable, string parentRootColumn)
+    {
+        var project = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var parent = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow(parentTable, parent, (parentRootColumn, "sprk_matter", secure));
+        var plain = Guid.NewGuid();
+        var carrier = Guid.NewGuid();
+        var carrierRow = MessageRow(carrier, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        carrierRow[column] = El(parent.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), carrierRow);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(new[] { plain.ToString("D") }, "the message's live parent is under secure X, which the caller cannot read");
+        Messages(await Get("projects", project, Ciam(project: project, matter: secure))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"), carrier.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageWhoseOtherParentIsUnderAnOrdinaryRoot_IsListed()
+    {
+        var project = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, open);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", open));
+        var id = Guid.NewGuid();
+        var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
         SetupMessages(row);
 
         Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
