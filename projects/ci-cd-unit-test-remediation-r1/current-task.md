@@ -1,8 +1,7 @@
 # Current Task State — ci-cd-unit-test-remediation-r1
 
-> **Last Updated**: 2026-08-28 (by `context-handoff`)
-> **Recovery**: read "Quick Recovery" first. Full narrative + traps: `C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke\memory\session-resume-2026-08-27-ci-remediation.md`
-> **Synopsis** (objectives / scope / end state / how CI runs after): <https://claude.ai/code/artifact/7ca88795-5790-43f3-8432-8d84bd3fdec0>
+> **Last Updated**: 2026-10-14 (task 075 measured, worktree `C:\wtci`, branch `work/ci-retire-sdap-ci`)
+> **Synopsis** (objectives / scope / end state): <https://claude.ai/code/artifact/7ca88795-5790-43f3-8432-8d84bd3fdec0>
 
 ---
 
@@ -10,72 +9,29 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | none — 094 done, PR **#890** open |
-| **Project state** | 47 tasks · 34 complete · 1 open · 7 closed · 2 partial |
-| **Status** | in-progress — **all defect tasks closed; only the cutover chain remains** |
-| **Next Action** | **1.** Merge PR **#890** when green. **2.** Then WAIT — the cutover chain is gated on the shadow window, and the window is now gated on **calendar days**, not throughput. Nothing else is startable. |
+| **Active task** | **075** soak-7day-gate — `in-progress`, gate **NOT MET** |
+| **Status** | Waiting on the calendar. 077 (retire `sdap-ci.yml`) is blocked behind it. |
+| **Next Action** | At or after **2026-10-15T15:57Z**: re-measure with the commands in `notes/soak-monitoring.md` §"How to re-measure". If no legitimate master red after 2026-10-08T15:57Z → write `notes/soak-passed.md` (run IDs), complete 075, then run 077. |
 
 ### Critical context
 
-**The shadow window is now gated on CALENDAR DAYS, not PRs.** It moved 7 → **15/20 agreeing** in a
-single session, but the day span is **1 of 5**. The 20-PR bar will be met well before the 5-day bar.
-Check with `pwsh scripts/ci/shadow-window-status.ps1`. **0 false greens throughout.**
+- **Why not met**: master did not compile 2026-10-08 12:16Z–15:57Z (CS0411, `EventRoutesLiveTests.cs:407`,
+  issue #1418, fixed PR #1424). A semantic conflict between two independently green PRs. POML step 3:
+  legitimate failure → reset. Green since: 5 d 23.5 h at measurement.
+- **Owner decision available**: if semantic-conflict breaks are ruled not to reset the soak, the gate is met
+  now (see `notes/soak-monitoring.md` last section).
+- **Flakes, no reset**: Tier 1 `Arch Tests` red 10-10 and 10-11 — `Task 167 f2-v2` Production-boot tests
+  hit real IMDS (#1672, #1784, OPEN). Job-level Tier 1 flake 0.28% (NFR-03 OK); run-level 2.0%.
+- **Release matrix (FR-B07) conflict**: the Release restore belongs in `ci-tier2-advisory.yml`, which the owner's
+  standing rule says not to edit. Needs an owner call when 075 passes.
+- **Owner rules for 077** (2026-10-14): retire by MOVING `sdap-ci.yml` (never delete); preserve any check with
+  no Router/Tier/nightly equivalent in a NEW standalone non-required workflow or an existing nightly; never
+  edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml`; `.claude/` edits go to the main
+  session as a list.
 
-**Task 094 is the only substantive work left, and it is FREEZE-EXPOSED** — arming more ADR-038 bans
-means editing `ci-tier1-blocking.yml`. PR #865 set the precedent: bans at **zero live instances** are
-verdict-neutral and were armed under the banner's own "guard present but not armed" carve-out. Shape
-for 094: measure all 15 remaining bans with the hardened classifier, arm the zero-count ones under
-that precedent, document the rest with live counts.
+### Remaining chain
 
-**Do not `--delete-branch` a PR that is another PR's base** — it auto-closes the stacked PR
-irrecoverably. That killed #856 earlier (recovered as #857).
-
----
-
-## Shipped this session
-
-| PR | Task | Result |
-|---|---|---|
-| #843 #847 #865 #866 #867 | (queue from prior session) | all merged; ArchTests now **136/136** on master |
-| **#884** | 091 timing tests | 4/5 fixed; 5th escalated (below). Scheduling suite 5m14s → 5s |
-| **#885** | 093 link validator | corpus 100,220 → 922 files; broken 1,212 → **267** (all verified real) |
-| **#886** | 095 client jest | new `client-tests.yml`; 730 test files / 40 packages now run at all |
-| **#888** | 092 prettier | root cause `endOfLine: crlf`; CI flagged 1,907 of 1,911 on line endings alone |
-| **#889** | test-signal hygiene | **OPEN at handoff** — registry exit rule + un-skip 4 |
-
----
-
-## Open work
-
-### 1. ~~Task 094~~ — DONE (PR #890)
-
-All 17 bans accounted for: **5 armed** (B1/B4 prior + **B3/B12/B16**), 12 documented-unenforceable
-with live counts. Migration cost 4 test methods in 2 files. ArchTests **136 → 139**.
-Census: `notes/094-adr038-ban-census.md`; annex added to ADR-038 §7.
-
-**The one thing worth carrying forward**: **B8 is the next arming pass** — 7 call sites in 5 files
-invoking private production methods by reflection. It is the only unarmed ban with both a tight
-signature and a bounded count; it stayed unarmed because the migration is a per-call-site
-production-visibility decision, not a mechanical sweep.
-
-Also confirmed, so nobody re-derives it: **B2 and B17 name types this repo does not contain** —
-there is no `IServiceClient` (3 grep hits, all prose) and AutoMapper is not a dependency (0 refs).
-Arming either would be guard-theater.
-
-### 2. The cutover chain — gated on the window
-
-`071 cutover → 075 soak (7d) → 077 retire sdap-ci.yml → 076 (30d) → 090 wrapup`
-(076 depends on 071, not 077.)
-
-### 3. Escalated, deliberately not fixed
-
-- **091's 5th failure** — `ReAnalysisFlowTests` is NOT a timing test. Reproduces deterministically;
-  fails on HttpClient's 100s timeout while making a **live Azure Search call**. It surfaces in a job
-  named *Full Unit Tests* because tier2 pass 1 is bare `dotnet test` with **no project filter**.
-  Fixing it is a tier-file edit (frozen) **and** an owner call, since filtering integration tests out
-  of Tier 2 means they run nowhere on a PR. Details: `notes/091-realclock-findings.md`.
-- **092's job-output criterion** — printing the repro command needs a tier-file edit. The command
-  lives in `docs/procedures/testing-and-code-quality.md` instead. One-liner, deferred past cutover.
+`075 soak (gate 2026-10-15T15:57Z)` → `077 retire sdap-ci.yml` · `076 (30d, depends on 071)` → `090 wrapup`
 
 ---
 

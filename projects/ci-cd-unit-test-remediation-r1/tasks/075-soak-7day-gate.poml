@@ -1,7 +1,7 @@
 <task id="CICD-075" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>7-day soak gate: verify surviving suite green ≥7 consecutive days before Release matrix lock-in (SC-06)</title>
-    <status>not-started</status>
+    <status>in-progress</status>
     <estimated-effort>0.5 hours (passive monitoring + 1 active gate task at cutover+7d)</estimated-effort>
     <phase>3 - Monitoring</phase>
     <stream>A+B - Monitoring</stream>
@@ -49,4 +49,13 @@
     <criterion testable="true">Soak-passed declaration includes run IDs as evidence</criterion>
     <criterion testable="true">Any failures during soak documented with classification</criterion>
   </acceptance-criteria>
+  <notes>
+    2026-10-14T15:24Z — measured, NOT MET. Evidence: notes/soak-monitoring.md.
+    Counter reset by a legitimate master break: CS0411 in EventRoutesLiveTests.cs (runs 37775675230,
+    37780400046; issue #1418), fixed by PR #1424 merged 2026-10-08T15:57:32Z. Green since then:
+    5 d 23.5 h. Two Tier 1 Arch Tests reds on 10-10 / 10-11 are the MI-token flake (#1672, #1784) and
+    do not reset. Earliest pass 2026-10-15T15:57Z if no further legitimate red. 077 stays blocked.
+    The Release-matrix step (FR-B07) cannot be done here as written: it lives in ci-tier2-advisory.yml,
+    which is under the owner's standing no-edit rule — needs an owner call when the gate passes.
+  </notes>
 </task>
