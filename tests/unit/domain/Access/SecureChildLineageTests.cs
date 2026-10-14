@@ -49,8 +49,8 @@ public class SecureChildLineageTests
 
     /// <summary>
     /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
-    /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups until
-    /// ontology task 145's backfill is verified.
+    /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
+    /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
     /// </summary>
     [Fact]
     public void TheDecisionRecordRow_HoldsTheSubjectLookups_AndTheTypedCores_ButNoServiceRequest()
