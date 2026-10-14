@@ -371,14 +371,14 @@
   <RuleDefinitions>
     <TabDisplayRules />
     <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
       <DisplayRule Id="sprk.Document.Form.DisplayRule">
         <FormStateRule State="Existing" />
       </DisplayRule>
       <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule">
         <FormStateRule State="Existing" />
-      </DisplayRule>
-      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
-        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

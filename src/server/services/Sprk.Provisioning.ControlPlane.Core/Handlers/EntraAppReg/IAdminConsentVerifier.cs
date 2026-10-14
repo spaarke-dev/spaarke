@@ -3,8 +3,8 @@
 //
 // L2 abstraction over the Microsoft Graph admin-consent verification H3
 // performs AFTER provisioning the BFF app-registration. Post-provisioning,
-// the app-registration's DELEGATED permissions (5 per
-// EntraAppRegPermissionCatalog.cs — Files/Sites/User.Read/Mail.Send +
+// the app-registration's DELEGATED permissions (6 per
+// EntraAppRegPermissionCatalog.cs — Files/FileStorageContainer/Sites/User.Read/Mail.Send +
 // Dynamics user_impersonation) require a tenant admin's explicit consent
 // before tokens can carry those scopes. H3 queries Graph
 // (oauth2PermissionGrants) to confirm the tenant admin has consented and —
@@ -20,7 +20,7 @@
 // app-registration's own service principal). design.md §4.1's H3 SDK-surface
 // table (Applications/ServicePrincipals/Oauth2PermissionGrants — no
 // AppRoleAssignedTo) confirms H3 never owned the app-role catalog. This
-// verifier's true scope is the 5 DELEGATED (OAuth2PermissionScope) grants —
+// verifier's true scope is the DELEGATED (OAuth2PermissionScope) grants —
 // EntraAppRegPermissionCatalog.cs is the shared source of truth both this
 // verifier and GraphAppRegistrationProvisioner consume.
 //
@@ -34,7 +34,7 @@
 //   - .claude/adr/ADR-028-spaarke-auth-architecture.md: MI-outbound MUST rule.
 //
 // GATE SEMANTICS:
-//   - Verified(grantedCount, expectedCount) — all 5 delegated scope values
+//   - Verified(grantedCount, expectedCount) — all delegated scope values
 //     observed on the app's oauth2PermissionGrants; `admin-consent` gate
 //     flips to Verified; handler returns Success.
 //   - Pending(grantedCount, expectedCount, diagnostic) — some/all scopes
@@ -51,7 +51,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 
 /// <summary>
 /// Verifies tenant admin consent has been granted for the BFF app-registration's
-/// 5 requested DELEGATED permissions (<see cref="EntraAppRegPermissionCatalog"/>).
+/// requested DELEGATED permissions (<see cref="EntraAppRegPermissionCatalog"/>).
 /// Domain outcomes (consent granted, consent pending) return typed results;
 /// only unexpected infrastructure errors (transient Graph SDK fault, network
 /// fault) should throw.
@@ -67,7 +67,7 @@ public interface IAdminConsentVerifier
     /// <param name="tenantId">Target Entra tenant id (§4D I1 — mandatory).</param>
     /// <param name="expectedDelegatedScopeCount">
     /// Number of delegated scopes expected per
-    /// <see cref="EntraAppRegPermissionCatalog.All"/> (5 as of task 130). The
+    /// <see cref="EntraAppRegPermissionCatalog.All"/> (6 as of ISS-018 F6). The
     /// verifier compares observed grant scope values against this expected
     /// count to decide Verified vs Pending.
     /// </param>
