@@ -154,7 +154,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `ci-router.yml` | CI (job: `Router`) | **Blocking — required check** | Single-gate router: classifies the diff, dispatches Tier 1 + Tier 2, aggregates into `CI / Router` |
 | `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate, Xrm capability guard; the DataGrid external-host gate is advisory until its flip |
 | `ci-tier2-advisory.yml` | CI Tier 2 (Advisory) | Advisory (reusable, called by the router) | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size; posts one deduplicated PR comment |
-| `client-tests.yml` | Client Tests (Jest) | Scheduled / advisory | Nightly jest baseline across every client package with a real `test` script (40 packages as of authoring) |
+| `client-tests.yml` | Client Tests | Scheduled / advisory | Nightly test baseline (jest, vitest, node:test) across every client package with a real `test` script (count discovered at runtime; 43 on 2026-10-12) |
 | `css-reset-gate.yml` | CSS Reset Gate | PR/push (scoped); reports only | Verifies every Code Page host `index.html` carries the box-sizing reset |
 | `deploy-bff-api.yml` | Deploy BFF API | Manual deploy | Build, test, publish a versioned artifact to blob storage (H9), deploy to staging slot, verify, swap to production, verify, auto-rollback |
 | `deploy-external-spa.yml` | Deploy External SPA (Static Web App) | Manual deploy | Build + deploy the external Secure Project Workspace SPA to Azure Static Web Apps |
@@ -559,7 +559,7 @@ One job runs `node scripts/check-html-css-reset.mjs --all`, verifying every Code
 |-----|---------|
 | `gated-jest` | Runs an explicit, ratchet-only list of jest suites (`ci-gated-suites.txt`) — 56 of the package's 56 suites as of 2026-09-28; fails if a listed suite is missing or if jest runs a different count than the manifest declares (no vacuous green) |
 | `typecheck` | Production-only TypeScript typecheck — fails on any production `error TS`; a pinned, equality-checked count of accepted test-file debt (68 lines as of the last re-baseline) must also match exactly |
-| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (office/AI/documents/domain/seam/filters/auth namespaces) with a floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
+| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (what the Office add-ins call: office, documents, record-search/visualization, rag send-to-index, communications send, file access, share-link auth; ~1,441 tests as of 2026-10-12, #1748/#1782) run as a 2-leg matrix (`api-office` / `rest`; checks `Server tests (office scope) (api-office)` and `(rest)`), each leg with its own floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
 | `lint` | ESLint over `shared/`, `word/`, `outlook/` with `--max-warnings 0` |
 
 **This workflow DOES fail its own run on a red job. It does NOT block a merge** — master's ruleset names only `Router` as required (see the note under [Pipeline Summary](#pipeline-summary)); each job's summary says so explicitly. The companion nightly baseline for the other 39 of 40 client packages is `client-tests.yml`.
@@ -616,13 +616,19 @@ One job (`build_and_deploy`) builds `@spaarke/auth` from source first (its `dist
 
 **Triggers**: `workflow_dispatch` only
 
-`build_and_package` builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (the manifest's `contentUrl` points at that already-deployed bundle), validates `appPackage/manifest.json` + icon assets, zips them into `appPackage.zip`, and uploads it as a build artifact; `deploy` republishes it as the longer-retention `teams-app-package` artifact. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app.
+**Inputs**: `environment` = `dev` (default) | `prod`. The first step of every job rejects any other value (a REST/`gh` dispatch can pass one the UI would refuse), and a workflow-level `concurrency` group `deploy-teams-app-{environment}` (`cancel-in-progress: false`) queues a second run for the same environment instead of overlapping it.
+
+`build_and_package` runs in the GitHub environment `external-spa-dev` / `external-spa-prod`. It builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (reading the same `VITE_*` environment variables as `deploy-external-spa.yml`), stages the manifest as `appPackage/build/stage/manifest.json` — `dev` copies `appPackage/manifest.json` byte for byte; `prod` renders `appPackage/manifest.prod.json` with the id taken from the environment variable `TEAMS_APP_ID` (must be a GUID, not the all-zero placeholder) — validates the **staged** file (required fields, no `webApplicationInfo` per ADR-028 A8, no unrendered `${{` placeholder) and the icon assets, zips `manifest.json` + `color.png` + `outline.png` into `appPackage.zip`, and uploads it as a build artifact. `deploy` republishes it as the longer-retention artifact. **Artifact names**: `dev` → `teams-app-package-build` / `teams-app-package`; `prod` → `teams-app-package-prod-build` / `teams-app-package-prod`. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app (the prod package is built only until go-live, task 073).
+
+**Variables** (GitHub environment variables, not secrets, set per environment): `VITE_BFF_API_URL`, `VITE_BACKENDS` (optional), `VITE_MSAL_AUTHORITY`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_BFF_SCOPE`, `VITE_TEAMS_MSAL_CLIENT_ID`, `VITE_TEAMS_MSAL_TENANT_ID`, `VITE_TEAMS_MSAL_BFF_SCOPE`, and `TEAMS_APP_ID` (prod). The owner-supplied list with the dev values is in `projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md` section 3; no environment-specific value is written in the workflow.
 
 #### `deploy-external-spa.yml` — Deploy External SPA (Static Web App)
 
 **Triggers**: `workflow_dispatch` only (manual-only until a later phase adds a push/path trigger)
 
-One job builds the external Secure Project Workspace SPA (Vite production build with hardcoded non-secret CIAM/MSAL identifiers as build-time env vars), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`.
+**Inputs**: `environment` = `dev` (default) | `prod`. The job runs in the GitHub environment `external-spa-dev` / `external-spa-prod` (put required reviewers on `external-spa-prod`; the prod run is a deliberate human act). The first step rejects any value other than `dev`/`prod`, and a workflow-level `concurrency` group `deploy-external-spa-{environment}` (`cancel-in-progress: false`) queues overlapping runs for the same environment.
+
+One job validates the environment's variables (a fail-closed preflight before the build: required values present; GUID, `api://{guid}/user_impersonation`, https and JSON-list formats; the authority must be an https URL whose path is one tenant GUID segment), builds the external Secure Project Workspace SPA (Vite production build; every `VITE_*` value is read from the environment's `vars.*` — nothing environment-specific is committed), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps: `dev` → `swa-spaarke-external-spa-dev`, `prod` → `swa-spaarke-external-spa-prod`. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod, an `external-spa-prod` environment secret; no fall-back to the dev token). **Variables**: see the task-043 notes section 3 (same list as `deploy-teams-app.yml`, minus `TEAMS_APP_ID`).
 
 ### Provisioning Artifact Publishers
 
@@ -675,7 +681,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — rolling tracking issue |
-| `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
+| `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
 | `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
@@ -700,7 +706,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 
 ### `client-tests.yml`
 
-Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (`max-parallel: 8`, `continue-on-error: true` per leg), and writes a combined pass/fail/install-failed table to the job summary plus a `client-test-baseline` artifact. Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
+Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (jest; vitest packages such as `external-spa` and node:test packages such as `EventCommands` are covered by the same `npm test` script) (`max-parallel: 8`, `continue-on-error: true` per leg; vitest packages get no `--ci`/`--reporters`, which vitest rejects), and writes a combined pass/fail/install-failed/deps-build-failed table to the job summary plus a `client-test-baseline` artifact. Each leg is `npm install` → **install + build the shared libraries the package depends on** → tests. The library set is derived from the package, never listed: `file:` dependencies (transitively; built when `main`/`types` point at `dist/`), siblings that any `../**/dist` path string in a `tsconfig*.json` file points into (not only `paths` entries), and siblings whose source the package imports by relative path without declaring them; any package with a `refreshTypes` script (PCF controls) also runs `npm run refreshTypes` for the gitignored `generated/ManifestTypes`. A library that will not install/build, or a failing `refreshTypes`, is reported as `deps-build-failed`, not `fail` — the package's tests never ran. Jest `moduleNameMapper` is deliberately not used to derive the set (installing a source-mapped library gives it a second copy of react). Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
 
 **Manual dispatch**: `gh workflow run client-tests.yml -f package_filter=<substring>` to scope to matching package paths.
 
@@ -1058,7 +1064,7 @@ stages until task 249, 2026-10-02 retired them.)*
 | Workflow | Secret |
 |---|---|
 | `deploy-office-addins.yml` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
-| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` |
+| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod) |
 
 ### Provisioning Artifact Publishers
 

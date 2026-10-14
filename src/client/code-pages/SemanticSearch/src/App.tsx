@@ -894,7 +894,6 @@ export const App: React.FC<AppProps> = ({
           savedSearches={savedSearches}
           currentSearchName={currentSearchName}
           onSelectSavedSearch={handleSelectSavedSearch}
-          onSaveCurrentSearch={handleSaveCurrentSearch}
           isSavedSearchesLoading={isSavedSearchesLoading}
           onCancel={handleCancelSearch}
         />

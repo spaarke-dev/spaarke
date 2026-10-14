@@ -29,12 +29,6 @@ export type { SmartTodoProps } from './SmartTodo';
 export { DocumentLibrary } from './DocumentLibrary';
 export type { DocumentLibraryProps } from './DocumentLibrary';
 
-export { SemanticSearch } from './SemanticSearch';
-export type { SemanticSearchProps } from './SemanticSearch';
-
-export { AiToolbar } from './AiToolbar';
-export type { AiToolbarProps } from './AiToolbar';
-
 export { InviteUserDialog } from './InviteUserDialog';
 
 export { IssuedGrantsList } from './IssuedGrantsList';

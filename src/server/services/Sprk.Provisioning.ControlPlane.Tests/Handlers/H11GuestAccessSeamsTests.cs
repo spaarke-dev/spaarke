@@ -29,7 +29,7 @@
 //     - roles already held are not associated again (second run writes nothing);
 //     - a refused alternate-key read says why (404 group rule vs other refusal);
 //     - an HTTP timeout is a Failure, not an escaped exception;
-//     - restrictguestuseraccess true/false/unreadable.
+//     - restrictGuestUserAccess true/false/unreadable.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -348,9 +348,13 @@ public sealed class H11GuestAccessSeamsTests
     }
 
     [Theory]
-    [InlineData("""{"value":[{"restrictguestuseraccess":false}]}""", typeof(GuestAccessOutcome.Allowed))]
-    [InlineData("""{"value":[{"restrictguestuseraccess":true}]}""", typeof(GuestAccessOutcome.Restricted))]
+    [InlineData("""{"value":[{"restrictGuestUserAccess":false}]}""", typeof(GuestAccessOutcome.Allowed))]
+    [InlineData("""{"value":[{"restrictGuestUserAccess":true}]}""", typeof(GuestAccessOutcome.Restricted))]
     [InlineData("""{"value":[{}]}""", typeof(GuestAccessOutcome.Failure))]
+    // The Web API property is the attribute's logical name, which is camel-case for this column and case-sensitive:
+    // `organizations?$select=restrictguestuseraccess` is a 400 on a live environment (found at T186, 2026-10-14).
+    // An all-lower-case key is therefore not the setting.
+    [InlineData("""{"value":[{"restrictguestuseraccess":false}]}""", typeof(GuestAccessOutcome.Failure))]
     public async Task ReadGuestAccessAsync_MapsTheOrganizationSetting(string body, Type expected)
     {
         var http = new FakeHttp(_ => Json(HttpStatusCode.OK, body));
@@ -358,7 +362,7 @@ public sealed class H11GuestAccessSeamsTests
         var outcome = await Writer(http).ReadGuestAccessAsync(EnvUrl, TenantId, CancellationToken.None);
 
         outcome.Should().BeOfType(expected);
-        http.Requests.Single().Uri.Should().EndWith("/api/data/v9.2/organizations?$select=restrictguestuseraccess");
+        http.Requests.Single().Uri.Should().EndWith("/api/data/v9.2/organizations?$select=restrictGuestUserAccess");
     }
 
     // ---------------- helpers ----------------

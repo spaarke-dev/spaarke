@@ -314,7 +314,7 @@ public class IdentityLinkReconciliationTests
 
         var oidB = Guid.NewGuid();
         var denied = await Binder(_store).ResolveWorkforceCallerAsync(
-            WorkforceUser(oidB, CustomerTenant, email: SharedEmail), oidB, CancellationToken.None);
+            WorkforceUser(oidB, CustomerTenant, email: SharedEmail), oidB, stampTenantId: null, CancellationToken.None);
         denied.DenyCode.Should().Be(ContactBindingDecision.DenyContactBoundToDifferentOid);
         _store.Contacts[c].Flag!.Parties.Should().HaveCount(2, "a second identity on a flagged contact is recorded, not swallowed");
 

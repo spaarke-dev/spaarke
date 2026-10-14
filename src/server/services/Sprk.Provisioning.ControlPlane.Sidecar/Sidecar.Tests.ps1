@@ -163,3 +163,205 @@ Describe 'Request validation' {
         (Test-ReadRequest -Body $body) -join ' ' | Should -BeLike '*organization is required*'
     }
 }
+
+# Task 263 (H14m): the customer's shared mailbox. Get-before-set — every Drift creates nothing; a second ensure writes
+# nothing; the read route never writes.
+Describe 'Customer shared mailbox (H14m)' {
+    BeforeAll {
+        function global:Get-Recipient { [CmdletBinding()] param($Filter) }
+        function global:Get-Group { [CmdletBinding()] param($Identity) }
+        function global:New-Mailbox { [CmdletBinding()] param([switch]$Shared, $Name, $Alias, $DisplayName, $PrimarySmtpAddress) }
+        function global:Add-DistributionGroupMember { [CmdletBinding()] param($Identity, $Member, [switch]$BypassSecurityGroupManagerCheck) }
+        function global:Test-ServicePrincipalAuthorization { [CmdletBinding()] param($Identity, $Resource) }
+        $global:T263Roles = @('Application Mail.Read', 'Application Mail.ReadWrite', 'Application Mail.Send')
+        function global:T263Request($Name = 'sprk-acme-mail', $Group = 'Spaarke-AppAccess-acme') {
+            [pscustomobject]@{ tenantId = 't'; organization = 'contoso.onmicrosoft.com'; appId = '11111111-2222-3333-4444-555555555555'
+                               scopeGroupId = '77777777-8888-9999-0000-111111111111'; expectedScopeGroupName = $Group; name = $Name
+                               displayName = 'Acme Corp'; primarySmtpAddress = 'acme@contoso.com'; roles = $global:T263Roles; correlationId = 'run-1' }
+        }
+        function global:T263Mbx($Name = 'sprk-acme-mail', $Type = 'SharedMailbox', $Address = 'acme@contoso.com') {
+            [pscustomobject]@{ Name = $Name; Alias = $Name; PrimarySmtpAddress = $Address; RecipientTypeDetails = $Type; DistinguishedName = "CN=$Name"; WhenCreatedUTC = '2026-10-10T10:00:00' }
+        }
+        function global:T263Grp($Name) { [pscustomobject]@{ Name = $Name; DistinguishedName = "CN=$Name"; RecipientTypeDetails = 'MailUniversalSecurityGroup' } }
+    }
+    BeforeEach {
+        $global:T263GroupName = 'Spaarke-AppAccess-acme'
+        $global:T263Mailboxes = @()                       # what the name/alias/address filter finds
+        $global:T263MemberOf = @()                        # the groups the mailbox is a direct member of
+        $global:T263InScope = $true
+        Mock -ModuleName SidecarCore Get-Recipient -ParameterFilter { $Filter -like 'ExternalDirectoryObjectId*' } { @([pscustomobject]@{ DistinguishedName = "CN=$global:T263GroupName" }) }
+        Mock -ModuleName SidecarCore Get-Recipient -ParameterFilter { $Filter -like 'Alias -eq*' } { $global:T263Mailboxes }
+        Mock -ModuleName SidecarCore Get-Recipient -ParameterFilter { $Filter -like 'Members -eq*' } { $global:T263MemberOf }
+        # MemberOfGroup -eq '<scope group DN>' -and Alias -eq '<name>': the mailbox, when the scope group is among its groups.
+        Mock -ModuleName SidecarCore Get-Recipient -ParameterFilter { $Filter -like 'MemberOfGroup -eq*' } {
+            if (@($global:T263MemberOf | Where-Object { $Filter -like "*'$($_.DistinguishedName)'*" }).Count -gt 0) { $global:T263Mailboxes }
+        }
+        Mock -ModuleName SidecarCore Get-Group { T263Grp $global:T263GroupName }
+        Mock -ModuleName SidecarCore Test-CustomerMailboxWritePermission { @() }
+        Mock -ModuleName SidecarCore New-Mailbox { $m = T263Mbx $Name; $global:T263Mailboxes = @($m); $m }
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember { $global:T263MemberOf = @(T263Grp $global:T263GroupName) }
+        Mock -ModuleName SidecarCore Test-ServicePrincipalAuthorization {
+            $global:T263Roles | ForEach-Object { [pscustomobject]@{ RoleName = $_; InScope = $global:T263InScope } }
+        }
+    }
+
+    It 'creates the shared mailbox, adds it to the scope group and verifies every role' {
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        $r.created | Should -BeTrue
+        $r.verified | Should -BeTrue
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 1 -Exactly -ParameterFilter { $Shared -and $Name -eq 'sprk-acme-mail' -and $Alias -eq 'sprk-acme-mail' -and $PrimarySmtpAddress -eq 'acme@contoso.com' -and $DisplayName -eq 'Acme Corp' }
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme' -and $Member -eq 'CN=sprk-acme-mail' -and $BypassSecurityGroupManagerCheck }
+    }
+
+    It 'writes nothing on a second ensure when the mailbox is already in place' {
+        $global:T263Mailboxes = @(T263Mbx)
+        $global:T263MemberOf = @(T263Grp 'Spaarke-AppAccess-acme')
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'AlreadyCompliant'
+        $r.verified | Should -BeTrue
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 0 -Exactly
+    }
+
+    It 'is Drift, writing nothing, when a same-named mailbox exists outside the scope group' {
+        $global:T263Mailboxes = @(T263Mbx)
+        $global:T263MemberOf = @()
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*not a member of the scope group*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 0 -Exactly
+    }
+
+    It 'is Drift when the mailbox is also in another customer''s group' {
+        $global:T263Mailboxes = @(T263Mbx)
+        $global:T263MemberOf = @((T263Grp 'Spaarke-AppAccess-acme'), (T263Grp 'Spaarke-AppAccess-other'))
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*Spaarke-AppAccess-other*'
+    }
+
+    It 'is Drift, writing nothing, when the address belongs to a foreign mailbox (another name, a user mailbox)' {
+        $global:T263Mailboxes = @(T263Mbx -Name 'sprk-other-mail' -Type 'UserMailbox')
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*UserMailbox*'
+        ($r.conflicts -join ' ') | Should -BeLike '*not this customer''s mailbox*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'is Drift, writing nothing, when the scope group is not this customer''s' {
+        $global:T263GroupName = 'Spaarke-AppAccess-other'
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*not this customer''s group*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'retries the join while a new mailbox replicates, then succeeds' {
+        InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
+        $global:T263JoinFailures = 2
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember {
+            if ($global:T263JoinFailures-- -gt 0) { throw "Couldn't find object 'CN=sprk-acme-mail'." }
+            $global:T263MemberOf = @(T263Grp $global:T263GroupName)
+        }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 3 -Exactly
+    }
+
+    It 'reports Failure with created = true when the join never succeeds' {
+        InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember { throw 'Access denied' }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.created | Should -BeTrue
+        $r.diagnostic | Should -BeLike '*could not add it to the scope group*Access denied*'
+    }
+
+    It 'fails BEFORE creating anything when PRQ-E-16 is not applied' {
+        Mock -ModuleName SidecarCore Test-CustomerMailboxWritePermission { @('Add-DistributionGroupMember -BypassSecurityGroupManagerCheck') }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.diagnostic | Should -BeLike '*PRQ-E-16*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'reports created but not verified when a role is not in scope yet' {
+        $global:T263InScope = $false
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        $r.verified | Should -BeFalse
+        @($r.authorization | Where-Object { -not $_.inScope }).Count | Should -Be 3
+    }
+
+    It 'fails when the scope group cannot be found' {
+        Mock -ModuleName SidecarCore Get-Recipient -ParameterFilter { $Filter -like 'ExternalDirectoryObjectId*' } { @() }
+        Mock -ModuleName SidecarCore Get-Group { }
+
+        (Invoke-CustomerMailboxEnsure -Request (T263Request)).outcome | Should -Be 'Failure'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'reads state without writing anything' {
+        $global:T263Mailboxes = @(T263Mbx)
+        $global:T263MemberOf = @(T263Grp 'Spaarke-AppAccess-acme')
+
+        $r = Get-CustomerMailboxState -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        $r.exists | Should -BeTrue
+        @($r.conflicts).Count | Should -Be 0
+        @($r.authorization | Where-Object { $_.inScope }).Count | Should -Be 3
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 0 -Exactly
+    }
+
+    It 'reads a missing mailbox as exists = false (not a failure)' {
+        $r = Get-CustomerMailboxState -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        $r.exists | Should -BeFalse
+    }
+}
+
+Describe 'Customer mailbox request validation' {
+    BeforeAll {
+        function global:T263Body($Group = 'Spaarke-AppAccess-acme', $Name = 'sprk-acme-mail', $Role = 'Application Mail.Send') {
+            [pscustomobject]@{ tenantId = 't'; organization = 'contoso.onmicrosoft.com'; appId = '11111111-2222-3333-4444-555555555555'
+                               scopeGroupId = 'grp@contoso.com'; expectedScopeGroupName = $Group; name = $Name
+                               displayName = 'Acme'; primarySmtpAddress = 'acme@contoso.com'; roles = @($Role); correlationId = 'c' }
+        }
+    }
+    It 'accepts a complete request' {
+        (Test-CustomerMailboxRequest -Body (T263Body)).Count | Should -Be 0
+    }
+    It 'refuses a mailbox name and a scope group that name different customers' {
+        (Test-CustomerMailboxRequest -Body (T263Body -Group 'Spaarke-AppAccess-other')) -join ' ' | Should -BeLike '*different customers*'
+    }
+    It 'refuses a name outside the sprk-{customerId}-mail pattern and an unknown role' {
+        $errors = (Test-CustomerMailboxRequest -Body (T263Body -Name 'ceo' -Role 'Application Exchange Full Access')) -join ' '
+        $errors | Should -BeLike '*sprk-{customerId}-mail*'
+        $errors | Should -BeLike '*not one the sidecar knows*'
+    }
+}

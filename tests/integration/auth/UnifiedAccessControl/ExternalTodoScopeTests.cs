@@ -614,6 +614,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "the parent flows from the ROUTE — the root gated must be the root written");
         _fixture.Data.LastCreateCallerContactId.Should().Be(_fixture.Principal!.ContactId,
             "UAC-r2 task 152: the calling contact is the triggering person — it becomes Assigned To");
+        _fixture.Data.LastCreateCreator.Should().BeSameAs(_fixture.Principal,
+            "task 030 (FR-25): the creator stamp comes from the principal the route resolved, not one rebuilt downstream");
     }
 
     // ---- CREATE: negative (out of scope), one per root ----
@@ -1099,6 +1101,18 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             = (ExternalDataService.TodoRootKind.None, null, null);
         public bool ThrowOnLookup { get; set; }
 
+        /// <summary>Task 187: what the live-parent check answers (a to-do whose live parents are ordinary, unless a test says so).</summary>
+        public ExternalDataService.LiveParentDecision LiveParents { get; set; } = ExternalDataService.LiveParentDecision.Readable;
+
+        public int LiveParentChecks { get; private set; }
+
+        public override Task<ExternalDataService.LiveParentDecision> CheckLiveParentsAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            LiveParentChecks++;
+            return Task.FromResult(LiveParents);
+        }
+
         public int UpdateCallCount { get; private set; }
         public Guid? LastUpdatedTodoId { get; private set; }
         public UpdateExternalTodoRequest? LastRequest { get; private set; }
@@ -1120,6 +1134,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         {
             TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null);
             ThrowOnLookup = false;
+            LiveParents = ExternalDataService.LiveParentDecision.Readable;
+            LiveParentChecks = 0;
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
@@ -1130,13 +1146,17 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateRequest = null;
             LastCreateOwningTeamId = null;
             LastCreateCallerContactId = null;
+            LastCreateCreator = null;
         }
+
+        /// <summary>Task 030 review: the creator principal the route handed the create (FR-25 stamp source).</summary>
+        public CallerPrincipal? LastCreateCreator { get; private set; }
 
         /// <summary>Task 152: the calling contact the endpoint handed the create (becomes Assigned To).</summary>
         public Guid? LastCreateCallerContactId { get; private set; }
 
         public override Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
-            ExternalDataService.TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+            ExternalDataService.TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
         {
             ListCallCount++;
             LastListArgs = (rootKind, rootId);
@@ -1145,13 +1165,15 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId,
-            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CancellationToken ct = default)
+            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
             CreateCallCount++;
             LastCreateArgs = (rootKind, rootId);
             LastCreateRequest = request;
             LastCreateOwningTeamId = owningTeamId;
             LastCreateCallerContactId = callerContactId;
+            LastCreateCreator = creator;
             return Task.FromResult(new ExternalTodoDto
             {
                 SprkTodoid = Guid.NewGuid().ToString(),

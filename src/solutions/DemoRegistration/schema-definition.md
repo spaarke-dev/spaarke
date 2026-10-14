@@ -4,7 +4,7 @@
 > **Display Name**: Registration Request
 > **Plural Display Name**: Registration Requests
 > **Ownership**: Organization Owned
-> **Target Environment**: Demo Dataverse (`spaarke-demo.crm.dynamics.com`)
+> **Target Environment**: the target demo Dataverse environment (the original `spaarke-demo.crm.dynamics.com` was retired 2026-10-14; the demo is now the ACME stamp built by provisioning, T186)
 > **Publisher Prefix**: `sprk_`
 > **Solution**: DemoRegistration (unmanaged, per ADR-027)
 
@@ -636,7 +636,7 @@ from `docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md`.
 ### 9.1 Authentication Setup
 
 ```powershell
-$Environment = "spaarke-demo.crm.dynamics.com"
+$Environment = "myenv.crm.dynamics.com"
 $token = (az account get-access-token --resource "https://$Environment" --query accessToken -o tsv)
 $BaseUrl = "https://$Environment/api/data/v9.2"
 
@@ -963,4 +963,4 @@ Write-Host "Customizations published for sprk_registrationrequest" -ForegroundCo
 ---
 
 *Schema definition for task 012 — Spaarke Self-Service Registration App project.*
-*Target environment: spaarke-demo.crm.dynamics.com (Demo Dataverse, unmanaged solution per ADR-027)*
+*Target environment at the time: spaarke-demo.crm.dynamics.com (Demo Dataverse, unmanaged solution per ADR-027) — retired 2026-10-14.*

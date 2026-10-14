@@ -115,6 +115,7 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
 
     [Theory]
     [InlineData(HandlerIds.H14a)]
+    [InlineData(HandlerIds.H14m)]   // task 263
     public void H14SubStepId_IsNotKeyedRegistered(string subStepHandlerId)
     {
         using var scope = _factory.Services.CreateScope();

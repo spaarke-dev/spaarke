@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Skip-via-return.</b> Every test starts with an <c>if (!_fixture.IsLive) return;</c> — the
+/// <b>Skip-via-SkippableFact.</b> Every live test is a <c>[SkippableFact]</c> that starts with <c>Skip.IfNot(_fixture.IsLive, ...)</c>, so a run without the live environment reports Skipped rather than a vacuous Passed — the
 /// established repo convention (see <see cref="LiveIntegrationFixture"/>'s remarks for the precedent
 /// and why <c>[Trait("Category","LiveIntegration")]</c> alone would not stop this suite from trying to
 /// reach Spaarke Dev in the default CI run). The one exception is
@@ -81,10 +81,10 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
         allows.Should().NotThrow();
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task DestructiveHelper_NeverCallsGraph_WhenTargetIsNotTheFixtureContainer()
     {
-        if (!_fixture.IsLive) return;
+        Skip.IfNot(_fixture.IsLive, "Live SPE environment not configured (LiveIntegrationFixture.IsLive is false).");
 
         // Structural proof, not just the pure-function proof above: the guard sits INSIDE the same
         // helper a real destructive test calls, before the Graph request is issued, so a caller
@@ -96,7 +96,7 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
 
     private Task<bool> SoftDeleteThroughGuard(string containerId)
     {
-        // ContainerId! — every caller of this helper is behind an `if (!_fixture.IsLive) return;`
+        // ContainerId! — every caller of this helper is behind a `Skip.IfNot(_fixture.IsLive, ...)`
         // guard, and IsLive true is exactly the condition under which InitializeAsync populated it.
         ThrowawayContainerGuard.EnsureProvisionedByFixture(containerId, _fixture.ContainerId!);
         return _fixture.GraphService.SoftDeleteContainerAsync(_fixture.GraphClient, containerId);
@@ -106,10 +106,10 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
     // Destructive lifecycle — throwaway container ONLY (NFR-07).
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
+    [SkippableFact]
     public async Task ThrowawayContainer_DeleteRestorePermanentDelete_SucceedsAndLeavesPreExistingContainersUntouched()
     {
-        if (!_fixture.IsLive) return;
+        Skip.IfNot(_fixture.IsLive, "Live SPE environment not configured (LiveIntegrationFixture.IsLive is false).");
 
         // ContainerId! — safe: IsLive true means InitializeAsync already populated it.
         var containerId = _fixture.ContainerId!;
@@ -152,10 +152,10 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
     // (NFR-07: "read-only and additive operations may use the existing ones").
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
+    [SkippableFact]
     public async Task ContainerTypePermissionGrant_ReadPath_ShowsTheOwningAppsRealGrant()
     {
-        if (!_fixture.IsLive) return;
+        Skip.IfNot(_fixture.IsLive, "Live SPE environment not configured (LiveIntegrationFixture.IsLive is false).");
 
         // "registration" + "permission": the owning app (170c98e1, SDAP-PCF-CLIENT) is itself a
         // registered consuming app on its own container type — Graph returns that grant unprompted,
@@ -176,10 +176,10 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
         consumers!.Should().Contain(c => c.AppId == _fixture.OwningAppClientId);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ConsumingAppRegistration_WritePath_ReturnsApiNotFound_ADocumentedGraphDefect()
     {
-        if (!_fixture.IsLive) return;
+        Skip.IfNot(_fixture.IsLive, "Live SPE environment not configured (LiveIntegrationFixture.IsLive is false).");
 
         // Characterization test, not a "this works" claim — see the class remarks. Confirmed live on
         // BOTH API versions: POSTing to the exact URL that GETs successfully above returns
@@ -227,22 +227,17 @@ public sealed class ContainerLifecycleLiveTests : IClassFixture<LiveIntegrationF
     // Role (container-type OWNER grant) — delegated + beta only, no app-only fallback (task 027).
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
+    [SkippableFact]
     public async Task ContainerTypeOwnerGrant_RoleFlow_RequiresADelegatedToken_SkippedWithoutOne()
     {
-        if (!_fixture.IsLive || !_fixture.HasDelegatedToken)
-        {
-            // Container-type OWNER grants are delegated-and-beta-only — confirmed live 2026-08-25 by
-            // task 027 (notes/task-027-findings.md §2: 403 app-only on both API versions; delegated +
-            // beta is the only combination Graph will serve). Delegated means an interactive (or
-            // device-code) sign-in a human completes in a browser, which this automated test runner
-            // cannot do for itself. An operator can run notes/delegated-diagnostics.py's device-code
-            // flow once and export the resulting access token as SPE_LIVE_DELEGATED_TOKEN before
-            // `dotnet test --filter Category=LiveIntegration` to exercise this test; absent that
-            // token (true for the default CI baseline and for this task's own execution — see the
-            // task notes), this is a documented, deliberate no-op — not a silently-omitted flow.
-            return;
-        }
+        // Container-type OWNER grants are delegated-and-beta-only — confirmed live 2026-08-25 by
+        // task 027 (notes/task-027-findings.md §2: 403 app-only on both API versions). An automated runner
+        // cannot complete the interactive sign-in; an operator may export SPE_LIVE_DELEGATED_TOKEN
+        // (see notes/delegated-diagnostics.py) before `dotnet test --filter Category=LiveIntegration`.
+        // Absent that token this reports Skipped, never a vacuous Passed.
+        Skip.IfNot(_fixture.IsLive && _fixture.HasDelegatedToken,
+            "Needs a live SPE environment and SPE_LIVE_DELEGATED_TOKEN (delegated Graph token).");
+
 
         var delegatedClient = _fixture.BuildDelegatedGraphClient();
 

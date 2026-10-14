@@ -127,17 +127,21 @@ public class AgentMiddlewareTests
     // AgentCostControlMiddleware tests
     // =========================================================================
 
-    [Fact(Skip = "AgentCostControlMiddleware constructor signature changed - budget parameter no longer accepted")]
+    [Fact]
     public async Task CostControlMiddleware_ReturnsPoliteMessage_WhenBudgetExceeded()
     {
-        // Arrange — budget of 0 tokens means immediately exceeded
-        var fakeAgent = new FakeAgent("This should not appear");
+        // Arrange — a budget of 0 (or less) falls back to the 10,000 default, so use 1: the first
+        // response ("Hello world!" = 12 chars -> 3 estimated tokens) exhausts it.
+        var fakeAgent = new FakeAgent("Hello world!");
         var loggerMock = new Mock<ILogger<SprkChatAgentFactory>>();
-        var sut = new AgentCostControlMiddleware(fakeAgent, loggerMock.Object, maxTokenBudget: 0);
+        var sut = new AgentCostControlMiddleware(fakeAgent, loggerMock.Object, maxTokenBudget: 1);
+        var history = Array.Empty<AiChatMessage>();
+        await DrainAsync(sut.SendMessageAsync("first", history, CancellationToken.None));
+        fakeAgent.CallCount.Should().Be(1);
 
         // Act
         var results = new List<ChatResponseUpdate>();
-        await foreach (var update in sut.SendMessageAsync("hi", Array.Empty<AiChatMessage>(), CancellationToken.None))
+        await foreach (var update in sut.SendMessageAsync("second", history, CancellationToken.None))
         {
             results.Add(update);
         }
@@ -145,7 +149,7 @@ public class AgentMiddlewareTests
         // Assert — should return budget exceeded message instead of calling inner agent
         results.Should().HaveCount(1);
         results[0].Text.Should().Be(AgentCostControlMiddleware.BudgetExceededMessage);
-        fakeAgent.CallCount.Should().Be(0, "inner agent should not be called when budget is exceeded");
+        fakeAgent.CallCount.Should().Be(1, "inner agent should not be called when budget is exceeded");
     }
 
     [Fact]
@@ -310,8 +314,8 @@ public class AgentMiddlewareTests
         results[0].Text.Should().Be("This is a perfectly safe response.");
     }
 
-    [Fact(Skip = "AgentContentSafetyMiddleware PII pattern matching changed - test SSN pattern no longer triggers warning")]
-    public async Task ContentSafetyMiddleware_LogsWarning_WhenPatternDetected()
+    [Fact]
+    public async Task ContentSafetyMiddleware_LogsWarningWithCountOnly_WhenPatternDetected()
     {
         // Arrange
         var fakeAgent = new FakeAgent("SSN: 123-45-6789");
@@ -321,15 +325,25 @@ public class AgentMiddlewareTests
         // Act
         await DrainAsync(sut.SendMessageAsync("hi", Array.Empty<AiChatMessage>(), CancellationToken.None));
 
-        // Assert — a warning should be logged with pattern name
+        // Assert — one warning carrying the matched-pattern COUNT (the SSN pattern is the only match)
         loggerMock.Verify(
             l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("SSN")),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("filtered 1 pattern types")),
                 null,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+
+        // AIPL-057: the matched content must never be logged
+        loggerMock.Verify(
+            l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("123-45-6789")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]

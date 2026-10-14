@@ -332,11 +332,16 @@ public sealed class SecureChildReconciler
     private readonly IConfiguration _configuration;
     private readonly ILogger<SecureChildReconciler> _logger;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
+    private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
 
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
     /// compiling. The host registers the hook unconditionally, with its Null-Object.</param>
+    /// <param name="threads">spaarkeai-word-add-in-r1 task 129: after a re-filed COMMUNICATION, its thread follows the filing
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>) — here, the one step
+    /// every re-file writer runs, so it runs once per filing. Optional so the test compositions keep compiling; the host
+    /// registers it unconditionally.</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -344,8 +349,10 @@ public sealed class SecureChildReconciler
         DataverseWebApiClient webApi,
         IConfiguration configuration,
         ILogger<SecureChildReconciler> logger,
-        Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null)
+        Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
     {
+        _threads = threads;
         _dataverse = dataverse;
         _ownership = ownership;
         _shares = shares;
@@ -780,6 +787,11 @@ public sealed class SecureChildReconciler
             table, childId,
             () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault),
             ct).ConfigureAwait(false);
+
+        // spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so the email shows on the
+        // record's Messages panel (the panel lists threads by the thread's own regarding). Never throws.
+        if (table == CommunicationTable && _threads is not null)
+            await _threads.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
 
         if (!SecureChildLineage.IsChild(table))
             return null;

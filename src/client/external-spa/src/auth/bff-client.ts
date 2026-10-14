@@ -38,20 +38,29 @@
  * HOST-DETECTION WIRING (task 012 — Teams host adapter)
  * ------------------------------------------------------
  * `bffApiCall` acquires its token via `acquireActiveBffToken()`, a pluggable seam in msal-auth.ts
- * that defaults to the CIAM strategy (`acquireBffToken`) — byte-for-byte unchanged behavior for the
+ * that defaults to the CIAM strategy (`acquireBffToken`) — the same request shape as before for the
  * standalone SPA (FR-15). The Teams host adapter re-points this seam at the Teams workforce
  * strategy (task 011) once at bootstrap, so this SAME module — no fork — serves BFF calls correctly
  * for both hosts. See `src/client/external-spa/src/host/TeamsHostAdapter.ts`.
+ *
+ * RUN-TIME BACKEND (task 041 — FR-17, NFR-02)
+ * -------------------------------------------
+ * There is no build-time BFF URL. Each request reads the ACTIVE backend once (`backend-selection.ts`: the T240c
+ * directory, or dev config until it ships — never a link or query string) and uses that one record for BOTH the
+ * request URL and the token scope (`acquireActiveBffToken(backend.bffScope)`), so a token for one customer's BFF is
+ * never sent to another origin. No active backend → the call rejects before any token or fetch (fail closed).
  *
  * See: docs/architecture/power-pages-spa-guide.md — Authentication section
  * See: notes/auth-migration-b2b-msal.md
  * See: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — external SPA out-of-scope rationale
  */
 
-import { BFF_API_URL } from '../config';
-import { acquireActiveBffToken } from './msal-auth';
+import { acquireActiveBffToken, type BffTokenAcquireOptions } from './msal-auth';
+import { bffRequestUrl, getActiveBackend } from './backend-selection';
+import { INVITE_CODE_HEADER, clearInviteCode, inviteCodeFor } from './invite-code';
 import { ApiError } from '../types';
 import { getMockResponse } from '../mocks/mock-service';
+import { isDevMockEnabled } from '../dev-mock';
 
 // ---------------------------------------------------------------------------
 // Request / Response types for BFF endpoints
@@ -138,6 +147,13 @@ export interface ExternalUserContextResponse {
   contactId: string;
   /** The authenticated user's email */
   email: string;
+  /**
+   * The caller's OWN Dataverse systemuser id - a licensed workforce (systemuser) principal only. Optional: `null` (or
+   * absent, from a BFF that predates it) for a CIAM partner and for a workforce contact with no systemuser; the BFF
+   * never sends the empty GUID. The detail view compares it with a row's `sprk_createdbyperson` stamp to offer Delete
+   * (task 054); the server's delete check stays the authority.
+   */
+  systemUserId?: string | null;
   /** List of projects the user can access, with their current access level */
   projects: Array<{
     /** Secure Project record ID */
@@ -156,31 +172,28 @@ export interface ExternalUserContextResponse {
 /**
  * Make an authenticated call to the BFF API.
  *
- * - Prepends BFF_API_URL to path.
+ * - Prepends the ACTIVE backend's base URL to path (task 041; never a URL from a link).
  * - Adds `Authorization: Bearer {token}` header (MSAL-acquired OAuth token).
- * - On 401: acquires a fresh token (MSAL handles silent refresh / redirect) and retries once.
+ * - On 401: forces a network token refresh (MSAL handles silent refresh / redirect) and retries once.
  * - Throws ApiError on any non-2xx response (including after the retry).
  *
- * @param path    API path relative to BFF_API_URL (e.g. "/api/v1/external/me")
+ * @param path    Root-relative API path on the active backend (e.g. "/api/v1/external/me")
  * @param options Standard RequestInit options (method, body, headers, etc.)
+ * @param auth    Token-acquisition options. `{ noInteraction: true }` is for a TIMER-driven background read only (the
+ *                notification bell's poll): if the token cannot be had silently the call rejects with
+ *                `SignInRequiredError` instead of starting a sign-in redirect. Absent, every call acquires exactly as before.
  * @returns Parsed JSON response body typed as T.
  */
-export async function bffApiCall<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+export async function bffApiCall<T>(
+  path: string,
+  options: RequestInit = {},
+  auth?: Pick<BffTokenAcquireOptions, 'noInteraction'>
+): Promise<T> {
+  if (isDevMockEnabled()) {
     return getMockResponse<T>(path, options);
   }
 
-  const token = await acquireActiveBffToken();
-  const response = await executeFetch(path, options, token);
-
-  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
-  if (response.status === 401) {
-    const freshToken = await acquireActiveBffToken();
-    const retryResponse = await executeFetch(path, options, freshToken);
-    return parseResponse<T>(retryResponse);
-  }
-
-  return parseResponse<T>(response);
+  return parseResponse<T>(await authorizedFetch(path, options, auth));
 }
 
 /**
@@ -197,19 +210,12 @@ export async function bffApiCall<T>(path: string, options: RequestInit = {}): Pr
  * ("Pointers are never surfaced to the client"). So a JSON-parsing caller can
  * never consume it; the bytes must be read directly.
  *
- * @param path    API path relative to BFF_API_URL
+ * @param path    Root-relative API path on the active backend
  * @param options Standard RequestInit options
  * @returns The response body as a Blob.
  */
 export async function bffApiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
-  const token = await acquireActiveBffToken();
-  let response = await executeFetch(path, options, token);
-
-  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
-  if (response.status === 401) {
-    const freshToken = await acquireActiveBffToken();
-    response = await executeFetch(path, options, freshToken);
-  }
+  const response = await authorizedFetch(path, options);
 
   if (!response.ok) {
     let message: string;
@@ -225,6 +231,39 @@ export async function bffApiBlob(path: string, options: RequestInit = {}): Promi
 }
 
 /**
+ * Internal helper shared by {@link bffApiCall} and {@link bffApiBlob}: read the active backend ONCE, build the URL on
+ * its origin, acquire a token for ITS scope, fetch; on 401 acquire a fresh token for the same scope and retry once.
+ * The URL and the scope come from the same snapshot, so a backend switch mid-request cannot pair one backend's token
+ * with another backend's host.
+ */
+async function authorizedFetch(
+  path: string,
+  options: RequestInit,
+  auth?: Pick<BffTokenAcquireOptions, 'noInteraction'>
+): Promise<Response> {
+  const backend = getActiveBackend();
+  const url = bffRequestUrl(backend, path);
+  // Passed only when set, so the default call shapes (`acquire(backend)`, `acquire(backend, { forceRefresh: true })`) stay.
+  const noInteraction = auth?.noInteraction ? ({ noInteraction: true } as const) : undefined;
+
+  // Task 185: the invite code captured from the invite link (invite-code.ts), sent until the first CIAM-plane 2xx.
+  const inviteCode = inviteCodeFor(backend);
+
+  const token = await acquireActiveBffToken(backend, noInteraction);
+  let response = await executeFetch(url, options, token, inviteCode);
+
+  // On 401, force a NETWORK refresh (MSAL redeems the refresh token, or redirects) and retry once. Without
+  // `forceRefresh` MSAL would return the cached access token the BFF just refused: the same 401, a sign-in loop.
+  if (response.status === 401) {
+    const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true, ...noInteraction });
+    response = await executeFetch(url, options, freshToken, inviteCode);
+  }
+
+  if (inviteCode && response.ok) clearInviteCode();
+  return response;
+}
+
+/**
  * Internal helper: perform the actual fetch with the Authorization header set.
  *
  * This is the SOLE Bearer-literal site in the external SPA — the project's
@@ -232,15 +271,19 @@ export async function bffApiBlob(path: string, options: RequestInit = {}): Promi
  * outside `authenticatedFetch.ts` will allowlist this path because the
  * external SPA is out of scope for `@spaarke/auth` (see file header).
  */
-async function executeFetch(path: string, options: RequestInit, token: string): Promise<Response> {
-  const url = `${BFF_API_URL}${path}`;
-
+async function executeFetch(
+  url: string,
+  options: RequestInit,
+  token: string,
+  inviteCode: string | null = null
+): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     // Auth v2 (D-AUTH-7): External SPA uses sessionStorage MSAL (B2B threat
     // model) — opts out of @spaarke/auth's authenticatedFetch. This is the
     // single allowlisted Bearer-literal site for this surface.
     Authorization: `Bearer ${token}`,
+    ...(inviteCode ? { [INVITE_CODE_HEADER]: inviteCode } : {}),
     ...(options.headers as Record<string, string> | undefined),
   };
 

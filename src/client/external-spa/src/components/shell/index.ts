@@ -20,3 +20,5 @@ export type { WidgetLibraryModalProps } from './WidgetLibraryModal';
 
 export { useWorkspaceTabs, QUICK_START_TAB } from './useWorkspaceTabs';
 export type { WidgetTab, UseWorkspaceTabsResult } from './useWorkspaceTabs';
+
+export { NotificationBell } from './NotificationBell';

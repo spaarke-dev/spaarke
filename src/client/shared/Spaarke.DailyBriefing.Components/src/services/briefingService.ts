@@ -324,8 +324,9 @@ export async function fetchAiBriefing(channels: ChannelFetchResult[]): Promise<B
       };
     }
 
-    // 401 = auth issue (already retried by authenticatedFetch)
-    if (error.statusCode === 401) {
+    // 401 = auth issue (already retried by authenticatedFetch); 403 = the caller may not read it —
+    // same handling as fetchBriefingLive / emailBriefingToColleague, not the generic red error.
+    if (error.statusCode === 401 || error.statusCode === 403) {
       return {
         status: 'unavailable',
         reason: 'Authentication required for AI briefing.',
@@ -476,8 +477,9 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
       };
     }
 
-    // 401 = auth issue (already retried by authenticatedFetch)
-    if (error.statusCode === 401) {
+    // 401 = auth issue (already retried by authenticatedFetch); 403 = the caller may not read it —
+    // same handling as fetchBriefingLive / emailBriefingToColleague, not the generic red error.
+    if (error.statusCode === 401 || error.statusCode === 403) {
       return {
         status: 'unavailable',
         reason: 'Authentication required for AI narration.',

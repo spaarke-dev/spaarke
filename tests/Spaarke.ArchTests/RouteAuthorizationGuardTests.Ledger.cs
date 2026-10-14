@@ -361,6 +361,23 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/ExternalAccess/ExternalModuleDataEndpoints.cs", Scope.GroupGated,
             "scoped module reads (Tier2ScopeFilterInjector, IsRecordAccessible) and schema/view passthrough, under the nested "
             + "/api/dataverse group of /api/v1/external."),
+        new GovernedFile("Api/ExternalAccess/ExternalMessageEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/{root}/{id}/messages (spaarke-SPA-external-access-platform-r3 task 033, FR-04) on the "
+            + "COLLABORATION group: the record is gated against the caller principal's accessible set through the module "
+            + "registry (IsRecordAccessible; ScopeRows for invoices and the requester-scoped service requests) before the "
+            + "app-only message read; an absent record and a foreign one are the same 403. POST (task 034, FR-11) runs the "
+            + "same gate and also requires Create on the record (GetRecordRightsAsync) before the app-only thread post."),
+        new GovernedFile("Api/ExternalAccess/ExternalIntakeEndpoints.cs", Scope.GroupGated,
+            "POST /api/v1/external/servicerequests (spaarke-SPA-external-access-platform-r3 task 035, FR-05/FR-06) on the "
+            + "COLLABORATION group: 403 unless the caller principal is entitled to the legal-front-door module "
+            + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
+            + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
+            + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
+            + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
+            + "feed is the caller principal's own (grants to its contact, each re-checked with CallerPrincipal.RightsOn; "
+            + "messages only on its accessible set and own service requests) and the marker is keyed by its own id."),
         new GovernedFile("Api/ExternalAccess/GrantExternalAccessEndpoint.cs", Scope.GroupGated,
             "POST /grant under the DelegationRuleFilter admin group."),
         new GovernedFile("Api/ExternalAccess/RevokeExternalAccessEndpoint.cs", Scope.GroupGated,
@@ -727,7 +744,35 @@ public partial class RouteAuthorizationGuardTests
     // 120 -> 121 (2026-10-11, spaarke-ontology-platform-r1 task 043). Net +1: Api/Signals/DecisionCommitEndpoints.cs ADDED --
     // POST /api/v1/signals/{signalId:guid}/decision. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
     // The main session reconciles the count with the other ontology routes at integration.
-    private const int ExpectedEndpointFileCount = 121;
+    //
+    // The three moves below landed on master in parallel with the three ontology moves above, each side counting from 118.
+    // Their files are disjoint, so at the 2026-10-14 master -> ontology merge the count is 118 + 3 + 3 = 124.
+    //
+    // 118 -> 119 (2026-10-10, spaarke-SPA-external-access-platform-r3 task 033, FR-04):
+    //
+    //   033  +1  Api/ExternalAccess/ExternalMessageEndpoints.cs ADDED — GET /api/v1/external/{root}/{id}/messages, the
+    //            message thread regarding a project / matter / work assignment / invoice / own service request, on the
+    //            COLLABORATION group. Governed GroupGated with a HandlerDecision (IsRecordAccessible through
+    //            GetMessagesCoreAsync -> IsRootRecordReadableAsync). Pinned by
+    //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalMessageEndpointsTests.cs.
+    //
+    // 119 -> 120 (2026-10-11, spaarke-SPA-external-access-platform-r3 task 035, FR-05/FR-06):
+    //
+    //   035  +1  Api/ExternalAccess/ExternalIntakeEndpoints.cs ADDED — POST /api/v1/external/servicerequests, the Legal
+    //            Front Door intake submit, on the COLLABORATION group. Governed GroupGated with a HandlerDecision (the
+    //            legal-front-door module entitlement, ModuleEntitlementResolver.IsEntitledAsync, before the app-only create).
+    //            Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs.
+    //
+    // 120 -> 121 (2026-10-12, spaarke-SPA-external-access-platform-r3 task 037, FR-08):
+    //
+    //   037  +1  Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs ADDED — GET /api/v1/external/notifications (the
+    //            derived in-portal feed) and POST /api/v1/external/notifications/seen (the caller's last-seen marker), on the
+    //            COLLABORATION group. Governed GroupGated; both routes take no id and are Permanent CallerScopedOnly (the
+    //            /me precedent). Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalNotificationFeedTests.cs.
+    //
+    // 121 + 121 -> 124 (2026-10-14, merge of master into docs/ontology-platform-design): the union of the two
+    // 118 -> 121 sequences above (ontology 036/071/043 + external-access-r3 033/035/037). No route added or removed here.
+    private const int ExpectedEndpointFileCount = 124;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1467,20 +1512,20 @@ public partial class RouteAuthorizationGuardTests
             + "(CommunicationAttachmentTextService.cs:150); the SPE download follows only for rows that query "
             + "returned."),
         new HandlerDecision("GET /api/communications/threads/{threadId:guid}/messages", "GetThreadMessagesAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationThreadReadService.ReadThreadAsync" },
-            "The thread's messages are queried AS the caller (CommunicationThreadReadService.cs:141, _query "
-            + ":114), then trimmed by ICommunicationAccessFilter."),
+            "The thread's messages are queried AS the caller (CommunicationThreadReadService.cs:223, _query "
+            + ":165), then trimmed by ICommunicationAccessFilter."),
         new HandlerDecision("GET /api/communications/threads/{threadId:guid}/unread-count", "GetThreadUnreadCountAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationThreadReadService.GetUnreadCountAsync" },
             "The unread count is computed over a query run AS the caller "
-            + "(CommunicationThreadReadService.cs:207)."),
+            + "(CommunicationThreadReadService.cs:278)."),
         new HandlerDecision("GET /api/communications/threads", "ListThreadsAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationThreadReadService.ListThreadsAsync" },
-            "The thread list is a query run AS the caller (CommunicationThreadReadService.cs:342): the query is "
+            "The thread list is a query run AS the caller (CommunicationThreadReadService.cs:747): the query is "
             + "the gate."),
         new HandlerDecision("GET /api/communications/by-regarding/{entityType}/{id:guid}", "GetCommunicationsByRegardingAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationThreadReadService.ReadByRegardingAsync" },
             "Threads and messages for the caller-chosen record are queried AS the caller "
-            + "(CommunicationThreadReadService.cs:252)."),
+            + "(CommunicationThreadReadService.cs:330)."),
         new HandlerDecision("GET /api/communications", "QueryCommunicationsAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationThreadReadService.QueryCommunicationsAsync" },
             "Every filter (thread, regarding, participant) narrows a query run AS the caller "
-            + "(CommunicationThreadReadService.cs:499)."),
+            + "(CommunicationThreadReadService.cs:908)."),
         new HandlerDecision("GET /api/communications/queue-feed", "GetQueueFeedAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationQueueFeedService.GetQueueFeedAsync" },
             "The feed's communications are queried AS the caller (CommunicationQueueFeedService.cs:151); the "
             + "app-only proposal read (:233) is keyed only by those visible ids."),
@@ -1500,57 +1545,183 @@ public partial class RouteAuthorizationGuardTests
             + "correct decision for a schema read."),
         new HandlerDecision("GET /api/v1/external/projects", "GetProjects", "GetAccessibleProjectIds", Array.Empty<string>(),
             "Lists only the caller principal's Read-filtered project set "
-            + "(callerContext.GetAccessibleProjectIds(), ExternalProjectDataEndpoints.cs:266)."),
+            + "(callerContext.GetAccessibleProjectIds(), ExternalProjectDataEndpoints.cs:514)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}", "GetProjectById", "HoldsReadOnProject", Array.Empty<string>(),
             "403 unless the caller holds Read on the route project (HoldsReadOnProject, "
-            + "ExternalProjectDataEndpoints.cs:283)."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents", "GetDocuments", "HoldsReadOnProject", Array.Empty<string>(),
-            "403 unless the caller holds Read on the route project (ExternalProjectDataEndpoints.cs:300) before "
-            + "the document list."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content", "DownloadDocumentContent", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the project (ExternalProjectDataEndpoints.cs:334) AND the document must belong to it "
-            + "(:346) before the app-only stream — both caller-chosen ids are decided."),
+            + "ExternalProjectDataEndpoints.cs:531)."),
+        // Task 031 (external-access-platform-r3, FR-24): the project document routes now run the handlers generalized
+        // over the document parent; the project's rights still come from RightsForRoot.
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents", "GetDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: 403 unless RightsForDocumentParentAsync gives Read on the route "
+            + "project (RightsForRoot, ExternalProjectDataEndpoints.cs:560) before the document list."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content", "DownloadDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the project (ExternalProjectDataEndpoints.cs:606) AND the "
+            + "document must belong to it through the project lookup (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
-            + "(ExternalProjectDataEndpoints.cs:411-412)."),
+            + "(ExternalProjectDataEndpoints.cs:688-689)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", Array.Empty<string>(),
             "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write "
-            + "(ExternalProjectDataEndpoints.cs:445-446)."),
+            + "(ExternalProjectDataEndpoints.cs:722-723)."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/todos", "GetMatterTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:411-412)."),
+            + "(ExternalProjectDataEndpoints.cs:688-689)."),
         new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", Array.Empty<string>(),
             "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:445-446)."),
+            + "(ExternalProjectDataEndpoints.cs:722-723)."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/todos", "GetWorkAssignmentTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:411-412)."),
+            + "(ExternalProjectDataEndpoints.cs:688-689)."),
         new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", Array.Empty<string>(),
             "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:445-446)."),
+            + "(ExternalProjectDataEndpoints.cs:722-723)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/documents", "UploadDocument", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project from the caller principal's rights before the upload "
-            + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:605)."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/versions", "GetDocumentVersions", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:728) before the version read."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:799) before any Dataverse read."),
+            "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
+            + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269)."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/versions", "GetDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the route project (ExternalProjectDataEndpoints.cs:1435) "
+            + "and the document's project scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
+        // Task 031 (FR-24): documents on matters and work assignments — the same four handlers, rights from RightsForRoot.
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents", "GetMatterDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route matter from RightsForRoot "
+            + "(ExternalProjectDataEndpoints.cs:560) before the document list."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/content", "DownloadMatterDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the matter (ExternalProjectDataEndpoints.cs:606) AND the "
+            + "document must belong to it through the matter lookup (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/documents", "UploadMatterDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route matter (rights.HasFlag(AccessRights.Create), "
+            + "ExternalProjectDataEndpoints.cs:1269) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/versions", "GetMatterDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the matter (ExternalProjectDataEndpoints.cs:1435) and "
+            + "the document's matter scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents", "GetWorkAssignmentDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route work assignment from RightsForRoot "
+            + "(ExternalProjectDataEndpoints.cs:560) before the document list."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/content", "DownloadWorkAssignmentDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:606) "
+            + "AND the document's work-assignment scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/documents", "UploadWorkAssignmentDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route work assignment (rights.HasFlag(AccessRights.Create), "
+            + "ExternalProjectDataEndpoints.cs:1269) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/versions", "GetWorkAssignmentDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:1435) "
+            + "and the document's work-assignment scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
+        // Task 031 (FR-24): a service request is not a root — its rights are the submitter scope, the Service Requests
+        // module's accessible set (sprk_requestedby = the caller's contact), decided by IsRecordAccessible.
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents", "GetServiceRequestDocuments", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read only when the request's requester is in the Service Requests "
+            + "module's accessible set (module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:989)."),
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/content", "DownloadServiceRequestDocumentContent", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: the requester check (ExternalProjectDataEndpoints.cs:989) AND the "
+            + "document's sprk_relatedservicerequest scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/servicerequests/{id:guid}/documents", "UploadServiceRequestDocument", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to UploadDocumentForParent: Read and Create only for the requester (module.IsRecordAccessible, "
+            + "ExternalProjectDataEndpoints.cs:989) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions", "GetServiceRequestDocumentVersions", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:989) and the "
+            + "document's service-request scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
+        // Task 031 (FR-24, owner decision 2026-10-11 option A): an invoice is not a root and is not securable — its rights
+        // are INHERITED, the union of the caller's RightsForRoot on the invoice's sprk_matter and sprk_project
+        // (ExternalProjectDataEndpoints.RightsForInvoiceAsync), the rule ExternalMessageEndpoints.RightsThroughParents
+        // already applies to an invoice post.
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents", "GetInvoiceDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route invoice (ExternalProjectDataEndpoints.cs:560), the union "
+            + "of RightsForRoot on its matter and project (RightsForInvoiceAsync, :925), before the document list."),
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content", "DownloadInvoiceDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:606, RightsForInvoiceAsync :925) "
+            + "AND the document's sprk_invoice scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/invoices/{id:guid}/documents", "UploadInvoiceDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route invoice, inherited from its matter or project "
+            + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions", "GetInvoiceDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1435, RightsForInvoiceAsync :925) "
+            + "and the document's invoice scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
+        // Task 039 (external-access-platform-r3, FR-03): the project event read is generalized over the root kind, as the
+        // to-do read is; the matter and work-assignment routes are two more adapters on the same handler.
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route project "
+            + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/events", "GetMatterEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route matter "
+            + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
+            + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/events", "GetWorkAssignmentEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
+            + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (ExternalProjectDataEndpoints.cs:831) before the write."),
+            "Requires Create on the route project (ExternalProjectDataEndpoints.cs:1570) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:856)."),
+            "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:873)."),
+            "Read on the route project (ExternalProjectDataEndpoints.cs:1628)."),
         new HandlerDecision("PATCH /api/v1/external/todos/{id:guid}", "UpdateTodo", "RightsForRoot", Array.Empty<string>(),
             "Write on the to-do's ROOT from RightsForRoot before the patch "
-            + "(ExternalProjectDataEndpoints.cs:930-936)."),
+            + "(ExternalProjectDataEndpoints.cs:1684-1690)."),
+        // Task 032 (external-access-platform-r3, FR-26): delete-own. ONE check (AuthorizeDeleteOwnAsync) for all three:
+        // the row's task-030 creator stamp must be the caller (ExternalDataService.IsCreatedByCaller,
+        // ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync) AND the caller must hold Read on EVERY parent this plane
+        // authorizes (the lookups ExternalDataService models: a document's project / matter / work assignment / service
+        // request; a to-do's or event's regarding project / matter / work assignment; other lookups on the row, such as
+        // sprk_invoice or sprk_parentdocument, are not consulted), through RightsForDocumentParentAsync (RightsForRoot for
+        // a project / matter / work assignment; the requester scope for a service request). Absent / not-own / unstamped
+        // / no-Read: one 403. A delete is a write, so it keeps the every-parent bar; the owner's option-B rule (2026-10-12:
+        // Read on every SECURE linked root, by effective status) governs the READ paths and does not touch this one.
+        new HandlerDecision("DELETE /api/v1/external/documents/{id:guid}", "DeleteOwnDocument", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every modelled parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1749-1796) before "
+            + "DocumentCheckoutService.DeleteAsync deletes the verified-pointer SPE file, then the row "
+            + "(ExternalProjectDataEndpoints.cs:1845, DeleteOwnDocument)."),
+        new HandlerDecision("DELETE /api/v1/external/todos/{id:guid}", "DeleteOwnTodo", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1749-1796) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1907, DeleteAuthorizedRowAsync)."),
+        new HandlerDecision("DELETE /api/v1/external/events/{id:guid}", "DeleteOwnEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1749-1796) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1922, DeleteAuthorizedRowAsync)."),
+        // Owner decision 2026-10-11 (task 032 follow-up, FR-26), option A: the REQUESTER deletes a service request that has no
+        // related row. Requester only through the same requester scope as the service-request document routes
+        // (RightsForDocumentParentAsync -> the Service Requests module's IsRecordAccessible: sprk_requestedby = the caller's
+        // contact; the partner switch is honoured); owner decision 2026-10-12: a closed (statecode 1) request is a 409
+        // service_request_closed, the state read in the SAME row read as the requester and used only after the requester
+        // gate; then every 1:N relationship is probed app-only (HasRelatedRecordsAsync) and any related row is a 409
+        // has_related_records. Absent / not-requester: the same 403 as the other delete routes.
+        new HandlerDecision("DELETE /api/v1/external/servicerequests/{id:guid}", "DeleteOwnServiceRequest", "IsRecordAccessible",
+            new[] { "ExternalProjectDataEndpoints.RightsForServiceRequestAsync" },
+            "Requester only (RightsForServiceRequestAsync -> module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:989; the same "
+            + "row read returns statecode), then open only (a closed request is 409 service_request_closed, DeleteOwnServiceRequest), "
+            + "then no related row in any of the 8 relationships (ExternalDataService.HasRelatedRecordsAsync, "
+            + "ExternalProjectDataEndpoints.cs:2002) before the app-only row delete (DeleteAuthorizedRowAsync, :2018)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
-            + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "
-            + "result (:271)."),
+            + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:277), then ScopeRows trims the "
+            + "result (:300)."),
         new HandlerDecision("GET /api/v1/external/api/dataverse/record/{entityLogicalName}/{id:guid}", "GetScopedRecordAsync", "IsRecordAccessible", Array.Empty<string>(),
             "Refused unless the record is in the caller principal's accessible set (module.IsRecordAccessible, "
-            + "ExternalModuleDataEndpoints.cs:372)."),
+            + "ExternalModuleDataEndpoints.cs:405)."),
+        new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/messages", "GetMessagesAsync", "IsRecordAccessible",
+            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.IsRootRecordReadableAsync" },
+            "403 unless the route record is in the caller principal's accessible set, decided by the registered module "
+            + "(module.IsRecordAccessible for project / matter / work assignment; the module's ScopeRows over the record's "
+            + "own scope lookups for an invoice or the caller's own service request), before the app-only message read "
+            + "(ExternalMessageEndpoints.cs:339 the gate call, :506 EvaluateRecordGateAsync, :563 ScopeRows); an unsupported root is a 404 with no read."),
+        new HandlerDecision("POST /api/v1/external/{root}/{id:guid}/messages", "PostMessageAsync", "IsRecordAccessible",
+            new[] { "ExternalMessageEndpoints.PostMessageCoreAsync", "ExternalMessageEndpoints.GetRecordRightsAsync" },
+            "Task 034 (FR-11): the SAME record gate as the GET (module.IsRecordAccessible / ScopeRows, through "
+            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:506, :563) — outside the set, absent or no grants is the "
+            + "same 403 — and then Create on the record (the caller's rights on the root, on an invoice's parent root, or "
+            + "the requester on their own service request; :211, :223) before CommunicationService.PostToRecordThreadAsync "
+            + "writes app-only (:233). The body is validated and an unattributable sender refused before any read (:191, :200)."),
+        new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
+            "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
+            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:161 — a CIAM partner only with the partner "
+            + "switch on), may submit the requested type (ModuleEntitlementResolver.IsIntakeTypeAvailable, :176 — Invention "
+            + "for a CIAM partner only with PartnerInventionIntakeEnabled on; owner 2026-10-12) and has a contact (:194, :205), "
+            + "before the one app-only create, whose sprk_requestedby is that contact (:292) and whose owner is the default team "
+            + "of that contact's business unit, resolved first and refused when it cannot be (:232, :261). The requester's "
+            + "department is read app-only from that contact (:270) and stored as a system key, never taken from the body. "
+            + "The route names no existing record."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),
@@ -1698,6 +1869,11 @@ public partial class RouteAuthorizationGuardTests
                 "The caller principal's Read-filtered project set (ReadableProjects) — a list trimmed to the caller's rights."),
             ["IsRecordAccessible"] = ("Infrastructure/ExternalAccess/ExternalModuleRegistry.cs",
                 "Membership of a record in the caller principal's accessible set for a registered module."),
+            ["IsEntitledAsync"] = ("Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs",
+                "The caller principal's Tier-1 module entitlement (r3 task 035): the same set /me/entitlements reports, from "
+                + "the server-resolved principal kind and the bound partner switch; false fails the route closed. A MODULE-level "
+                + "decision only: it decides nothing about a record, so it may credit only a route that names none (no '{' in "
+                + "the route; EveryHandlerDecisionIsVerified enforces it)."),
             ["Tier2ScopeFilterInjector"] = ("Api/ExternalAccess/Tier2ScopeFilterInjector.cs",
                 "Rewrites the caller's FetchXML to their accessible-record set before it runs — the query is the gate."),
             ["DownloadFileAsUserAsync"] = ("Infrastructure/Graph/SpeFileStore.cs",
@@ -2463,16 +2639,16 @@ public partial class RouteAuthorizationGuardTests
             "Dataverse METADATA: collection navigation property name (NavMapEndpoints.cs:317). Schema content; "
             + "no record id."),
         Permanent("GET /api/v1/external/api/dataverse/metadata/{entityLogicalName}", PermanentBasis.ReferenceData, "167",
-            "Schema of a REGISTERED module entity, app-only passthrough (ExternalModuleDataEndpoints.cs:409); "
+            "Schema of a REGISTERED module entity, app-only passthrough (ExternalModuleDataEndpoints.cs:464); "
             + "no record data. (The sweep notes registered-entity schema reaches every collaboration caller — "
             + "recorded in the note.)"),
         Permanent("GET /api/v1/external/api/dataverse/savedquery/{savedQueryId:guid}", PermanentBasis.ReferenceData, "167",
-            "A system view definition, refused when its entity has no registered module "
-            + "(ExternalModuleDataEndpoints.cs:449, :474). View FetchXML/LayoutXML, no record data; the saved-query "
+            "A system view definition, refused when no registered module uses that view id (ExternalModuleDataEndpoints.cs:515) "
+            + "or the loaded view targets another entity (:533). View FetchXML/LayoutXML, no record data; the saved-query "
             + "id selects a view, not a record (owner round 12 item 2)."),
         Permanent("GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}", PermanentBasis.ReferenceData, "167",
             "System view list for a REGISTERED module entity only, fail-closed otherwise "
-            + "(ExternalModuleDataEndpoints.cs:491, :505). View definitions, no record data."),
+            + "(ExternalModuleDataEndpoints.cs:587, :592). View definitions, no record data."),
         // Master merge 2026-10-05 (spaarkeai-word-add-in-r1 task 100): /search/matter-types was GENERALIZED into ONE
         // parameterized route (CLAUDE.md §11); {list} = matter-types is the same URL. Ported from master's old-format waiver.
         Permanent("GET /api/office/search/{list}", PermanentBasis.ReferenceData, "167",
@@ -2536,6 +2712,14 @@ public partial class RouteAuthorizationGuardTests
             + "caller.ReadableProjects). Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",
             "The caller principal's own module entitlements (MeEntitlementsEndpoint.cs:32). Takes no id."),
+        Permanent("GET /api/v1/external/notifications", PermanentBasis.CallerScopedOnly, "r3-037",
+            "The caller principal's own feed: grants naming its own contact, each kept only with Read on its root "
+            + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:277), and messages read only for its accessible "
+            + "set (:288) and its own service requests (the module's ScopeRows, :313), under the external read rules (:328). "
+            + "Takes no id."),
+        Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
+            "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
+            + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),
         Permanent("GET /api/users/me/memberships/{entityType}", PermanentBasis.CallerScopedOnly, "167",
             "Memberships of the caller's own systemuserid, resolved from the oid claim "
             + "(MembershipEndpoints.cs:192-209). {entityType} is a table name; no caller-chosen principal or "

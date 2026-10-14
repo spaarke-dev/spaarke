@@ -9,8 +9,8 @@ Creating or modifying Minimal API endpoints in the BFF API.
 
 ## Read These Files
 1. `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — AI streaming endpoints (exemplar)
-2. `src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs` — Container CRUD endpoints
-3. `src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs` — File upload endpoints
+2. `src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs` — Document CRUD endpoints
+3. `src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs` — File upload-session endpoints (`/api/obo/records/{entity}/{id}/upload-session`)
 4. `src/server/api/Sprk.Bff.Api/Program.cs` — Endpoint registration (MapGroup, MapXxxEndpoints calls)
 
 ## Constraints

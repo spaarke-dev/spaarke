@@ -35,7 +35,7 @@ For architectural context (tenant isolation, multi-instance behavior, Cache Inst
 | Environment | Cache | Resource group / subscription | High availability | Access-policy assignments |
 |---|---|---|---|---|
 | dev | `spaarke-bff-redis-dev` — endpoint `spaarke-bff-redis-dev.westus2.redis.azure.net:10000` | `spe-infrastructure-westus2` / "Spaarke Devlopment Environment" `484bc857-3802-427f-9ea5-ca47b43db0f0` | Disabled | `9fd47efb-…` = `mi-bff-api-dev` (the dev BFF `spaarke-bff-dev` runs as it); `38f7693f-…` = `sprk-controlplane-dev-uami` (L2 Worker) |
-| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` / "Spaarke Demo Environment" `2ff9ee48-6f1d-4664-865c-f11868dd1b50` | Disabled | `eaf9591e-…` = `mi-bff-api-demo`. The demo BFF is stopped pending task T242c. |
+| demo (retired 2026-10-14) | _deleted_ — the old `spaarke-bff-redis-demo` and its `mi-bff-api-demo` identity went with the old demo environment; the demo is now the ACME stamp, whose cache is created by `customer.bicep` | — | — | — |
 | staging / prod | not created yet (no Spaarke staging or prod BFF exists) | `rg-spaarke-staging` / `rg-spaarke-prod` | Enabled | placeholders in the `.bicepparam` — replace before deploying |
 | customer stamps | `sprk-{customer}-{env}-redis`, created by [`infrastructure/bicep/customer.bicep`](../../infrastructure/bicep/customer.bicep), not by this guide's script | per-customer stamp | Enabled | the stamp's user-assigned identity |
 
@@ -62,7 +62,7 @@ All caches share one shape, set by [`infrastructure/bicep/modules/redis.bicep`](
 - **App Settings template loaded** — see [`src/server/api/Sprk.Bff.Api/appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) for the Redis settings shape (`Redis__Enabled`, `Redis__Endpoint`, `Redis__InstanceName`, `Redis__AllowInMemoryFallback`).
 - **Bicep module + parameter file present**:
   - [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep)
-  - [`infrastructure/bicep/parameters/redis-{env}.bicepparam`](../../infrastructure/bicep/parameters/) (`dev`, `demo`, `staging`, `prod`)
+  - [`infrastructure/bicep/parameters/redis-{env}.bicepparam`](../../infrastructure/bicep/parameters/) (`dev`, `staging`, `prod`)
 - **Validation harness present** — [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) (used by `Deploy-RedisCache.ps1` after a deploy and by `-VerifyOnly`).
 
 No Key Vault is involved: the BFF setting `Redis__Endpoint` is a plain value (host:port, not a secret).
@@ -74,7 +74,7 @@ No Key Vault is involved: the BFF setting `Redis__Endpoint` is a plain value (ho
 All Spaarke BFF environments use the same idempotent script: [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1). The script:
 
 - Detects an existing `Microsoft.Cache/redisEnterprise` cache in `Succeeded` provisioning state and skips the template deploy (NFR-01).
-- Rejects `prod` and `demo` without `-Force` (NFR-05).
+- Rejects `prod` without `-Force` (NFR-05).
 - Supports `-WhatIf` (plan-only, NFR-06) and `-VerifyOnly` (run the validation harness against the existing cache, NFR-06).
 - `-CutoverBffSettings` sets `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `Redis__Endpoint={host}:10000` and `Redis__AllowInMemoryFallback=false` on `spaarke-bff-{env}` (resource group `rg-spaarke-{env}`). An existing `ConnectionStrings__Redis` is left in place on purpose.
 - `-RemoveBffConnectionString` deletes `ConnectionStrings__Redis` and `Redis__ConnectionString` from the BFF. It refuses if the app has no `Redis__Endpoint`. The Key Vault secret the setting referenced is left alone.
@@ -111,14 +111,9 @@ pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -SubscriptionId 484bc857-3
 
 A create takes about 8 minutes.
 
-### Demo (requires explicit `-Force`)
+### Demo (retired 2026-10-14)
 
-```powershell
-pwsh ./scripts/Deploy-RedisCache.ps1 -Environment demo -Force `
-  -SubscriptionId 2ff9ee48-6f1d-4664-865c-f11868dd1b50 -CutoverBffSettings -RemoveBffConnectionString
-```
-
-This is the command T242b ran. The demo BFF had no previous cache, so the connection-string removal could run in the same call.
+The old demo cache `spaarke-bff-redis-demo` was deleted on 2026-10-14 with the rest of the old demo environment, and `-Environment demo` no longer exists in `Deploy-RedisCache.ps1`. The demo is now the ACME customer stamp built by the provisioning control plane (T186); its cache is created by `customer.bicep` like every other customer stamp, not by this script.
 
 ### Staging
 
@@ -284,7 +279,7 @@ Investigate the root cause, then re-attempt the cutover when ready.
 
 ## 6. Secret Rotation Procedure
 
-**There is nothing to rotate.** Every Spaarke Redis — dev, demo and every customer stamp — is Azure Managed Redis with access keys disabled: no key, no connection string, no Key Vault secret in use. The BFF and the L2 Worker sign in with their managed identities, whose tokens Azure issues and refreshes automatically. Access is changed by editing the access-policy assignments (§2 "Granting another identity access"), not by rotating anything.
+**There is nothing to rotate.** Every Spaarke Redis — dev and every customer stamp (the demo is the ACME stamp) — is Azure Managed Redis with access keys disabled: no key, no connection string, no Key Vault secret in use. The BFF and the L2 Worker sign in with their managed identities, whose tokens Azure issues and refreshes automatically. Access is changed by editing the access-policy assignments (§2 "Granting another identity access"), not by rotating anything.
 
 The key-rotation tooling — `scripts/Rotate-RedisKey.ps1`, `.github/workflows/redis-key-rotation.yml` and the missed-rotation alert — was **removed on 2026-10-05** (task 242b): it could only operate a classic key-based `Microsoft.Cache/Redis` cache, none exists, ADR-009 forbids a Redis key in Key Vault, and a current BFF refuses a connection string outside Development/Testing. Its scheduled runs had all failed since 2026-07-01. The dev vault's old `Redis-ConnectionString` secret stays in place, unreferenced (Key Vault secrets are never deleted).
 
@@ -511,7 +506,7 @@ Classic Azure Cache for Redis (Basic/Standard/Premium) retires on 2028-09-30 and
 - [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1) — provisioning automation (idempotent, multi-env, `-WhatIf`, `-VerifyOnly`, `-CutoverBffSettings`, `-RemoveBffConnectionString`, `-SubscriptionId`, `-Force`, `-DeployAlerts`).
 - [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) — read-only ARM validation harness (cluster state, SKU, keys disabled, TLS, OSSCluster, port 10000, access-policy assignments, BFF `Redis__Endpoint`, no connection string).
 - [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep) — Azure Managed Redis module (also used by `customer.bicep`).
-- [`infrastructure/bicep/parameters/redis-dev.bicepparam`](../../infrastructure/bicep/parameters/redis-dev.bicepparam) / [`redis-demo.bicepparam`](../../infrastructure/bicep/parameters/redis-demo.bicepparam) — live environments; staging / prod parameter files follow the same shape with placeholders.
+- [`infrastructure/bicep/parameters/redis-dev.bicepparam`](../../infrastructure/bicep/parameters/redis-dev.bicepparam) — the live environment (`redis-demo.bicepparam` was deleted with the old demo environment on 2026-10-14); staging / prod parameter files follow the same shape with placeholders.
 - [`infrastructure/bicep/alerts.bicep`](../../infrastructure/bicep/alerts.bicep) — alert rules (§8).
 - [`src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs) — BFF cache registration (endpoint → managed identity, RESP3; connection string only in Development/Testing).
 

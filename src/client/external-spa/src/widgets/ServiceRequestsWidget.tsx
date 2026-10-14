@@ -1,13 +1,14 @@
 /**
- * ServiceRequestsWidget — INTERNAL-ONLY "Service Requests" widget (task 028). A thin
+ * ServiceRequestsWidget — "Service Requests" widget (task 028; workforce plane in the client for now). A thin
  * `createGridWidgetBody(configId)` binding — see `GridWidgetBody.tsx` for the shared implementation.
  * Backed by the "Internal — Service Requests (external widget)" `sprk_gridconfiguration` record and
  * the "service-requests" BFF module (entity `sprk_servicerequest`, Tier-2 predicate =
- * `sprk_requestedby == caller contact`, and server-side fail-closed for the CIAM partner plane).
+ * `sprk_requestedby == caller contact`; BFF A8 / r3 task 011: workforce see their own rows, CIAM partners
+ * only when ExternalAccess:PartnerServiceRequestsEnabled is on, otherwise 0 rows).
  *
- * Registered with `planes: ['workforce']` so it never appears on the outside-counsel partner SPA
- * (client gate); the BFF module additionally returns 0 rows for any non-workforce caller (defense in
- * depth — the "internal-only" guarantee does not depend on the client hiding the tab).
+ * Registered for both real planes and gated by the `legal-front-door` entitlement from `/me` (task 052, review 011 K3):
+ * a CIAM partner sees it only when the partner switch gives it that entitlement. The BFF, not the client gate, is the
+ * boundary (NFR-06).
  */
 import { createGridWidgetBody } from './GridWidgetBody';
 

@@ -3,7 +3,7 @@
 //
 // Machine-stable rejection codes + gate identifiers emitted by
 // H14IntegrationWiringHandler + its H14a sub-handler (task 073, wave C4 Batch
-// 3F; H14b/H14c removed under ISS-019 / #1560). T4 silent-fail trap owner (Exchange role-assignment drift — RBAC for Applications since task 251).
+// 3F; H14b/H14c removed under ISS-019 / #1560) and H14m (customer mailbox, task 263). T4 silent-fail trap owner (Exchange role-assignment drift — RBAC for Applications since task 251).
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-19 (H14
@@ -35,10 +35,19 @@ public static class H14Rejections
     public const string MissingTenantId = "h14-missing-tenant-id";
 
     /// <summary>
-    /// Retired by task 251 (H14a grants only the stamp identity) — kept so a run record carrying it still
-    /// reads. InterStepState.bffAppRegId missing.
+    /// InterStepState.bffAppRegId missing — H3 has not completed. Retired by task 251 and used again by task 263: H14m
+    /// writes the stamp's sprk_communicationaccount row as the BFF app registration (the H7/H7b identity).
     /// </summary>
     public const string MissingBffAppRegId = "h14-missing-bff-appreg-id";
+
+    /// <summary>InterStepState.dataverseEnvUrl missing — H5 has not completed (H14m writes the account row there).</summary>
+    public const string MissingDataverseEnvUrl = "h14-missing-dataverse-env-url";
+
+    /// <summary>Run parameter <c>displayName</c> missing (H14m: the shared mailbox's display name).</summary>
+    public const string MissingDisplayName = "h14-missing-display-name";
+
+    /// <summary>Run parameter <c>communicationDefaultMailbox</c> missing (H14m: the shared mailbox's address).</summary>
+    public const string MissingMailboxAddress = "h14-missing-mailbox-address";
 
     /// <summary>InterStepState.miClientId missing — H2a (uami.bicep) has not completed yet (upstream dependency for H14a).</summary>
     public const string MissingUamiClientId = "h14-missing-uami-client-id";
@@ -82,6 +91,35 @@ public static class H14aRejections
     public const string ApplyFailed = "h14a-apply-failed";
 }
 
+/// <summary>Machine-stable rejection codes for H14m (the customer's shared mailbox — task 263).</summary>
+public static class H14mRejections
+{
+    /// <summary>H14m's ParametersJson could not be read or misses a field (a parent bug) — Resumable.</summary>
+    public const string InvalidParameters = "h14m-invalid-parameters";
+
+    /// <summary>
+    /// A recipient with the mailbox's name, alias or address exists and is not this customer's shared mailbox in its
+    /// scope group only (a foreign or out-of-scope mailbox), or the scope group is not Spaarke-AppAccess-{customerId}.
+    /// QuarantineRequired — nothing was created or changed.
+    /// </summary>
+    public const string MailboxDrift = "h14m-mailbox-drift";
+
+    /// <summary>No conclusive ensure (sign-in, sidecar, Exchange, PRQ-E-16 not applied) — Resumable; nothing half-made by a missing permission.</summary>
+    public const string MailboxEnsureFailed = "h14m-mailbox-ensure-failed";
+
+    /// <summary>The mailbox is in place but Exchange does not report every stamp mail role in scope yet — Resumable; no row written.</summary>
+    public const string MailboxUnverified = "h14m-mailbox-unverified";
+
+    /// <summary>The stamp's sprk_communicationaccount rows for the address cannot be adopted (inactive, another type, several) — QuarantineRequired.</summary>
+    public const string AccountRowConflict = "h14m-account-row-conflict";
+
+    /// <summary>The row's verification is Failed (the BFF's own Graph test) — never overwritten; Resumable after a re-verify in the app.</summary>
+    public const string AccountVerificationFailed = "h14m-account-verification-failed";
+
+    /// <summary>Writing or reading the row failed (auth, HTTP, Dataverse) — Resumable.</summary>
+    public const string AccountRowFailed = "h14m-account-row-failed";
+}
+
 /// <summary>
 /// Well-known gate identifiers written to <c>ProvisioningRun.GateStates</c> by
 /// H14 + its sub-handlers. Kept as string constants so grep across the
@@ -91,4 +129,7 @@ public static class H14Gates
 {
     /// <summary>T4 gate — flips to Verified once H14a has read back every group-scoped mailbox role with no drift. (Value kept for run-record compatibility.)</summary>
     public const string ExchangePolicyApplied = "h14a-exchange-policy-applied";
+
+    /// <summary>Flips to Verified once H14m has the customer's shared mailbox in scope and its verified account row (task 263).</summary>
+    public const string CustomerMailboxVerified = "h14m-customer-mailbox-verified";
 }

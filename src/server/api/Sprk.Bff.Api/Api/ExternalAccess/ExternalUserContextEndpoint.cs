@@ -86,7 +86,10 @@ public static class ExternalUserContextEndpoint
         var response = new ExternalUserContextResponse(
             caller.ContactId,
             caller.Email,
-            projects);
+            projects,
+            // The caller's own systemuser id (same property IsCreatedByCaller reads). Null for a CIAM or
+            // contact-only caller; an empty id is never emitted.
+            caller.SystemUserId is { } systemUserId && systemUserId != Guid.Empty ? systemUserId : null);
 
         return Results.Ok(response);
     }

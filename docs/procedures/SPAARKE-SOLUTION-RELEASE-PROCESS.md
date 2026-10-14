@@ -163,6 +163,8 @@ authored in a child unit, "root component Role is missing"). "Spaarke Office Add
 | 2026-08-21 | SpaarkeMaster v1.1.0.0 exported (412 root components; 7 PCFs excluded by the owner) and hand-uploaded to the provisioning store. |
 | 2026-10-07 | ADR-027 amended (managed by default, unmanaged on explicit instruction). Scope rule replaces solution membership; git becomes the source of record; CI publishes; this document becomes the release/IAM/upgrade runbook (customer-provisioning-orchestration-r1 T218). |
 | 2026-10-08 | SpaarkeMaster 1.2.0.0 complete in dev and committed as source (T218e); the CI pack-and-publish workflow replaces the hand-uploaded zip and manifest (T218d). |
+| 2026-10-13 | SpaarkeMaster 1.2.2.0 exported. It adds `contact.sprk_externalinvitedon` and its field security (UAC task 184), the `sprk_ServiceRequest` table, the Spaarke Document Management and Spaarke Administration apps, and Dataverse search configuration. Nothing is removed. The role `Spaarke Internal Contact User (Workforce)` is excluded until UAC task 186 closes. |
+| 2026-10-14 | SpaarkeMaster 1.2.3.0 exported. It adds `contact.sprk_externalinvitecodehash` (secured, not audited) and its field security (UAC task 185): the writer profile `Spaarke BFF-Managed Field Writers` gets read/create/update, the reader profile gets nothing. Also carries other projects' dev changes inside the package rule (`sprk_ServiceRequest` auto-number `RQST-{SEQNUM:4}` and read-only-in-UI request number; web-resource and PCF bundle updates). Nothing is removed. The role `Spaarke Internal Contact User (Workforce)` stays excluded until UAC task 186 closes. |
 
 ## Related
 

@@ -41,6 +41,12 @@ public class SessionPersistenceServiceTabsTests
     private readonly IConfiguration _configuration;
     private readonly SessionPersistenceService _sut;
 
+    // Signalled by the Cosmos container double when the fire-and-forget upsert actually runs, so tests await
+    // the write itself instead of sleeping and hoping it has landed.
+    private readonly TaskCompletionSource _cosmosUpserted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private Task CosmosUpsertedAsync() => _cosmosUpserted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
     public SessionPersistenceServiceTabsTests()
     {
         _cache = new TrackingTenantCache();
@@ -118,12 +124,12 @@ public class SessionPersistenceServiceTabsTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (s, _, _, _) => capturedSession = s)
+                (s, _, _, _) => { capturedSession = s; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act
         var result = await _sut.SaveTabsAsync(SessionId, TenantId, Array.Empty<StoredWorkspaceTab>(), activeTabId: "home");
-        await Task.Delay(50); // fire-and-forget Cosmos
+        await CosmosUpsertedAsync(); // fire-and-forget Cosmos write
 
         // Assert
         result.Should().BeTrue();
@@ -152,7 +158,7 @@ public class SessionPersistenceServiceTabsTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (s, _, _, _) => capturedSession = s)
+                (s, _, _, _) => { capturedSession = s; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         var tabs = new[]
@@ -164,7 +170,7 @@ public class SessionPersistenceServiceTabsTests
 
         // Act
         var result = await _sut.SaveTabsAsync(SessionId, TenantId, tabs, activeTabId: "tab-b");
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert
         result.Should().BeTrue();
@@ -207,7 +213,7 @@ public class SessionPersistenceServiceTabsTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (s, _, _, _) => capturedSession = s)
+                (s, _, _, _) => { capturedSession = s; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act — set to a new active tab id
@@ -215,7 +221,7 @@ public class SessionPersistenceServiceTabsTests
             SessionId, TenantId,
             new[] { BuildTab("new-active", "wizard.foo") },
             activeTabId: "new-active");
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert
         result.Should().BeTrue();
@@ -262,7 +268,7 @@ public class SessionPersistenceServiceTabsTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (s, _, _, _) => capturedSession = s)
+                (s, _, _, _) => { capturedSession = s; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         var newTab = BuildTab("tab-1", "wizard.create-matter");
@@ -272,7 +278,7 @@ public class SessionPersistenceServiceTabsTests
             SessionId, TenantId,
             new[] { newTab },
             activeTabId: "tab-1");
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert — round-trip preserved Messages + WidgetStates, ADDED Tabs + ActiveTabId
         result.Should().BeTrue("legacy session document must deserialize cleanly");

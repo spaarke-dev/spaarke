@@ -118,6 +118,40 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ProvisioningCreate_WhenTheCallerCancelsDuringTheBind_StillBindsAndMarks_NeverStrandsIt()
+    {
+        // #1652 round 1, same pattern: once the container exists, a client disconnect must not skip the bind (or its
+        // compensation) — it used to throw TaskCanceledException and leave a live, unbound, unmarked container.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}", delay: TimeSpan.FromSeconds(2));
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        var created = await ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, caller.Token);
+
+        created!.Id.Should().Be("c-new");
+        caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the stamp PATCH was in flight");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("PATCH", "GET", "PATCH");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheBindTimesOut_DeletesTheContainer_AndThrows()
+    {
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}", delay: TimeSpan.FromSeconds(5));
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit)); // it WOULD land — only the timeout fails it
+        _graph.StubDelete($"{ContainersPath}/c-new");
+        var operations = ProvisioningOperations();
+        operations.UncancellableStepTimeout = TimeSpan.FromMilliseconds(500);
+
+        var act = () => operations.CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _graph.RequestsFor($"{ContainersPath}/c-new").Should().Contain(r => r.Method == "DELETE",
+            "a bind that never completes is compensated like any other failure");
+    }
+
+    [Fact]
     public async Task TheBindingOfADeletedContainer_IsReadFromTheRecycleBin()
     {
         _graph.StubGet("/storage/fileStorage/deletedContainers/c-gone", Container(Unit, "c-gone"));

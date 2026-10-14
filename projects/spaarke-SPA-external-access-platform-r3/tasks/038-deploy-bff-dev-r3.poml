@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Deploy R3 BFF changes to dev + live verification</title>
+    <phase>3 BFF features</phase>
+    <gate>after 010, 011, 012, 032, 035, 036, 037, 039 — owner approval to deploy</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (tags deploy) with live probes</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment with explicit probes</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live deployment; one at a time</parallel-reason>
+    <deps>010, 011, 012, 032, 035, 036, 037, 039</deps>
+    <tags>deploy, azure, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the R3 BFF changes to spaarke-bff-dev and verify the new and changed behaviour live, read-only where possible.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>spaarke-bff-dev runs this branch's BFF; /healthz is 200; the live probes listed in the steps pass; the result and publish size are recorded.</goal>
+
+  <context>
+    <background>Design §4.5: build and deploy only from a net10 tree. Dev serves both planes. FR-23's live probe matches provisioning's H13 hard-gate shape.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-038-deploy-record.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">Owner approval and a stated rollback (redeploy the previous package) before deploying.</constraint>
+    <constraint source="project">Deploy with the /bff-deploy procedure only; dotnet --list-sdks must show 10.0.1xx and a Release build must be clean first.</constraint>
+    <constraint source="project">Live probes use test identities only; no production data is changed except owner-approved test rows, which are deleted afterwards.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Merge master into the branch; `dotnet build -c Release src/server/api/Sprk.Bff.Api/` clean; `dotnet test` green; record publish size.</step>
+    <step order="2">Ask the owner for approval; state the rollback.</step>
+    <step order="3">Deploy via /bff-deploy; check https://spaarke-bff-dev.azurewebsites.net/healthz → 200.</step>
+    <step order="4">Probes: CIAM token on a workforce-only route → 401 (FR-23); CIAM token with each audience form → accepted on /api/v1/external/me (FR-22); /me/entitlements for a workforce user shows legal-front-door + policy-library (FR-19); message read/send on an accessible record and 403 outside (FR-04/FR-11); intake submit as workforce → 201 (FR-05); feed returns the new message (FR-08); a document upload + own delete on a matter (FR-24/26).</step>
+    <step order="5">Record results in notes/task-038-deploy-record.md.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-038-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /healthz is not 200 after deploy, roll back immediately and report.</trigger>
+    <trigger>If any probe fails, roll back if it affects existing behaviour; otherwise record it and file a fix task.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-038-deploy-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/healthz returns 200 on spaarke-bff-dev after the deploy.</criterion>
+    <criterion testable="true">Every probe in the steps has a recorded pass/fail with evidence (status code, masked token claims).</criterion>
+    <criterion testable="true">The publish size is recorded and at or under 60 MB.</criterion>
+    <criterion testable="true">Test rows created by probes are deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner-gated live change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

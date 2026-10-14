@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:dist": "node scripts/check-dist.mjs",
     "preview": "vite preview",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix",

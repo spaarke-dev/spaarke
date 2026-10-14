@@ -2,6 +2,7 @@ import type { AccountInfo, AuthenticationResult, Configuration, PublicClientAppl
 import type { IAuthConfig, TokenResult } from '../types';
 import type { AuthStrategy } from './AuthStrategy';
 import { normalizeTenant, sameTenant, tenantFromAuthority } from '../tenant';
+import { dataverseUserObjectId, normalizeObjectId } from '../dataverseUser';
 
 /** Buffer (ms) before token expiry to consider it stale. Matches config.TOKEN_EXPIRY_BUFFER_MS. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
@@ -81,6 +82,25 @@ function decodeJwtExpMs(jwt: string): number {
   } catch {
     return 0;
   }
+}
+
+/** The `oid` claim of a JWT (base64url payload), lower-cased; `null` when absent or malformed. */
+function tokenObjectId(jwt: string): string | null {
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) return null;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { oid?: unknown };
+    return normalizeObjectId(payload.oid);
+  } catch {
+    return null;
+  }
+}
+
+/** A cached account's object id in its tenant: the id token's `oid`, else MSAL's `localAccountId`. */
+function accountObjectId(account: AccountInfo): string | null {
+  return normalizeObjectId(account.idTokenClaims?.oid) ?? normalizeObjectId(account.localAccountId);
 }
 
 /**
@@ -164,26 +184,30 @@ export class BrowserMsalStrategy implements AuthStrategy {
     if (!msal) return { accessToken: '', expiresOn: 0 };
 
     const scopes = [this._scope];
-    const account = this._pickAccount(msal);
+    // #1656: inside Dataverse, the signed-in user's Entra object id (null = unreadable -> fail closed).
+    const expectedOid = await this._expectedUserOid();
+    const account = this._pickAccount(msal, expectedOid);
 
     // 1. acquireTokenSilent — refresh-token-backed silent renewal
     try {
       console.info('[BrowserMsalStrategy] cached account:', account ? 'yes' : 'none', 'scope:', this._scope);
       if (account) {
         const result = await msal.acquireTokenSilent({ scopes, account });
-        const token = this._accept(result);
+        const token = this._accept(result, expectedOid);
         if (token) return token;
       }
     } catch (err) {
       console.warn('[BrowserMsalStrategy] acquireTokenSilent failed:', err);
     }
 
-    // 2. ssoSilent with UPN hint
+    // 2. ssoSilent with UPN hint. Inside Dataverse with the user's id unreadable (expectedOid
+    //    === null) there is NO hint at all — not even Xrm's userPrincipalName: the call falls
+    //    closed to the browser's own Entra session (ADR-028 A7, #1656).
+    const loginHint = expectedOid === null ? undefined : resolveLoginHint(account);
     try {
-      const loginHint = resolveLoginHint(account);
       console.info('[BrowserMsalStrategy] ssoSilent', loginHint ? `hint=${loginHint}` : '(no hint)');
       const result = await msal.ssoSilent({ scopes, loginHint });
-      const token = this._accept(result);
+      const token = this._accept(result, expectedOid);
       if (token) return token;
     } catch (err) {
       console.warn('[BrowserMsalStrategy] ssoSilent failed:', err);
@@ -205,10 +229,9 @@ export class BrowserMsalStrategy implements AuthStrategy {
     }
 
     try {
-      const loginHint = resolveLoginHint(account);
       console.warn('[BrowserMsalStrategy] falling back to acquireTokenPopup (regression in steady state)');
       const result = await msal.acquireTokenPopup({ scopes, loginHint });
-      const token = this._accept(result);
+      const token = this._accept(result, expectedOid);
       if (token) return token;
     } catch (err) {
       console.warn('[BrowserMsalStrategy] acquireTokenPopup failed:', err);
@@ -241,7 +264,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
     const msal = await this._ensureInitialized();
     if (!msal) return;
 
-    const account = this._pickAccount(msal) ?? undefined;
+    const account = this._pickAccount(msal, await this._expectedUserOid()) ?? undefined;
     try {
       await msal.logoutPopup({ account });
     } catch (err) {
@@ -274,9 +297,25 @@ export class BrowserMsalStrategy implements AuthStrategy {
    *      of acquire() lets ssoSilent use the browser's own Entra session instead.
    * Outside a tenant authority (the degraded /organizations fallback) the first
    * cached account is used, as before.
+   *
+   * Inside a Dataverse host (#1656) none of the above applies: `expectedOid` is the
+   * signed-in Dataverse user's Entra object id, and the ONLY usable account is the
+   * in-tenant one whose `oid` is that id. A lone cached account of anyone else —
+   * another user of a shared workstation, or the user's own home-tenant account —
+   * is never used, and its UPN is never the hint. `expectedOid === null` (the id
+   * could not be read) uses no cached account: ssoSilent then runs with no hint on
+   * the browser's own Entra session, and `_accept` checks nothing it cannot know.
    */
-  private _pickAccount(msal: PublicClientApplication): AccountInfo | null {
+  private _pickAccount(msal: PublicClientApplication, expectedOid: string | null | undefined): AccountInfo | null {
     const accounts = msal.getAllAccounts();
+    if (expectedOid !== undefined) {
+      if (!expectedOid) return null;
+      return (
+        accounts.find(
+          a => accountObjectId(a) === expectedOid && (!this._tenant || sameTenant(a.tenantId, this._tenant))
+        ) ?? null
+      );
+    }
     const page = this._pageAccount;
     if (page) {
       const same = accounts.find(a => a.homeAccountId === page.homeAccountId && sameTenant(a.tenantId, page.tenantId));
@@ -289,9 +328,28 @@ export class BrowserMsalStrategy implements AuthStrategy {
     return candidates.length === 1 ? candidates[0] : null;
   }
 
-  /** Validate a result and, when it is usable, remember its account for this page. */
-  private _accept(result: AuthenticationResult | null): TokenResult | null {
+  /**
+   * The signed-in Dataverse user's Entra object id (#1656): `undefined` outside a
+   * Dataverse host, `null` when it could not be read. Read once per page.
+   */
+  private async _expectedUserOid(): Promise<string | null | undefined> {
+    const pending = dataverseUserObjectId();
+    return pending === undefined ? undefined : await pending;
+  }
+
+  /**
+   * Validate a result and, when it is usable, remember its account for this page.
+   * Inside a Dataverse host a token for anyone but the signed-in Dataverse user is
+   * discarded (#1656) — e.g. a no-hint ssoSilent answered by another Entra session.
+   */
+  private _accept(result: AuthenticationResult | null, expectedOid: string | null | undefined): TokenResult | null {
     const token = this._validate(result);
+    if (token && expectedOid && tokenObjectId(token.accessToken) !== expectedOid) {
+      console.error(
+        '[BrowserMsalStrategy] token is for a different user than the signed-in Dataverse user; discarded (#1656)'
+      );
+      return null;
+    }
     if (token && result?.account?.homeAccountId) {
       this._pageAccount = { homeAccountId: result.account.homeAccountId, tenantId: result.account.tenantId };
     }

@@ -83,6 +83,20 @@ public class DataverseAccessRightsMapperTests
         result.Should().NotHaveFlag(AccessRights.Create, "CreateAccess was not in the answer");
     }
 
+    /// <summary>
+    /// A right named twice is still granted. Accumulating with <c>^=</c> instead of <c>|=</c> would toggle
+    /// the flag back OFF on the second occurrence — a caller Dataverse said HAS the right would be denied.
+    /// </summary>
+    [Theory]
+    [InlineData("ReadAccess,ReadAccess", AccessRights.Read)]
+    [InlineData("ShareAccess, ShareAccess ,ShareAccess", AccessRights.Share)]
+    [InlineData("ReadAccess,WriteAccess,ReadAccess", AccessRights.Read | AccessRights.Write)]
+    public void FromAccessRightsString_WithADuplicatedRight_KeepsItGranted(string answer, AccessRights expected)
+    {
+        DataverseAccessRightsMapper.FromAccessRightsString(answer).Should().Be(expected,
+            "repeating a right must neither add rights nor toggle the repeated one off");
+    }
+
     [Fact]
     public void FromAccessRightsString_WithSurroundingWhitespace_StillMaps()
     {

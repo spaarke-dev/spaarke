@@ -77,16 +77,18 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
-        // Returns the module-code list the external-spa widget registry gates tab visibility on: workforce
-        // from sprk_approlemodulemap (App-Role → module); CIAM blanket outside-counsel set. Distinct from
+        // Returns the module-code list the external-spa widget registry gates tab visibility on: default
+        // modules by server-resolved principal kind (A8: workforce → legal-front-door + policy-library; CIAM →
+        // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras. Distinct from
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
-                "Returns the caller's entitled module codes (Tier-1). Workforce callers resolve from the " +
-                "App-Role→module map (sprk_approlemodulemap); CIAM outside-counsel callers are blanket- " +
-                "entitled to the outside-counsel module set. Consumed by the external-spa widget registry " +
+                "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +
+                "principal kind (workforce: legal-front-door + policy-library; CIAM: assigned-work, plus " +
+                "legal-front-door when the partner service-request switch is on), plus App-Role→module map " +
+                "(sprk_approlemodulemap) extras. Consumed by the external-spa widget registry " +
                 "to gate tab visibility. Record visibility within a module is governed by Tier-2 grants.")
             .Produces<MeEntitlementsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -104,6 +106,24 @@ public static class ExternalAccessEndpoints
         // registered predicate (app-only, no OBO, no Graph pointers). Additive — handlers + the group
         // filter above are untouched.
         externalGroup.MapExternalModuleDataEndpoints();
+
+        // GET /api/v1/external/{root}/{id}/messages — the message thread regarding a record (r3 task 033, FR-04). Inherits
+        // this group's policy + CallerPrincipalAuthorizationFilter; the record is checked against the caller's accessible
+        // set (service requests: the caller's own) before an app-only read, and internal-only messages reach only
+        // internal systemusers.
+        externalGroup.MapExternalMessageEndpoints();
+
+        // POST /api/v1/external/servicerequests — the Legal Front Door intake submit (r3 task 035, FR-05/FR-06). Inherits this
+        // group's policy + CallerPrincipalAuthorizationFilter; gated server-side on the legal-front-door module entitlement
+        // (the one ModuleEntitlementResolver check /me/entitlements reports), and creates the request app-only with the
+        // caller's contact as sprk_requestedby.
+        externalGroup.MapExternalIntakeEndpoints();
+
+        // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
+        // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the
+        // caller's accessible set, messages come only from records in it under the external read rules (no privileged, no
+        // internal-only to a contact, not the caller's own), and the last-seen marker is Redis keyed by the principal id.
+        externalGroup.MapExternalNotificationFeedEndpoints();
 
         // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
         // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.

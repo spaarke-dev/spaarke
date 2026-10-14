@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -63,6 +64,50 @@ public sealed class CommunicationThreadReadService
     // sprk_communication and sprk_communicationthread carry the OOB `statecode` attribute.
     private const string StateCodeField = "statecode";
     private const string ActiveOnlyClause = "statecode eq 0";
+    // External-plane status allow-list (task 033 review F1). A message reaches an external reader ONLY when its Status
+    // Reason says it was actually sent or received: Send (659490002) and Delivered (659490003 — also what every inbound
+    // ingest path stamps). Draft/Queued/Failed/Bounded/Deleted/Recalled never qualify. An ALLOW-list, so a status added
+    // later is hidden from the external plane until it is consciously admitted here. Applies to the app-only read only.
+    private const string StatusCodeAttribute = "statuscode";
+    private const int StatusSend = (int)CommunicationStatus.Send;
+    private const int StatusDelivered = (int)CommunicationStatus.Delivered;
+    private static readonly string ExternalStatusClause =
+        $"({StatusCodeAttribute} eq {StatusSend} or {StatusCodeAttribute} eq {StatusDelivered})";
+    // External-plane privilege rule (owner decision 2026-10-11, task 033 follow-up): an external caller NEVER receives a
+    // message classified Privileged OR Potentially Privileged; None and null are shown. THIS list is the one place the
+    // hidden set is named - relaxing the rule to "Privileged only" is deleting PotentiallyPrivileged from it. The OData
+    // clause the external query adds and the per-row re-check are both derived from it. Applies to the app-only external
+    // read only: the impersonated internal reads still treat privilege as display metadata (ADR-015, owner decision
+    // 2026-07-16) and are unchanged.
+
+    /// <summary>
+    /// The privilege classifications an external caller never receives. Hide-only, and a classification not in the
+    /// defined set is hidden too (<see cref="IsHiddenFromExternal"/>): fail closed.
+    /// </summary>
+    public static readonly IReadOnlyList<CommunicationPrivilegeClassification> ExternallyHiddenPrivilege =
+        new[] { CommunicationPrivilegeClassification.PotentiallyPrivileged, CommunicationPrivilegeClassification.Privileged };
+
+    /// <summary>
+    /// The <c>$filter</c> clause every EXTERNAL message query must carry, so the privilege rule is applied by Dataverse
+    /// BEFORE paging (a page cut after filtering would otherwise be short): a null classification, or one outside
+    /// <see cref="ExternallyHiddenPrivilege"/>. Derived from that list. Any other external read of
+    /// <c>sprk_communication</c> (a notification feed, a count, a "latest") must add it.
+    /// </summary>
+    public static readonly string ExternalPrivilegeFilterClause =
+        $"({PrivilegeField} eq null or ("
+        + string.Join(" and ", ExternallyHiddenPrivilege.Select(p => $"{PrivilegeField} ne {(int)p}"))
+        + "))";
+
+    /// <summary>
+    /// Whether an external caller must not receive a message with this raw <c>sprk_privilegeclassification</c> value:
+    /// it is in <see cref="ExternallyHiddenPrivilege"/>, or it is a value this code does not define (an unreadable
+    /// classification is hidden, not shown). Null and None are shown.
+    /// </summary>
+    public static bool IsHiddenFromExternal(int? classification) =>
+        classification is { } value
+        && (ExternallyHiddenPrivilege.Contains((CommunicationPrivilegeClassification)value)
+            || !Enum.IsDefined(typeof(CommunicationPrivilegeClassification), value));
+
     private const string BodyField = "sprk_body";
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
@@ -85,6 +130,12 @@ public sealed class CommunicationThreadReadService
     // (IsValidODataAttribute=false → 400 on $select) and was never written by the send path anyway
     // (messaging-r3 2026-07-22). Null when sprk_sentby is unset (e.g. an inbound message with no systemuser sender).
     private const string SentByFormattedValue = "_sprk_sentby_value@OData.Community.Display.V1.FormattedValue";
+    // spaarke-SPA-external-access-platform-r3 task 034 (FR-11/FR-25): a CONTACT's external thread post has no sprk_sentby
+    // (a systemuser lookup); its author is the sprk_createdbycontact stamp. Selected ONLY by the app-only external read
+    // (ReadRegardingAppOnlyAsync) — the column is task 020's, so the internal reads do not depend on it. Its FormattedValue
+    // (the contact's name) is the sender name when sprk_sentby is unset.
+    private const string CreatedByContactValue = "_sprk_createdbycontact_value";
+    private const string CreatedByContactFormattedValue = "_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue";
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -112,6 +163,7 @@ public sealed class CommunicationThreadReadService
     private const int MaxParticipantAddressLength = 400; // matches sprk_addresstext Text(400) field max length
 
     private readonly IImpersonatedCommunicationQuery _query;
+    private readonly IAppOnlyCommunicationQuery? _appOnlyQuery;
     private readonly ICommunicationAccessFilter _accessFilter;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
@@ -122,9 +174,14 @@ public sealed class CommunicationThreadReadService
         ICommunicationAccessFilter accessFilter,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        ILogger<CommunicationThreadReadService> logger)
+        ILogger<CommunicationThreadReadService> logger,
+        IAppOnlyCommunicationQuery? appOnlyQuery = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
+        // Optional so the impersonated-only callers and their tests construct the service unchanged. Only
+        // ReadRegardingAppOnlyAsync uses it, and it refuses (throws) when the seam is absent — never an impersonated or
+        // unscoped substitute. CommunicationModule registers it, so DI always supplies it.
+        _appOnlyQuery = appOnlyQuery;
         _accessFilter = accessFilter ?? throw new ArgumentNullException(nameof(accessFilter));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
@@ -312,6 +369,313 @@ public sealed class CommunicationThreadReadService
             entityType, recordId, callerSystemUserId, threadResults.Count, messageCount);
 
         return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
+    }
+
+    // ── app-only by-regarding read for the EXTERNAL plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04) ──
+
+    /// <summary>
+    /// The messages filed regarding one record, read APP-ONLY for the external plane, oldest→newest (newest last).
+    /// Same row parsing, the same shared <see cref="ICommunicationAccessFilter"/> and the same DTO as the impersonated
+    /// reads above; only the query identity differs, because a contact caller has no <c>systemuser</c> to impersonate
+    /// and the external plane forbids OBO (ADR-028, NFR-01).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Record access is the caller's job, and must already be done.</b> This method makes NO record-level
+    /// decision: the external endpoint (<c>ExternalMessageEndpoints</c>) checks <paramref name="recordId"/> against the
+    /// caller's composed accessible set first, and the query here is keyed on that one record through the typed
+    /// <see cref="RegardingFieldMap"/> lookup on <c>sprk_communication</c> (the same column the filtered query's
+    /// <c>regarding=</c> facet uses). Every returned row is re-checked: a row whose regarding value is not
+    /// <paramref name="recordId"/> is dropped, so a query that drifted cannot widen the result.</para>
+    /// <para><b>Internal-only.</b> Shown only to an internal <c>systemuser</c>: <paramref name="callerSystemUserId"/> is
+    /// set AND <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> says internal (the same per-caller bit the
+    /// impersonated reads use, #675). A contact caller (CIAM or workforce contact) passes <c>null</c> and never receives
+    /// an internal-only row; an unreadable flag hides the row (the filter fails closed).</para>
+    /// <para><b>Columns.</b> An explicit projection — no attachments, no recipient addresses — so nothing beyond what
+    /// the external DTO needs is read. Bounded to <see cref="MaxRegardingScan"/> rows; <c>Truncated</c> says when the
+    /// bound was reached with more rows remaining.</para>
+    /// </remarks>
+    /// <param name="entityType">The regarding entity logical name (an ADR-024 family member, e.g. <c>sprk_matter</c>).</param>
+    /// <param name="recordId">The record the caller has already been authorized to read.</param>
+    /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
+    /// <param name="rootsReadable">
+    /// REQUIRED (no default, so a caller cannot forget it): whether the caller may see a message carrying these core-root
+    /// stamps. A communication filed under an invoice of secure matter M and project P is stamped with both, so the
+    /// keyed lookup alone would list it on P's thread to a reader of P only. Called once with the stamps of every row that
+    /// passed the other re-checks; a row it refuses is dropped, not counted as truncation.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AppOnlyRegardingReadResult> ReadRegardingAppOnlyAsync(
+        string entityType,
+        Guid recordId,
+        Guid? callerSystemUserId,
+        MessageRootsFilter rootsReadable,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rootsReadable);
+        if (string.IsNullOrWhiteSpace(entityType))
+            throw BadRequest("A regarding entity type is required.");
+
+        var regardingField = RegardingFieldMap.FieldFor(entityType);
+        if (regardingField is null)
+            throw BadRequest($"'{entityType}' is not a supported regarding entity type (ADR-024 family).");
+
+        if (recordId == Guid.Empty)
+            throw BadRequest("A regarding record id is required.");
+
+        var appOnlyQuery = _appOnlyQuery
+            ?? throw new InvalidOperationException(
+                "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
+
+        var regardingValue = $"_{regardingField}_value";
+        var select = ExternalSelect(new[] { regardingValue }, includeContent: true);
+        // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
+        // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
+        // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
+        // never read for the external plane.
+        var odata =
+            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $" and {ExternalPrivilegeFilterClause}" +
+            $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
+        var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
+
+        var truncated = rows.Count > MaxRegardingScan;
+        var bounded = rows.Take(MaxRegardingScan).Reverse().ToList();
+        // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
+        // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
+        var candidates = bounded
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r))
+            .ToList();
+        // The multi-root rule, prepared once for every candidate's stamps (one batched secure-flag read, not one per row).
+        var readable = await rootsReadable(candidates.Select(RootsOf).ToList(), ct);
+        var scoped = candidates.Where(r => readable(RootsOf(r))).ToList();
+
+        var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
+
+        _logger.LogDebug(
+            "[BY-REGARDING-APPONLY] {EntityType}={RecordId} internalCaller={Internal} returned={Returned} " +
+            "(read={Read}, dropped-regarding-or-status={Dropped}, truncated={Truncated})",
+            entityType, recordId, isInternal, messages.Count, rows.Count, bounded.Count - scoped.Count, truncated);
+
+        return new AppOnlyRegardingReadResult(messages, truncated);
+    }
+
+    private const string ProjectStampColumn = "_sprk_regardingproject_value";
+    private const string MatterStampColumn = "_sprk_regardingmatter_value";
+    private const string WorkAssignmentStampColumn = "_sprk_regardingworkassignment_value";
+
+    private static readonly string[] RootStampColumns = { ProjectStampColumn, MatterStampColumn, WorkAssignmentStampColumn };
+
+    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks, or holds as JSON null, reads
+    /// as not filed).</summary>
+    private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
+        RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn),
+        // Task 187: the row itself, whose other parents (thread, invoice, event ...) the rule derives and takes in LIVE.
+        row);
+
+    /// <summary>The table the external reads select from.</summary>
+    private const string CommunicationTable = "sprk_communication";
+
+    /// <summary>Stands for a stamp that is present but not a string; the multi-root rule reads it as an unreadable root.</summary>
+    private const string MalformedRootStamp = "malformed";
+
+    /// <summary>
+    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): absent or JSON null is "not filed", a string is the lookup, and
+    /// any other JSON value (a number, object, array, boolean) is malformed, so the row is withheld, as
+    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case.
+    /// </summary>
+    private static string? RootStamp(Dictionary<string, JsonElement> row, string key)
+    {
+        if (!row.TryGetValue(key, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        return v.ValueKind == JsonValueKind.String ? v.GetString() : MalformedRootStamp;
+    }
+
+    /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
+    private static bool IsExternallyReadableStatus(int? statusCode)
+        => statusCode is StatusSend or StatusDelivered;
+
+    /// <summary>
+    /// The per-row re-check every EXTERNAL read applies after its query (defence in depth — the query is not the only
+    /// gate): a sent/received status (a missing or unreadable one is dropped) and a privilege classification an external
+    /// caller may receive (<see cref="IsHiddenFromExternal"/>).
+    /// </summary>
+    private static bool IsExternallyVisibleRow(Dictionary<string, JsonElement> row)
+        => IsExternallyReadableStatus(TryInt(row, StatusCodeAttribute)) && !IsHiddenFromExternal(TryInt(row, PrivilegeField));
+
+    /// <summary>
+    /// The explicit external projection (no attachments, no recipient addresses) plus the regarding lookups read.
+    /// <paramref name="includeContent"/> adds the body, its format and the subject: the task 033 thread read returns them;
+    /// the notification feed never uses them, so it projects without (task 037 review K3, least data).
+    /// </summary>
+    private static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
+    {
+        // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
+        // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.
+        // Task 187 (owner round 99, D-123): and the row's other parent lookups, whose LIVE roots the rule takes in (RootsOf).
+        regardingValues = regardingValues.Concat(RootStampColumns)
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalMultiRootRule.LiveParentSelect(CommunicationTable))
+            .Distinct();
+        var columns = new List<string> { PkField };
+        if (includeContent)
+        {
+            columns.AddRange(new[] { BodyField, BodyFormatField, SubjectField });
+        }
+
+        columns.AddRange(new[]
+        {
+            DirectionField, SentByValue, CreatedByContactValue, CreatedOnField, InternalOnlyField, PrivilegeField,
+            StatusCodeAttribute,
+        });
+        return string.Join(',', columns.Concat(regardingValues));
+    }
+
+    /// <summary>
+    /// The shared tail of every EXTERNAL read: the internal-only decision (an internal systemuser only — the same
+    /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> bit the impersonated reads use, #675), the shared
+    /// <see cref="ICommunicationAccessFilter"/>, and the shared DTO builder. Returns the visible messages in input order.
+    /// </summary>
+    private async Task<(List<ThreadMessageDto> Messages, bool IsInternal)> FilterExternalMessagesAsync(
+        IReadOnlyList<Dictionary<string, JsonElement>> rows, Guid? callerSystemUserId, CancellationToken ct)
+    {
+        var isInternal = callerSystemUserId is { } systemUserId
+            && systemUserId != Guid.Empty
+            && !await _identityResolver.IsExternalAsync(systemUserId, ct);
+        var context = new CommunicationAccessContext(
+            CallerSystemUserId: callerSystemUserId ?? Guid.Empty, IsInternalUser: isInternal);
+
+        var parsed = rows.Select(ParseMessageRow).Where(p => p.MessageId != Guid.Empty).ToList();
+        var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
+        var byId = parsed.ToDictionary(p => p.MessageId);
+        var messages = filtered.Decisions
+            .Where(d => d.Decision.IsVisible)
+            .Select(d => BuildDto(byId[d.Message.Id], d.Decision, EmptyAttachments))
+            .ToList();
+        return (messages, isInternal);
+    }
+
+    // ── app-only RECENT messages across many records, for the EXTERNAL notification feed (r3 task 037 / FR-08) ──
+
+    /// <summary>Records per feed query: one OR-filter over this many regarding ids keeps the GET URL well inside the limit.</summary>
+    internal const int RecentRecordChunkSize = 50;
+
+    /// <summary>
+    /// The most records one feed read scans (<see cref="RecentRecordChunkSize"/> × 20 queries). A caller with more is
+    /// answered from the first this-many and the result says <c>Truncated</c> — a cap is never silent.
+    /// </summary>
+    internal const int MaxRecentRecords = 1000;
+
+    /// <summary>
+    /// The newest messages filed regarding ANY of <paramref name="records"/> since <paramref name="since"/>, read APP-ONLY
+    /// for the external notification feed, newest first, at most <paramref name="max"/>. Every row passes the SAME external
+    /// rules as <see cref="ReadRegardingAppOnlyAsync"/>: active and sent/received only, the privilege rule
+    /// (<see cref="ExternalPrivilegeFilterClause"/> in the query, <see cref="IsHiddenFromExternal"/> per row), and the
+    /// shared internal-only filter (an internal systemuser only).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Record access is the caller's job, and must already be done.</b> <paramref name="records"/> must be the
+    /// caller's accessible set (the feed endpoint passes the principal's Read-bearing roots and its own service requests).
+    /// The query is keyed on those records through the typed <see cref="RegardingFieldMap"/> lookups, and every returned row
+    /// is re-checked: it is kept only when one of its regarding values IS one of <paramref name="records"/>, and that record
+    /// (the first in <paramref name="records"/> order) is the one reported. A row that matches none is dropped.</para>
+    /// <para><b>Bounded.</b> At most <see cref="MaxRecentRecords"/> records, queried <see cref="RecentRecordChunkSize"/> at
+    /// a time, each query <c>$top</c> = <paramref name="max"/> + 1 newest; merged, newest first, cut to
+    /// <paramref name="max"/>. <c>Truncated</c> says a bound cut the answer (more records, or more messages, than read).</para>
+    /// </remarks>
+    /// <param name="records">The caller's accessible records as (entity logical name, id); unsupported types are ignored.</param>
+    /// <param name="since">The window start; only messages created at or after it are read.</param>
+    /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
+    /// <param name="max">The most messages to return (newest first).</param>
+    /// <param name="rootsReadable">
+    /// REQUIRED: whether the caller may see a message carrying these core-root stamps (see
+    /// <see cref="ReadRegardingAppOnlyAsync"/>). A message filed to one accessible record and also to a root the caller
+    /// cannot read is not reported; it is dropped, not counted as truncation.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AppOnlyRecentReadResult> ReadRecentForRecordsAppOnlyAsync(
+        IReadOnlyList<(string EntityType, Guid RecordId)> records,
+        DateTimeOffset since,
+        Guid? callerSystemUserId,
+        int max,
+        MessageRootsFilter rootsReadable,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(rootsReadable);
+        if (max <= 0)
+            throw new ArgumentOutOfRangeException(nameof(max), "The feed read needs a positive bound.");
+
+        var appOnlyQuery = _appOnlyQuery
+            ?? throw new InvalidOperationException(
+                "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
+
+        // Supported, non-empty, distinct records, in the caller's order (that order picks the reported record for a row
+        // filed under two of them).
+        var keyed = records
+            .Where(r => r.RecordId != Guid.Empty && RegardingFieldMap.FieldFor(r.EntityType) is not null)
+            .Select(r => (Entity: r.EntityType, r.RecordId, Value: $"_{RegardingFieldMap.FieldFor(r.EntityType)}_value"))
+            .DistinctBy(r => (r.Value, r.RecordId))
+            .ToList();
+        var truncated = keyed.Count > MaxRecentRecords;
+        if (truncated)
+            keyed = keyed.Take(MaxRecentRecords).ToList();
+
+        if (keyed.Count == 0)
+            return new AppOnlyRecentReadResult(Array.Empty<RecentRecordMessage>(), truncated);
+
+        var rows = new List<Dictionary<string, JsonElement>>();
+        foreach (var chunk in keyed.Chunk(RecentRecordChunkSize))
+        {
+            var regardingValues = chunk.Select(r => r.Value).Distinct().ToList();
+            var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
+            var odata =
+                $"$select={ExternalSelect(regardingValues, includeContent: false)}" +
+                $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
+                $" and {CreatedOnField} ge {FormatOData(since)}" +
+                $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";
+            var chunkRows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
+            truncated |= chunkRows.Count > max;
+            rows.AddRange(chunkRows.Take(max));
+        }
+
+        // Re-check every row: the window, the external status/privilege rules, and that it regards one of THE records.
+        var matched = new Dictionary<Guid, (string Entity, Guid RecordId)>();
+        var candidates = new List<Dictionary<string, JsonElement>>();
+        foreach (var row in rows)
+        {
+            if (TryGuid(row, PkField) is not { } messageId || messageId == Guid.Empty || matched.ContainsKey(messageId))
+                continue;
+            if (TryDateTimeOffset(row, CreatedOnField) is not { } createdOn || createdOn < since || !IsExternallyVisibleRow(row))
+                continue;
+
+            var match = keyed.FirstOrDefault(r => TryGuid(row, r.Value) == r.RecordId);
+            if (match.Value is null)
+                continue;
+            matched[messageId] = (match.Entity, match.RecordId);
+            candidates.Add(row);
+        }
+
+        // The multi-root rule, prepared once for every candidate's stamps (one batched secure-flag read, not one per row):
+        // a message also filed to a root the caller may not see is not reported.
+        var readable = await rootsReadable(candidates.Select(RootsOf).ToList(), ct);
+        var scoped = candidates.Where(r => readable(RootsOf(r))).ToList();
+
+        var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
+        var ordered = messages
+            .OrderByDescending(m => m.CreatedOn)
+            .ThenByDescending(m => m.MessageId)
+            .ToList();
+        truncated |= ordered.Count > max;
+        var result = ordered
+            .Take(max)
+            .Select(m => new RecentRecordMessage(m, matched[m.MessageId].Entity, matched[m.MessageId].RecordId))
+            .ToList();
+
+        _logger.LogDebug(
+            "[RECENT-APPONLY] records={Records} since={Since:o} internalCaller={Internal} returned={Returned} " +
+            "(read={Read}, kept-after-recheck={Kept}, truncated={Truncated})",
+            keyed.Count, since, isInternal, result.Count, rows.Count, scoped.Count, truncated);
+
+        return new AppOnlyRecentReadResult(result, truncated);
     }
 
     // ── list all threads (R3 task 003 / FR-16) ───────────────────────────────────────────────────────
@@ -718,7 +1082,8 @@ public sealed class CommunicationThreadReadService
             IsPrivate: parsed.IsPrivate,
             Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
                 ? atts
-                : Array.Empty<ThreadAttachmentRef>());
+                : Array.Empty<ThreadAttachmentRef>(),
+            CreatedByContactId: parsed.CreatedByContactId);
 
     private sealed record VisibleMessage(Guid ThreadId, ThreadMessageDto Dto);
 
@@ -928,7 +1293,9 @@ public sealed class CommunicationThreadReadService
             To = SplitRecipients(TryString(row, ToField)),
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
-            SentByName = TryString(row, SentByFormattedValue),
+            CreatedByContactId = TryGuid(row, CreatedByContactValue),
+            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
+            SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),
@@ -950,6 +1317,7 @@ public sealed class CommunicationThreadReadService
         public IReadOnlyList<string> To { get; init; } = Array.Empty<string>();
         public int? Direction { get; init; }
         public Guid? SentBy { get; init; }
+        public Guid? CreatedByContactId { get; init; }
         public string? SentByName { get; init; }
         public DateTimeOffset? SentAt { get; init; }
         public DateTimeOffset? CreatedOn { get; init; }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
   "manifestVersion": "1.29",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "id": "23610794-67de-4e6c-be61-ff80cc8cbe7f",
   "developer": {
     "name": "Spaarke",
@@ -37,9 +37,5 @@
     "spaarke-bff-dev.azurewebsites.net",
     "teams.microsoft.com",
     "*.cloud.microsoft"
-  ],
-  "webApplicationInfo": {
-    "id": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    "resource": "api://green-dune-0c4f1221e.7.azurestaticapps.net/1e40baad-e065-4aea-a8d4-4b7ab273458c"
-  }
+  ]
 }

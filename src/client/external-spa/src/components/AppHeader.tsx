@@ -73,6 +73,10 @@ const useStyles = makeStyles({
   welcomeSub: { color: tokens.colorNeutralForeground3 },
   // Teams-embedded: the host provides its own header + theme; show only a thin hint.
   teamsHint: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalXL,
@@ -99,6 +103,11 @@ interface AppHeaderProps {
   teamsHost?: boolean;
   /** Show the tall "Welcome to the Legal Department Service Portal" band (workspace landing only). */
   showWelcomeBand?: boolean;
+  /**
+   * The notification bell (task 055), rendered at the right of the header and of the Teams hint. A slot, not an import: the
+   * caller mounts it only for a signed-in user, because the bell reads the BFF the moment it mounts.
+   */
+  bell?: React.ReactNode;
 }
 
 /**
@@ -116,6 +125,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onSignOut,
   teamsHost = false,
   showWelcomeBand = false,
+  bell = null,
 }) => {
   const styles = useStyles();
 
@@ -123,6 +133,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     return (
       <div className={styles.teamsHint} role="banner">
         <Text size={200}>Teams-embedded: the host provides the header and theme. Your workspace is below.</Text>
+        {bell}
       </div>
     );
   }
@@ -156,6 +167,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         </div>
 
         <div className={styles.right}>
+          {bell}
           <ThemeToggle />
           {portalUser && (
             <Menu>

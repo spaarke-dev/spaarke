@@ -78,7 +78,9 @@ public class RecordSyncJobTests
 
         // Act
         await job.StartAsync(cts.Token);
-        await Task.Delay(50); // let the background loop tick once
+        // Await the actual execute task: a disabled job's ExecuteAsync returns straight away. The bound only
+        // matters if it regressed into the polling loop, in which case this times out and fails.
+        await job.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await job.StopAsync(CancellationToken.None);
 
         // Assert
@@ -106,7 +108,8 @@ public class RecordSyncJobTests
 
         // Act — should not throw
         await job.StartAsync(cts.Token);
-        await Task.Delay(50);
+        // Missing endpoint => ExecuteAsync returns straight away (see the disabled test above).
+        await job.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await job.StopAsync(CancellationToken.None);
 
         // Assert

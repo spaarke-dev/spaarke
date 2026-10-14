@@ -180,7 +180,7 @@ public class JpsPipelineIntegrationTests
     // JPS with structuredOutput → JSON Schema generated
     // ===================================================================
 
-    [Fact(Skip = "Render method signature changed - test calls outdated 6-parameter overload")]
+    [Fact]
     public void JpsWithStructuredOutput_GeneratesJsonSchema()
     {
         // Arrange
@@ -225,8 +225,9 @@ public class JpsPipelineIntegrationTests
         // Verify numeric constraints on confidence
         var confProp = props["confidence"]!.AsObject();
         confProp["type"]!.GetValue<string>().Should().Be("number");
-        confProp["minimum"]!.GetValue<double>().Should().Be(0);
-        confProp["maximum"]!.GetValue<double>().Should().Be(1);
+        // minimum/maximum are stripped: Azure OpenAI strict structured output rejects them (HTTP 400)
+        confProp.ContainsKey("minimum").Should().BeFalse();
+        confProp.ContainsKey("maximum").Should().BeFalse();
 
         // Verify required array
         var required = schema["required"]!.AsArray();
@@ -516,7 +517,7 @@ public class JpsPipelineIntegrationTests
     // Full pipeline: realistic JPS → complete rendered prompt
     // ===================================================================
 
-    [Fact(Skip = "Render method signature changed - test calls outdated 6-parameter overload")]
+    [Fact]
     public void FullPipeline_RealisticJps_RendersCompletePromptWithAllSections()
     {
         // Arrange — a realistic JPS similar to document-profiler.json
@@ -621,9 +622,9 @@ public class JpsPipelineIntegrationTests
         var docTypeProp = props["documentType"]!.AsObject();
         docTypeProp["enum"]!.AsArray().Should().HaveCount(5);
 
-        // Verify maxLength on summary in JSON Schema
+        // maxLength is stripped: Azure OpenAI strict structured output rejects it (HTTP 400)
         var summaryProp = props["summary"]!.AsObject();
-        summaryProp["maxLength"]!.GetValue<int>().Should().Be(5000);
+        summaryProp.ContainsKey("maxLength").Should().BeFalse();
     }
 
     [Fact]
