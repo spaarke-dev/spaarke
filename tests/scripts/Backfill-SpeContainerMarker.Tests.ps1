@@ -4,14 +4,18 @@
 # carry no marker, and the BFF's SpeContainerOwnershipGuard refuses them forever. scripts/
 # Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId marks them. These tests prove, with no live call:
 #   1. the pure per-container decision (Get-SpeContainerMarkerDecision): each outcome, a case-differing id is
-#      MarkerForeign, an underivable container is never Mark, a blank -CustomerId means no marker pass;
+#      MarkerForeign, an underivable container is never Mark, a blank -CustomerId means no marker pass, a container the
+#      run stamps from records alone is MarkNextRun (never Mark), an earlier-bound unclaimed container is UnmarkedNoClaim;
 #   2. Get-SpeContainerBinding tells an ABSENT marker from an AMBIGUOUS one (the backfill must not write over the latter);
 #   3. the whole script, end to end against an in-memory Dataverse + Graph (child pwsh with `az` and
 #      Invoke-RestMethod shadowed): dry run writes nothing; -Apply marks only derivable, undisputed, unmarked containers;
 #      it is idempotent; -MaxWritesPerRun is honoured; a read-back failure is a failure; -Verify fails on unmarked /
 #      foreign / malformed; -RevertManifest removes a marker only where it is still this run's; an old stamp-only
-#      manifest still reverts; a blank -CustomerId is refused before any call; without -CustomerId nothing about the
-#      marker is read or written; no container is ever deleted.
+#      manifest still reverts; a blank or malformed -CustomerId is refused before any call; without -CustomerId nothing
+#      about the marker is read or written; no container is ever deleted. SAFETY (cross-customer exposure): a FOREIGN or
+#      MISMATCH stamp and a -Bind conflicting with the stamp are never marked; a record claim alone never marks the
+#      container in the pass that stamps it (MARK-NEXT-RUN, -Verify fails, the next -Apply marks it); an unclaimed
+#      container stamped by an earlier -Bind is UNMARKED-NO-CLAIM; the marker's manifest row is on disk before its write.
 #
 # Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Backfill-SpeContainerMarker.Tests.ps1
 # Run under PowerShell 7 (the script is a pwsh script and the harness child is `pwsh`).
@@ -23,39 +27,56 @@ $script:Backfill = Join-Path $repoRoot 'scripts/Backfill-SpeContainerBusinessUni
 
 $script:Root = '11111111-1111-1111-1111-111111111111'
 $script:Unit2 = '22222222-2222-2222-2222-222222222222'
-$script:Cust = 'cust-1'
+$script:ForeignUnit = '99999999-9999-9999-9999-999999999999'   # a unit this environment's hierarchy does not hold
+$script:Cust = 'acme'
 
 # ── 1. The pure decision ────────────────────────────────────────────────────────────────────────────────────────
 Describe 'Get-SpeContainerMarkerDecision' {
-    It 'is Mark for a derivable, undisputed container whose marker is absent (stamped or not)' {
+    It 'is Mark for a derivable, undisputed container that was ALREADY stamped at the first read and whose marker is absent' {
         Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Stamped' -Marker $null | Should Be 'Mark'
-        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Unstamped' -Marker $null | Should Be 'Mark'
+    }
+    It 'is Mark for an unstamped container only when an explicit -Bind names it' {
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Unstamped' -Marker $null -BindNamed $true | Should Be 'Mark'
+    }
+    It 'is MarkNextRun - never Mark - for an unstamped container derivable from records alone (a customer-writable claim)' {
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Unstamped' -Marker $null | Should Be 'MarkNextRun'
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Unstamped' -Marker $null -BindNamed $false | Should Be 'MarkNextRun'
     }
     It 'is AlreadyMarked when the marker equals the customer id (trimmed)' {
-        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Stamped' -Marker 'cust-1' | Should Be 'AlreadyMarked'
-        Get-SpeContainerMarkerDecision -CustomerId '  cust-1 ' -Derivable $true -StampState 'Stamped' -Marker 'cust-1' | Should Be 'AlreadyMarked'
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Stamped' -Marker 'acme' | Should Be 'AlreadyMarked'
+        Get-SpeContainerMarkerDecision -CustomerId '  acme ' -Derivable $true -StampState 'Stamped' -Marker 'acme' | Should Be 'AlreadyMarked'
     }
     It 'is MarkerForeign for a different value' {
         Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Stamped' -Marker 'other-customer' | Should Be 'MarkerForeign'
     }
     It 'is MarkerForeign - not AlreadyMarked - for a case-differing customer id (ordinal compare)' {
-        Get-SpeContainerMarkerDecision -CustomerId 'CUST-1' -Derivable $true -StampState 'Stamped' -Marker 'cust-1' | Should Be 'MarkerForeign'
-        Get-SpeContainerMarkerDecision -CustomerId 'cust-1' -Derivable $true -StampState 'Stamped' -Marker 'CUST-1' | Should Be 'MarkerForeign'
+        Get-SpeContainerMarkerDecision -CustomerId 'ACME' -Derivable $true -StampState 'Stamped' -Marker 'acme' | Should Be 'MarkerForeign'
+        Get-SpeContainerMarkerDecision -CustomerId 'acme' -Derivable $true -StampState 'Stamped' -Marker 'ACME' | Should Be 'MarkerForeign'
     }
     It 'is MarkerMalformed for an ambiguous marker, never Mark' {
         Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState 'Stamped' -Marker $null -MarkerMalformed $true | Should Be 'MarkerMalformed'
     }
-    It 'is SkipUnderivable for an underivable container whatever its marker or stamp - never Mark' {
-        foreach ($stamp in 'Unstamped', 'Stamped', 'Mismatch', 'Foreign', 'Malformed') {
-            foreach ($marker in @($null, 'cust-1', 'other')) {
+    It 'is SkipUnderivable for an underivable container that is not stamped for this environment - never Mark' {
+        foreach ($stamp in 'Unstamped', 'Mismatch', 'Foreign', 'Malformed') {
+            foreach ($marker in @($null, 'acme', 'other')) {
                 Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState $stamp -Marker $marker | Should Be 'SkipUnderivable'
             }
         }
         Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Unstamped' -Marker $null -MarkerMalformed $true | Should Be 'SkipUnderivable'
+        # stamped for this environment, no claim, but already marked for this customer: nothing to say
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Stamped' -Marker 'acme' | Should Be 'SkipUnderivable'
     }
-    It 'is SkipDisputedStamp for a MISMATCH / FOREIGN / MALFORMED stamp - never Mark' {
+    It 'is UnmarkedNoClaim - never Mark - for a container stamped for this environment that no record claims and that is not marked for this customer' {
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Stamped' -Marker $null | Should Be 'UnmarkedNoClaim'
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Stamped' -Marker 'other' | Should Be 'UnmarkedNoClaim'
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Stamped' -Marker 'ACME' | Should Be 'UnmarkedNoClaim'
+        Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $false -StampState 'Stamped' -Marker $null -MarkerMalformed $true | Should Be 'UnmarkedNoClaim'
+    }
+    It 'is SkipDisputedStamp for a MISMATCH / FOREIGN / MALFORMED stamp - never Mark, even with -Bind' {
         foreach ($stamp in 'Mismatch', 'Foreign', 'Malformed') {
-            Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState $stamp -Marker $null | Should Be 'SkipDisputedStamp'
+            foreach ($bind in $true, $false) {
+                Get-SpeContainerMarkerDecision -CustomerId $script:Cust -Derivable $true -StampState $stamp -Marker $null -BindNamed $bind | Should Be 'SkipDisputedStamp'
+            }
         }
     }
     It 'runs no marker pass (returns nothing) when -CustomerId is absent or blank' {
@@ -63,12 +84,14 @@ Describe 'Get-SpeContainerMarkerDecision' {
         Get-SpeContainerMarkerDecision -CustomerId '' -Derivable $true -StampState 'Stamped' -Marker $null | Should BeNullOrEmpty
         Get-SpeContainerMarkerDecision -CustomerId '   ' -Derivable $true -StampState 'Stamped' -Marker $null | Should BeNullOrEmpty
     }
-    It 'only ever answers one of the six outcomes' {
-        $allowed = 'Mark', 'AlreadyMarked', 'MarkerForeign', 'MarkerMalformed', 'SkipUnderivable', 'SkipDisputedStamp'
-        foreach ($d in $true, $false) { foreach ($s in 'Unstamped', 'Stamped', 'Mismatch', 'Foreign', 'Malformed') {
-            foreach ($m in @($null, 'cust-1', 'x')) { foreach ($mm in $true, $false) {
-                $allowed -contains (Get-SpeContainerMarkerDecision -CustomerId 'cust-1' -Derivable $d -StampState $s -Marker $m -MarkerMalformed $mm) | Should Be $true
-            } }
+    It 'only ever answers one of the eight outcomes, and answers Mark only on basis (a) Stamped or (b) -Bind' {
+        $allowed = 'Mark', 'MarkNextRun', 'AlreadyMarked', 'MarkerForeign', 'MarkerMalformed', 'SkipUnderivable', 'UnmarkedNoClaim', 'SkipDisputedStamp'
+        foreach ($d in $true, $false) { foreach ($st in 'Unstamped', 'Stamped', 'Mismatch', 'Foreign', 'Malformed') {
+            foreach ($m in @($null, 'acme', 'x')) { foreach ($mm in $true, $false) { foreach ($b in $true, $false) {
+                $r = Get-SpeContainerMarkerDecision -CustomerId 'acme' -Derivable $d -StampState $st -Marker $m -MarkerMalformed $mm -BindNamed $b
+                $allowed -contains $r | Should Be $true
+                if ($r -eq 'Mark') { $d | Should Be $true; ($st -eq 'Stamped' -or $b) | Should Be $true }
+            } } }
         } }
     }
 }
@@ -90,9 +113,9 @@ Describe 'Get-SpeContainerBinding marker reading' {
         $b.MarkerMalformed | Should Be $false
     }
     It 'reads one marker as its trimmed value' {
-        Set-FakeContainer @{ spaarkeCustomerId = ' cust-1 ' }
+        Set-FakeContainer @{ spaarkeCustomerId = ' acme ' }
         $b = Get-SpeContainerBinding -Token t -ContainerId 'b!x'
-        $b.Marker | Should BeExactly 'cust-1'
+        $b.Marker | Should BeExactly 'acme'
         $b.MarkerMalformed | Should Be $false
     }
     It 'reads two marker entries as malformed (Marker $null)' {
@@ -151,6 +174,7 @@ function Invoke-RestMethod {
             $global:W.patches = @($global:W.patches) + @(@{ id = $id; body = $Body })
             $patch = $Body | ConvertFrom-Json -AsHashtable
             foreach ($k in @($patch.Keys)) {
+                if ($k -ieq 'spaarkeCustomerId' -and @($global:W.throwMarkerPatchFor) -contains $id) { throw "FAKE 500 on the marker PATCH of $id" }
                 if ($k -ieq 'spaarkeCustomerId' -and @($global:W.dropMarkerPatchFor) -contains $id) { continue }
                 if ($null -eq $patch[$k]) { foreach ($e in @($c.props.Keys)) { if ($e -ceq $k) { $c.props.Remove($e) } } }
                 else { $c.props[$k] = $patch[$k].value }
@@ -173,21 +197,24 @@ exit $code
 
 function New-World {
     param([string[]]$Only)
-    $keys = if ($Only) { $Only } else { 'cA', 'cB', 'cC', 'cD', 'cE', 'cF', 'cG', 'cH' }
+    $keys = if ($Only) { $Only } else { 'cA', 'cB', 'cC', 'cD', 'cE', 'cF', 'cG', 'cH', 'cI' }
     $stamp = 'spaarkeBusinessUnitId'; $marker = 'spaarkeCustomerId'
     $all = [ordered]@{
-        # derivable from the root unit's default container; unstamped, unmarked -> stamp AND mark
+        # derivable from the root unit's default container; unstamped, unmarked -> stamped, then MARK-NEXT-RUN (not marked in that pass)
         'cA' = @{ name = 'unit default'; props = @{} }
         # the #1889 case: secure project container, correctly stamped, no marker -> mark only
         'cB' = @{ name = 'secure project (pre-marker)'; props = @{ $stamp = $script:Unit2 } }
-        'cC' = @{ name = 'already marked'; props = @{ $stamp = $script:Unit2; $marker = 'cust-1' } }
-        'cD' = @{ name = 'marker differs by case'; props = @{ $stamp = $script:Unit2; $marker = 'CUST-1' } }
+        'cC' = @{ name = 'already marked'; props = @{ $stamp = $script:Unit2; $marker = 'acme' } }
+        'cD' = @{ name = 'marker differs by case'; props = @{ $stamp = $script:Unit2; $marker = 'ACME' } }
         'cE' = @{ name = 'two marker entries'; props = @{ $stamp = $script:Unit2; $marker = 'a'; (' ' + $marker) = 'b' } }
         # no authoritative record claims it (another environment's, in a shared type) -> never marked
         'cF' = @{ name = 'underivable unstamped'; props = @{} }
         # secure project container stamped with a unit the records do not derive -> MISMATCH, disputed
         'cG' = @{ name = 'mismatched stamp'; props = @{ $stamp = $script:Root } }
+        # stamped for this environment by an earlier -Bind, claimed by no record -> UNMARKED-NO-CLAIM, never marked automatically
         'cH' = @{ name = 'underivable stamped'; props = @{ $stamp = $script:Unit2 } }
+        # a secure project claims it, but the stamp names a unit this environment does not know -> FOREIGN, disputed
+        'cI' = @{ name = 'foreign stamp'; props = @{ $stamp = $script:ForeignUnit } }
     }
     $containers = @{}
     foreach ($k in $keys) { $containers["b!$k"] = $all[$k] }
@@ -198,6 +225,7 @@ function New-World {
             'cB' { $proj += @{ sprk_projectid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
             'cE' { $proj += @{ sprk_projectid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
             'cG' { $proj += @{ sprk_projectid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
+            'cI' { $proj += @{ sprk_projectid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
             'cC' { $matters += @{ sprk_matterid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
             'cD' { $work += @{ sprk_workassignmentid = $guid; sprk_containerid = "b!$k"; _owningbusinessunit_value = $script:Unit2 } }
         }
@@ -214,7 +242,7 @@ function New-World {
             sprk_keyvaultsecretname = 'spe-owning-app-test'; _sprk_environment_value = '66666666-6666-6666-6666-666666666666'
             _sprk_businessunit_value = $script:Root })
         projects = $proj; matters = $matters; workassignments = $work; audits = @()
-        containers = $containers; patches = @(); deletes = @(); dropMarkerPatchFor = @()
+        containers = $containers; patches = @(); deletes = @(); dropMarkerPatchFor = @(); throwMarkerPatchFor = @()
     }
 }
 
@@ -254,38 +282,161 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
         $r.Exit | Should Be 0
         @($r.World.patches).Count | Should Be 0
         @($r.World.deletes).Count | Should Be 0
-        Get-StatLine $r 'ToMark' | Should Be 2          # cA (after its stamp) and cB
+        Get-StatLine $r 'ToMark' | Should Be 1             # cB: already stamped, derivable
+        Get-StatLine $r 'MarkNextRun' | Should Be 1        # cA: would be stamped this run, marked only on the next
+        Get-StatLine $r 'UnmarkedNoClaim' | Should Be 1    # cH: stamped by an earlier -Bind, no record claims it
         Get-StatLine $r 'Marked' | Should Be 0
-        Get-StatLine $r 'AlreadyMarked' | Should Be 1   # cC
-        Get-StatLine $r 'MarkerForeign' | Should Be 1   # cD (case differs)
-        Get-StatLine $r 'MarkerMalformed' | Should Be 1 # cE
+        Get-StatLine $r 'AlreadyMarked' | Should Be 1      # cC
+        Get-StatLine $r 'MarkerForeign' | Should Be 1      # cD (case differs)
+        Get-StatLine $r 'MarkerMalformed' | Should Be 1    # cE
+        $r.Out | Should Match 'MARK-NEXT-RUN b!cA'
+        $r.Out | Should Match 'UNMARKED-NO-CLAIM b!cH'
         $r.Out | Should Match 'MARKER-FOREIGN b!cD'
         $r.Out | Should Match 'MARKER-MALFORMED b!cE'
     }
 
-    It '-Apply marks ONLY derivable, undisputed, unmarked containers - never underivable, mismatched, foreign or malformed' {
+    It '-Apply marks ONLY containers already stamped for this environment and derivable - never underivable, mismatched, foreign, malformed, or one it stamps itself' {
         $r = Invoke-Backfill (New-World) @{ CustomerId = $script:Cust; Apply = $true }
         $r.Exit | Should Be 0
-        Get-Prop $r 'b!cA' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
-        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
-        Get-Prop $r 'b!cC' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
-        Get-Prop $r 'b!cD' 'spaarkeCustomerId' | Should BeExactly 'CUST-1'   # never overwritten
-        Get-Prop $r 'b!cE' 'spaarkeCustomerId' | Should BeExactly 'a'          # never overwritten
-        Get-Prop $r 'b!cF' 'spaarkeCustomerId' | Should BeNullOrEmpty          # underivable
-        Get-Prop $r 'b!cG' 'spaarkeCustomerId' | Should BeNullOrEmpty          # MISMATCH stamp
-        Get-Prop $r 'b!cH' 'spaarkeCustomerId' | Should BeNullOrEmpty          # underivable
+        Get-Prop $r 'b!cA' 'spaarkeBusinessUnitId' | Should BeExactly $script:Root     # stamped from records ...
+        Get-Prop $r 'b!cA' 'spaarkeCustomerId' | Should BeNullOrEmpty                  # ... but NOT marked in the same pass
+        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'acme'
+        Get-Prop $r 'b!cC' 'spaarkeCustomerId' | Should BeExactly 'acme'
+        Get-Prop $r 'b!cD' 'spaarkeCustomerId' | Should BeExactly 'ACME'   # never overwritten
+        Get-Prop $r 'b!cE' 'spaarkeCustomerId' | Should BeExactly 'a'      # never overwritten
+        Get-Prop $r 'b!cF' 'spaarkeCustomerId' | Should BeNullOrEmpty      # underivable
+        Get-Prop $r 'b!cG' 'spaarkeCustomerId' | Should BeNullOrEmpty      # MISMATCH stamp
+        Get-Prop $r 'b!cH' 'spaarkeCustomerId' | Should BeNullOrEmpty      # stamped, no claim
+        Get-Prop $r 'b!cI' 'spaarkeCustomerId' | Should BeNullOrEmpty      # FOREIGN stamp
         Get-Prop $r 'b!cF' 'spaarkeBusinessUnitId' | Should BeNullOrEmpty
-        Get-StatLine $r 'Marked' | Should Be 2
+        Get-StatLine $r 'Marked' | Should Be 1
         @($r.World.deletes).Count | Should Be 0
-        # exactly: cA stamp + cA marker + cB marker
-        @($r.World.patches).Count | Should Be 3
-        (@($r.World.patches | Where-Object { $_.id -in 'b!cF', 'b!cG', 'b!cH', 'b!cD', 'b!cE', 'b!cC' })).Count | Should Be 0
+        # exactly: cA stamp + cB marker
+        @($r.World.patches).Count | Should Be 2
+        (@($r.World.patches | Where-Object { $_.id -in 'b!cF', 'b!cG', 'b!cH', 'b!cI', 'b!cD', 'b!cE', 'b!cC' })).Count | Should Be 0
+        (@($r.World.patches | Where-Object { $_.body -match 'spaarkeCustomerId' })).Count | Should Be 1
+    }
+
+    It 'a container with a FOREIGN stamp that a secure project claims is never marked, and is listed' {
+        $r = Invoke-Backfill (New-World -Only 'cI') @{ CustomerId = $script:Cust; Apply = $true }
+        $r.Exit | Should Be 0
+        @($r.World.patches).Count | Should Be 0
+        (@($r.World.patches | Where-Object { $_.body -match 'spaarkeCustomerId' })).Count | Should Be 0
+        $r.Out | Should Match 'FOREIGN b!cI'
+        Get-Prop $r 'b!cI' 'spaarkeBusinessUnitId' | Should BeExactly $script:ForeignUnit
+        $verify = Invoke-Backfill $null @{ CustomerId = $script:Cust; Verify = $true } $r.Dir
+        $verify.Exit | Should Be 1
+    }
+
+    It 'a container with a MISMATCH stamp is never marked, and is listed' {
+        $r = Invoke-Backfill (New-World -Only 'cG') @{ CustomerId = $script:Cust; Apply = $true }
+        $r.Exit | Should Be 0
+        @($r.World.patches).Count | Should Be 0
+        $r.Out | Should Match 'MISMATCH b!cG'
+        Get-Prop $r 'b!cG' 'spaarkeCustomerId' | Should BeNullOrEmpty
+    }
+
+    It 'a stamped container plus a -Bind that conflicts with its stamp is never marked' {
+        $r = Invoke-Backfill (New-World -Only 'cB') @{ CustomerId = $script:Cust; Apply = $true; Bind = @("b!cB=$($script:Root)") }
+        $r.Exit | Should Be 1                                  # BIND-CONFLICT fails an apply
+        @($r.World.patches).Count | Should Be 0
+        $r.Out | Should Match 'BIND-CONFLICT b!cB'
+        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeNullOrEmpty
+    }
+
+    It 'a container the run stamps from records alone is NOT marked in that pass (MARK-NEXT-RUN), -Verify fails, and the next -Apply marks it' {
+        $first = Invoke-Backfill (New-World -Only 'cA') @{ CustomerId = $script:Cust; Apply = $true }
+        $first.Exit | Should Be 0
+        @($first.World.patches).Count | Should Be 1
+        $first.World.patches[0].body | Should Match 'spaarkeBusinessUnitId'
+        $first.World.patches[0].body | Should Not Match 'spaarkeCustomerId'
+        Get-Prop $first 'b!cA' 'spaarkeBusinessUnitId' | Should BeExactly $script:Root
+        Get-Prop $first 'b!cA' 'spaarkeCustomerId' | Should BeNullOrEmpty
+        $first.Out | Should Match 'MARK-NEXT-RUN b!cA'
+        $first.Out | Should Match 'stamped this run from records'
+        $first.Out | Should Match 'UNMARKED b!cA'
+        Get-StatLine $first 'Marked' | Should Be 0
+        Get-StatLine $first 'MarkNextRun' | Should Be 1
+        # the manifest holds the stamp row only - no marker row
+        @(Import-Csv $first.Manifest | Where-Object { $_.Kind -ceq 'marker' }).Count | Should Be 0
+
+        $verify = Invoke-Backfill $null @{ CustomerId = $script:Cust; Verify = $true } $first.Dir
+        $verify.Exit | Should Be 1
+        $verify.Out | Should Match 'UNMARKED b!cA'
+
+        $second = Invoke-Backfill $null @{ CustomerId = $script:Cust; Apply = $true } $first.Dir
+        $second.Exit | Should Be 0
+        Get-Prop $second 'b!cA' 'spaarkeCustomerId' | Should BeExactly 'acme'
+        @($second.World.patches).Count | Should Be 2            # the first run's stamp + this run's marker
+        Get-StatLine $second 'Marked' | Should Be 1
+
+        $final = Invoke-Backfill $null @{ CustomerId = $script:Cust; Verify = $true } $first.Dir
+        $final.Exit | Should Be 0
+    }
+
+    It 'a DRY RUN lists the unstamped derivable container as MARK-NEXT-RUN and -Verify fails on it' {
+        $r = Invoke-Backfill (New-World -Only 'cA') @{ CustomerId = $script:Cust; Verify = $true }
+        $r.Exit | Should Be 1
+        @($r.World.patches).Count | Should Be 0
+        $r.Out | Should Match 'MARK-NEXT-RUN b!cA'
+    }
+
+    It 'an explicit -Bind names an unstamped container: it is stamped AND marked in the same pass' {
+        $w = New-World -Only 'cF'
+        $r = Invoke-Backfill $w @{ CustomerId = $script:Cust; Apply = $true; Bind = @("b!cF=$($script:Unit2)") }
+        $r.Exit | Should Be 0
+        Get-Prop $r 'b!cF' 'spaarkeBusinessUnitId' | Should BeExactly $script:Unit2
+        Get-Prop $r 'b!cF' 'spaarkeCustomerId' | Should BeExactly 'acme'
+        @($r.World.patches).Count | Should Be 2
+        $r.Out | Should Not Match 'MARK-NEXT-RUN'
+    }
+
+    It 'a container stamped by an earlier -Bind with no claim is UNMARKED-NO-CLAIM: no PATCH, -Verify fails; a matching -Bind then marks it' {
+        $r = Invoke-Backfill (New-World -Only 'cH') @{ CustomerId = $script:Cust; Apply = $true }
+        $r.Exit | Should Be 0
+        @($r.World.patches).Count | Should Be 0
+        $r.Out | Should Match "UNMARKED-NO-CLAIM b!cH"
+        $r.Out | Should Match "-Bind 'b!cH=$($script:Unit2)'"
+        $verify = Invoke-Backfill $null @{ CustomerId = $script:Cust; Verify = $true } $r.Dir
+        $verify.Exit | Should Be 1
+        $verify.Out | Should Match 'UNMARKED-NO-CLAIM b!cH'
+
+        $bound = Invoke-Backfill $null @{ CustomerId = $script:Cust; Apply = $true; Bind = @("b!cH=$($script:Unit2)") } $r.Dir
+        $bound.Exit | Should Be 0
+        Get-Prop $bound 'b!cH' 'spaarkeCustomerId' | Should BeExactly 'acme'
+        $ok = Invoke-Backfill $null @{ CustomerId = $script:Cust; Verify = $true; Bind = @("b!cH=$($script:Unit2)") } $r.Dir
+        $ok.Exit | Should Be 0
+    }
+
+    It 'an unclaimed stamped container already marked for this customer is not listed' {
+        $w = New-World -Only 'cH'
+        $w.containers['b!cH'].props['spaarkeCustomerId'] = 'acme'
+        $r = Invoke-Backfill $w @{ CustomerId = $script:Cust; Verify = $true }
+        $r.Out | Should Not Match 'UNMARKED-NO-CLAIM'
+        @($r.World.patches).Count | Should Be 0
+    }
+
+    It 'WRITE-AHEAD: the marker manifest row is on disk even when the marker PATCH throws' {
+        $w = New-World -Only 'cB'
+        $w.throwMarkerPatchFor = @('b!cB')
+        $r = Invoke-Backfill $w @{ CustomerId = $script:Cust; Apply = $true }
+        $r.Exit | Should Be 1
+        Get-StatLine $r 'Failed' | Should Be 1
+        Get-StatLine $r 'Marked' | Should Be 0
+        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeNullOrEmpty
+        $r.Manifest | Should Not BeNullOrEmpty
+        $rows = @(Import-Csv $r.Manifest)
+        $rows.Count | Should Be 1
+        $rows[0].Kind | Should BeExactly 'marker'
+        $rows[0].ContainerId | Should BeExactly 'b!cB'
+        $rows[0].NewMarker | Should BeExactly 'acme'
+        $r.Out | Should Match 'UNMARKED b!cB'
     }
 
     It 'marks a container that is already stamped but unmarked (the marker does not depend on the stamp)' {
         $r = Invoke-Backfill (New-World -Only 'cB') @{ CustomerId = $script:Cust; Apply = $true }
         $r.Exit | Should Be 0
-        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
+        Get-Prop $r 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'acme'
         @($r.World.patches).Count | Should Be 1
         $r.World.patches[0].body | Should Not Match 'spaarkeBusinessUnitId'
     }
@@ -331,7 +482,7 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
         $rows = @(Import-Csv $r.Manifest)
         $rows.Count | Should Be 1
         $rows[0].Kind | Should BeExactly 'marker'
-        $rows[0].NewMarker | Should BeExactly 'cust-1'
+        $rows[0].NewMarker | Should BeExactly 'acme'
         $rows[0].ContainerId | Should BeExactly 'b!cB'
     }
 
@@ -345,10 +496,13 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
         $without.Exit | Should Be 0
     }
 
-    It '-Verify with -CustomerId exits 1 for MARKER-FOREIGN (a case-differing id included) and MARKER-MALFORMED' {
-        $foreign = Invoke-Backfill (New-World -Only 'cC') @{ CustomerId = 'CUST-1'; Verify = $true }   # marker is cust-1
+    It '-Verify with -CustomerId exits 1 for MARKER-FOREIGN (a different id, and a case-differing marker) and MARKER-MALFORMED' {
+        $foreign = Invoke-Backfill (New-World -Only 'cC') @{ CustomerId = 'zeta'; Verify = $true }   # marker is acme
         $foreign.Exit | Should Be 1
         $foreign.Out | Should Match 'MARKER-FOREIGN b!cC'
+        $case = Invoke-Backfill (New-World -Only 'cD') @{ CustomerId = $script:Cust; Verify = $true }   # marker is ACME
+        $case.Exit | Should Be 1
+        $case.Out | Should Match 'MARKER-FOREIGN b!cD'
         $malformed = Invoke-Backfill (New-World -Only 'cE') @{ CustomerId = $script:Cust; Verify = $true }
         $malformed.Exit | Should Be 1
         $malformed.Out | Should Match 'MARKER-MALFORMED b!cE'
@@ -359,10 +513,15 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
         $r.Exit | Should Be 0
     }
 
-    It 'a case-differing -CustomerId is never written over an existing marker in -Apply' {
-        $r = Invoke-Backfill (New-World -Only 'cC') @{ CustomerId = 'CUST-1'; Apply = $true }
+    It 'a case-differing existing marker is never written over in -Apply' {
+        $r = Invoke-Backfill (New-World -Only 'cD') @{ CustomerId = $script:Cust; Apply = $true }
         @($r.World.patches).Count | Should Be 0
-        Get-Prop $r 'b!cC' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
+        Get-Prop $r 'b!cD' 'spaarkeCustomerId' | Should BeExactly 'ACME'
+    }
+
+    It 'trims -CustomerId before comparing it' {
+        $r = Invoke-Backfill (New-World -Only 'cC') @{ CustomerId = '  acme '; Verify = $true }
+        $r.Exit | Should Be 0
     }
 
     It 'refuses a blank -CustomerId with exit 2 before any az, Dataverse or Graph call' {
@@ -370,6 +529,24 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
         $r.Exit | Should Be 2
         $r.Calls.Count | Should Be 0
         @($r.World.patches).Count | Should Be 0
+    }
+
+    foreach ($bad in 'Acme', 'acme-prod', 'ab', 'abcdefghi', '1abc', 'ac me') {
+        It "refuses -CustomerId '$bad' (not the BFF's customerId format) with exit 2 before any az, Dataverse or Graph call" {
+            $r = Invoke-Backfill (New-World) @{ CustomerId = $bad; Apply = $true }
+            $r.Exit | Should Be 2
+            $r.Calls.Count | Should Be 0
+            @($r.World.patches).Count | Should Be 0
+            $r.Out | Should Match 'does not match'
+        }
+    }
+
+    foreach ($good in 'abc', 'abcdefg1') {
+        It "accepts the boundary -CustomerId '$good'" {
+            $r = Invoke-Backfill (New-World -Only 'cB') @{ CustomerId = $good }
+            $r.Exit | Should Be 0
+            Get-StatLine $r 'ToMark' | Should Be 1
+        }
     }
 
     It 'without -CustomerId it behaves as before: no marker is read-for-write or written, and the summary has no marker counts' {
@@ -409,7 +586,7 @@ Describe 'Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId (issue #1889)' 
     It '-RevertManifest dry run (no -Apply) removes nothing' {
         $apply = Invoke-Backfill (New-World -Only 'cB') @{ CustomerId = $script:Cust; Apply = $true }
         $dry = Invoke-Backfill $null @{ RevertManifest = $apply.Manifest } $apply.Dir
-        Get-Prop $dry 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'cust-1'
+        Get-Prop $dry 'b!cB' 'spaarkeCustomerId' | Should BeExactly 'acme'
         @($dry.World.patches).Count | Should Be 1
     }
 

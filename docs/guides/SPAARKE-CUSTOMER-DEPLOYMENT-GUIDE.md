@@ -1253,9 +1253,22 @@ Resumable (`spe-container-marker-failed`); the container stays on the run's reco
 **Pre-marker containers (issue #1889).** Only the BFF's and H8's *creation* paths write the marker, so per-record (secure)
 containers created before T227d carry none and the guard refuses them (404 `spe_container_not_owned`). An environment that
 holds such containers runs `Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId <the BFF's Customer__Id>` — dry run,
-then `-Apply -MaxWritesPerRun 1`, then `-Apply` — and then `-Verify` (it must exit 0) **before the guard-carrying BFF is
-deployed there**. It marks only containers its records derive an owner for, only where the marker is absent (a different
-or ambiguous marker is listed, never overwritten), and writes a reversal manifest first.
+then `-Apply -MaxWritesPerRun 1`, then `-Apply`, then `-Apply` once more — and then `-Verify` (it must exit 0) **before the
+guard-carrying BFF is deployed there**. `-CustomerId` is the BFF's `Customer__Id` app setting and must match the BFF's
+format `^[a-z][a-z0-9]{2,7}$` (3–8 characters, lowercase letters and digits, a letter first; anything else exits 2 before
+any call). When that setting is absent, the BFF derives the id from its `WEBSITE_RESOURCE_GROUP` name
+`rg-spaarke-{customerId}-{env}` (`CustomerIdResolver`: exactly two segments after the prefix, lower-cased; `platform`,
+`shared` and `byok` are never a customer) — pass that id. An explicit setting that breaks the format is *not* replaced by the
+derived one: the BFF treats it as unresolved. The marker is what makes the BFF serve a container to this customer, and every
+customer stamp shares one container type, so the script marks only a container that **already carried a stamp naming one of
+this environment's business units** and whose owner its records derive (or one an explicit `-Bind` names). A container the
+run stamps from records alone is **not** marked in that pass: it is listed `MARK-NEXT-RUN`, the operator reviews the stamp,
+and the next run marks it. **The operator reviews the dry-run list before `-Apply`, because the record claim
+(`sprk_containerid` on a secure root) is customer-writable.** A container stamped by an earlier `-Bind` that no record
+claims is listed `UNMARKED-NO-CLAIM` (re-run with `-Bind '<id>=<unit>'` to mark it). A marker is written only where it is
+absent (a different or ambiguous marker is listed, never overwritten) after a reversal-manifest row is on disk, and
+`-Verify` exits 1 while any derivable container is unmarked. Known limit: the guard caches a missing marker for up to 10
+minutes, so access can lag a passing `-Verify` by that long.
 
 Container ID persisted to the Dataverse env-var (`sprk_SharePointEmbeddedContainerId`, H7) and to the BFF as plain settings (`EmailProcessing__DefaultContainerId`, `Communication__ArchiveContainerId`, H4b — T227c) — enables I4 invariant enforcement.
 
