@@ -57,12 +57,13 @@ namespace Sprk.Bff.Api.Tests.Eval.GoldenUtterances;
 /// <para>
 /// <b>Merge-gate wiring (NFR-02 — ACTIVE since task 026)</b>: this class
 /// compiles into <c>Sprk.Bff.Api.Tests</c> via the contract-path Compile glob
-/// and runs inside the root <c>dotnet test</c> of
-/// <c>.github/workflows/sdap-ci.yml</c> (build-test job, pass 1) on every PR.
-/// In addition, the dedicated <c>eval-gate</c> job runs
+/// and runs inside the Tier 2 <c>Full Unit Tests (Debug)</c> shards of
+/// <c>.github/workflows/ci-tier2-advisory.yml</c> (pass 1) on every PR.
+/// In addition, the dedicated <c>eval-gate</c> job in
+/// <c>.github/workflows/ci-tier1-blocking.yml</c> runs
 /// <c>dotnet test --filter "Category=GoldenUtteranceEval"</c> with NO
-/// <c>continue-on-error</c> — a red eval suite fails the workflow (the
-/// build-test job's job-level informational posture cannot swallow it). See
+/// <c>continue-on-error</c> — a red eval suite fails Tier 1 and so the
+/// required <c>Router</c> check (the advisory Tier 2 posture cannot swallow it). See
 /// <c>tests/integration/contract/Eval/README.md</c>.
 /// </para>
 /// </remarks>

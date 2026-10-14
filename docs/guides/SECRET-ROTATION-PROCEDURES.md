@@ -230,7 +230,7 @@ GitHub Actions secrets are used in CI/CD workflows and cannot be rotated by `Rot
 4. Paste the new value and save.
 5. Trigger a test workflow run to verify the new secret works:
    ```bash
-   gh workflow run sdap-ci.yml
+   gh workflow run ci-standalone-checks.yml
    ```
 6. Monitor the workflow run for success.
 

@@ -1,6 +1,6 @@
 # Current Task State — ci-cd-unit-test-remediation-r1
 
-> **Last Updated**: 2026-10-14 (task 075 measured, worktree `C:\wtci`, branch `work/ci-retire-sdap-ci`)
+> **Last Updated**: 2026-10-14 (tasks 075 + 077 complete, worktree `C:\wtci`, branch `work/ci-retire-sdap-ci`)
 > **Synopsis** (objectives / scope / end state): <https://claude.ai/code/artifact/7ca88795-5790-43f3-8432-8d84bd3fdec0>
 
 ---
@@ -9,29 +9,26 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **075** soak-7day-gate — `in-progress`, gate **NOT MET** |
-| **Status** | Waiting on the calendar. 077 (retire `sdap-ci.yml`) is blocked behind it. |
-| **Next Action** | At or after **2026-10-15T15:57Z**: re-measure with the commands in `notes/soak-monitoring.md` §"How to re-measure". If no legitimate master red after 2026-10-08T15:57Z → write `notes/soak-passed.md` (run IDs), complete 075, then run 077. |
+| **Active task** | none — **076** (30-day SC measurements) is next, gated at cutover+30d = **2026-10-29** |
+| **Status** | 075 complete (owner ruling, soak passed). 077 complete: `sdap-ci.yml` retired on branch `work/ci-retire-sdap-ci` (PR "ci: retire legacy sdap-ci.yml (CI remediation tasks 075 + 077)"). The PR must merge **after #1837** (it uses `.github/actions/quality-alert`). |
+| **Next Action** | Merge master into the branch once #1837 lands and confirm `CI Standalone Checks` goes green; apply the `.claude/` edits listed in the PR body (main session). On/after 2026-10-29 run 076. |
 
 ### Critical context
 
-- **Why not met**: master did not compile 2026-10-08 12:16Z–15:57Z (CS0411, `EventRoutesLiveTests.cs:407`,
-  issue #1418, fixed PR #1424). A semantic conflict between two independently green PRs. POML step 3:
-  legitimate failure → reset. Green since: 5 d 23.5 h at measurement.
-- **Owner decision available**: if semantic-conflict breaks are ruled not to reset the soak, the gate is met
-  now (see `notes/soak-monitoring.md` last section).
-- **Flakes, no reset**: Tier 1 `Arch Tests` red 10-10 and 10-11 — `Task 167 f2-v2` Production-boot tests
-  hit real IMDS (#1672, #1784, OPEN). Job-level Tier 1 flake 0.28% (NFR-03 OK); run-level 2.0%.
-- **Release matrix (FR-B07) conflict**: the Release restore belongs in `ci-tier2-advisory.yml`, which the owner's
-  standing rule says not to edit. Needs an owner call when 075 passes.
-- **Owner rules for 077** (2026-10-14): retire by MOVING `sdap-ci.yml` (never delete); preserve any check with
-  no Router/Tier/nightly equivalent in a NEW standalone non-required workflow or an existing nightly; never
-  edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml`; `.claude/` edits go to the main
-  session as a list.
+- **Retirement record**: `notes/sdap-ci-retirement.md` (job mapping, alert wiring, replay table, deploy-promote note).
+- **New workflows**: `ci-standalone-checks.yml` (dependency audit, Release build + `deployment-packages`, Compose
+  client gate, client typecheck; not required) and `master-ci-alert.yml` (`router-master`,
+  `tier2-master/full-unit-tests` quality alerts; decision logic `scripts/ci/master-ci-verdict.ps1`).
+- **deploy-promote.yml** now downloads from `ci-standalone-checks.yml` (separate commit; spec MUST "untouched"
+  flagged to the owner). Recommended follow-up: `branch: master` on its three download steps.
+- **Required checks**: `Router` AND `Client lint (type-aware ratchet)` (ruleset 21824191).
+- **Flakes**: Tier 1 `Arch Tests` IMDS flake (#1672, #1784, OPEN) will now raise `router-master` alerts when it hits master.
+- **Owner rules still standing**: never edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml`
+  (they keep stale sdap-ci comments); `.claude/` edits go to the main session as a list.
 
 ### Remaining chain
 
-`075 soak (gate 2026-10-15T15:57Z)` → `077 retire sdap-ci.yml` · `076 (30d, depends on 071)` → `090 wrapup`
+`076 (30d gate 2026-10-29)` → `090 wrapup`
 
 ---
 

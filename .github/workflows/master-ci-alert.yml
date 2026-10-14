@@ -1,0 +1,117 @@
+name: Master CI Alert
+
+# Raises or clears a quality alert when the CI Router (ci-router.yml, workflow name "CI")
+# finishes on a push to master. Owner requirement 2026-10-14 (task CICD-077): CI failures
+# must never be silently lost. On 2026-10-08 master did not compile for ~3 h 40 min
+# (CS0411, issue #1418) and nothing told anyone; this alert fires on the first red run.
+#
+#   router-master                   the Router (required check) or any Tier 1 job is red,
+#                                   cancelled or timed out on master
+#   tier2-master/full-unit-tests    Tier 2 unit tests (advisory, never blocking) did not pass
+#                                   on master: read from the per-shard verdict artifacts the
+#                                   run already uploaded, never by re-running tests
+#
+# Each alert is ONE issue, assigned to the owner (GitHub emails them), edited in place while
+# the check keeps failing and closed by the next green master run. The logic lives in
+# scripts/ci/master-ci-verdict.ps1 (replayable locally against any past run); the writing is
+# .github/actions/quality-alert. Docs: docs/procedures/ci-cd-workflow.md
+# "How CI problems are surfaced".
+#
+# workflow_run, not an edit to ci-router.yml: the tier files are under a standing owner
+# no-edit rule. GitHub runs workflow_run workflows from the DEFAULT branch's copy only, so
+# this file takes effect once merged.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'CI (Router) run id to evaluate'
+        required: true
+        type: string
+      dry_run:
+        description: 'Print what would be posted instead of opening/updating/closing issues'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read     # read the CI run, its jobs and its Tier 2 verdict artifacts
+  issues: write     # the quality-alert action opens/edits/closes the alert issues
+
+concurrency:
+  # Serialize: two master runs finishing close together must not race on the same issue.
+  # GitHub keeps only the newest PENDING run per group, so a run can be dropped; that is safe
+  # because the verdict script always evaluates the newest COMPLETED master run, whichever
+  # CI run triggered it.
+  group: master-ci-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    name: Router + Tier 2 alerts
+    # Push-to-master runs only (pull_request runs are the author's to fix, and visible on the PR).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (verdict script + local action)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions
+            scripts/ci
+
+      - name: Read the CI run
+        id: read
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+        run: ./scripts/ci/master-ci-verdict.ps1 -RunId $env:RUN_ID -Repo '${{ github.repository }}'
+
+      - name: Report
+        shell: bash
+        env:
+          ROUTER: ${{ steps.read.outputs.router_status }}
+          TIER2: ${{ steps.read.outputs.tier2_status }}
+          NOTE: ${{ steps.read.outputs.note }}
+          RUN_URL: ${{ steps.read.outputs.run_url }}
+        run: |
+          {
+            echo "## Master CI alert decision"
+            echo
+            echo "CI run: ${RUN_URL}"
+            echo
+            echo "| Alert | Status |"
+            echo "|---|---|"
+            echo "| \`router-master\` | ${ROUTER} |"
+            echo "| \`tier2-master/full-unit-tests\` | ${TIER2} |"
+            [ -z "$NOTE" ] || { echo; echo "$NOTE"; }
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Raise or clear router-master
+        if: steps.read.outputs.router_status == 'ok' || steps.read.outputs.router_status == 'failing'
+        uses: ./.github/actions/quality-alert
+        with:
+          check: router-master
+          status: ${{ steps.read.outputs.router_status }}
+          summary: ${{ steps.read.outputs.router_summary }}
+          run-url: ${{ steps.read.outputs.run_url }}
+          # workflow_run always runs on the default branch and writes. A manual dispatch is a dry
+          # run unless dry_run is unticked AND it runs on the default branch.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref_name != github.event.repository.default_branch) && 'true' || 'false' }}
+
+      - name: Raise or clear tier2-master/full-unit-tests
+        if: steps.read.outputs.tier2_status == 'ok' || steps.read.outputs.tier2_status == 'failing'
+        uses: ./.github/actions/quality-alert
+        with:
+          check: tier2-master/full-unit-tests
+          status: ${{ steps.read.outputs.tier2_status }}
+          summary: ${{ steps.read.outputs.tier2_summary }}
+          run-url: ${{ steps.read.outputs.run_url }}
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref_name != github.event.repository.default_branch) && 'true' || 'false' }}

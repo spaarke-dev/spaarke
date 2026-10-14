@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Eval.NdaReview;
 /// <b>Merge-gate wiring</b> (identical pattern to <c>AssistantEnhancementsR1EvalTests</c> /
 /// <c>ResourcefulnessEvalSuiteTests</c> / <c>OriginClassificationEvalSuiteTests</c> in this same
 /// directory): the <c>[Trait("Category", "GoldenUtteranceEval")]</c> attribute joins this class to the
-/// dedicated <c>eval-gate</c> job in <c>.github/workflows/sdap-ci.yml</c>
+/// dedicated <c>eval-gate</c> job in <c>.github/workflows/ci-tier1-blocking.yml</c>
 /// (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>, NO <c>continue-on-error</c>) with ZERO
 /// CI-YAML change — the trait IS the registration. This suite deliberately does NOT touch the shared
 /// <c>golden-utterances.json</c> (owned by the ai-architecture-redesign project) — a net-new family is

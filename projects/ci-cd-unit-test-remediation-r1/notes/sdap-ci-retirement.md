@@ -1,0 +1,70 @@
+# sdap-ci.yml retirement — task CICD-077 (2026-10-14)
+
+> Gates: cutover 2026-09-29 (071, `notes/cutover-success.md`); 7-day soak passed 2026-10-14 by owner ruling
+> (075, `notes/soak-passed.md`); cutover+14d = 2026-10-13.
+> Owner rulings 2026-10-14: move, never delete; checks with no per-PR equivalent go into ONE new standalone,
+> non-required workflow; Release build (FR-B07) goes there too; master failures raise quality alerts;
+> do not edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml`.
+
+## What moved where
+
+| Legacy job / step (`sdap-ci.yml`) | Disposition | Now |
+|---|---|---|
+| **Security Scan**: Trivy fs scan, SARIF to the Security tab | Mapped to a nightly; per-PR **dropped** | `nightly-health.yml` `trivy-fs` (counts HIGH/CRITICAL nightly). Per-PR job was `continue-on-error` and never gated; Trivy findings are a standing backlog, not a per-change regression. **Consequence:** the repo-filesystem SARIF upload to the Security tab stops (the provisioning-sidecar image scan still uploads its SARIF). |
+| **Build & Test (Debug)**: full suite, two-pass classifier | Mapped | Tier 2 `Full Unit Tests (Debug)`, 4 shards, same classifier (`scripts/ci/classify-and-retry.ps1`). Master failures now raise `tier2-master/full-unit-tests` (`master-ci-alert.yml`). |
+| Build & Test: coverage collection + upload | Mapped | `nightly-health.yml` `coverage-observation` (ADR-038: coverage is observation, never a gate). |
+| Build & Test: `Release` matrix entry (removed 2026-06-24; FR-B07 restore) | **Preserved** | `ci-standalone-checks.yml` `release-build`: Release build of the whole solution. Tests stay in Debug (Tier 2). |
+| **Eval Gate (Golden Utterances)** | Mapped | Tier 1 `eval-gate` (same command, blocking). |
+| **Client Quality**: Prettier check, PCF ESLint | Mapped | Tier 2 `lint` (same two commands) and `client-lint.yml` (type-aware ratchet, required). |
+| Client Quality: Prettier auto-fix | **Dropped** | Rewrote the workspace and pushed nothing since 2026-08-28; `.husky/pre-commit` formats staged files. |
+| Client Quality: 6 shared-lib `tsc` builds + `Spaarke.AI.Widgets` `tsc --noEmit` | **Preserved** | `ci-standalone-checks.yml` `client-typecheck` (no other workflow runs `tsc` on these libraries per push). |
+| **Code Quality**: `dotnet format whitespace --verify-no-changes` | Mapped | Tier 2 `format`. |
+| Code Quality: ArchTests (NetArchTest) | Mapped | Tier 1 `arch-tests` (full suite, **blocking**) + Tier 2 `adr-compliance`. |
+| Code Quality: plugin size (ADR-002) | Mapped | Tier 2 `plugin-size`. Both pass trivially: the repo has had no net4x plugin since 2026-09-25. |
+| Code Quality: **Dependencies audit** | **Preserved** (+ fail-closed fix) | `ci-standalone-checks.yml` `dependency-audit`; on master → alert `ci-standalone/dependency-audit`. Legacy step passed when `dotnet list` itself errored; now a non-zero exit fails. |
+| Code Quality: naming conformance | Already moved | Tier 1 `naming-conformance` (2026-10-06, T230a). |
+| **Tenant Isolation (I1–I5)** | Mapped | Tier 1 `tenant-isolation` (blocking). |
+| **Integration Readiness**: BFF Release publish + `deployment-packages` artifact | **Preserved** | `ci-standalone-checks.yml` `release-build`. Same artifact name and `api/` layout (`deploy-promote.yml` downloads it); uploaded on master pushes only. |
+| Integration Readiness: "Environment readiness check" | **Dropped** | Printed fixed "✓" lines; checked nothing. |
+| **ADR Violations Report** (PR comment) | **Dropped** (duplicate) | Tier 2 `tier2-pr-comment` reports ADR Compliance in its own PR comment; Tier 1 `arch-tests` blocks. |
+| **CI Summary** | **Dropped** | Static table + boilerplate "Next Steps"; replaced by the Router decision summary and the standalone `Summary` job. |
+| **Compose Fidelity Gate** | Mapped | Tier 1 `compose-fidelity-gate` (blocking). |
+| **Compose Client Gate** | **Preserved** | `ci-standalone-checks.yml` `compose-client-gate`, no longer `continue-on-error` (its flip condition was met: green on every observed master run). On master → alert `ci-standalone/compose-client-gate`. |
+| `sdap-ci-docs-only.yml` (placeholder "Build & Test" checks) | **Dropped** | Existed only to satisfy a required check that branch protection no longer has. |
+
+Both legacy files were **moved** to `docs/archive/workflows/` (GitHub does not execute them there).
+
+## Alert wiring (owner requirement: CI failures are never silently lost)
+
+| Alert (`check`) | Raised by | Raised when | Cleared when |
+|---|---|---|---|
+| `router-master` | `master-ci-alert.yml` (`workflow_run` on `CI` completed, master push) | Router or any non-Tier-2 job not success (cancelled/timed out count as failing) | next green master Router run |
+| `tier2-master/full-unit-tests` | `master-ci-alert.yml` | a Tier 2 shard that ran has verdict ≠ `pass` or no verdict | next master run whose shards all pass (skipped when no shard ran or master did not compile) |
+| `ci-standalone/dependency-audit` | `ci-standalone-checks.yml` `alerts` (push to master) | job not success | next green master run |
+| `ci-standalone/release-build` | same | job not success | next green master run |
+| `ci-standalone/compose-client-gate` | same | job not success | next green master run |
+| `ci-standalone/client-typecheck` | same | job not success | next green master run |
+
+All use `.github/actions/quality-alert` (PR #1837): one issue per check, label `quality-alert`, assigned to the
+owner, edited in place, closed with "Recovered". Decision logic for the first two is
+`scripts/ci/master-ci-verdict.ps1`, replayable against any past run:
+
+| Replayed run | router-master | tier2 | |
+|---|---|---|---|
+| 37775675230 (2026-10-08, CS0411) | failing (Compile) | skip (master did not compile) | ✅ the alert that was missing |
+| 38069733811 (2026-10-10, IMDS flake) | failing (Arch Tests) | skip (no shard ran) | ✅ |
+| 37856261377 (2026-10-09, shard crash) | ok | failing (`rest`) | ✅ |
+| 37370930255 (2026-10-05, cancelled) | failing (3 cancelled Tier 1 jobs) | failing (4 shards without verdict) | ✅ |
+| 38576680033 (2026-10-14, green) | ok | ok | ✅ |
+
+## deploy-promote.yml (spec MUST: "functionally untouched")
+
+Its three `dawidd6/action-download-artifact` steps named `workflow: sdap-ci.yml`. With an explicit
+`artifact_run_id` that name is only logged (v14 lists artifacts by run id); with a blank one it searches
+`sdap-ci.yml` for the latest successful run. After retirement that search can only find stale artifacts
+(up to 30 days old) and then nothing. The three lines now name `ci-standalone-checks.yml`, which is the only
+change, made to keep the workflow functioning as before. It is a separate commit so it can be reverted alone.
+
+Pre-existing hazard, **not** fixed (spec MUST + owner call): the blank-input search has no `branch` filter, so
+under `sdap-ci.yml` it could pick a PR run's artifact. The new workflow uploads `deployment-packages` on master
+pushes only, so that case now fails loudly instead. Recommended: add `branch: master` to the three steps.

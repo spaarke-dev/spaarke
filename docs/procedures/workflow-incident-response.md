@@ -1,6 +1,6 @@
 # Workflow Incident Response
 
-> **Last updated**: 2026-09-10 — corrected required-status-check claims (live ruleset 21824191 requires exactly ONE check, `Router`; the "4 contexts" classic-branch-protection description was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` to the workflow-set table. Originally 2026-06-01 (github-actions-rationalization-r1)
+> **Last updated**: 2026-10-14 — retired `sdap-ci.yml` (task CICD-077): workflow-set table and `gh run list` examples now name `ci-router.yml` / `ci-standalone-checks.yml`. Earlier: 2026-09-10 — corrected required-status-check claims (live ruleset 21824191 requires exactly ONE check, `Router`; the "4 contexts" classic-branch-protection description was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` to the workflow-set table. Originally 2026-06-01 (github-actions-rationalization-r1)
 > **Purpose**: Runbook for responding to a failed GitHub Actions workflow run
 > **Audience**: On-call operator / Platform engineer
 > **Companion**: [`.github/WORKFLOWS.md`](../../.github/WORKFLOWS.md) (per-workflow purpose, owner, SLA, common failure modes)
@@ -25,12 +25,14 @@ This runbook is **specific to GitHub Actions workflow failures**. For broader pr
 
 | Workflow | Purpose | Trigger |
 |---|---|---|
-| `sdap-ci.yml` | Build + test + quality scan (PR gate) | push/PR |
+| `ci-router.yml` (name `CI`; calls `ci-tier1-blocking.yml` + `ci-tier2-advisory.yml`) | PR gate: required check `Router` (Tier 1 blocking, Tier 2 advisory) | push/PR |
+| `ci-standalone-checks.yml` | Dependency audit, Release build + BFF publish (`deployment-packages`), Compose client gate, shared-lib `tsc`; not required, raises quality alerts on master | push/PR + manual |
+| `master-ci-alert.yml` | Raises/clears `router-master` and `tier2-master/full-unit-tests` quality alerts | `workflow_run` on `CI` (master) |
 | `adr-audit.yml` | ADR architecture audit | weekly + manual |
 | `deploy-bff-api.yml` | BFF API staging-slot deploy | push to `master` (api paths) + manual |
 | `deploy-infrastructure.yml` | "Validate Bicep Infrastructure" — Bicep lint + compile only; deploys nothing (what-if/deploy retired by task 249, 2026-10-02) | PR/push to `master` (infra paths) + manual |
 | `deploy-office-addins.yml` | Office Add-ins to Azure Static Web App | push to `master` (add-in paths) + manual |
-| `deploy-promote.yml` | dev → staging → prod promotion | after-sdap-ci success + manual |
+| `deploy-promote.yml` | dev → staging → prod promotion | manual (`workflow_dispatch` only) |
 | `workflows-validate.yml` | actionlint on `.github/workflows/**` | PR/push touching workflows |
 | `report-workflow-health.yml` | Weekly CI health snapshot issue | schedule (Mon 09:00 UTC) + manual |
 | `office-addins-tests.yml` (added 2026-09-10) | jest suite for `src/client/office-addins`; reports, does not block | PR touching `src/client/office-addins/**` |
@@ -49,10 +51,10 @@ For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFL
 
   ```powershell
   # Last 30 runs of a workflow
-  gh run list --workflow=sdap-ci.yml --limit 30
+  gh run list --workflow=ci-router.yml --limit 30
 
   # Failures only, with conclusion + timestamps
-  gh run list --workflow=sdap-ci.yml --status=failure --limit 30 --json conclusion,createdAt,event,headBranch,databaseId
+  gh run list --workflow=ci-router.yml --status=failure --limit 30 --json conclusion,createdAt,event,headBranch,databaseId
 
   # Drill into a specific run
   gh run view {run-id} --log-failed | head -200
@@ -84,7 +86,7 @@ For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFL
 
 ┌────────────────────────────────────────────────────────────────────┐
 │ Did the run fail under a `workflow_run` trigger when the upstream  │
-│ (e.g., `SDAP CI`) succeeded — or did the consumer fail spuriously  │
+│ (e.g., `CI`) succeeded — or did the consumer fail spuriously  │
 │ because the upstream failed?                                       │
 │   YES → CASCADE BUG (P2-class — workflow_run fires regardless of   │
 │         upstream conclusion; needs workflow-level `if:` filter)    │
@@ -107,7 +109,7 @@ For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFL
 
 | Signature | What it looks like in `gh run view` | Probable class |
 |---|---|---|
-| **LOADER-FAILURE** | Run duration < 5 seconds, `gh run view {id} --json jobs` returns `"jobs": []`, no checks posted to PR | Workflow YAML is malformed (duplicate key, invalid runner, job-level `${{ runner.X }}` in `env:`). This was the original `sdap-ci.yml` duplicate-key bug (P1) and the `deploy-promote.yml` / `deploy-infrastructure.yml` patterns (P2/P3). |
+| **LOADER-FAILURE** | Run duration < 5 seconds, `gh run view {id} --json jobs` returns `"jobs": []`, no checks posted to PR | Workflow YAML is malformed (duplicate key, invalid runner, job-level `${{ runner.X }}` in `env:`). This was the original duplicate-key bug in `sdap-ci.yml` (P1; that workflow was retired 2026-10-14) and the `deploy-promote.yml` / `deploy-infrastructure.yml` patterns (P2/P3). |
 | **CASCADE** | A `workflow_run`-triggered workflow reports failure even when its real work is skipped (all jobs `skipped` except summary) — OR fires spuriously after upstream failure | Missing workflow-level `if: github.event.workflow_run.conclusion == 'success'`. Fixed in `deploy-promote.yml` per D-02. |
 | **GHOST TRIGGER** | Workflow runs on branches/paths it should be filtered out of | Path filters silently dropped because YAML parsing rejected the trigger block — usually a sibling of LOADER-FAILURE. |
 | **REAL CODE FAILURE** | Jobs execute; a specific step (e.g., `Run unit tests`, `dotnet build -c Release`, `npx prettier --check`) fails with exit code != 0; log shows the actual error | A regression in `src/` code or in a test asset. Route the fix through the normal change process — NOT through `.github/workflows/`. |

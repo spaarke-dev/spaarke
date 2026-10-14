@@ -1,0 +1,500 @@
+name: CI Standalone Checks
+
+# Checks that came out of the retired legacy sdap-ci.yml (task CICD-077, 2026-10-14) and
+# have NO equivalent in the CI Router (ci-router.yml -> Tier 1 blocking / Tier 2 advisory)
+# or a nightly. Owner ruling 2026-10-14: they live here, in ONE standalone workflow, so the
+# tier files stay untouched (standing owner rule: do not edit ci-router.yml,
+# ci-tier1-blocking.yml, ci-tier2-advisory.yml).
+#
+#   Job                     From sdap-ci.yml                      Why it is still needed
+#   dependency-audit        Code Quality > Dependencies audit     Per-push CVE gate. The nightly dep-audit only
+#                                                                 reports counts; this one fails on any
+#                                                                 package outside the accepted-risk list
+#                                                                 (it caught a HIGH CVE on master 2026-10-13).
+#   release-build           Integration Readiness + FR-B07        The only Release-configuration build of the
+#                           (Release in the Build matrix)         solution, and the BFF publish whose
+#                                                                 `deployment-packages` artifact
+#                                                                 deploy-promote.yml downloads.
+#   compose-client-gate     Compose Client Gate                   The only job that runs the
+#                                                                 @spaarke/compose-components save-contract
+#                                                                 suite on a push (client-tests.yml is nightly).
+#   client-typecheck        Client Quality > shared-lib builds    The only `tsc` check of the shared client
+#                           + Spaarke.AI.Widgets tsc --noEmit     libraries (client-lint is an ESLint
+#                                                                 ratchet, Tier 2 lint is Prettier + ESLint).
+#
+# NOT REQUIRED. The master ruleset requires `Router` and `Client lint (type-aware ratchet)`
+# only; nothing here is added to it. A red job here never blocks a merge. That is why no job
+# carries `continue-on-error`: a job that fails must SHOW as failed (on a PR, in the run's
+# summary table; on master, as a quality alert). continue-on-error would also make
+# `needs.<job>.result` read `success`, which would hide the failure from the alerts job.
+#
+# FAILURES ARE NEVER SILENT (owner requirement 2026-10-14):
+#   - Pull requests: each job's result is in the `Summary` job's step summary.
+#   - Push to master: the `alerts` job raises one quality alert per check (an issue assigned to
+#     the owner, so GitHub emails them) and closes it on the next green run. See
+#     .github/actions/quality-alert and docs/procedures/ci-cd-workflow.md
+#     "How CI problems are surfaced".
+#   - workflow_dispatch: the alerts run in dry-run (they print what they would do) unless
+#     dispatched on the default branch.
+
+on:
+  pull_request:
+    branches: [master]
+    # Same docs-only exclusions sdap-ci.yml used. Safe here because this workflow is not a
+    # required check: a skipped run can never leave a required status pending.
+    paths-ignore:
+      - 'docs/**'
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'
+      - '**.md'
+      - '.claude/**'
+      - 'memory/**'
+      - 'knowledge/**'
+      - 'CHANGELOG*'
+      - 'CODEOWNERS'
+      - 'LICENSE*'
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'docs/**'
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'
+      - '**.md'
+      - '.claude/**'
+      - 'memory/**'
+      - 'knowledge/**'
+      - 'CHANGELOG*'
+      - 'CODEOWNERS'
+      - 'LICENSE*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PRs group by number (a new push cancels the previous run); master groups by SHA so
+  # back-to-back merges never cancel each other's verdict (the PR #841 lesson).
+  group: ci-standalone-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Dependencies audit — moved verbatim from sdap-ci.yml's Code Quality job, plus one
+  # fail-closed fix: the legacy step passed whenever the output lacked the "vulnerable
+  # packages" phrase, so a `dotnet list` that errored out (e.g. a restore failure) read as
+  # clean. Here a non-zero exit is a failure.
+  # --------------------------------------------------------------------------
+  dependency-audit:
+    name: Dependencies audit (dotnet, transitive)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-standalone-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore (whole solution)
+        run: dotnet restore Spaarke.sln --verbosity minimal
+
+      - name: Dependencies audit
+        shell: pwsh
+        run: |
+          # Accepted-risk allow-list. EMPTIED 2026-08-13 (dotnet-10-upgrade-r1 task 032; see
+          # projects/dotnet-10-upgrade-r1/notes/cve-audit.md): the net10 package graph had ZERO
+          # vulnerable packages, so the gate fails on ANY transitive advisory. Adding an entry is
+          # an accepted-risk decision under ADR-029 — record it with its advisory id and reason.
+          $acceptedRiskPackages = @()
+          $output = dotnet list Spaarke.sln package --vulnerable --include-transitive 2>&1 | Out-String
+          $listExit = $LASTEXITCODE
+          Write-Output $output
+          if ($listExit -ne 0) {
+            "### ❌ Dependencies audit could not run`n`n``dotnet list package --vulnerable`` exited $listExit. A scan that did not run is not a clean scan." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            Write-Error "dotnet list package --vulnerable exited $listExit — the audit did not run"
+            exit 1
+          }
+          if ($output -match "has the following vulnerable packages") {
+            $lines = $output -split "`n"
+            $unaccepted = $lines | Where-Object {
+              $line = $_
+              # Package-name column shape: ">" then the package name
+              if ($line -notmatch '^\s*>\s*([\w\.]+)') { return $false }
+              $pkg = $matches[1]
+              foreach ($prefix in $acceptedRiskPackages) {
+                if ($pkg.StartsWith($prefix)) { return $false }
+              }
+              return $true
+            }
+            if ($unaccepted.Count -gt 0) {
+              $list = ($unaccepted | ForEach-Object { "    $($_.Trim())" }) -join "`n"
+              "### ❌ Vulnerable packages (outside the accepted-risk list)`n`n``````text`n$list`n```````n" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+              Write-Error "Vulnerable packages detected (outside accepted-risk list):`n$($unaccepted -join "`n")"
+              exit 1
+            }
+            Write-Output "Vulnerable packages detected, but all match the accepted-risk list (ADR-029)."
+          }
+          "### ✅ Dependencies audit: no vulnerable package outside the accepted-risk list" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+  # --------------------------------------------------------------------------
+  # Release build + BFF publish.
+  #
+  # FR-B07 (spec): `Release` returns to the Build matrix once the surviving suite has been
+  # green >= 7 days — passed at task CICD-075 (2026-10-14). Owner ruling 2026-10-14: it goes
+  # here, not into ci-tier2-advisory.yml. This is a Release BUILD of the whole solution; the
+  # test suite runs in Debug (Tier 2, sharded) and is not re-run in Release.
+  #
+  # The publish replaces sdap-ci.yml's Integration Readiness job. Its artifact keeps the
+  # SAME name (`deployment-packages`) and layout (`api/`) because deploy-promote.yml
+  # downloads it (`package: ./artifacts/api`).
+  # --------------------------------------------------------------------------
+  release-build:
+    name: Release build + BFF publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-standalone-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore (whole solution)
+        run: dotnet restore Spaarke.sln --verbosity minimal
+
+      - name: Build (Release, whole solution)
+        # No -warnaserror — Directory.Build.props centralizes that policy (same as Tier 1).
+        run: dotnet build Spaarke.sln -c Release --no-restore
+
+      - name: Publish BFF (Release)
+        run: dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish/api --no-restore
+
+      # Master pushes only. deploy-promote.yml's blank `artifact_run_id` takes the latest
+      # SUCCESSFUL run of this workflow on ANY branch (dawidd6/action-download-artifact passes
+      # no branch filter). sdap-ci.yml uploaded on pull requests too, so a blank dispatch could
+      # promote an unmerged PR build. Without a PR artifact that dispatch fails loudly
+      # ("no artifact") instead; pass an explicit master run id.
+      - name: Upload deployment-packages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v6
+        with:
+          name: deployment-packages
+          path: ./publish/**
+          retention-days: 30
+
+      - name: Report result
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### ✅ Release build + BFF publish succeeded" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ❌ Release build or BFF publish failed — see the failing step's log" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # --------------------------------------------------------------------------
+  # Compose client gate — moved verbatim from sdap-ci.yml (spaarkeai-compose-r8 task 018).
+  # What it gates and why: projects/spaarkeai-compose-r8/notes/compose-client-ci-gate.md.
+  #
+  # Its FLIP CONDITION ("three consecutive green runs on this runner, then delete
+  # continue-on-error") was met in sdap-ci.yml (green on every master run observed
+  # 2026-10-13/14), so it moves WITHOUT continue-on-error. This workflow is not required,
+  # so a red here still blocks nothing; it shows red and, on master, raises an alert.
+  # --------------------------------------------------------------------------
+  compose-client-gate:
+    name: Compose Client Gate (Save-Contract Suite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # `*.docx filter=lfs` (.gitattributes): without LFS the checkout yields a pointer where
+          # ComposeWorkspace.redline-from-ledger.test.tsx expects tests/integration/
+          # Spe.Integration.Tests/fixtures/sample.docx, and 19 rendering tests time out.
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # SharedLibs dist, in dependency order. `npm install`, never `npm ci` (root CLAUDE.md §12).
+      - name: Install Spaarke.Auth deps
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Auth
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx tsc
+
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npx tsc
+
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.UI.Components
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx tsc
+
+      - name: Install Spaarke.DocumentOperations deps
+        working-directory: src/client/shared/Spaarke.DocumentOperations
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.DocumentOperations
+        working-directory: src/client/shared/Spaarke.DocumentOperations
+        run: npx tsc
+
+      - name: Install Spaarke.Compose.Components deps
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      # The package's own CI entry point. Coverage is collected but NOT gated (ADR-038).
+      - name: Compose client suite (save contract)
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: npm run test:ci -- --json --outputFile=compose-client-jest-results.json
+
+      - name: Report result (job summary + annotation)
+        if: always()
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: |
+          if [ ! -f compose-client-jest-results.json ]; then
+            echo "::error::compose-client-gate produced no jest results - a build step failed or jest crashed before reporting"
+            echo "### ❌ Compose Client Gate - no results (a build step failed or jest crashed)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node "$GITHUB_WORKSPACE/scripts/ci/summarize-jest-results.js" compose-client-jest-results.json "Compose Client Gate (Save-Contract Suite)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload jest results (per-suite breakdown)
+        uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: compose-client-jest-results
+          path: src/client/shared/Spaarke.Compose.Components/compose-client-jest-results.json
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # Client typecheck — the type-checking half of sdap-ci.yml's Client Quality job
+  # (R4 task 061 / B-2 / NFR-05). Each `npx tsc` emits a shared library's declarations and
+  # fails on a type error in that library; the last step type-checks Spaarke.AI.Widgets,
+  # whose tsconfig path-maps its @spaarke/* siblings to their dist/. ORDER MATTERS: building
+  # out of order produces the TS2307/TS2875 cascade documented in the legacy job.
+  # The Prettier + ESLint half is NOT copied: Tier 2's `lint` job runs the same two commands.
+  # --------------------------------------------------------------------------
+  client-typecheck:
+    name: Client typecheck (shared libs + AI.Widgets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Spaarke.Auth deps
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Auth
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Context deps
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.AI.Context
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npx tsc
+
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npx tsc
+
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.UI.Components
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Outputs deps
+        working-directory: src/client/shared/Spaarke.AI.Outputs
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.AI.Outputs
+        working-directory: src/client/shared/Spaarke.AI.Outputs
+        run: npx tsc
+
+      # MUST come after Spaarke.UI.Components: it type-checks against that package's dist.
+      - name: Install Spaarke.Communication.Components deps
+        working-directory: src/client/shared/Spaarke.Communication.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Communication.Components
+        working-directory: src/client/shared/Spaarke.Communication.Components
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Widgets deps
+        working-directory: src/client/shared/Spaarke.AI.Widgets
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Spaarke.AI.Widgets — tsc --noEmit
+        working-directory: src/client/shared/Spaarke.AI.Widgets
+        run: npx tsc --noEmit
+
+      - name: Report result
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### ✅ Client typecheck passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ❌ Client typecheck failed — the failing step names the library; its log has the tsc errors" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # --------------------------------------------------------------------------
+  # One table of every job's result, so a PR shows what failed without opening each job.
+  # --------------------------------------------------------------------------
+  summary:
+    name: Summary
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Results table
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## CI Standalone Checks (advisory — not a required check)"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            for j in dependency-audit release-build compose-client-gate client-typecheck; do
+              r="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
+              case "$r" in success) icon="✅" ;; *) icon="❌" ;; esac
+              echo "| \`${j}\` | ${icon} ${r} |"
+            done
+            echo
+            echo "A cancelled job (which is what hitting \`timeout-minutes\` reports) counts as failed."
+            echo "On master, a failing check opens a quality alert (label \`quality-alert\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------------
+  # alerts: one quality alert per check on master (pattern copied from nightly-health.yml's
+  # alerts job, PR #1837). Never on pull requests: a PR's red is the author's to fix and is
+  # visible on the PR. A job that is not `success` is failing, whatever the reason: failure,
+  # CANCELLED (what a timeout reports) or skipped.
+  # --------------------------------------------------------------------------
+  alerts:
+    name: Alert ${{ matrix.check }}
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: ci-standalone/dependency-audit
+            job: dependency-audit
+          - check: ci-standalone/release-build
+            job: release-build
+          - check: ci-standalone/compose-client-gate
+            job: compose-client-gate
+          - check: ci-standalone/client-typecheck
+            job: client-typecheck
+    steps:
+      - name: Checkout (local action only)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Decide status
+        id: decide
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          JOB: ${{ matrix.job }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          result="$(jq -r --arg j "$JOB" '.[$j].result' <<<"$NEEDS_JSON")"
+          if [ "$result" = "success" ]; then
+            status=ok
+            summary="\`${JOB}\` passed on ${SHA}."
+          else
+            status=failing
+            case "$result" in
+              cancelled) why="was **cancelled**, which is what a job that hits its \`timeout-minutes\` reports" ;;
+              *)         why="finished **${result}**" ;;
+            esac
+            summary="- Job \`${JOB}\` ${why} on master commit \`${SHA}\`. A check that did not complete is a failing check, not a pass."$'\n\n'"Open the workflow run linked above: the job's step summary names the failure."
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "summary<<${delimiter}"
+            printf '%s\n' "$summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Raise or clear the alert
+        uses: ./.github/actions/quality-alert
+        with:
+          check: ${{ matrix.check }}
+          status: ${{ steps.decide.outputs.status }}
+          summary: ${{ steps.decide.outputs.summary }}
+          # Only the default branch writes issues; a dispatch on any other branch is a dry run.
+          dry-run: ${{ github.ref_name != github.event.repository.default_branch && 'true' || 'false' }}

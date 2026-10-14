@@ -3,8 +3,8 @@
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
 > **Last Updated**: 2026-06-01 (r2 task 080 — added BFF test suite repair lessons + TestClock pattern)
-> **Last Reviewed**: 2026-09-30
-> **Reviewed By**: `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons); `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — Nightly Quality / Weekly Quality / Claude Code Action sections corrected after `nightly-quality.yml`, `weekly-quality.yml`, and `claude-code-review.yml` were deleted)
+> **Last Reviewed**: 2026-10-14
+> **Reviewed By**: `ci-cd-unit-test-remediation-r1` task 077 (2026-10-14 — PR gates rewritten for the CI Router after `sdap-ci.yml` was retired); `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons); `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — Nightly Quality / Weekly Quality / Claude Code Action sections corrected after `nightly-quality.yml`, `weekly-quality.yml`, and `claude-code-review.yml` were deleted)
 > **Status**: Current
 
 ---
@@ -19,7 +19,7 @@ This guide explains the complete code quality system in the Spaarke development 
 |-------|------|-------|-----------|
 | **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
 | **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
-| **PR gates** | Every pull request (sdap-ci.yml) | Build, test, security scan, client quality, code quality, ADR tests | Yes |
+| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck (standalone, advisory) | Router + Client lint: Yes |
 | **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
 | **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
 | **Quarterly** | Manual trigger | Full audit runbook | Advisory |
@@ -43,7 +43,7 @@ This guide explains the complete code quality system in the Spaarke development 
 3. [Code Review (Step 9.5)](#code-review-step-95)
 4. [ADR Compliance Check (Step 9.5)](#adr-compliance-check-step-95)
 5. [Linting (Step 9.5)](#linting-step-95)
-6. [PR Quality Gates (sdap-ci.yml)](#pr-quality-gates-sdap-ciyml)
+6. [PR Quality Gates (CI Router)](#pr-quality-gates-ci-router)
 7. [Nightly Quality Pipeline](#nightly-quality-pipeline)
 8. [Weekly Quality Summary](#weekly-quality-summary)
 9. [Quarterly Audit](#quarterly-audit)
@@ -435,7 +435,7 @@ The adr-check skill validates code against Architecture Decision Records:
 
 **What it does**: Enforces consistent code formatting for TypeScript, JSON, and YAML files across the repository.
 
-**When it runs**: Pre-commit (via Husky/lint-staged), PR (client-quality job in sdap-ci.yml), Step 9.5 quality gates.
+**When it runs**: Pre-commit (via Husky/lint-staged), PR (Tier 2 `lint` job in `ci-tier2-advisory.yml`, advisory), Step 9.5 quality gates.
 
 **Configuration**: `.prettierrc.json` at repository root:
 ```json
@@ -703,37 +703,48 @@ A disable without ` -- <reason>` fails `catch-disable-needs-reason`, and so does
 
 `.lintstagedrc.mjs` does **not** run this on commit: a typed program for even one file builds the whole package program (10-65 s for UI.Components alone), far over the pre-commit budget. Use `npm run lint:client` (or `check --package <id>`) before pushing changes to a covered package.
 
-## PR Quality Gates (sdap-ci.yml)
+## PR Quality Gates (CI Router)
 
-The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All jobs must pass before a PR can merge.
+Every pull request to `master` runs the **CI Router** (`ci-router.yml`, check `Router`). It classifies the diff and dispatches a **blocking Tier 1** and an **advisory Tier 2**; a docs-only diff skips both. The `master` ruleset requires `Router` and `Client lint (type-aware ratchet)` (`client-lint.yml`). Verify with `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
+
+The legacy `sdap-ci.yml` pipeline was **retired on 2026-10-14** (archived at `docs/archive/workflows/`); the job-by-job mapping is in `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`.
 
 ### CI Jobs
 
-| Job | Runner | What It Checks | Blocking? |
-|-----|--------|---------------|-----------|
-| **Security Scan** | ubuntu-latest | Trivy filesystem vulnerability scan | Yes |
-| **Build & Test** | windows-latest | `dotnet build`, `dotnet test` with coverage | Yes |
-| **Client Quality** | ubuntu-latest | Prettier format check, ESLint strict check | Yes |
-| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), dependency audit (legacy plugin size step is dead — Spaarke ships no plugins, ADR-002; removal deferred to post-cutover) | Yes |
-| **Integration Readiness** | windows-latest | Build for deployment, package artifacts, environment readiness | Yes |
-| **ADR Violations Report** | ubuntu-latest | Parses NetArchTest results and comments on PR | Advisory |
-| **CI Summary** | ubuntu-latest | Aggregates all job results into step summary | Advisory |
+| Job | Workflow | What It Checks | Blocking? |
+|-----|----------|---------------|-----------|
+| **Compile (Debug)** | Tier 1 | Whole-solution `dotnet build` | Yes |
+| **Arch Tests** | Tier 1 | Full NetArchTest suite (`tests/Spaarke.ArchTests`) | Yes |
+| **Eval Gate**, **Tenant Isolation**, **Naming Conformance**, **Compose Fidelity Gate**, smoke + guard jobs | Tier 1 | Golden-utterance evals, I1–I5 invariants, naming, Compose round-trip, changed-surface/auth smoke, Xrm capability guard | Yes |
+| **Client lint (type-aware ratchet)** | `client-lint.yml` | Typed ESLint ratchet over the client packages | Yes (required) |
+| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes`; Prettier + PCF ESLint | Advisory |
+| **Full Unit Tests (Debug)** | Tier 2 | Whole unit suite in 4 shards, two-pass retry classifier | Advisory |
+| **ADR Compliance**, **Plugin Size**, **Markdown Link Validator**, **Last Reviewed Stamp** | Tier 2 | As named; one "Tier 2 Advisory Report" PR comment | Advisory |
+| **Dependencies audit** | `ci-standalone-checks.yml` | `dotnet list package --vulnerable --include-transitive` outside the accepted-risk list | Advisory (alert on master) |
+| **Release build + BFF publish** | `ci-standalone-checks.yml` | Release build of the solution (FR-B07); BFF publish + `deployment-packages` artifact | Advisory (alert on master) |
+| **Compose Client Gate** | `ci-standalone-checks.yml` | `@spaarke/compose-components` jest save-contract suite | Advisory (alert on master) |
+| **Client typecheck** | `ci-standalone-checks.yml` | Shared-lib `tsc` builds + `Spaarke.AI.Widgets` `tsc --noEmit` | Advisory (alert on master) |
+
+Advisory does not mean ignorable. On master every red check raises a **quality alert** assigned to the owner, and a red `Router` on master raises `router-master` (`master-ci-alert.yml`). See [CI/CD Workflow Guide — How CI problems are surfaced](ci-cd-workflow.md#how-ci-problems-are-surfaced).
 
 ### Key Commands Run in CI
 
 ```bash
-# Client Quality job
-npx prettier --check .                    # Format verification
-cd src/client/pcf && npx eslint .         # ESLint strict check
+# Tier 2 lint
+npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+cd src/client/pcf && node_modules/.bin/eslint .
 
-# Code Quality job
-dotnet format --verify-no-changes         # C# format verification
-dotnet test tests/Spaarke.ArchTests/      # ADR architecture tests (NetArchTest)
+# Tier 2 format / Tier 1 arch tests
+dotnet format whitespace --verify-no-changes
+dotnet test tests/Spaarke.ArchTests/
+
+# Standalone dependency audit
+dotnet list Spaarke.sln package --vulnerable --include-transitive
 ```
 
 ### Performance Target
 
-The full PR pipeline MUST complete in **< 5 minutes**. The `client-quality` job runs in parallel with `build-test` and `security-scan` to stay within budget.
+Spec budgets: Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (see [CI/CD Workflow Guide](ci-cd-workflow.md)). The standalone checks run in parallel and do not hold the required check.
 
 ---
 
