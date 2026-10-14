@@ -654,6 +654,48 @@ public class CoreAncestorStampReconciliationJobTests
             .Should().Equal("sprk_decisionrecord", "sprk_signal", "sprk_signals");
     }
 
+    private static readonly Guid SignalOfTodoUnderEvent = Guid.Parse("14400000-0000-0000-0000-000000000503");
+
+    [Fact(DisplayName = "Ontology task 144 (uac-r2 K2): a stale chain event -> to-do -> Signal repaired from the EVENT writes the to-do, HOLDS the Signal two hops down (the depth >= 2 cascade honours the hold), and the job then reports it")]
+    public async Task ReportOnlySignal_TwoHopsBelowTheRepairedRow_IsHeld_AndReported()
+    {
+        // The communication was re-filed A -> B out of band: the event, the to-do under it and a Signal about the to-do all say A.
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_event", Event,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString())
+            .Row("sprk_todo", TodoUnderEvent,
+                [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Event.ToString())
+            .Row("sprk_signal", SignalOfTodoUnderEvent,
+                [("sprk_regardingtodo", "sprk_todo", TodoUnderEvent), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: TodoUnderEvent.ToString());
+
+        // Repair from the event with Signal report-only: event (the row), to-do (depth 1) and Signal (depth 2).
+        var report = await world.Restamper.RestampChildAsync(
+            "sprk_event", Event, holdTables: new HashSet<string>(["sprk_signal"], StringComparer.OrdinalIgnoreCase));
+
+        report.Complete.Should().BeTrue();
+        world.Lookup("sprk_event", Event, "sprk_regardingmatter").Should().Be(MatterB);
+        world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterB,
+            "the to-do is not report-only: the cascade writes it");
+        world.Lookup("sprk_signal", SignalOfTodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA,
+            "a Signal two hops below the repaired row is held by the cascade, not written");
+        world.Patches.Should().NotContain(p => p.Entity == "sprk_signal");
+        world.Patches.Should().Contain(p => p.Entity == "sprk_todo" && p.Id == TodoUnderEvent);
+
+        // The job's own scan then finds the held Signal stale and REPORTS it (default holds), still without writing it.
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(1);
+        Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain($"sprk_signal:{SignalOfTodoUnderEvent:D}");
+        world.Lookup("sprk_signal", SignalOfTodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA);
+        world.Patches.Should().NotContain(p => p.Entity == "sprk_signal");
+    }
+
     [Fact(DisplayName = "Ontology task 144: with writes OFF, a stale Signal is reported and nothing at all is written")]
     public async Task WritesOff_ReportsTheOntologyRow_AndWritesNothing()
     {

@@ -330,9 +330,10 @@ public sealed class CoreAncestorResolver
         + "filed under them, so the storage resolver never reads one, and the only lineage edge into one is Signal to "
         + "Decision Record, which only narrows (a secure Decision Record makes its Signal secure). "
         + "The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
-        + "never the owner; the owner moves only through SecureChildReconciler, where a denied or unresolvable re-own writes "
-        + "nothing and an isolated row is released only by an authorised re-file or unsecure, so a refusal never puts a row "
-        + "on a wider owner.";
+        + "never the owner; the owner moves only through SecureChildReconciler. A refused re-own into a secure parent keeps "
+        + "the previous owner until the reconciler succeeds, and a persistent refusal fails every 2-minute run (the root stays "
+        + "in incompleteRoots with Success=false, and AfterRefileAsync logs an Error after its second attempt). A refused "
+        + "release out of isolation leaves the row isolated: a refusal never puts a row on a wider owner.";
 
     private static readonly HashSet<string> StampedOutsideAccessTaxonomySet =
         new(StampedOutsideAccessTaxonomy, StringComparer.OrdinalIgnoreCase);

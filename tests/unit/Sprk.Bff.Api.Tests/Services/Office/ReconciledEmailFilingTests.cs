@@ -99,7 +99,7 @@ public class ReconciledEmailFilingTests
                 null!, configuration, NullLogger<SecureChildReconciler>.Instance);
             var filing = new ReconciledEmailFiling(
                 resolver, Dataverse.Object, Probe.Object, children,
-                Isolation is { } stamped
+                Isolation is { } stamped && !RestampOverStamps
                     ? SecureChildShareWorld.RestamperOver(() => stamped)
                     : RestamperLogger is { } restamperLogger
                         ? new CoreAncestorRestamper(Stamps.Service, Stamps.Resolver, restamperLogger)
@@ -123,6 +123,10 @@ public class ReconciledEmailFilingTests
         /// <summary>Ontology task 144: when set, the re-stamp AND the ownership pass run over this one secure-child world (the
         /// REAL restamper and the REAL reconciler, ownership resolver and share synchronizer), so the re-own reads the new stamp.</summary>
         public SecureChildShareWorld? Isolation { get; set; }
+
+        /// <summary>Ontology task 144 (uac-r2 K3): with <see cref="Isolation"/> set, keep the re-stamp over <see cref="Stamps"/> (so a
+        /// test can make it fail or throw) while the ownership pass still runs over the secure-child world.</summary>
+        public bool RestampOverStamps { get; set; }
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
@@ -285,14 +289,41 @@ public class ReconciledEmailFilingTests
         world.Stamps.Patches.Should().BeEmpty("nothing was filed, so nothing under it moved");
     }
 
+    /// <summary>
+    /// Ontology task 144 (uac-r2 K3): a secure-child world in which the filing leaves the communication under the secure matter and
+    /// a Signal filed under it still owned by the ordinary owner. Only <see cref="SecureChildReconciler.AfterRefileAsync"/> moves
+    /// that Signal to the Secure Record owner team — the filing's own reparent goes to the ownership double, never to this world.
+    /// </summary>
+    private static (SecureChildShareWorld Isolation, Guid Signal) SecureWorldWithAnOrdinarySignal()
+    {
+        var signal = Guid.NewGuid();
+        var isolation = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_matter", MatterId)
+            .SecureChild("sprk_communication", CanonicalId, ("sprk_regardingmatter", "sprk_matter", MatterId))
+            .OrdinaryChild("sprk_signal", signal,
+                ("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", MatterId));
+        return (isolation, signal);
+    }
+
+    private static void AssertAfterRefileReownedTheSignal(SecureChildShareWorld isolation, Guid signal)
+    {
+        isolation.OwnerWrites.Should().ContainSingle(w => w.Table == "sprk_signal" && w.Id == signal,
+                "AfterRefileAsync (and nothing else) re-owns the Signal filed under the re-filed communication")
+            .Which.Owner.Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        isolation.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+    }
+
     [Fact(DisplayName = "Ontology task 144: a re-stamp that THROWS never undoes the filing, skips the ownership step or the Signal trigger")]
     public async Task FileIfUnfiled_WhenTheRestampThrows_TheFilingStands_AndTheTriggerStillRuns()
     {
         var trigger = FilingSignalDoubles.Trigger();
+        var (isolation, signal) = SecureWorldWithAnOrdinarySignal();
         var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true))
         {
             Trigger = trigger,
             RestamperLogger = new ThrowingLogger<CoreAncestorRestamper>(),
+            Isolation = isolation,
+            RestampOverStamps = true,
         };
         world.Stamps
             .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
@@ -301,7 +332,8 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.Filed, "the filing landed before the re-stamp; it is not reported as failed");
-        world.Ownership.Reparents.Should().ContainSingle();
+        world.Ownership.Reparents.Should().ContainSingle("the filing's own reparent");
+        AssertAfterRefileReownedTheSignal(isolation, signal);
         FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CanonicalId);
     }
 
@@ -309,7 +341,13 @@ public class ReconciledEmailFilingTests
     public async Task FileIfUnfiled_WhenTheRestampFails_TheFilingStands_AndTheTriggerStillRuns()
     {
         var trigger = FilingSignalDoubles.Trigger();
-        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+        var (isolation, signal) = SecureWorldWithAnOrdinarySignal();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true))
+        {
+            Trigger = trigger,
+            Isolation = isolation,
+            RestampOverStamps = true,
+        };
         world.Stamps
             .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
             .FailScan("sprk_signal");
@@ -317,7 +355,8 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.Filed);
-        world.Ownership.Reparents.Should().ContainSingle();
+        world.Ownership.Reparents.Should().ContainSingle("the filing's own reparent");
+        AssertAfterRefileReownedTheSignal(isolation, signal);
         FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CanonicalId);
     }
 

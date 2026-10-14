@@ -91,11 +91,11 @@ security, dataverse, testing).
 4. **`sprk_analysis` stays separate**, as its own exemption in StampFreshness.
 5. **The stamp is never an access input for these two tables, and the re-own fails closed.** This is stated in the reason text
    and in the commit message.
-   - **Wording discrepancy, flagged to the coordinator.** uac-r2's condition says a denied re-own "leaves the record unreadable".
-     That is not literally true for a refused move INTO isolation: the row keeps its previous (ordinary) owner until the
-     2-minute recent-changes pass.
-   - The reason text therefore says what holds: "never puts a row on a wider owner". The move-in residual is uac-r2's existing
-     window. 144 adds no new one.
+   - **Refused re-own into a secure parent (condition 5 wording, agreed with uac-r2).** A refused re-own into secure keeps the
+     previous owner until the reconciler succeeds. A persistent refusal fails every 2-minute run: the root stays in
+     `incompleteRoots` with `Success=false`, and `AfterRefileAsync` logs an Error after its second attempt.
+   - The reason text says what holds: a refusal "never puts a row on a wider owner" (a refused release out of isolation leaves
+     the row isolated). The move-in residual is uac-r2's existing window. 144 adds no new one.
 
 ## Window trace (coordinator's question, answered before the ReconciledEmailFiling change)
 
@@ -218,3 +218,27 @@ job.
 - No #1854 file was touched (`SignalWriter`, `SignalReevaluationJob`, `SignalClosureService`, `SignalEvaluationTriggerHandler`,
   `SecureChildReconciler`).
 - No second re-own path was added: the re-own is `SecureChildReconciler.AfterRefileAsync`.
+
+## Known limits (uac-r2 review, 2026-10-14)
+
+uac-r2 verdict: **approve**. All 5 conditions hold; no security F; targeted 771/771, ArchTests 973/973.
+
+- **K (accepted by uac-r2): the report-only hold covers the reconciliation job only.**
+  `CoreAncestor:StampReconciliation:ReportOnlyTables` holds writes only inside the reconciliation job. Two other entry points
+  write Signal and Decision Record stamps while those tables are report-only:
+  - `CoreAncestorRestamper` called via `AfterWriteAsync` (8 write paths, including `ReconciledEmailFiling.cs:148`).
+  - The 409-stale queue handler, `CoreAncestorRestampJobHandler.cs:54`.
+  - `OntologyStampedChildRestampTests.cs:110` pins this.
+  - There is no access impact: for these two tables the stamp is only another ownership parent, and a secure parent wins.
+- **K2 (closed): the depth >= 2 hold in the cascade is now covered.**
+  `CoreAncestorStampReconciliationJobTests.ReportOnlySignal_TwoHopsBelowTheRepairedRow_IsHeld_AndReported` repairs a stale chain
+  event -> to-do -> Signal with Signal report-only: the to-do is written, the Signal is held, and the job's next scan reports it.
+  - Seeding proof: removing the `holdTables` argument from the recursive `CascadeAsync` call (`CoreAncestorRestamper.cs`, in the
+    depth + 1 cascade) failed exactly this test (Signal written: expected matter A, found B) and no other of the 51 in the two
+    restamp classes; restoring it passes.
+- **K3 (closed): the `ReconciledEmailFiling` tests now prove `AfterRefileAsync` ran.**
+  The two "re-stamp throws / does not finish" tests assert the secure-child re-own of a Signal filed under the communication
+  (table, id and the Secure Record owner team) instead of relying on `Reparents.ContainSingle()`, which the filing's own
+  reparent satisfies.
+  - Seeding proof: replacing the `AfterRefileAsync` call with a no-op failed three tests (these two and the secure-matter test);
+    restoring it passes.
