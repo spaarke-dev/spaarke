@@ -114,7 +114,9 @@ def planned_for(repo, path, commit):
 def find_index_path(paths, slug):
     """The TASK-INDEX path for a board slug: the folder of that name (case-insensitive), else with the board's
     `x-` (retired project) and/or `spaarke-` prefix removed."""
-    by_folder = {p.split("/")[1].lower(): p for p in paths}
+    # The git pathspec `projects/*/tasks/...` also matches nested sub-projects (projects/<slug>/<sub>/tasks/...), which
+    # would shadow the project's own index: only projects/<slug>/tasks/TASK-INDEX.md counts.
+    by_folder = {p.split("/")[1].lower(): p for p in paths if p.count("/") == 3}
     s = slug.lower()
     nox = s.removeprefix("x-")
     for cand in (s, nox, s.removeprefix("spaarke-"), nox.removeprefix("spaarke-")):

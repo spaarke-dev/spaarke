@@ -69,6 +69,13 @@ class Selection(unittest.TestCase):
         self.assertIsNone(bf.find_index_path(paths, "gamma"))
         self.assertIsNone(bf.find_index_path(paths, "alp"))                       # no prefix guessing
 
+    def test_nested_sub_project_index_does_not_shadow_the_project_index(self):
+        top = "projects/x-demo/tasks/TASK-INDEX.md"
+        nested = "projects/x-demo/sub-part/tasks/TASK-INDEX.md"
+        for paths in ([nested, top], [top, nested]):
+            self.assertEqual(bf.find_index_path(paths, "x-demo"), top)
+        self.assertIsNone(bf.find_index_path([nested], "x-demo"))
+
 
 class History(unittest.TestCase):
     def setUp(self):
