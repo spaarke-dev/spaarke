@@ -15,7 +15,9 @@ name: Master CI Alert
 #                                   stale; raised instead of failing silently
 #
 # Each check is judged from master's current state, not from the triggering run alone: the
-# newest 25 completed master push runs, each job from the most recent run that executed it.
+# newest 100 completed master push runs, each job from the most recent run that executed it;
+# a job the open alert lists as failing that no run in the window executed stays failing (a
+# path-gated job that is not re-run must not close its own alert).
 # A docs-only push skips Tier 1 and must not close a compile-break alert; path-gated jobs and
 # Tier 2 shards run only when their paths change; runs finish out of order.
 #
@@ -37,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'Any CI (Router) run id on master. Master''s CURRENT state is evaluated (newest 25 completed master push runs); the id only names the workflow. Replay a past state locally with -AsOf.'
+        description: 'Any CI (Router) run id on master. Master''s CURRENT state is evaluated (newest 100 completed master push runs); the id only names the workflow. Replay a past state locally with -AsOf.'
         required: true
         type: string
       dry_run:

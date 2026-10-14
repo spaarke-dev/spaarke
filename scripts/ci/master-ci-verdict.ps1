@@ -43,10 +43,20 @@
     Every gh call is retried (3 attempts); if one still fails the script throws, and the
     workflow raises the master-ci-alert/evaluation alert instead of staying silent.
 
-    KNOWN LIMITS: a job whose last execution is older than the window (default 25 master runs)
-    is no longer considered, so its alert would close as recovered; at current master volume the
-    window covers roughly a working day. Conversely, a job that failed and was then renamed or
-    removed keeps its red until it ages out of the window, since it never executes again.
+    A FAILING JOB THAT LEAVES THE WINDOW STAYS FAILING. The window (default 100 master runs)
+    only sees a path-gated job when it executed recently, so a job that failed and was not
+    re-executed would drop out and its alert would close as "Recovered" while master is still
+    red. To prevent that the script also reads the OPEN alert issue ("Quality alert: <check>",
+    the exact title .github/actions/quality-alert writes). Every job (or shard) that issue lists
+    as failing, and that no run in the window executed, is reported as still failing with
+    "has not executed since <oldest run in the window>". The alert closes only once the job
+    executes again and passes. Conversely, a job that failed and was then renamed or removed
+    never executes again: close its alert by hand (the alert text says so).
+
+    NEWER RUN STILL RUNNING. If a master push run newer than the evaluated one is queued or in
+    progress (a re-run, or an out-of-order finish), `ok` is reported as `skip`: an alert is not
+    closed on a state that is about to be superseded. `failing` is unaffected. Not applied with
+    -AsOf (a replay judges the past).
 
 .PARAMETER RunId
     The triggering CI run. It identifies the workflow; it is also the window's end with -AsOf.
@@ -55,7 +65,14 @@
     owner/name. Defaults to $env:GITHUB_REPOSITORY.
 
 .PARAMETER Window
-    How many completed master push runs to look back over (default 25, max 100).
+    How many completed master push runs to look back over (default 100, max 100).
+
+.PARAMETER RouterAlertBodyPath
+    Test/replay override: read the open router-master alert body from this file instead of
+    GitHub. An empty file means "no open alert".
+
+.PARAMETER Tier2AlertBodyPath
+    Same, for tier2-master/full-unit-tests.
 
 .PARAMETER AsOf
     Evaluate master as it was when RunId was created (the window ends at RunId) instead of
@@ -75,8 +92,10 @@
 param(
     [Parameter(Mandatory)] [long] $RunId,
     [string] $Repo = $env:GITHUB_REPOSITORY,
-    [ValidateRange(1, 100)] [int] $Window = 25,
-    [switch] $AsOf
+    [ValidateRange(1, 100)] [int] $Window = 100,
+    [switch] $AsOf,
+    [string] $RouterAlertBodyPath,
+    [string] $Tier2AlertBodyPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,6 +158,30 @@ function Get-RunLabel($r) {
     return "``$sha`` ($title)"
 }
 
+# The body of the OPEN quality-alert issue for a check, or '' when none is open. The title is
+# the one .github/actions/quality-alert writes: "<emoji> Quality alert: <check>" (matched by its
+# stable suffix so the emoji's console encoding cannot matter). OverridePath: a file to read
+# instead (tests and replays). An unreadable GitHub listing throws, so the evaluation alert is raised.
+$script:openAlerts = $null
+function Get-OpenAlertBody([string] $Check, [string] $OverridePath) {
+    if ($OverridePath) { return ((Get-Content -Path $OverridePath -Raw -ErrorAction Stop) + '').Trim() }
+    if ($null -eq $script:openAlerts) {
+        $script:openAlerts = @(Invoke-GhJson @('issue', 'list', '-R', $Repo, '--label', 'quality-alert', '--state', 'open',
+            '--limit', '300', '--json', 'number,title,body'))
+    }
+    $mine = @($script:openAlerts | Where-Object { $_.title -like "*Quality alert: $Check" } | Sort-Object -Property number)
+    if ($mine.Count -eq 0) { return '' }
+    return ([string]$mine[0].body)
+}
+
+# Names the alert body lists as failing: lines of the form  - <Kind> `name` ...  (Kind = Job | Shard).
+# Our own summaries are the only writer, and they always use this shape.
+function Get-FailingName([string] $Body, [string] $Kind) {
+    $names = @()
+    foreach ($m in [regex]::Matches($Body, "(?m)^- $Kind ``(?<n>[^``]+)``")) { $names += $m.Groups['n'].Value }
+    return @($names | Select-Object -Unique)
+}
+
 # ------------------------------------------------------------------ the triggering run
 $trigger = Invoke-GhJson @('api', "repos/$Repo/actions/runs/$RunId")
 if ($trigger.head_branch -ne 'master' -or $trigger.event -ne 'push') {
@@ -164,6 +207,22 @@ if ($runs.Count -eq 0) { $runs = @($trigger) }
 $newest = $runs[0]
 $out.run_url = $newest.html_url
 $out.note = "Evaluated the $($runs.Count) newest completed master push runs (newest: run $($newest.id), $(Get-RunLabel $newest)); each check is judged from the most recent run that executed it."
+
+$oldest = $runs[$runs.Count - 1]
+$windowLabel = "the newest $($runs.Count) master runs (back to $(Get-RunLabel $oldest))"
+
+# A newer master run that is still queued or running will supersede this verdict. Closing an
+# alert now would be undone (or wrongly stand) a few minutes later, so `ok` is held back below.
+# Runs older than 3 h are ignored so a stuck run cannot hold alerts open forever. Not with -AsOf.
+$newerPending = @()
+if (-not $AsOf) {
+    foreach ($st in 'queued', 'in_progress') {
+        $pr = Invoke-GhJson @('api', "repos/$Repo/actions/workflows/$($trigger.workflow_id)/runs?branch=master&event=push&status=$st&per_page=20")
+        $newerPending += @($pr.workflow_runs | Where-Object {
+            ([datetime]$_.created_at) -gt ([datetime]$newest.created_at) -and ([datetime]$_.created_at) -gt (Get-Date).AddHours(-3)
+        })
+    }
+}
 
 $passing = @('success', 'neutral')
 $shardPattern = '^Tier 2 \(Advisory\) / Full Unit Tests \((?<config>[^)]+)\) / (?<shard>.+)$'
@@ -207,6 +266,14 @@ foreach ($name in $jobState.Keys) {
     }
 }
 
+# A job the open alert lists as failing that no run in the window executed: its last known
+# state is red, so it stays red. (The window would otherwise forget it and close the alert.)
+$routerBody = Get-OpenAlertBody 'router-master' $RouterAlertBodyPath
+$carriedJobs = @(Get-FailingName $routerBody 'Job' | Where-Object { -not $jobState.Contains($_) })
+foreach ($name in $carriedJobs) {
+    $reasons += "Job ``$name`` was failing and has **not executed since** $windowLabel; its last known result is still red. It needs a run that executes it and passes. If the job was renamed or removed, close this alert by hand."
+}
+
 if ($reasons.Count -gt 0) {
     $out.router_status = 'failing'
     $out.router_summary = @(
@@ -215,7 +282,7 @@ if ($reasons.Count -gt 0) {
         ($reasons | ForEach-Object { "- $_" })
         ''
         'Every branch cut from master now starts red. A cancelled job is what a timeout reports and counts as failing.'
-        'This alert closes itself once every job listed has executed again and passed on a later master run. A path-gated job runs only when its paths change; a job not executed in the newest 25 master runs (for example renamed or removed) drops out of the evaluation.'
+        'This alert closes itself once every job listed has executed again and passed on a later master run. A path-gated job runs only when its paths change, so it can stay listed for a long time; it is never dropped just because it has not run. A job that was renamed or removed never runs again: close the alert by hand.'
     ) -join "`n"
 } elseif ($jobState.Count -gt 0) {
     $out.router_status = 'ok'
@@ -223,10 +290,16 @@ if ($reasons.Count -gt 0) {
 }
 
 # ---------------------------------------------------- tier2-master/full-unit-tests
-if ($shardState.Count -eq 0) {
+$tier2Body = Get-OpenAlertBody 'tier2-master/full-unit-tests' $Tier2AlertBodyPath
+$shardNames = @($shardState.Values | ForEach-Object { $_.Shard })
+$carriedShards = @(Get-FailingName $tier2Body 'Shard' | Where-Object { $_ -notin $shardNames })
+if ($shardState.Count -eq 0 -and $carriedShards.Count -eq 0) {
     $out.note += " No Tier 2 unit-test shard ran in a compiling master run in this window (they run only when the BFF changed); the tier2 alert is left as is."
 } else {
     $bad = @()
+    foreach ($name in $carriedShards) {
+        $bad += "Shard ``$name`` was failing and has **not executed since** $windowLabel (shards run only when BFF paths change, and not in a run where master did not compile); its last known verdict is still not pass."
+    }
     foreach ($group in ($shardState.Values | Group-Object { $_.Run.id })) {
         $rid = $group.Name
         $dir = Join-Path ([IO.Path]::GetTempPath()) "tier2-verdicts-$rid-$([guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -264,6 +337,15 @@ if ($shardState.Count -eq 0) {
     } else {
         $out.tier2_status = 'ok'
         $out.tier2_summary = "All $($shardState.Count) Tier 2 unit-test shards passed on their most recent master run."
+    }
+}
+
+if ($newerPending.Count -gt 0) {
+    $held = @()
+    if ($out.router_status -eq 'ok') { $out.router_status = 'skip'; $held += 'router-master' }
+    if ($out.tier2_status -eq 'ok') { $out.tier2_status = 'skip'; $held += 'tier2-master/full-unit-tests' }
+    if ($held.Count -gt 0) {
+        $out.note += " Not closing $($held -join ' and '): master run $($newerPending[0].id) ($($newerPending[0].status)) is newer than the evaluated run and will re-evaluate when it completes."
     }
 }
 
