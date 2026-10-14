@@ -618,6 +618,107 @@ public class ExistingCiamAccountInviteTests
     public void BuildInviteLink_UsesOnlyTrustedConfig_TheKeyAndTheCode(string portal, string? key, string? code, string? expected)
         => InviteExternalUserEndpoint.BuildInviteLink(portal, key, code).Should().Be(expected);
 
+    // ── Task 185 adversarial pass 2, F2: an invite email that did not send is reported ───────────────────────
+
+    /// <summary>The shared mailbox refusing the send (a Graph 429).</summary>
+    private static HttpRequestException MailboxThrottled()
+        => new("Simulated mailbox throttling.", null, System.Net.HttpStatusCode.TooManyRequests);
+
+    /// <summary>The code hash the invite stored, read when the CIAM account is created (a new account's bind then clears it).</summary>
+    private string? _hashAtCreate;
+
+    /// <summary>Sets up one of the two onboarding branches: a new CIAM account, or a person who already has one.</summary>
+    private Guid ContactOnBranch(string branch)
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () => _hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+        if (branch == "existing-account")
+            _ciam.Failure = ObjectConflictOnProxyAddresses();
+        return contact;
+    }
+
+    /// <summary>
+    /// The /invite ROUTE, when the invite email fails to send: nobody holds the code, so the response says so —
+    /// <c>emailSent: false</c> and <c>email_not_sent</c> — and §12 I-10: the WHOLE response (status code and every field) is the
+    /// same on both branches. MUTATION: dropping the report on either branch fails that row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteRoute_WhenTheInviteEmailFails_ReportsEmailNotSent_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+        _h.Emails.InviteEmailFailure = MailboxThrottled();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteRoute(log)).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteExternalUserResponse(
+            contact, PortalUrl, InviteExternalUserEndpoint.ProvisionedStatus,
+            EmailSent: false, EmailErrorCode: GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Emails.InviteUrls.Should().BeEmpty("the send failed");
+        _hashAtCreate.Should().NotBeNull("the marker and the code's hash landed before the account step");
+        foreach (var part in HashParts(_hashAtCreate!))
+            log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
+    }
+
+    /// <summary>
+    /// /invite-and-grant, when the invite email fails to send: the grant is written (200), and the response reports the email
+    /// the same way on both branches (§12 I-10). MUTATION: dropping the report on either branch fails that row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteAndGrant_WhenTheInviteEmailFails_ReportsEmailNotSent_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+        _h.Emails.InviteEmailFailure = MailboxThrottled();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteAndGrantResponse(
+            contact, InviteExternalUserEndpoint.ProvisionedStatus, body.AccessRecordId, PortalUrl,
+            GrantedAccessLevel: ExternalAccessLevel.Collaborate, Narrowed: false, NotificationFailed: false,
+            EmailSent: false, EmailErrorCode: GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands");
+        _h.Emails.InviteUrls.Should().BeEmpty("the send failed");
+        _hashAtCreate.Should().NotBeNull("the marker and the code's hash landed before the account step");
+        foreach (var part in HashParts(_hashAtCreate!))
+            log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
+    }
+
+    /// <summary>A sent invite email is reported as sent, with no error code, on both routes and both branches.</summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteRoute_WhenTheInviteEmailIsSent_ReportsNoFailure_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteExternalUserResponse(
+            contact, PortalUrl, InviteExternalUserEndpoint.ProvisionedStatus, EmailSent: true, EmailErrorCode: null));
+        _h.Emails.InviteUrls.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteAndGrant_WhenTheInviteEmailIsSent_ReportsNoFailure_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteAndGrantResponse(
+            contact, InviteExternalUserEndpoint.ProvisionedStatus, body.AccessRecordId, PortalUrl,
+            GrantedAccessLevel: ExternalAccessLevel.Collaborate, Narrowed: false, NotificationFailed: false,
+            EmailSent: true, EmailErrorCode: null));
+        _h.Emails.InviteUrls.Should().ContainSingle();
+    }
+
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A caller who holds every right on the record, so the grant ceiling passes.</summary>

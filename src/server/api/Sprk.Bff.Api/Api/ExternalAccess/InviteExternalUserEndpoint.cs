@@ -145,8 +145,11 @@ public static class InviteExternalUserEndpoint
             }
 
             // Task 185: the response carries the BASE portal URL. The invite link and its code go only into the email.
-            // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference).
-            return TypedResults.Ok(new InviteExternalUserResponse(outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status)));
+            // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference), and an
+            // email that did not send is reported the same way on both branches (adversarial pass 2, F2).
+            var (emailSent, emailErrorCode) = InviterVisibleEmail(outcome);
+            return TypedResults.Ok(new InviteExternalUserResponse(
+                outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status), emailSent, emailErrorCode));
         }
         catch (Exception ex)
         {
@@ -197,11 +200,25 @@ public static class InviteExternalUserEndpoint
     internal static string InviterVisibleStatus(string status)
         => string.Equals(status, ExistingAccountStatus, StringComparison.Ordinal) ? ProvisionedStatus : status;
 
+    /// <summary>
+    /// Task 185 (adversarial pass 2, F2): the invite email's result as <c>/invite</c> and <c>/invite-and-grant</c> report it —
+    /// <c>(false, <see cref="GrantInviteStatus.EmailNotSentReasonCode"/>)</c> when the invite email was attempted and did not
+    /// send (nobody holds the code: a re-invite sends a new one), <c>(true, null)</c> when it was sent, <c>(null, null)</c> when
+    /// no invite email was due. §12 I-10: the new-account and the existing-account branch answer identically.
+    /// </summary>
+    internal static (bool? EmailSent, string? EmailErrorCode) InviterVisibleEmail(ProvisionOutcome outcome)
+    {
+        if (outcome.EmailFailed)
+            return (false, GrantInviteStatus.EmailNotSentReasonCode);
+
+        return outcome.Status is ProvisionedStatus or ExistingAccountStatus ? (true, null) : (null, null);
+    }
+
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     /// <param name="EmailFailed">
-    /// Task 185 slice E: the invite email (onboarding or existing-account) was attempted and did not send. The routes keep
-    /// answering as before (the send is non-fatal there); the grant flows report it as a failed invite, since nobody holds
-    /// the code.
+    /// Task 185 slice E: the invite email (onboarding or existing-account) was attempted and did not send, so nobody holds
+    /// the code. The grant flows report it as a failed invite; <c>/invite</c> and <c>/invite-and-grant</c> still answer 200
+    /// and report it in <c>emailSent</c> / <c>emailErrorCode</c> (<see cref="InviterVisibleEmail"/>).
     /// </param>
     internal sealed record ProvisionOutcome(
         Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null,

@@ -239,6 +239,8 @@ public static class InviteAndGrantExternalUserEndpoint
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
         string onboardStatus;
+        bool? emailSent;
+        string? emailErrorCode;
         try
         {
             // The resolution the checks above judged — onboarding does not look the email up again.
@@ -263,6 +265,10 @@ public static class InviteAndGrantExternalUserEndpoint
             }
 
             (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
+
+            // Adversarial pass 2, F2: an invite email that did not send is reported (the grant still proceeds), the same
+            // way on the new-account and the existing-account branch (§12 I-10).
+            (emailSent, emailErrorCode) = InviteExternalUserEndpoint.InviterVisibleEmail(outcome);
         }
         catch (Exception ex)
         {
@@ -383,6 +389,8 @@ public static class InviteAndGrantExternalUserEndpoint
             contactId, InviteExternalUserEndpoint.InviterVisibleStatus(onboardStatus), accessRecordId, portalUrl,
             GrantedAccessLevel: grantOutcome.GrantedLevel,
             Narrowed: grantOutcome.Narrowed,
-            NotificationFailed: notificationFailed));
+            NotificationFailed: notificationFailed,
+            EmailSent: emailSent,
+            EmailErrorCode: emailErrorCode));
     }
 }

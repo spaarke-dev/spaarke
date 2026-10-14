@@ -258,6 +258,28 @@ public class GrantSendsInviteTests
             log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
     }
 
+    /// <summary>
+    /// Task 185 adversarial pass 2, F2 (pins the grant flow's existing behaviour): an invite email that did not send is a
+    /// failed invite — <c>Failed</c> + <c>email_not_sent</c> — on both branches; the grant stands.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task Grant_WhenTheInviteEmailFails_StillCommitsTheGrant_AndSaysFailed_EmailNotSent(string branch)
+    {
+        var contact = UnboundContact();
+        if (branch == "existing-account")
+            _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+        _h.Emails.InviteEmailFailure = new HttpRequestException(
+            "Simulated mailbox throttling.", null, System.Net.HttpStatusCode.TooManyRequests);
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("I-1: the grant stands");
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Grant_WhenTheMarkerCannotBeWritten_StillCommitsTheGrant_AndSaysFailed_WithTheInvitesCode()
     {

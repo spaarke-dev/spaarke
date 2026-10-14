@@ -839,9 +839,17 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 185: the invite link each email in <see cref="Onboarding"/> or <see cref="ExistingAccount"/> carried, in send order.</summary>
         public List<string> InviteUrls { get; } = new();
 
+        /// <summary>
+        /// Task 185 (adversarial pass 2, F2): when set, every INVITE email (onboarding or existing-account) throws this, as the
+        /// shared mailbox does on a Graph 429 or 5xx. Nothing is recorded. Portal notifications use <see cref="Failure"/>.
+        /// </summary>
+        public Exception? InviteEmailFailure { get; set; }
+
         public override Task SendCiamOnboardingEmailAsync(
             string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
         {
+            if (InviteEmailFailure is { } inviteFailure)
+                throw inviteFailure;
             lock (InviteUrls)
             {
                 Onboarding.Add(recipientEmail);
@@ -856,6 +864,8 @@ internal static class AssignedAccessTestDoubles
         public override Task SendCiamExistingAccountEmailAsync(
             string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
         {
+            if (InviteEmailFailure is { } inviteFailure)
+                throw inviteFailure;
             lock (InviteUrls)
             {
                 ExistingAccount.Add(recipientEmail);

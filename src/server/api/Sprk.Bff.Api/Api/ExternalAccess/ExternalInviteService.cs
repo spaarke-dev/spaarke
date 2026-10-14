@@ -446,7 +446,9 @@ public sealed class ExternalInviteService
         }
 
         // Send the onboarding email (task 024; task 185: its links open the invite link).
-        // Non-fatal: the account + oid are persisted; admin can re-send out-of-band on failure.
+        // Non-fatal: the account + oid are persisted. But the link carries the invite code, which exists only in this email,
+        // so a failed send leaves nobody holding the code: sending the portal URL out of band does not help. The person needs
+        // a re-invite, which sends a new code. EmailFailed reports it (the routes' emailSent, the grant flows' email_not_sent).
         var onboardingEmailFailed = false;
         try
         {
