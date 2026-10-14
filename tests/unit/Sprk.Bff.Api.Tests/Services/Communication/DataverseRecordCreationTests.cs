@@ -619,10 +619,11 @@ public class DataverseRecordCreationTests
     private static readonly Guid ReplySourceId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid TargetThreadId = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
-    private SendCommunicationRequest EmailRequest(bool userMode, bool? isInternalOnly, Guid? inheritFrom = null, Guid? threadId = null)
+    private SendCommunicationRequest EmailRequest(
+        bool userMode, bool? isInternalOnly, Guid? inheritFrom = null, Guid? threadId = null, string? inReplyTo = null)
     {
         var request = userMode ? UserModeRequest(isInternalOnly) : CreateValidRequest() with { IsInternalOnly = isInternalOnly };
-        return request with { InheritRegardingFromCommunicationId = inheritFrom, ThreadId = threadId };
+        return request with { InheritRegardingFromCommunicationId = inheritFrom, ThreadId = threadId, InReplyToMessageId = inReplyTo };
     }
 
     private Task SendEmailAsync(SendCommunicationRequest request) =>
@@ -643,8 +644,12 @@ public class DataverseRecordCreationTests
         var thread = new DataverseEntity("sprk_communicationthread", TargetThreadId);
         if (privacyState is { } state)
             thread["sprk_privacystate"] = new OptionSetValue(state);
+        // K3 (fix round 3): the read must ask for the privacy column and the thread's typed regarding columns.
         _genericEntityServiceMock
-            .Setup(s => s.RetrieveAsync("sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId,
+                It.Is<string[]>(c => c.Contains("sprk_privacystate") && c.Contains("sprk_regardingmatter")),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
     }
 
@@ -801,6 +806,180 @@ public class DataverseRecordCreationTests
         await SendEmailAsync(EmailRequest(userMode: false, isInternalOnly: null, inheritFrom: ReplySourceId, threadId: TargetThreadId));
 
         _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    // ── Fix round 3 (F2): an email reply with InReplyToMessageId and no ThreadId JOINS its parent's thread afterwards
+    //    (EmailThreadKeyStrategy), and that thread may be Private ──
+
+    private const string ReplyParentMessageId = "<parent@contoso.com>";
+    private static readonly Guid ReplyParentId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+    /// <summary>The parent communication is found by Internet-Message-Id (or Graph id) and carries a thread lookup (or none).</summary>
+    private ICommunicationDataverseService ParentFound(Guid? parentThreadId, bool foundByGraphId = false)
+    {
+        var comm = new Mock<ICommunicationDataverseService>();
+        var parent = new DataverseEntity("sprk_communication", ReplyParentId);
+        if (foundByGraphId)
+        {
+            comm.Setup(c => c.GetCommunicationByGraphMessageIdAsync(ReplyParentMessageId, It.IsAny<CancellationToken>())).ReturnsAsync(parent);
+        }
+        else
+        {
+            comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync(ReplyParentMessageId, It.IsAny<CancellationToken>())).ReturnsAsync(parent);
+        }
+
+        var parentRow = new DataverseEntity("sprk_communication", ReplyParentId);
+        if (parentThreadId is { } threadId)
+            parentRow["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId);
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync(
+                "sprk_communication", ReplyParentId,
+                It.Is<string[]>(c => c.Contains("sprk_communicationthread")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentRow);
+        return comm.Object;
+    }
+
+    private Task<SendCommunicationResponse> SendReplyAsync(
+        ICommunicationDataverseService comm, bool userMode, bool? isInternalOnly = null, Guid? threadId = null) =>
+        CreateService(communicationDataverse: comm).SendAsync(
+            EmailRequest(userMode, isInternalOnly, threadId: threadId, inReplyTo: ReplyParentMessageId), CallerContext());
+
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(false, false)]   // an explicit false cannot publish into a Private thread
+    [InlineData(true, false)]
+    public async Task SendAsync_EmailReplyJoiningPrivateThreadViaInReplyTo_WritesInternalOnly(bool userMode, bool? explicitFlag)
+    {
+        var comm = ParentFound(parentThreadId: TargetThreadId);
+        ThreadPrivacyReturns(100000001); // Private
+
+        await SendReplyAsync(comm, userMode, explicitFlag);
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailReplyJoiningPrivateThreadViaInReplyTo_ParentFoundByGraphMessageId_WritesInternalOnly()
+    {
+        var comm = ParentFound(parentThreadId: TargetThreadId, foundByGraphId: true);
+        ThreadPrivacyReturns(100000001);
+
+        await SendReplyAsync(comm, userMode: false);
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailReplyJoiningOpenThreadViaInReplyTo_WritesNotInternalOnly(bool userMode)
+    {
+        var comm = ParentFound(parentThreadId: TargetThreadId);
+        ThreadPrivacyReturns(100000000); // Open
+
+        await SendReplyAsync(comm, userMode);
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailReplyJoiningThreadWithNoPrivacyValueViaInReplyTo_WritesInternalOnly()
+    {
+        var comm = ParentFound(parentThreadId: TargetThreadId);
+        ThreadPrivacyReturns(null);
+
+        await SendReplyAsync(comm, userMode: false);
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("ancestor lookup throws")]
+    [InlineData("parent thread read throws")]
+    [InlineData("joined thread read throws")]
+    public async Task SendAsync_EmailReplyWhoseParentThreadLookupFaults_WritesInternalOnly(string fault)
+    {
+        // Fail closed: the thread the reply will join cannot be determined, so the reply is not shareable.
+        ICommunicationDataverseService comm;
+        if (fault == "ancestor lookup throws")
+        {
+            var throwing = new Mock<ICommunicationDataverseService>();
+            throwing.Setup(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+            comm = throwing.Object;
+        }
+        else
+        {
+            comm = ParentFound(parentThreadId: TargetThreadId);
+            if (fault == "parent thread read throws")
+            {
+                _genericEntityServiceMock
+                    .Setup(s => s.RetrieveAsync("sprk_communication", ReplyParentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+            }
+            else
+            {
+                _genericEntityServiceMock
+                    .Setup(s => s.RetrieveAsync("sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+            }
+        }
+
+        var response = await SendReplyAsync(comm, userMode: false);
+
+        response.Should().NotBeNull("the floor never fails the send");
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("no ancestor found")]
+    [InlineData("ancestor has no thread")]
+    public async Task SendAsync_EmailReplyThatJoinsNoThread_WritesNotInternalOnly(string case_)
+    {
+        // The key strategy creates a NEW (Open) thread for these, so there is no thread to take a floor from.
+        var comm = case_ == "no ancestor found"
+            ? Mock.Of<ICommunicationDataverseService>()
+            : ParentFound(parentThreadId: null);
+
+        await SendReplyAsync(comm, userMode: false);
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailReplyJoiningARecordThreadViaInReplyTo_InheritsNoRegarding()
+    {
+        // D1 covers an explicit ThreadId only: joining the parent's thread files nothing under the thread's record.
+        var comm = ParentFound(parentThreadId: TargetThreadId);
+        var thread = new DataverseEntity("sprk_communicationthread", TargetThreadId);
+        thread["sprk_privacystate"] = new OptionSetValue(100000000);
+        thread["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+        thread["sprk_regardingrecordname"] = "Acme";
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId,
+                It.Is<string[]>(c => c.Contains("sprk_privacystate") && c.Contains("sprk_regardingmatter")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+
+        await SendReplyAsync(comm, userMode: false);
+
+        _capturedEntity!.Contains("sprk_regardingmatter").Should().BeFalse();
+        _capturedEntity.Contains("sprk_regardingrecordid").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailReplyWithExplicitThreadId_DoesNotLookUpTheAncestor()
+    {
+        // The explicit ThreadId path is unchanged (ApplyTargetThreadAsync): the in-reply-to ancestor is not consulted.
+        var comm = new Mock<ICommunicationDataverseService>();
+        ThreadPrivacyReturns(100000000);
+
+        await SendReplyAsync(comm.Object, userMode: false, threadId: TargetThreadId);
+
+        comm.Verify(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
     }
 
     [Fact]

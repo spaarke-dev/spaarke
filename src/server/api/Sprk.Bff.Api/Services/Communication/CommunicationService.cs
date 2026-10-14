@@ -978,8 +978,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             if (thread is null)
                 return UnreadableTargetThread;
 
-            var privacy = thread.GetAttributeValue<OptionSetValue>("sprk_privacystate")?.Value;
-
             EntityReference? regarding = null;
             foreach (var (entityLogicalName, field) in Engine.RegardingFieldMap.All)
             {
@@ -992,7 +990,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             return new TargetThread(
-                privacy == (int)Membership.ThreadPrivacyState.Open,
+                CommunicationInternalOnlyFloor.IsConfirmedOpen(thread),
                 regarding,
                 thread.GetAttributeValue<string>("sprk_regardingrecordname"),
                 thread.GetAttributeValue<string>("sprk_regardingrecordurl"));
@@ -1021,14 +1019,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// with no typed regarding, or one that cannot be read, writes none.</para>
     /// </summary>
     private async Task ApplyTargetThreadAsync(
-        DataverseEntity communication, SendCommunicationRequest request, Guid threadId, string correlationId, CancellationToken ct)
+        DataverseEntity communication, SendCommunicationRequest request, Guid threadId, string correlationId, CancellationToken ct,
+        bool inheritRegarding = true)
     {
         var thread = await ReadTargetThreadAsync(threadId, correlationId, ct);
 
         if (!thread.ConfirmedOpen)
             communication["sprk_isinternalonly"] = true;
 
-        if (thread.Regarding is not { } regarding)
+        // D1 covers an explicit ThreadId only; the in-reply-to join (fix round 3) takes the privacy floor and nothing else.
+        if (!inheritRegarding || thread.Regarding is not { } regarding)
             return;
 
         var hasOwnRegarding = request.Associations is { Length: > 0 }
@@ -1053,6 +1053,45 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _logger.LogInformation(
             "Inherited regarding {EntityType}:{RegardingId} from target thread {ThreadId} | CorrelationId: {CorrelationId}",
             regarding.LogicalName, regarding.Id, threadId, correlationId);
+    }
+
+    /// <summary>
+    /// Task 065 fix round 3 (F2): an email reply with <c>InReplyToMessageId</c> and no <c>ThreadId</c> is joined to its
+    /// parent's thread afterwards by <see cref="Threads.EmailThreadKeyStrategy"/> (find-or-create,
+    /// <see cref="ResolveOutboundThreadAsync"/>), and that thread may be Private. This resolves the SAME ancestor thread
+    /// the key strategy will (Internet-Message-Id, else Graph message id; the thread lookup on that parent) and runs the
+    /// Private-thread floor on it. It takes the privacy floor ONLY: the regarding is not inherited on this path (D1 covers
+    /// an explicit <c>ThreadId</c>). A failed ancestor or thread lookup raises the flag (fail closed); no ancestor, or an
+    /// ancestor with no thread, means the key strategy creates a new Open thread, so nothing is raised.
+    /// </summary>
+    private async Task ApplyReplyParentThreadFloorAsync(
+        DataverseEntity communication, SendCommunicationRequest request, string correlationId, CancellationToken ct)
+    {
+        Guid? parentThreadId;
+        try
+        {
+            var inReplyTo = request.InReplyToMessageId!;
+            var parent = await _communicationService.GetCommunicationByInternetMessageIdAsync(inReplyTo, ct)
+                         ?? await _communicationService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
+            if (parent is null)
+                return;
+
+            var parentRow = await _genericEntityService.RetrieveAsync(
+                "sprk_communication", parent.Id, new[] { "sprk_communicationthread" }, ct);
+            parentThreadId = parentRow?.GetAttributeValue<EntityReference>("sprk_communicationthread")?.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve the in-reply-to parent's thread; the reply is written internal-only (fail closed) | CorrelationId: {CorrelationId}",
+                correlationId);
+            communication["sprk_isinternalonly"] = true;
+            return;
+        }
+
+        if (parentThreadId is { } threadId)
+            await ApplyTargetThreadAsync(communication, request, threadId, correlationId, ct, inheritRegarding: false);
     }
 
     /// <summary>
@@ -2184,6 +2223,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // its own, its regarding. After the reply inheritance, so a reply's inherited regarding is never overwritten.
         if (request.ThreadId is { } targetThreadId)
             await ApplyTargetThreadAsync(communication, request, targetThreadId, correlationId, ct);
+        else if (request.CommunicationType == CommunicationType.Email && !string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            await ApplyReplyParentThreadFloorAsync(communication, request, correlationId, ct);
 
         // Map primary association (regarding lookup + FR-26 stamp + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);

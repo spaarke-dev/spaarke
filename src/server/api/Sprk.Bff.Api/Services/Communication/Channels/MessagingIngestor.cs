@@ -104,6 +104,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         // Map the ACS ChatThreadId (request.ProviderThreadId) → a sprk_communicationthread and stamp the
         // sprk_communicationthread lookup. Same shared seam the email inbound + outbound paths call. A
         // resolver failure MUST NOT fail the persist — the message already exists (without a thread).
+        Guid? resolvedThreadId = null;
         if (_threadResolver is not null)
         {
             try
@@ -118,6 +119,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                         AcsThreadId = request.ProviderThreadId,
                     },
                     cancellationToken);
+                resolvedThreadId = assignment?.ThreadId;
 
                 // task 043 CRITICAL RISK fix: sprk_communication is User-level and this message is owned by
                 // the app-only identity, so a Direct-thread message is invisible to BOTH participants under
@@ -137,6 +139,15 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                     communicationId, request.CorrelationId);
             }
         }
+
+        // ── Internal-only (task 065 fix round 3, owner 2026-10-14) — FAIL CLOSED, NON-FATAL ──
+        // PersistAsync wrote the row internal-only because its thread was unknown. Lower it to shareable only when the
+        // thread resolved AND reads explicitly Open. A chat message carries no parent (AcsEventNormalizer sets InReplyTo
+        // null); a non-blank InReplyTo cannot be resolved here, so it keeps the row internal-only.
+        await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+            _genericEntityService, communicationId, resolvedThreadId,
+            parentNotShareable: !string.IsNullOrWhiteSpace(request.Message.InReplyTo),
+            _logger, cancellationToken);
 
         // ── Participant index (task 050 / FR-08 / ADR-048) — BEST-EFFORT, NON-FATAL + IDEMPOTENT ──
         // Write one sprk_communicationparticipant row per (message × person/address × role) so the participant=
@@ -212,6 +223,11 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
             ["sprk_body"] = bodyContent,
             ["sprk_sentat"] = sentAt,
             ["sprk_receiveddate"] = sentAt,
+
+            // Task 065 fix round 3 (owner 2026-10-14): a received message is hidden from partners unless its thread is
+            // confirmed Open. The thread is unknown at create, so the row starts internal-only and IngestAsync lowers it
+            // (CommunicationInternalOnlyFloor.LowerWhenSafeAsync) once the thread is resolved and Open.
+            [CommunicationInternalOnlyFloor.InternalOnlyField] = true,
         };
 
         // ACS transport ids (AS-BUILT schema names): dedupe key + denormalized thread id.

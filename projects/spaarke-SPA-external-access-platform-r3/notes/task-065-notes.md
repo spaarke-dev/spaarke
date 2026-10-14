@@ -240,3 +240,130 @@ tests that ride on the same line. Restored (file touched to force a rebuild): 15
 - The inbound builders listed under "Fix the class" (`MessagingIngestor`, `EmailUploadCaptureService`,
   `IncomingCommunicationProcessor`) still write no `sprk_isinternalonly`. Unchanged and still outside this task.
 - Publish-size delta not measured (no new package, endpoint, service or DI registration).
+
+## Fix round 3 (review pass 2 + owner decision 2026-10-14 on received communications)
+
+Worktree `agent-a0fca4a29271bc1f5`, branch `worktree-agent-a0fca4a29271bc1f5`, base `3ea046e1d`. No live Dataverse or Azure calls.
+
+| # | Finding | Status | Where |
+|---|---------|--------|-------|
+| F2 | The Private-thread floor covered an explicit `ThreadId` only; an email reply with `InReplyToMessageId` and no `ThreadId` joins its parent's thread afterwards and that thread may be Private | Fixed | `CommunicationService.ResolveOutboundOwnerAsync` -> new `ApplyReplyParentThreadFloorAsync` |
+| F3 | D1 wrote the thread's regarding without the AppendTo check the route promises | Fixed | `CommunicationRecordAuthorizationFilter.AuthorizeSendBodyAsync` (3b), `CommunicationThreadReadService.ReadVisibleThreadRegardingAsync` |
+| K3 | Thread-read mocks used `It.IsAny<string[]>` | Fixed | `CommunicationServiceMessageSendTests`, `DataverseRecordCreationTests` |
+| Owner | Received communications follow the same rule | Done | `CommunicationInternalOnlyFloor` + the three inbound writers |
+| K2 | A Message into an invoice/document/memo-anchored thread can return 502 `CORE_ANCESTOR_DERIVATION_FAILED` on a transient fault | Accepted, test added | `SendAsync_ForMessageType_IntoRecordThreadWhoseAncestorCannotBeDerived_Returns502AndSendsNothing` |
+| K4 | Legacy mixed pointer name | Recorded only (cosmetic) | - |
+| K4 | Bulk send can't set the flag | Recorded only (client task 068 covers it) | - |
+
+### F2: the in-reply-to join
+
+`ResolveOutboundOwnerAsync` now has, beside the explicit-`ThreadId` branch, `else if (CommunicationType.Email && InReplyToMessageId set)`.
+`ApplyReplyParentThreadFloorAsync` resolves the ancestor exactly as `EmailThreadKeyStrategy` will
+(`GetCommunicationByInternetMessageIdAsync ?? GetCommunicationByGraphMessageIdAsync`, then the parent's
+`sprk_communicationthread` lookup) and runs the existing `ApplyTargetThreadAsync` privacy floor on that thread with the new
+`inheritRegarding: false`, so the floor is taken and the regarding is NOT (D1 covers an explicit `ThreadId` only).
+
+- A failed ancestor lookup, parent read or thread read raises the flag (fail closed). No ancestor, or an ancestor with no thread,
+  means the key strategy creates a new Open thread, so nothing is raised.
+- Gated on `CommunicationType.Email`: for a Message, `InReplyToMessageId` is a communication id (task 062), not an Internet-Message-Id,
+  and the Message thread strategy keys on the ACS thread, never on this header.
+- Only `request.InReplyToMessageId` is walked. The outbound envelope carries no `References` (`ResolveOutboundThreadAsync`), so this is
+  the same candidate list the key strategy sees.
+- It runs even when no `IThreadResolver` is wired (no join can happen then). Production always wires one; the extra lookups are the
+  price of not coupling the floor to the resolver, and the result is only ever a raise.
+
+### F3: AppendTo on the thread's record
+
+`AuthorizeSendBodyAsync` step (3b): when `threadId` is set and `associations` is empty (the same condition `ApplyTargetThreadAsync`
+inherits under, `Associations is { Length: > 0 }`), the thread's typed regarding is read impersonated through the new
+`CommunicationThreadReadService.ReadVisibleThreadRegardingAsync` (one projection of the key and the `_sprk_regarding*_value` columns, with
+`ThreadRegardingFields` = `RegardingFieldMap.All` minus the report card, which the thread table lacks) and added to `targets` for the existing AppendTo check.
+
+- The anchor is the first populated lookup in `RegardingFieldMap.All` order, via the service's existing `ResolveRegardingFromRow`. That is the
+  order `ReadTargetThreadAsync` writes in, so the record checked is the record written.
+- A read that throws, or a thread that is not visible, is the filter's existing deny: `Forbidden(reasonCode)`, 403 with the send reason code. A
+  thread with no regarding adds no target. An entity type with no entity set is denied, never guessed (as the inherit-from branch does).
+- Conservative edge: with both `threadId` and `inheritRegardingFromCommunicationId`, where the source has a regarding, the send writes the
+  source's and not the thread's, but the filter still asks AppendTo on the thread's record. It over-asks and never under-asks; the Console
+  and model-driven sends carry a threadId and no inherit-from (CommunicationMessageActionsApp.tsx:221-231), so they do not hit this.
+- The existing thread-visibility check (2) is unchanged and still runs first; this is a second impersonated read of the same row. A single
+  merged read was rejected so that the existing deny shape for an invisible thread stays byte-identical.
+
+### Received communications (owner decision 2026-10-14)
+
+> "received emails hidden from partners - yes but if an email is related to a record that is shared with a partner then the partner
+> should see it; the 'internal only' will hide communications so partner does not see them (this applies equally to workforce contact users)."
+
+The three inbound writers now write `sprk_isinternalonly` explicitly. Each creates its row `true` (its thread is unknown at create, so a row
+is never `false` while its thread is unknown) and lowers it to `false` through the new shared helper
+`Services/Communication/CommunicationInternalOnlyFloor.cs` only when:
+
+1. the thread was resolved, AND
+2. the thread reads explicitly Open (`sprk_privacystate`; Private, a missing value, a null row and a read fault all keep `true`), AND
+3. (mailbox email only) the parent it replies to is explicitly shareable.
+
+The outbound `ReadTargetThreadAsync` now takes its Open decision from the same `CommunicationInternalOnlyFloor.IsConfirmedOpen`, so there
+is one definition. Visibility to partners then comes from record sharing (the external read filters by regarding and record access) plus this
+flag. A failed lowering update is logged and leaves the row `true`; nothing here throws or fails the persist.
+
+| Writer | Create | Lowered where | Parent (b) |
+|---|---|---|---|
+| `Channels/MessagingIngestor.cs` | `PersistAsync`, `true` | after thread resolution in `IngestAsync`, from `assignment.ThreadId` | **Not reachable.** `AcsEventNormalizer` always sets `InReplyTo = null` (`Engine/AcsEventNormalizer.cs:54`) and there is no chat reply-parent lookup. A non-blank `InReplyTo` (never today) is treated as an unresolvable parent and keeps `true`. No lookup was invented. |
+| `EmailUploadCaptureService.cs` | `BuildCommunicationEntity`, `true` | after `ResolveThreadAsync` (now returns the thread id) in `CaptureWithOutcomeAsync` | **Not reachable.** The upload envelope carries no In-Reply-To or References (see `ResolveThreadAsync`), so it can neither name a parent nor join a parent's thread; it starts a new Open thread. Only the thread rule applies. A reconciled duplicate is not touched (the canonical row keeps what its first writer gave it). |
+| `IncomingCommunicationProcessor.cs` | `CreateCommunicationRecordAsync`, `true` | new `ResolveThreadAndShareabilityAsync` (extracted from step 4.6 so it is testable; step 4.6b) | Walked the way `EmailThreadKeyStrategy` walks it (In-Reply-To, then References newest to oldest; Internet-Message-Id, else Graph id; nearest existing ancestor wins), then one read of the parent's flag. Raise-only, the outbound rule: a parent whose flag is `true`, unset, unreadable, or whose lookup faults gives `true`. No ancestor found means no parent. |
+
+`EmailUploadCaptureService` gained an optional `IGenericEntityService? genericEntityService = null` constructor parameter (the host's DI
+supplies it; the existing three test constructions are unchanged and simply skip the lowering, staying `true`). No new service, endpoint,
+DI registration or package.
+
+Consequences to know:
+- A reply to a legacy parent with no flag (every inbound row before this change, every row the old outbound code wrote) is `true`:
+  not explicitly shareable. This is the outbound reply rule applied as asked; it fails closed on old chains.
+- Deployments with no `IThreadResolver` leave every received item `true`. Production always wires one.
+- Cost on the inbound path: one thread read plus one update per received item that resolves a thread; a mailbox reply adds the ancestor lookup and one parent read.
+
+**Read side not changed.** Workforce contacts and CIAM contacts are both non-systemuser callers, and `FilterExternalMessagesAsync`
+(`CommunicationThreadReadService.cs:549-556`) already hides `true`/`null` from both, so one flag serves both.
+
+### Tests
+
+- `DataverseRecordCreationTests.cs`: `SendAsync_EmailReplyJoiningPrivateThreadViaInReplyTo_WritesInternalOnly` (both modes, explicit
+  `false` and unset), the Graph-id variant, Open control, no-privacy-value, the three-way throwing-lookup variant (ancestor lookup,
+  parent thread read, joined thread read), no-ancestor and ancestor-without-thread controls, no regarding inherited on this path, and the
+  explicit-`ThreadId` path not consulting the ancestor.
+- `CommunicationRecordAuthorizationContractTests.cs` (the filter's test class; the host's `FakeImpersonatedQuery` gained
+  `ThrowWhenQueryContains` to fault one read of a set): deny without AppendTo on the thread's record; allow with it; deny when the thread
+  read fails; a thread with no regarding adds no target; the priority-order anchor is the one checked; the request's own association
+  means the thread's record is not checked.
+- `InboundInternalOnlyFlagTests.cs` (new; all three writers): the create is `true`; an Open thread lowers it; Private, no privacy value,
+  null row, read fault, no resolved thread and no resolver keep it `true`; mailbox parent `false` lowers, parent `true`, unset, null row
+  and lookup fault keep it; a lowering fault never fails the persist.
+- `CommunicationServiceMessageSendTests.cs`: `SendAsync_ForMessageType_IntoRecordThreadWhoseAncestorCannotBeDerived_Returns502AndSendsNothing`
+  (`CoreAncestorResolverFixtures.Failing`; 502 `CORE_ANCESTOR_DERIVATION_FAILED`, nothing sent, no row).
+- K3: the thread-read mocks in `CommunicationServiceMessageSendTests` (`ThreadWithPrivacy`, `ThreadAnchoredToInvoice`) and
+  `DataverseRecordCreationTests` (`ThreadPrivacyReturns`) now use `It.Is<string[]>(c => c.Contains("sprk_privacystate") && c.Contains(<regarding column>))`
+  (`sprk_regardingmatter`, and `sprk_regardinginvoice` where the invoice lookup is the one relied on). The brief's line numbers
+  (`:61-64`, `:201-203`, `:468-470`) no longer matched; the live thread-read setups were pinned. The throwing and null-row setups were left
+  `It.IsAny` (they never return columns).
+
+Filtered run in `Sprk.Bff.Api.Tests` (`Communication|SecureChildOwnership|UnifiedAccessControl|ExternalAccess|Office|Messaging`, which includes the filter's contract class, the three writers' classes and the Office email-save tests): 5378 passed, 9 skipped (pre-existing), 0 failed. `Spaarke.ArchTests` (`RecordOwner|Census|RouteAuthorization`): 146 passed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors; the unit test project also builds with `-warnaserror`.
+
+### Seeding proof
+
+- **F3 guard** (the one asked for): commented out `targets.Add((set, threadRecordId))` in the filter. `CommunicationRecordAuthorizationContractTests`:
+  2 failed / 170 passed, including `Send_AMessageIntoARecordThreadWithoutAppendToOnItsRecord_Is403_AndNothingIsSent` and
+  `Send_IntoAThreadWithTwoRegardingLookups_ChecksTheOneTheSendFilesUnder_ThePriorityOrderAnchor`. Restored (file touched to force a rebuild): 172 passed.
+- F2 (extra): disabled the new `else if` branch in `ResolveOutboundOwnerAsync`: 9 failed / 69 passed in `DataverseRecordCreationTests`
+  (the Private, no-privacy-value, Graph-id and three throwing-lookup tests). Restored.
+- Inbound floor (extra): `IsConfirmedOpen` forced to `true`: 25 failed / 117 passed across `InboundInternalOnlyFlagTests`,
+  `DataverseRecordCreationTests` and `CommunicationServiceMessageSendTests`. The parent rule forced to "shareable": 3 failed in
+  `InboundInternalOnlyFlagTests` (parent `true`, unset, null row). Restored.
+
+### Not done / for the operator
+
+- K4 legacy mixed pointer name: cosmetic, no change.
+- K4 bulk send cannot set the flag: client task 068 covers it.
+- The per-message "Internal only" toggle in the client is still the separate task (D2).
+- The guard suggested under "Fix the class" (an ArchTest requiring every `new Entity("sprk_communication")` in `Services/Communication` to set
+  `sprk_isinternalonly`) is still not built. With the inbound writers fixed, it would now have no known violations to baseline.
+- Publish-size delta not measured (no new package, endpoint, service or DI registration).

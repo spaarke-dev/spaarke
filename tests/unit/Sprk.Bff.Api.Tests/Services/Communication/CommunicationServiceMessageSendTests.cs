@@ -496,8 +496,11 @@ public class CommunicationServiceMessageSendTests
         var thread = new Entity("sprk_communicationthread") { Id = TargetThreadId };
         if (privacyState is { } state)
             thread["sprk_privacystate"] = new OptionSetValue(state);
+        // K3 (fix round 3): the read must ask for the privacy column and the thread's typed regarding columns.
         entity.Setup(s => s.RetrieveAsync(
-                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                "sprk_communicationthread", TargetThreadId,
+                It.Is<string[]>(c => c.Contains("sprk_privacystate") && c.Contains("sprk_regardingmatter")),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
     }
 
@@ -636,8 +639,11 @@ public class CommunicationServiceMessageSendTests
         thread["sprk_privacystate"] = new OptionSetValue(100000000); // Open
         thread["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", ThreadInvoiceId);
         thread["sprk_regardingrecordname"] = "INV-001";
+        // K3 (fix round 3): the read must ask for the invoice lookup this test relies on, and for the privacy column.
         entity.Setup(s => s.RetrieveAsync(
-                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                "sprk_communicationthread", TargetThreadId,
+                It.Is<string[]>(c => c.Contains("sprk_privacystate") && c.Contains("sprk_regardinginvoice")),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
     }
 
@@ -665,6 +671,29 @@ public class CommunicationServiceMessageSendTests
         persisted.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ThreadInvoiceId.ToString());
         persisted.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("INV-001");
         persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoRecordThreadWhoseAncestorCannotBeDerived_Returns502AndSendsNothing()
+    {
+        // K2 (fix round 3, accepted): the inherited regarding gets the same FR-26 core-ancestor stamp an associated email
+        // gets, and the same fail-closed contract (NFR-01). A thread anchored to a child-class record (invoice) whose
+        // ancestor cannot be derived refuses BEFORE the send: 502 CORE_ANCESTOR_DERIVATION_FAILED, nothing posted, no row.
+        var sender = new RecordingMessagingSender();
+        var entity = EntityServiceCapturing(_ => { });
+        ThreadAnchoredToInvoice(entity);
+        var sut = BuildOutboundSut(
+            sender, entity.Object, new FakeIdempotencyService(),
+            coreAncestors: Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Failing());
+
+        var act = () => sut.SendAsync(
+            MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        var thrown = (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>()).Which;
+        thrown.StatusCode.Should().Be(502);
+        thrown.Code.Should().Be("CORE_ANCESTOR_DERIVATION_FAILED");
+        sender.LastRequest.Should().BeNull("nothing is sent when the filing cannot be completed");
+        entity.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

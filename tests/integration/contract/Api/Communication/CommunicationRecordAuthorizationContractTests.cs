@@ -823,6 +823,121 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         AssertNothingSent();
     }
 
+    // Task 065 fix round 3 (F3): a send into a thread with no association of its own is filed against the thread's
+    // regarding record (CommunicationService.ApplyTargetThreadAsync), so the route asks AppendTo on THAT record, read as
+    // the caller, in the priority order the send uses.
+
+    private void VisibleThreadAnchoredTo(Guid thread, params (string Column, Guid RecordId)[] regarding)
+    {
+        var columns = new Dictionary<string, object?> { ["sprk_communicationthreadid"] = thread.ToString() };
+        foreach (var (column, recordId) in regarding)
+        {
+            columns[$"_{column}_value"] = recordId.ToString();
+        }
+
+        _host.Query.Visible(ThreadSet, thread, JsonSerializer.Serialize(columns));
+    }
+
+    [Fact]
+    public async Task Send_AMessageIntoARecordThreadWithoutAppendToOnItsRecord_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read); // may read the matter, may not file against it
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_AMessageIntoARecordThreadWithAppendToOnItsRecord_IsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWhoseRegardingCannotBeRead_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo); // would be allowed if it were read
+        // The thread is visible (the existence probe selects only the key); the READ of its regarding lookups faults.
+        _host.Query.ThrowWhenQueryContains = "_sprk_regardingmatter_value";
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWithNoRegarding_AddsNoTarget_AndIsSent()
+    {
+        var thread = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread); // no typed regarding lookup populated
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().BeEmpty("a thread with no regarding adds no AppendTo target");
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWithTwoRegardingLookups_ChecksTheOneTheSendFilesUnder_ThePriorityOrderAnchor()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        // ADR-024 priority: matter before invoice. The send files under the matter, so that is the record checked.
+        VisibleThreadAnchoredTo(thread, ("sprk_regardinginvoice", invoice), ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+        _host.Probe.Grant("sprk_invoices", invoice, AccessRights.Read); // no AppendTo on the invoice: irrelevant
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})")
+            .And.NotContain($"rights sprk_invoices({invoice})");
+    }
+
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnAssociationOfItsOwn_ChecksTheAssociation_NotTheThreadsRecord()
+    {
+        var thread = Guid.NewGuid();
+        var threadMatter = Guid.NewGuid();
+        var ownMatter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", threadMatter));
+        _host.Probe.Grant(MatterSet, ownMatter, AccessRights.Read | AccessRights.AppendTo);
+        // No rights at all on the thread's matter: the send does not file under it (the request's association wins).
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, association: ("sprk_matter", ownMatter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().NotContain($"rights {MatterSet}({threadMatter})");
+    }
+
     [Fact]
     public async Task Send_151Attachments_GetsTodays400_BeforeAnyRightsQuery()
     {

@@ -1161,6 +1161,36 @@ public sealed class CommunicationThreadReadService
         return rows.Count > 0;
     }
 
+    /// <summary>The record a thread is filed against: its first populated typed regarding lookup (ADR-024 priority).</summary>
+    /// <param name="EntityType">The record's entity logical name; null when the thread has no typed regarding.</param>
+    /// <param name="RecordId">The record's id; null when the thread has no typed regarding.</param>
+    public sealed record ThreadRegardingTarget(string? EntityType, Guid? RecordId);
+
+    /// <summary>
+    /// Task 065 fix round 3 (F3): the typed regarding record of a thread the caller can SEE, from one IMPERSONATED
+    /// projection (the same Dataverse row-level security as <see cref="CanCallerSeeThreadAsync"/>). The send route's
+    /// authorization filter uses it to run AppendTo on the record a send into the thread is filed against (the send
+    /// inherits the thread's regarding). The anchor is chosen in <c>RegardingFieldMap</c> priority order, the same order
+    /// the send reads it in. Returns <c>null</c> when the thread is not visible to the caller or does not exist; an
+    /// unresolved caller throws 403 and a query fault propagates (the caller denies, fail closed).
+    /// </summary>
+    public async Task<ThreadRegardingTarget?> ReadVisibleThreadRegardingAsync(
+        Guid threadId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        if (threadId == Guid.Empty)
+            return null;
+
+        var select = string.Join(',', new[] { ThreadPkField }.Concat(ThreadRegardingFields.Select(x => $"_{x.RegardingField}_value")));
+        var odata = $"$select={select}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+        if (rows.Count == 0)
+            return null;
+
+        var (entityType, recordId) = ResolveRegardingFromRow(rows[0]);
+        return new ThreadRegardingTarget(entityType, recordId);
+    }
+
     /// <summary>
     /// Round-7 item 8 authorization gate: returns true only if the impersonated caller can SEE the single message
     /// (<c>sprk_communication</c>). Mirrors <see cref="CanCallerSeeThreadAsync"/> — an impersonated top-1 existence
