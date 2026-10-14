@@ -602,6 +602,19 @@ public sealed class ContactIdentityBinder
                 }
 
                 default:
+                    // Task 185 (pass 1 F1): the contact row and its version were read BEFORE the marker and the hash. A
+                    // concurrent sign-in carrying the same code can bind in between (the SPA's first load sends
+                    // /me/entitlements and the bell poll together); this call then sees the hash already cleared and never
+                    // reaches the 412 retry. Re-decide ONCE against fresh rows: the oid lookup finds the now-bound contact
+                    // (D4), or the email row is bound to another oid (E7). A wrong code fails the match again, so the
+                    // re-run never turns it into a bind.
+                    if (attempt == 0
+                        && decision.DenyCode == ContactBindingDecision.DenyContactNotInvited
+                        && request.InviteCode is not null)
+                    {
+                        continue;
+                    }
+
                     return ContactBindingResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactNotFound);
             }
         }

@@ -504,6 +504,71 @@ public class CiamContactBindingTests
         }
     }
 
+    /// <summary>
+    /// Pass 1 F1 (design §5.3): the contact row is read BEFORE its marker and hash. A concurrent sign-in with the same code
+    /// that binds in between (staged just before this call's intent read) leaves this call seeing the hash already cleared.
+    /// It re-decides once against fresh rows instead of denying <c>contact_not_invited</c>: with the SAME oid it resolves
+    /// by oid (D4, the SPA's simultaneous first-load requests); with a DIFFERENT oid it is E7, as in the 412 race.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASameCodeBindBetweenTheRowReadAndTheIntentRead_IsReDecided_NotDeniedNotInvited(bool sameOid)
+    {
+        var code = InvitedContactA();
+        var otherOid = sameOid ? CiamOid : Guid.NewGuid();
+        ContactBindingResult? racer = null;
+        _store.AfterRead = read =>
+        {
+            if (read != "intent") return;
+            _store.AfterRead = null; // one-shot: the racer's own intent read runs unhooked
+            racer = Binder(_store)
+                .ResolveCiamCallerAsync(otherOid.ToString(), Email, code, CancellationToken.None).GetAwaiter().GetResult();
+        };
+
+        var late = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
+
+        racer!.Action.Should().Be(BindingAction.BindByEmail, "the racer bound inside the window");
+        _store.Writes.Count(w => w.Op == "bind").Should().Be(1, "exactly one sign-in binds");
+        _store.Contacts[ContactA].Oid.Should().Be(otherOid.ToString("D"));
+        if (sameOid)
+        {
+            late.Action.Should().Be(BindingAction.ResolveByOid, "the oid lookup finds the contact the racer bound (D4)");
+            late.ContactId.Should().Be(ContactA);
+        }
+        else
+        {
+            late.Action.Should().Be(BindingAction.Collision);
+            late.DenyCode.Should().Be(ContactBindingDecision.DenyContactBoundToDifferentOid);
+        }
+    }
+
+    /// <summary>
+    /// Pass 1 F1, the negative: a plain wrong code with no race is re-decided exactly ONCE (two intent reads, never a
+    /// loop) and stays denied, with nothing written. A sign-in presenting no code is never re-decided.
+    /// </summary>
+    [Fact]
+    public async Task AWrongCode_WithNoRace_IsReDecidedExactlyOnce_AndStaysDenied_NothingWritten()
+    {
+        var code = InvitedContactA();
+
+        var wrong = await Binder(_store).ResolveCiamCallerAsync(
+            CiamOid.ToString(), Email, InviteCode.Create(ContactA).Code, CancellationToken.None);
+
+        wrong.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Reads.Count(r => r == "intent").Should().Be(2, "one re-decision, never a loop");
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts[ContactA].InviteCodeHash.Should().NotBeNull("the real code is still usable");
+
+        _store.Reads.Clear();
+        (await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, inviteCode: null, CancellationToken.None))
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Reads.Count(r => r == "intent").Should().Be(1, "no code presented: nothing a racer could have consumed");
+
+        (await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None))
+            .Action.Should().Be(BindingAction.BindByEmail);
+    }
+
     /// <summary>AC2 replay: after the bind, the same code from another account is decided by E7, never by E11.</summary>
     [Fact]
     public async Task TheSameCode_FromAnotherAccount_AfterTheBind_IsDeniedAsBoundToDifferentOid()
