@@ -137,8 +137,10 @@ public sealed class SessionOwnershipFilterContractTests : IAsyncLifetime
             "a client tells THIS 404 from any other on the route by errorCode");
         body.GetProperty("correlationId").GetString().Should().Be(Correlation,
             "ADR-019: the response must carry the request's trace identifier so it joins the deny log line");
-        body.GetProperty("detail").GetString().Should().NotContain(victim.SessionId,
-            "ADR-019: no identifier is echoed back to a caller probing with it");
+        body.GetProperty("detail").GetString().Should().Be("The chat session was not found.",
+            "ADR-019: a fixed sentence — no identifier is echoed back to a caller probing with it");
+        body.GetProperty("detail").GetString().Should().NotContain(victim.SessionId);
+        body.GetProperty("type").GetString().Should().Be("https://tools.ietf.org/html/rfc7231#section-6.5.4");
         _handlerInvocations.Should().Be(0, "the handler must not run for a denied caller");
     }
 
@@ -165,6 +167,8 @@ public sealed class SessionOwnershipFilterContractTests : IAsyncLifetime
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         body.GetProperty("status").GetInt32().Should().Be(401);
         body.GetProperty("title").GetString().Should().Be("Unauthorized");
+        body.GetProperty("detail").GetString().Should().Be("Tenant ID not found in token claims (tid).");
+        body.GetProperty("type").GetString().Should().Be("https://tools.ietf.org/html/rfc7235#section-3.1");
         body.GetProperty("errorCode").GetString().Should().Be(SessionOwnershipFilterExtensions.TenantMissingErrorCode);
         body.GetProperty("errorCode").GetString().Should().Be("auth.tid-missing",
             "the same spelling SummarizeSessionEndpoint and DispatchSessionEndpoint publish — clients key on it");
@@ -181,6 +185,8 @@ public sealed class SessionOwnershipFilterContractTests : IAsyncLifetime
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         body.GetProperty("title").GetString().Should().Be("Unauthorized");
+        body.GetProperty("detail").GetString().Should().Be("User identity not found");
+        body.GetProperty("type").GetString().Should().Be("https://tools.ietf.org/html/rfc7235#section-3.1");
         body.TryGetProperty("errorCode", out _).Should().BeFalse(
             "the no-identity 401 carries no errorCode; only the tid-missing 401 does");
         _handlerInvocations.Should().Be(0);
@@ -197,6 +203,7 @@ public sealed class SessionOwnershipFilterContractTests : IAsyncLifetime
         body.GetProperty("status").GetInt32().Should().Be(500);
         body.GetProperty("title").GetString().Should().Be("Internal Server Error");
         body.GetProperty("detail").GetString().Should().Be("Session ownership could not be established.");
+        body.GetProperty("type").GetString().Should().Be("https://tools.ietf.org/html/rfc7231#section-6.6.1");
         _handlerInvocations.Should().Be(0, "an unchecked request must not reach the handler");
     }
 

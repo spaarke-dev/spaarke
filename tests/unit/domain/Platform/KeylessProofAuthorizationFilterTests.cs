@@ -1,5 +1,9 @@
 using System.Security.Claims;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Contracts.Provisioning;
 using Sprk.Bff.Api.Api.Filters;
 using Xunit;
@@ -104,6 +108,94 @@ public class KeylessProofAuthorizationFilterTests
         var user = Principal(("roles", KeylessProofContract.AppRoleValue), ("aud", ClientId), ("tid", Tenant));
 
         KeylessProofAuthorizationFilter.IsAdmitted(user, tenant, clientId).Should().BeFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The filter's own responses. The census contract tests drive the route through the host, where the
+    // authorization middleware answers an unauthenticated caller before this filter runs, so the filter's
+    // own 401 (defence in depth) has no other coverage, and its 403 body is only pinned by status code.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string Corr = "corr-1800-keyless";
+
+    private static async Task<(int Status, JsonElement Body, bool NextCalled)> InvokeAsync(ClaimsPrincipal user)
+    {
+        var ctx = new DefaultHttpContext
+        {
+            User = user,
+            TraceIdentifier = Corr,
+            RequestServices = new ServiceCollection()
+                .AddSingleton<IConfiguration>(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["AzureAd:TenantId"] = Tenant,
+                        ["AzureAd:ClientId"] = ClientId,
+                    })
+                    .Build())
+                .BuildServiceProvider(),
+        };
+        var nextCalled = false;
+
+        var result = await new KeylessProofAuthorizationFilter().InvokeAsync(
+            new DefaultEndpointFilterInvocationContext(ctx),
+            _ =>
+            {
+                nextCalled = true;
+                return ValueTask.FromResult<object?>(Results.Ok());
+            });
+
+        if (!nextCalled)
+        {
+            ctx.RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider();
+            using var buffer = new MemoryStream();
+            ctx.Response.Body = buffer;
+            await ((IResult)result!).ExecuteAsync(ctx);
+            return (ctx.Response.StatusCode, JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+        }
+
+        return (StatusCodes.Status200OK, default, true);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ForAnUnauthenticatedCaller_Answers401WithTheUnauthenticatedReasonCodeAndTraceId()
+    {
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+
+        var (status, body, nextCalled) = await InvokeAsync(anonymous);
+
+        status.Should().Be(401);
+        nextCalled.Should().BeFalse();
+        body.GetProperty("title").GetString().Should().Be("Unauthorized");
+        body.GetProperty("detail").GetString().Should().Be("An application token for this API is required.");
+        body.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.unauthenticated");
+        body.GetProperty("traceId").GetString().Should().Be(Corr);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ForAnAuthenticatedCallerWithoutTheRole_Answers403NamingTheRoleAndCarryingTheTraceId()
+    {
+        var user = Principal(("roles", "Admin"), ("aud", ClientId), ("tid", Tenant));
+
+        var (status, body, nextCalled) = await InvokeAsync(user);
+
+        status.Should().Be(403);
+        nextCalled.Should().BeFalse();
+        body.GetProperty("title").GetString().Should().Be("Forbidden");
+        body.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.keyless_proof_role");
+        body.GetProperty("detail").GetString().Should().Be(
+            $"Only an application holding the '{KeylessProofContract.AppRoleValue}' role may call this endpoint.");
+        body.GetProperty("traceId").GetString().Should().Be(Corr);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ForAnAdmittedApplicationToken_RunsTheHandler()
+    {
+        // Positive control: a filter that denied everyone would satisfy both tests above.
+        var user = Principal(("roles", KeylessProofContract.AppRoleValue), ("aud", ClientId), ("tid", Tenant));
+
+        var (_, _, nextCalled) = await InvokeAsync(user);
+
+        nextCalled.Should().BeTrue();
     }
 
     private static ClaimsPrincipal Principal(params (string Type, string Value)[] claims)
