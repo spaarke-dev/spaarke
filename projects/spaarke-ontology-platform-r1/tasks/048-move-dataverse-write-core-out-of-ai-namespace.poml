@@ -4,7 +4,7 @@
     <title>D-66: move the shared Dataverse write core (OwnedChildWrite + helpers) out of Services/Ai to Services/Dataverse, own PR reviewed by uac-r2</title>
     <phase>3 Decision Record + commit route</phase>
     <gate>#1391 merged (uac-r2 agreed, D-113)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves BFF code owned by another project (uac-r2); namespaces, DI, ArchTests.</rigor-reason>
     <model-tier>sonnet</model-tier>

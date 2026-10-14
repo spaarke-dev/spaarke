@@ -32,6 +32,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-137">Q22 (owner, 2026-10-13): on sprk_event the individual ("mine", Assigned To) is `sprk_assignedto` (contact), not `sprk_assignedto1`; `sprk_assignedto1` stays the invoice column (D-129 amended).</constraint>
     <constraint source="owner">Scope (D-15): the widget reads Signals ONLY through the task 038 route; no Xrm.WebApi or child-records read of sprk_signal anywhere in the widget.</constraint>
     <constraint source="project">Scope: order is the route's order; the widget never re-sorts. Filters are lenses on the lane's list (task 052), never another query, and are not persisted (no localStorage or user setting).</constraint>
     <constraint source="project">Scope: the aggregate email row is task 054's AggregateCard at the top of the Do lane, its count taken from the same feed the Email Review tab uses (#36), excluded from both lanes' counts and hidden under a Do filter.</constraint>
