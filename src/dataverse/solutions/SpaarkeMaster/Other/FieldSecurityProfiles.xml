@@ -679,6 +679,14 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitecodehash</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_eventlog</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>

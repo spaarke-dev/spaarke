@@ -240,6 +240,24 @@ echo ""
 # ============================================================================
 
 echo "--- Gate 3: Architecture Tests ---"
+
+# Fast project-archive-prefix check (no dotnet). Gate 3 skips when no .cs file changed, and the CI router
+# treats a projects/-only diff as docs-only, so a rename to projects/x-<slug> would otherwise reach no test
+# until a later unrelated PR. Covers staged, unstaged and untracked adds/renames in the session diff.
+PROJECT_PATHS=$( { git diff --name-only -M --diff-filter=AR HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | grep -E '^projects/[xX]-' || true)
+if [ -n "$PROJECT_PATHS" ]; then
+  CHECKS_RUN=$((CHECKS_RUN + 1))
+  if PREFIX_OUTPUT=$(printf '%s\n' "$PROJECT_PATHS" | sh scripts/quality/check-project-archive-prefix.sh 2>&1); then
+    echo "[GATE: PASS — no new x- project folders]"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+  else
+    echo "[GATE: FAIL — new project folder with the retired x- archive prefix]"
+    echo "$PREFIX_OUTPUT" | head -10
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+    GATE_FAILED=1
+  fi
+fi
+
 CHECKS_RUN=$((CHECKS_RUN + 1))
 
 if [ -z "$CS_FILES" ]; then

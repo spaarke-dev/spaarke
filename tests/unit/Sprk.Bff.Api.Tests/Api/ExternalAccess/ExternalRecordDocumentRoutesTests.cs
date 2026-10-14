@@ -502,6 +502,177 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // unified-access-control-r2 task 187, fix round 2 (F1): an upload to an invoice passes the invoice gate (D4)
+    // =====================================================================
+    //
+    // The caller holds Collaborate on ordinary matter M. Invoice A is filed to M and to project X. Option A still lets the
+    // caller reach A through M, but when X is SECURE and the caller cannot read it, A is behind X's wall (D4): its thread is
+    // refused, its documents are withheld, and an upload is refused too, before SPE or Dataverse is touched. (Without the
+    // gate the upload answered 201 and wrote the file into X's container.)
+
+    private static readonly Guid ProjectX = Guid.Parse("c0310000-0000-4000-8000-0000000000a7");
+    private static readonly Guid AgreementG = Guid.Parse("c0310000-0000-4000-8000-0000000000a8");
+
+    /// <summary>Invoice <see cref="RecordA"/> under ordinary matter M and project X; a caller with Collaborate on M only.</summary>
+    private void SeedInvoiceUnderMAndX(bool secureX)
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, ProjectX);
+        NonSecure("sprk_matter", MatterM);
+        if (secureX) SecureProject(ProjectX);
+        else NonSecure("sprk_project", ProjectX);
+        _fixture.Data.RootIsSecure[(ExternalGrantRootType.Project, ProjectX)] = secureX;
+        _fixture.Principal = CollaboratorOnMatterM();
+    }
+
+    private static CallerPrincipal CollaboratorOnMatterM(params Guid[] alsoMatters) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = CallerContact,
+        Email = "external.user@example.test",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        MatterAccess = new[] { MatterM }.Concat(alsoMatters).ToDictionary(m => m, _ => Collaborate),
+    };
+
+    private void SecureProject(Guid project) =>
+        _fixture.Rows[("sprk_project", project)] = new Entity("sprk_project", project)
+        {
+            ["sprk_issecure"] = true,
+            ["sprk_containerid"] = SecureMatterContainer,
+            ["owningbusinessunit"] = new EntityReference("businessunit", Fixture.OwningBusinessUnitId),
+        };
+
+    private async Task<HttpResponseMessage> UploadToInvoiceA()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        return await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
+    }
+
+    private void NothingWasWritten()
+    {
+        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE");
+        _fixture.Data.Documents.Should().BeEmpty("no sprk_document row is created");
+        _fixture.Ownership.Requests.Should().BeEmpty("the upload stops at the gate, before the owner is resolved");
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_AlsoUnderASecureProjectTheCallerCannotRead_Is403_AndWritesNothing_F1()
+    {
+        SeedInvoiceUnderMAndX(secureX: true);
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
+        NothingWasWritten();
+
+        // The read routes keep D4's own shapes: the list answers (the document walk withholds its documents) and offers no
+        // upload.
+        using var client = _fixture.CreateAuthenticatedClient();
+        var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{RecordA}/documents");
+        list!.CanCreate.Should().BeFalse("an upload that can only fail is not offered");
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_AlsoUnderAnOrdinaryProject_Is201_OptionA_F1()
+    {
+        SeedInvoiceUnderMAndX(secureX: false);
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(Fixture.BusinessUnitContainer);
+        _fixture.Data.Documents.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_AlsoUnderASecureProjectTheCallerReads_Is201_F1()
+    {
+        SeedInvoiceUnderMAndX(secureX: true);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = new[] { CallerProjectAccess.FromLevel(ProjectX, ExternalAccessLevel.ViewOnly) },
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(SecureMatterContainer, "X's own container");
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_WhoseAgreementIsUnderASecureMatterTheCallerCannotRead_Is403_AndWritesNothing_F1()
+    {
+        var secureMatter = Guid.Parse("c0310000-0000-4000-8000-0000000000a9");
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        _fixture.Data.InvoiceAgreements[RecordA] = AgreementG;
+        _fixture.Data.LiveRoots[("sprk_agreement", AgreementG)] = new[] { (ExternalGrantRootType.Matter, secureMatter) };
+        _fixture.Data.RootIsSecure[(ExternalGrantRootType.Matter, secureMatter)] = true;
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = CollaboratorOnMatterM();
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
+        NothingWasWritten();
+
+        // Control: the same invoice for a caller who also reads the secure matter.
+        _fixture.Principal = CollaboratorOnMatterM(secureMatter);
+        using var admitted = await UploadToInvoiceA();
+        admitted.StatusCode.Should().Be(HttpStatusCode.Created, await admitted.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_WhenTheSecureFlagReadFails_Is503_AndWritesNothing_F1()
+    {
+        SeedInvoiceUnderMAndX(secureX: false);
+        _fixture.Data.SecureFlagFault = new HttpRequestException("connection reset");
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await upload.Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
+        NothingWasWritten();
+    }
+
+    [Fact]
+    public async Task InvoiceUpload_WhenTheAgreementWalkFaults_Is503_AndWritesNothing_F1()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        _fixture.Data.InvoiceAgreements[RecordA] = AgreementG;
+        _fixture.Data.LiveParentFault = true;
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = CollaboratorOnMatterM();
+
+        using var upload = await UploadToInvoiceA();
+
+        upload.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await upload.Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
+        NothingWasWritten();
+    }
+
+    [Fact]
+    public async Task InvoiceRights_WithoutCreate_CauseNoGateRead_F1()
+    {
+        SeedInvoiceUnderMAndX(secureX: true);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.ViewOnly) },
+        };
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        _fixture.Data.InvoiceGateReads.Should().Be(0, "a ViewOnly reader has no Create for the gate to decide");
+    }
+
+    // =====================================================================
     // Owner decision 2026-10-11 (2): a document of a secure record — or of a record whose chain reaches one — goes into
     // that secure record's OWN container; every other document into the owning business unit's one container
     // =====================================================================
@@ -997,6 +1168,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          + ",_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value"
                          + ",_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon"
                          + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+                         // Task 187: the document's other parents, whose LIVE roots the rule takes in.
+                         + ",_sprk_canonicaldocument_value,_sprk_invoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value"
+                         + ",_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedinvoice_value,_sprk_relatedtodo_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 
@@ -1463,6 +1637,26 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>Task 063: set to make the document create fail the way an unreachable Dataverse does.</summary>
         public Exception? CreateFault { get; set; }
 
+        // ---- Task 187 fix round 2 (F1): the invoice gate's reads (GetInvoiceLookupsAsync, the flags, the live parents) ----
+
+        /// <summary>Invoice id → the agreement it regards (<c>sprk_regardingagreement</c>). Absent = none.</summary>
+        public ConcurrentDictionary<Guid, Guid> InvoiceAgreements { get; } = new();
+
+        /// <summary>A root's effective secure state as the secure-flag read answers it. Absent = unreadable (counts as secure).</summary>
+        public ConcurrentDictionary<(ExternalGrantRootType Root, Guid Id), bool> RootIsSecure { get; } = new();
+
+        /// <summary>Set to make the secure-flag read fail.</summary>
+        public Exception? SecureFlagFault { get; set; }
+
+        /// <summary>A parent record's live roots, as the live-parent walk answers them. Absent = not resolved (fail closed).</summary>
+        public ConcurrentDictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>> LiveRoots { get; } = new();
+
+        /// <summary>Set to make the live-parent walk report a fault.</summary>
+        public bool LiveParentFault { get; set; }
+
+        /// <summary>How many times the invoice gate read the invoice.</summary>
+        public int InvoiceGateReads;
+
         public void Reset()
         {
             CreateFault = null;
@@ -1474,6 +1668,55 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             InvoiceParents.Clear();
             InvoiceFault = null;
             Interlocked.Exchange(ref InvoiceReads, 0);
+            InvoiceAgreements.Clear();
+            RootIsSecure.Clear();
+            SecureFlagFault = null;
+            LiveRoots.Clear();
+            LiveParentFault = false;
+            Interlocked.Exchange(ref InvoiceGateReads, 0);
+        }
+
+        // The invoice row as the gate reads it: the same parents as GetInvoiceParentsAsync, plus its agreement.
+        public override Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
+            Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref InvoiceGateReads);
+            if (InvoiceFault is { } fault)
+                throw fault;
+            if (!InvoiceParents.TryGetValue(invoiceId, out var parents))
+                throw new RecordNotFoundException("sprk_invoice", invoiceId);
+
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (parents.MatterId is { } matter && lookups.Contains("sprk_matter")) row["sprk_matter"] = matter;
+            if (parents.ProjectId is { } project && lookups.Contains("sprk_project")) row["sprk_project"] = project;
+            if (InvoiceAgreements.TryGetValue(invoiceId, out var agreement) && lookups.Contains("sprk_regardingagreement"))
+                row["sprk_regardingagreement"] = agreement;
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(row);
+        }
+
+        public override Task<NonSecureRootsRead> GetNonSecureRootsAsync(
+            IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct = default)
+        {
+            if (SecureFlagFault is { } fault)
+                throw fault;
+            return Task.FromResult(new NonSecureRootsRead(
+                roots.Where(r => RootIsSecure.TryGetValue(r, out var secure) && !secure).ToHashSet()));
+        }
+
+        public override Task<LiveParentRootsRead> GetLiveParentRootsAsync(
+            IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct = default)
+        {
+            var resolved = new Dictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>>();
+            if (!LiveParentFault)
+            {
+                foreach (var parent in parents)
+                {
+                    if (LiveRoots.TryGetValue(parent, out var roots))
+                        resolved[parent] = roots;
+                }
+            }
+
+            return Task.FromResult(new LiveParentRootsRead(resolved, LiveParentFault));
         }
 
         public override Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(Guid invoiceId, CancellationToken ct = default)

@@ -58,6 +58,10 @@ public class ExternalMessageSendTests
     private readonly Dictionary<(string Entity, Guid Id), IReadOnlyDictionary<string, object?>> _records = new();
     private readonly Guid _threadId = Guid.NewGuid();
 
+    // Task 187 D4: the post gate's secure-flag and live-parent reads, the REAL ones over a fake Web API, passed as the route
+    // passes them (PostMessageAsync).
+    private readonly ExternalRootEventReadTests.FakeDataverse _roots = new();
+
     // Read-back (task 033 read) doubles.
     private readonly Mock<IAppOnlyCommunicationQuery> _appOnly = new();
     private readonly Mock<ISystemUserIdentityResolver> _identity = new(MockBehavior.Strict);
@@ -200,10 +204,13 @@ public class ExternalMessageSendTests
 
     private Task<IResult> Post(
         string root, Guid id, CallerPrincipal caller, PostExternalMessageRequest? request,
-        ExternalModuleRegistry? registry = null) =>
-        ExternalMessageEndpoints.PostMessageCoreAsync(
+        ExternalModuleRegistry? registry = null)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, request, caller, registry ?? ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance,
-            CancellationToken.None);
+            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
+    }
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
     private static PostExternalMessageRequest Bind(string json) =>
@@ -323,10 +330,15 @@ public class ExternalMessageSendTests
             _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>(),
             _appOnly.Object);
+        // Task 187 x D7 (merge of master into r3): the thread is also a LIVE PARENT of every message, and a read given no
+        // live-parent reader resolves nothing and withholds a row that names a parent (fail closed). So the read gets the
+        // reader the route passes, over a filing world that holds the shared Open thread (filed under nothing).
+        var roots = new ExternalRootEventReadTests.FakeDataverse();
+        roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        var data = roots.NewService();
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, ProductionRegistry(), ReadRecord, read,
-            new ExternalRootEventReadTests.FakeDataverse().NewService().GetNonSecureRootsAsync,
-            NullLogger.Instance, CancellationToken.None);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
     }
 
     private static IReadOnlyList<ExternalMessageDto> Messages(IResult result) =>
@@ -459,6 +471,39 @@ public class ExternalMessageSendTests
         Created(await Post("invoices", invoice, Ciam(matter: matter)));
 
         TheRow().GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(invoice);
+    }
+
+    /// <summary>
+    /// Task 187, fix round 1, owner decision D4: the post gate is the read gate. An invoice also under a SECURE root the
+    /// caller cannot read is refused (nothing written); one also under an ORDINARY root keeps option A (posted).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InvoiceAlsoUnderAProjectTheCallerCannotRead_IsRefusedWhenThatProjectIsSecure_D4(bool projectIsSecure)
+    {
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddRoot(ExternalGrantRootType.Project, project, isSecure: projectIsSecure);
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+            ["sprk_project"] = Lookup(project, "sprk_project"),
+        };
+
+        var result = await Post("invoices", invoice, Ciam(matter: matter));
+
+        if (projectIsSecure)
+        {
+            ShouldBeForbidden(result, ExternalMessageEndpoints.DenyRecordNotAccessible);
+            ShouldHaveWrittenNothing();
+        }
+        else
+        {
+            Created(result);
+        }
     }
 
     // ── AC 2: outside the caller's set → 403, no row (foreign record, nonexistent id, no grants at all) ──────────

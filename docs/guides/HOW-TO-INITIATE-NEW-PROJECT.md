@@ -524,7 +524,7 @@ Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade
 | `/devops-project-register` | Inverse of project-start — folder → Issue (used for backfill) |
 | `/devops-project-sync` | Workhorse — idempotent local→Issue field sync (called by 5 hooks) |
 | `/devops-portfolio-status` | Terminal dashboard + `--snapshot` for stakeholder narrative |
-| `/devops-project-archive` | **DESTRUCTIVE** — set Status, close Issue, delete worktree, retain folder + `.archived` marker |
+| `/devops-project-archive` | Set Status, close Issue, write `.archived` marker; folder and worktree are both preserved. Never renames the folder (no `x-` prefix) |
 
 ### Portfolio-specific troubleshooting
 
@@ -538,7 +538,8 @@ Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade
 - The Project was created manually without using the skills. Run `/devops-project-sync` to populate fields from local state (assuming the README has the portfolio pointer block — otherwise re-register first).
 
 **Q: I want to archive a project but the worktree has uncommitted changes.**
-- `/devops-project-archive` refuses by default (safety contract). Either commit/stash first, OR re-run with `--force` (uncommitted work will be LOST).
+- Archiving does not touch the worktree, so uncommitted changes neither block it nor are lost. Remove the worktree yourself later (`git worktree remove`) once you have committed or discarded what is in it.
+- Archiving never renames or moves `projects/{name}/`: "archived" is the `.archived` marker plus board Status. A new `projects/x-*` folder is rejected by the pre-commit hook and the `projects-layout-guard` workflow.
 
 **Q: Multiple projects on Project #2 board have the same Type=Project but no Parent issue.**
 - **D-DEVOPS-12** violation — every Project must have an Epic parent. Set `Parent issue` manually in GitHub UI, OR re-run `/devops-project-register --epic #E` for each orphan.

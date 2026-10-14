@@ -1101,6 +1101,18 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             = (ExternalDataService.TodoRootKind.None, null, null);
         public bool ThrowOnLookup { get; set; }
 
+        /// <summary>Task 187: what the live-parent check answers (a to-do whose live parents are ordinary, unless a test says so).</summary>
+        public ExternalDataService.LiveParentDecision LiveParents { get; set; } = ExternalDataService.LiveParentDecision.Readable;
+
+        public int LiveParentChecks { get; private set; }
+
+        public override Task<ExternalDataService.LiveParentDecision> CheckLiveParentsAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            LiveParentChecks++;
+            return Task.FromResult(LiveParents);
+        }
+
         public int UpdateCallCount { get; private set; }
         public Guid? LastUpdatedTodoId { get; private set; }
         public UpdateExternalTodoRequest? LastRequest { get; private set; }
@@ -1122,6 +1134,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         {
             TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null);
             ThrowOnLookup = false;
+            LiveParents = ExternalDataService.LiveParentDecision.Readable;
+            LiveParentChecks = 0;
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
