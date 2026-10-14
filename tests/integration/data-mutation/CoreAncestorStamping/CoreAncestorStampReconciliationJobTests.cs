@@ -637,6 +637,21 @@ public class CoreAncestorStampReconciliationJobTests
         Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(0);
     }
 
+    [Fact(DisplayName = "Ontology task 145 (uac-r2 K4): the setting \",\" - what the backfill's -Apply writes, because App Service can drop an EMPTY app setting - holds nothing, so Signals and Decision Records are written")]
+    public async Task ReportOnlyTables_ACommaAlone_HoldsNothing_TheBackfillRelease()
+    {
+        var world = StaleOntologyWorld("sprk_signal");
+
+        var run = await Job(world, reportOnlyTables: ",").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_signal", OntologyRow, "sprk_regardingmatter").Should().Be(MatterB, "\",\" names no table: the hold is released");
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterB);
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(0);
+        Counts(run).GetProperty("reportOnlyTables").EnumerateArray().Should().BeEmpty();
+        Counts(run).GetProperty("status").GetString().Should().NotBe("partial", "\",\" is not an unknown table");
+    }
+
     [Fact(DisplayName = "Ontology task 144: a report-only setting naming a table the job does not stamp fails closed - the defaults stay held and the run is partial")]
     public async Task ReportOnlyTables_WithAnUnknownTable_KeepsTheDefaultHolds()
     {

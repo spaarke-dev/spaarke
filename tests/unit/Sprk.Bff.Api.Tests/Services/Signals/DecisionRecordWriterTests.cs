@@ -1076,7 +1076,7 @@ public sealed partial class DecisionRecordWriterTests
         h.Row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(CommunicationId.ToString("D").ToLowerInvariant());
         h.Row.Contains("sprk_regardingrecordtype").Should().BeFalse("spaarkedev1 has no sprk_communication catalog row: the pair is untyped (D-133)");
         h.RecordTypes.Queried.Should().Equal("sprk_communication");
-        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the typed lineage column stays populated until task 145");
+        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the typed core column is decision context and stays populated (task 145)");
         h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
         result.SecureOwnerTeamId.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
     }

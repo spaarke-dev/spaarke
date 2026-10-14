@@ -107,10 +107,22 @@ public sealed class SignalReevaluationJob : IScheduledJob
         foreach (var policy in policies)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var failuresBefore = counts.PolicyFailures + counts.InvalidPolicies;
             await EvaluatePolicyAsync(policy, counts, cancellationToken).ConfigureAwait(false);
+            if (counts.PolicyFailures + counts.InvalidPolicies > failuresBefore)
+            {
+                counts.PoliciesFailedThisRun.Add(policy.Code);
+            }
         }
 
+        // Task 145 (uac-r2 review F1 on #1874): an in-force policy that stopped before its redaction (invalid rule, no current
+        // version or lane, a version not in force, a partition skip, a fault, or a scoped policy the nightly pass does not
+        // evaluate) still has its stored evidence checked.
+        await SweepStoredEvidenceAsync(
+            policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
+
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
 
         var success = counts.IsSuccess;
         var duration = Finish(context, counts, started, success);
@@ -292,6 +304,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
+            // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
+            await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -357,6 +371,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     private async Task ApplyAsync(PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
     {
+        // Task 145 (D-123, #1747 finding e): a Signal never carries the subject or sender of a witness in another (or an undetermined)
+        // secure family. Every write below can create a row (a reconcile creates when its row is gone), so both take the filtered lines.
+        var evidence = await _suppression.EvidenceWithinPartitionAsync(
+            policy.Code, plan.Reconciles.Select(r => r.Hit).Concat(plan.Creates.Select(c => c.Hit)).ToList(), ct).ConfigureAwait(false);
+        SignalHit Writable(SignalHit hit) =>
+            evidence.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var lines) ? hit with { Evidence = lines } : hit;
+
         // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
         var closedIds = new HashSet<Guid>();
         foreach (var signal in plan.Closes)
@@ -429,7 +450,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             await GuardAsync(policy, "reconcile", hit.SubjectId, counts, writerLogged: false, async () =>
             {
-                var result = await _writer.WriteAsync(BuildRequest(policy, spec, hit, signal.Episode), ct).ConfigureAwait(false);
+                var result = await _writer.WriteAsync(BuildRequest(policy, spec, Writable(hit), signal.Episode), ct).ConfigureAwait(false);
                 if (result.IsSkipped) counts.Refused++;
                 else counts.Updated++;
             }).ConfigureAwait(false);
@@ -452,7 +473,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             await GuardAsync(policy, "create", create.Hit.SubjectId, counts, writerLogged: false, async () =>
             {
-                var result = await _writer.WriteAsync(BuildRequest(policy, spec, create.Hit, create.Episode), ct).ConfigureAwait(false);
+                var result = await _writer.WriteAsync(BuildRequest(policy, spec, Writable(create.Hit), create.Episode), ct).ConfigureAwait(false);
                 if (result.IsSkipped) counts.Refused++;
                 else if (!result.Created) counts.Updated++;
                 else if (create.Episode > 1) counts.Reraised++;
@@ -662,8 +683,107 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
     /// does not parse is an Error and fails the run (its subject's episode cannot be known).</summary>
+    /// <summary>
+    /// Ontology task 145, review F1 (D-123; main session 2026-10-14, option A): every Signal of the policy read this pass, open AND
+    /// resolved, loses the stored evidence detail that is no longer within its secure family
+    /// (<see cref="SignalSuppressionService.StoredEvidenceToRedactAsync"/>), through <see cref="SignalWriter.RedactEvidenceAsync"/>,
+    /// conditional on the version read. Monotonic (detail is removed, never added). A Signal changed since the read is counted
+    /// <c>changedSinceRead</c> and retried next pass; when the families cannot be read nothing is written (a policy failure, retried
+    /// next pass); a write failure is a refusal. Evidence is not a stamp, so task 144's report-only tables do not apply.
+    /// </summary>
+    private async Task RedactStoredEvidenceAsync(string policyCode, IReadOnlyList<ExistingSignal> signals, RunCounts counts, CancellationToken ct)
+    {
+        // Once per policy per run: the sweeps after the policy loop skip a policy already attempted here (whatever the outcome).
+        counts.EvidenceRedactionAttempted.Add(policyCode);
+        var redactions = await _suppression.StoredEvidenceToRedactAsync(policyCode, signals, ct).ConfigureAwait(false);
+        if (redactions is null)
+        {
+            counts.PolicyFailures++;
+            return;
+        }
+
+        foreach (var signal in signals)
+        {
+            if (!redactions.TryGetValue(signal.Id, out var redacted)) continue;
+            if (string.IsNullOrWhiteSpace(signal.RowVersion))
+            {
+                counts.Refused++;
+                _logger.LogWarning(
+                    "Policy {PolicyCode}: Signal {SignalId} has stored evidence to clear but no version was read, so it cannot be written conditionally; the next pass retries.",
+                    policyCode, signal.Id);
+                continue;
+            }
+
+            try
+            {
+                if (await _writer.RedactEvidenceAsync(signal.Id, signal.RowVersion, redacted, policyCode, ct).ConfigureAwait(false)) counts.EvidenceRedacted++;
+                else counts.ChangedSinceRead++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                counts.Refused++; // logged and metered by the writer
+            }
+        }
+    }
+
+    /// <summary>
+    /// Task 145 (review F1): a policy that is Off or Retired is never evaluated, so its Signals (closed PolicyRetired, or resolved
+    /// before) would never pass through <see cref="RedactStoredEvidenceAsync"/> again. The nightly pass reads them, after the Off/Retired
+    /// close, and redacts them by the same rule. A policy whose Signals cannot be read is a policy failure, retried next pass.
+    /// </summary>
+    private async Task RedactPoliciesNotInForceAsync(RunCounts counts, CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, string> policies;
+        try
+        {
+            policies = await _closure.PoliciesNotInForceAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Policies that are Off or Retired could not be read ({ExceptionType}); their Signals' stored evidence was not checked this run.",
+                ex.GetType().Name);
+            return;
+        }
+
+        await SweepStoredEvidenceAsync(policies.Values, "is not in force", counts, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 145: reads the Signals of each policy in <paramref name="policyCodes"/> that this run has not yet sent through
+    /// <see cref="RedactStoredEvidenceAsync"/> (<see cref="RunCounts.EvidenceRedactionAttempted"/>), and redacts their stored
+    /// evidence. Never twice per policy per run. A policy whose Signals cannot be read is a policy failure (logged, nothing
+    /// written, the run fails visibly, the next pass retries) unless the policy already failed this run, which is not counted
+    /// again; a family-read fault is handled by <see cref="RedactStoredEvidenceAsync"/> the same way. The sweep reads in
+    /// <c>forRedactionSweep</c> mode (uac-r2 re-check F1): an unparseable dedupe key is skipped without being counted, logged or
+    /// metered again, and the policy's parseable Signals are still redacted.
+    /// </summary>
+    private async Task SweepStoredEvidenceAsync(IEnumerable<string> policyCodes, string why, RunCounts counts, CancellationToken ct)
+    {
+        foreach (var code in policyCodes.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal).ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (counts.EvidenceRedactionAttempted.Contains(code)) continue;
+            try
+            {
+                var signals = await ReadPolicySignalsAsync(code, counts, ct, forRedactionSweep: true).ConfigureAwait(false);
+                await RedactStoredEvidenceAsync(code, signals, counts, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                counts.EvidenceRedactionAttempted.Add(code);
+                // One failure per policy per run: a policy that already failed the run is logged here but not counted twice.
+                if (counts.PoliciesFailedThisRun.Add(code)) counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "Policy {PolicyCode} {Why}, and its Signals could not be read ({ExceptionType}); their stored evidence was not checked this run.",
+                    code, why, ex.GetType().Name);
+            }
+        }
+    }
+
     private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(
-        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
+        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null, bool forRedactionSweep = false)
     {
         // A scoped (event-trigger) pass reads only the one subject's episodes: the planner closes every open Signal whose
         // subject is not a hit, so handing it the policy's other subjects would close them (task 032).
@@ -678,6 +798,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
                 "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord",
+                // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync).
+                SignalSuppressionService.EvidenceColumn,
             }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
@@ -710,6 +832,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
                 if (!SignalWriter.TryParseDedupeKey(key, out var code, out var subjectEntity, out var subjectId, out var episode))
                 {
+                    if (forRedactionSweep)
+                    {
+                        // Task 145 (uac-r2 re-check F1): counting, logging and metering an unparseable key (and failing the run)
+                        // is the evaluation pass's job; the sweep only redacts, and a row with no readable subject cannot be placed.
+                        continue;
+                    }
+
                     counts.UnparseableKeys++;
                     unparseable++;
                     _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
@@ -768,6 +897,16 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>K1: the part of <see cref="Refused"/> that is a Dataverse privilege refusal (deterministic, so not retried by a trigger).</summary>
         public int AccessDenied;
         public int SupersededClosed, RetiredClosed;
+        /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
+        public int EvidenceRedacted;
+
+        /// <summary>Task 145 (uac-r2 F1 on #1874): the policies whose stored evidence this run already checked (or tried to), so the
+        /// sweeps after the policy loop reach every other policy exactly once.</summary>
+        public HashSet<string> EvidenceRedactionAttempted { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 145 (uac-r2 re-check F1): the policies that already failed this run (a policy failure or an invalid rule),
+        /// so a sweep's own read failure for one of them is logged but not counted a second time.</summary>
+        public HashSet<string> PoliciesFailedThisRun { get; } = new(StringComparer.Ordinal);
         public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
         /// <summary>#1661 round 2 F3: policies planned NOTHING this pass because their secure-family partitions could not be read (each is
@@ -845,6 +984,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             awaitingEvidence = AwaitingEvidence,
             noDatedEvidence = NoDatedEvidence,
             clearedMarked = ClearedMarked,
+            evidenceRedacted = EvidenceRedacted,
             missingInputs = MissingInputs,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,

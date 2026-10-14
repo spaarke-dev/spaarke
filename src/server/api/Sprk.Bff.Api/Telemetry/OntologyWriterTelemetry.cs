@@ -324,6 +324,10 @@ public static class OntologyWriterFailureReason
     /// <summary>Task 031: a system closure (ConditionCleared) of a Signal failed in Dataverse.</summary>
     public const string SignalCloseFailed = "signal_close_failed";
 
+    /// <summary>Ontology task 145 (D-123, review F1): clearing stored evidence detail that is no longer within the Signal's secure
+    /// family failed in Dataverse.</summary>
+    public const string SignalEvidenceRedactFailed = "signal_evidence_redact_failed";
+
     /// <summary>Task 031 (D-35), task 143: re-owning a no-core Signal to its item's current owner team failed (uac-r2's
     /// <c>ReownOrdinaryRowAsync</c> answered Failed, or faulted).</summary>
     public const string SignalReassignFailed = "signal_reassign_failed";

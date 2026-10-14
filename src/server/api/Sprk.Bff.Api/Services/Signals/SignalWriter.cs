@@ -949,6 +949,48 @@ public sealed partial class SignalWriter
     }
 
     /// <summary>
+    /// Ontology task 145 (D-123, review F1): replaces a Signal's stored <c>sprk_evidencerefs</c> with
+    /// <paramref name="redactedEvidenceJson"/>, the same lines with the detail that is no longer within the Signal's secure family
+    /// removed (<see cref="SignalSuppressionService.StoredEvidenceToRedactAsync"/>). Writes ONLY that column, conditional on
+    /// <paramref name="rowVersion"/>: a Signal changed since the read returns false and writes nothing (the next pass re-reads it), so
+    /// a concurrent update is never overwritten. A failure is logged at Error, metered and rethrown.
+    /// </summary>
+    internal async Task<bool> RedactEvidenceAsync(
+        Guid signalId, string? rowVersion, string redactedEvidenceJson, string policyCode, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (string.IsNullOrWhiteSpace(rowVersion))
+            throw new ArgumentException("rowVersion is required: the redaction must not overwrite a Signal changed since it was read.", nameof(rowVersion));
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedEvidenceJson);
+
+        var fields = new Dictionary<string, object> { [SignalSuppressionService.EvidenceColumn] = redactedEvidenceJson };
+        try
+        {
+            await _writerClient.UpdateIfRowVersionMatchesAsync("sprk_signal", signalId, rowVersion, fields, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Signal {SignalId} (policy {PolicyCode}): stored evidence detail outside the Signal's secure family cleared (D-123).",
+                signalId, policyCode);
+            return true;
+        }
+        catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+        {
+            _logger.LogInformation(
+                "Signal {SignalId} changed since the evaluator read it; its evidence redaction waits for the next pass (policy {PolicyCode}).",
+                signalId, policyCode);
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalEvidenceRedactFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Evidence redaction refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Task 031 (task 037 hand-off, D-35), task 143 (D-130, D-134): a no-core Signal follows its item's owner answer. When that
     /// answer changes after the Signal was written (the item's own team, or a personal To Do's Assigned To), the Signal is
     /// re-owned to <paramref name="owner"/> — the team <see cref="DeriveCoreRecordAsync"/> resolved, never a user — through
@@ -1351,7 +1393,9 @@ public sealed partial class SignalWriter
 
         if (core.Entity is not null)
         {
-            // D-36: the generic core-record pair (catalog type + id); sprk_matter as well only when the core is a matter.
+            // D-36: the generic core-record pair (catalog type + id); sprk_matter as well only when the core is a matter. Task 145:
+            // sprk_matter is decision CONTEXT (the frozen core, an owner parent in the lineage), never the filing; the filing is the
+            // subject lookup plus the live sprk_regarding{core} stamp, which follows the subject (144 review K1).
             entity["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", coreTypeRefId!.Value);
             entity["sprk_corerecordid"] = core.Id.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
             if (core.Entity == "sprk_matter")

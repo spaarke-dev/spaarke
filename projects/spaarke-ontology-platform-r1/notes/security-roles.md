@@ -754,3 +754,134 @@ Why: with the revision owned correctly (by the matter's BU owner team, or the Se
    - **Negative control** 16:09:21Z (before the grant): POST `sprk_budgetrevisions` owned by team `Secure Record Owners` `6eabc7f9-13be-f111-a05b-0022482913fc` → HTTP 403 `0x80040299` "Principal team … privilegeCount=28 … is missing prvReadsprk_BudgetRevision privilege (Id=f921db62-3fcf-4d02-9ba3-107d0452f484) on OTC=10999". Nothing written.
    - Dry run: MISSING only `prvReadsprk_BudgetRevision`. `-Apply`: added at Basic, 28 → 33 (platform re-injected the SharePoint four). **Strip (setup guide §5.4)**: removed ONLY `prvReadSharePointData`, `prvWriteSharePointData`, `prvCreateSharePointData`, `prvReadSharePointDocument` (`RemovePrivilegeRole`, 4× HTTP 204) → **29** (28 + the one). The guide's sample loop was NOT used: it strips everything outside the file, which would remove this project's D-33(a) `prvReadsprk_Signal` / `prvReadsprk_DecisionRecord`. `-Verify`: PASS (27 tables).
    - **Positive control** 16:12:11Z and 16:12:50Z: the same probe → HTTP 201 twice; both rows deleted (204); 0 `zz-044` probes left.
+
+## 11. Task 041: append-only proven against a real non-admin, and the 1-to-N direction (2026-10-14)
+
+Environment `spaarkedev1` only. Owner approval D-138 (2026-10-14) for the dev data writes. Replay scripts:
+`notes/task-041-live-test.sh` (11.2, 11.5) and `notes/task-041-share-probe.sh` (11.4). Every row created carries
+`zz-041-`, and both scripts delete what they create in an `EXIT` trap (11.7).
+
+### 11.1 Who was tested, and how
+
+**Chelsea Friez**, systemuser `c46d44ca-33bd-f111-aaaf-0022482913fc` (`chelsea.friez@demo.spaarke.com`, access mode
+0 Read-Write, enabled, root BU `Spaarke`), the human non-admin task 008 used (section 10.4). Roles, read live before the run:
+
+| Source | Roles |
+|---|---|
+| Direct | Spaarke Core User, Spaarke Console User, Spaarke Office Add In User |
+| Default team `Spaarke` (`09fbf21c-...`) | Spaarke Console User, Spaarke Basic User, Spaarke Office Add In User |
+
+No System Administrator, System Customizer, Service Writer, Service Deleter, Spaarke Ontology Administrator or Spaarke
+Ontology Service. Dataverse itself reported `roleCount=4, privilegeCount=801`.
+
+**Method.** The dev operator's `az` token with the `MSCRMCallerID` header set to Chelsea's id. Dataverse then runs the
+request as Chelsea and enforces **her** privileges (the method of sections 9 and 10.4). It needs no secret, password,
+new user, role or credential. It is not a Chelsea sign-in, but the privilege check is the platform's own and the error
+text below names her as the principal. The positive control (11.2) shows the same row accepts an admin write, so the
+refusals are the privilege check and not a broken row.
+
+### 11.2 Update, delete and deactivate by Chelsea: all refused
+
+Chelsea created a Decision Record herself (HTTP 204, so she is its **owner**: `ownerid` = Chelsea), then tried to change
+it. Owning the row does not help, because no role she holds has Write or Delete.
+
+| Attempt (run 2026-10-14T17:08:20Z) | Result |
+|---|---|
+| Update `sprk_proposedaction` | **HTTP 403 `0x80040220`** |
+| Delete | **HTTP 403 `0x80040220`** |
+| Deactivate (`statecode=1, statuscode=2`) | **HTTP 403 `0x80040220`**, refused on the same Write privilege |
+| `RetrievePrincipalAccess` for Chelsea on her own row | `ReadAccess, AppendAccess, AppendToAccess, CreateAccess`. **No `WriteAccess`, no `DeleteAccess`** |
+| Row re-read after the three attempts | unchanged (`sprk_proposedaction` original, `statecode` 0, `statuscode` 1) |
+| Positive control: admin Update of the same row | HTTP 204 |
+
+Captured errors, verbatim (update and deactivate return the same text):
+
+```
+Update:  {"error":{"code":"0x80040220","message":"Principal user (Id=c46d44ca-33bd-f111-aaaf-0022482913fc, type=8, roleCount=4, privilegeCount=801, accessMode='0 Read-Write', AADObjectId='3ebd4e17-fa8c-4b7d-a78c-13410d0238ce', MetadataCachePrivilegesCount=7350, businessUnitId=06fbf21c-1872-f011-b4cb-7c1e52671ad0), is missing prvWritesprk_DecisionRecord privilege (Id=192e7933-c198-463a-a21d-c5c8c7aea132) on OTC=11002 for entity 'sprk_decisionrecord' (LocalizedName='Decision Record'). context.Caller=c46d44ca-33bd-f111-aaaf-0022482913fc. Consider adding missed privilege to one of the principal (user/team) roles."}}
+Delete:  {"error":{"code":"0x80040220","message":"Principal user (Id=c46d44ca-33bd-f111-aaaf-0022482913fc, type=8, roleCount=4, privilegeCount=801, accessMode='0 Read-Write', AADObjectId='3ebd4e17-fa8c-4b7d-a78c-13410d0238ce', MetadataCachePrivilegesCount=7350, businessUnitId=06fbf21c-1872-f011-b4cb-7c1e52671ad0), is missing prvDeletesprk_DecisionRecord privilege (Id=02615b9f-bca8-4603-869d-1278c2dd6076) on OTC=11002 for entity 'sprk_decisionrecord' (LocalizedName='Decision Record'). context.Caller=c46d44ca-33bd-f111-aaaf-0022482913fc. Consider adding missed privilege to one of the principal (user/team) roles."}}
+```
+
+An earlier run (17:07:55Z, before a navigation-property name in the Signal payload was corrected) gave the
+same three refusals. A bound SetState call returned 404 on this Web API ("Resource not found for the segment"), so deactivating by `PATCH statecode` is the
+path used (a state change is an Update to Dataverse, so it is checked as Write, as the error text shows).
+
+### 11.3 Known limit: rows cannot be deactivated either
+
+Deactivation is an Update (a Write), so with no Write privilege a Decision Record can **never** be deactivated, by a
+human or by the writer. This is the **consequence of the no-Write privilege model**, recorded as a **known limit** and
+not a defect: an append-only ledger has no inactive state, and a wrong decision is corrected by writing a **new**
+Decision Record, not by hiding the old one. Nobody should file "cannot deactivate a Decision Record" as a bug, and no
+view may rely on `statecode` to filter Decision Records (every row stays Active).
+
+### 11.4 Sharing does not reopen Write (checks uac-r2's "mirrored share rights are inert")
+
+uac-r2's `config/secure-record-owner-role.json` entry for `sprk_decisionrecord` says mirrored share rights are inert
+because no human role holds Write or Delete. Tested: an admin-owned Decision Record was shared with Chelsea with
+`Read, Write, Delete, Append, AppendTo` (`GrantAccess`, HTTP 204). `RetrievePrincipalAccess` then reported
+`ReadAccess, WriteAccess, AppendAccess, AppendToAccess, CreateAccess, DeleteAccess` (the share is recorded). Chelsea:
+
+| Attempt on the shared row (run 2026-10-14T17:09:45Z) | Result |
+|---|---|
+| Read | HTTP 200 (the share works) |
+| Update | **HTTP 403 `0x80040220`**, missing `prvWritesprk_DecisionRecord` |
+| Delete | **HTTP 403 `0x80040220`**, missing `prvDeletesprk_DecisionRecord` |
+| Deactivate | **HTTP 403 `0x80040220`**, missing `prvWritesprk_DecisionRecord` |
+
+A share carries a record's access *rights*, but Dataverse still requires the user to hold the *privilege*. So the
+secure-child share mirroring cannot be used to edit a Decision Record. This holds only while no Spaarke role gains Write
+or Delete on the table (11.6).
+
+### 11.5 The relationship is 1-to-N with the foreign key on the Signal
+
+**Metadata, read live (`EntityDefinitions`):**
+
+| Check | Result |
+|---|---|
+| 1:N relationship with the Decision Record as parent and Signal as child | `sprk_signal_decisionrecord`: referenced `sprk_decisionrecord.sprk_decisionrecordid`, referencing **`sprk_signal.sprk_decisionrecord`**, not hierarchical, cascade Delete = RemoveLink, Assign/Share = NoCascade |
+| Lookup `sprk_signal.sprk_decisionrecord` | Targets `[sprk_decisionrecord]`, RequiredLevel None (nullable for system closures) |
+| **Negative:** N:1 relationships from `sprk_decisionrecord` to `sprk_signal` | **none** (0 of 28) |
+| **Negative:** any lookup column on `sprk_decisionrecord` targeting `sprk_signal` | **none** (all 28 lookup columns listed; the `sprk_regarding*` ones target subject tables) |
+| Many-to-many relationships on `sprk_decisionrecord` | none |
+
+**Behaviour (run 2026-10-14T17:08:20Z).** One Decision Record and three Signals created with the lookup set to it
+(`zz-041-sig-1..3`), plus a decoy Signal with no decision (`zz-041-sig-4-unlinked`). Read **as Chelsea**:
+
+| Read | Rows |
+|---|---|
+| Navigation from the Decision Record, `sprk_decisionrecords(id)/sprk_signal_decisionrecord` | **3**: `zz-041-sig-1`, `-2`, `-3`, each with `_sprk_decisionrecord_value` = the decision. The decoy is absent |
+| FetchXML on `sprk_signal` where `sprk_decisionrecord` eq id (what a "Signals closed by this decision" subgrid runs) | **3**, the same rows |
+| `sprk_decisionrecords(id)` read | carries no Signal reference; nothing on the Decision Record lists its Signals |
+
+So "Signals closed by this decision" renders from the Signal side. **Subgrid control:** none of the three
+`sprk_decisionrecord` forms (types 2 Main, 6 Quick View, 11 Card, all named Information) has a subgrid today; they are
+the read-only Name/Owner forms of section 10.5. The criterion is therefore proven at the query a subgrid executes, not
+by opening a rendered form. Adding the control is form design (section 10.7 item 7) and belongs to a Console/UI task.
+
+### 11.6 Union re-check (task 002 method), 2026-10-14T17:10Z
+
+Roles holding the two ledger privileges now (`privileges(id)/roleprivileges_association`):
+
+| Privilege | Held by |
+|---|---|
+| `prvWritesprk_DecisionRecord` | Service Writer, System Administrator, System Customizer |
+| `prvDeletesprk_DecisionRecord` | Service Deleter, System Administrator, System Customizer |
+
+Identical to section 10.3: **no Spaarke role** holds either, and the repo role XML
+(`src/dataverse/solutions/SpaarkeMaster/Roles`) agrees: the table carries only Append, AppendTo, Create, Read (plus
+Assign on Ontology Service). The accepted admin limit (section 1) stands: System Administrator and System Customizer
+always hold everything, and auditing is the detection (`IsAuditEnabled` on `sprk_decisionrecord` = true).
+
+### 11.7 Cleanup proof
+
+The `EXIT` traps deleted every row: two runs of `task-041-live-test.sh` (the first 1 Decision Record + 1 Signal, the
+second 1 Decision Record + 4 Signals; 17:07:55Z and 17:08:20Z) and two runs of the share probe (2 Decision Records, one from an aborted first
+attempt). Query at 17:10:10Z with `contains(sprk_name,'zz-041')`: **`sprk_signals` 0 rows, `sprk_decisionrecords` 0
+rows.** Both tables hold 0 rows in total after the run.
+
+### 11.8 Notes for later tasks
+
+- **Task 049 / D-62** removes Create on Decision Records from users. `task-041-share-probe.sh` creates its row as admin
+  and keeps working. `task-041-live-test.sh` has Chelsea create the row and will then fail at step 1, which is a true
+  statement about 049 and not a regression.
+- Impersonation proves the privilege model; it does not drive the Console UI. Any Dataverse update on a Decision Record
+  from the Console would see the same 403. The BFF commit route is the only writer (FR-18).

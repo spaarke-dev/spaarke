@@ -462,7 +462,7 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
     /// mirroring <c>SignalsModule</c>'s production split between the writer client and the shared
     /// <c>IGenericEntityService</c>.
     /// </summary>
-    private sealed class SysadminAdapter : IGenericEntityService
+    internal class SysadminAdapter : IGenericEntityService
     {
         private readonly ServiceClient _operatorClient;
 
@@ -480,7 +480,7 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         public Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
         // Task 039: the ownership resolver's reads (business units, teams, root flags).
-        public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) =>
+        public virtual Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) =>
             _operatorClient.RetrieveMultipleAsync(query, ct);
         public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default) =>
             _operatorClient.RetrieveMultipleAsync(fetch, ct);

@@ -4,7 +4,7 @@
     <title>Do lane: four policies as subject-only rules (incl. overdue To Do), evaluated by the one evaluator</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>060, 034, 024, 036, 037, 047 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves Do-lane membership from hardcoded collector queries into declared rules evaluated by the shared evaluator; changes what users are told is overdue.</rigor-reason>
     <model-tier>sonnet</model-tier>

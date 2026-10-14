@@ -379,9 +379,9 @@ public sealed class DecisionCommitServiceTests
                     : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
             }
 
-            if (path.StartsWith("sprk_matters(", StringComparison.Ordinal))
+            if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) || path.StartsWith("sprk_projects(", StringComparison.Ordinal))
             {
-                var id = Guid.Parse(path["sprk_matters(".Length..path.IndexOf(')')]);
+                var id = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
                 return CallerCannotReadCore.Contains(id)
                     ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no")
                     : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
@@ -586,6 +586,41 @@ public sealed class DecisionCommitServiceTests
             "the #1634 review: the child create sends the TYPED pair from sprk_corerecordtype");
         request.MatterId.Should().Be(Matter);
         request.SignalId.Should().Be(Primary);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task T145_TheDecisionsMatter_IsTheCorePairsMatter_NeverTheTypedSprkMatter(bool typedNamesAnotherMatter)
+    {
+        // D-34 (task 145): the matter the executors act on (and the budget-revision trigger re-evaluates) is the decision CONTEXT, so it
+        // comes from sprk_corerecordtype + sprk_corerecordid. The typed sprk_matter lookup is not read: whether it names another matter
+        // or is empty, the answer is the core's.
+        var rig = new Rig();
+        if (typedNamesAnotherMatter) rig.Signals[Primary]["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+        else rig.Signals[Primary].Attributes.Remove("sprk_matter");
+
+        await rig.CommitAsync(PathBReview());
+
+        rig.Executors["add-todo"].Requests.Single().MatterId.Should().Be(Matter);
+    }
+
+    [Fact]
+    public async Task T145_AProjectCoresDecision_HasNoMatter_EvenWhenATypedSprkMatterIsSet()
+    {
+        // Review F3: only a MATTER core pair gives the decision a matter; a project core gives none, whatever sprk_matter says.
+        var rig = new Rig();
+        var typeProject = Guid.Parse("c0430000-0000-4000-8000-000000000011");
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", typeProject, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", typeProject) { ["sprk_recordlogicalname"] = "sprk_project" });
+        rig.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_project", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_projects");
+        rig.Signals[Primary]["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", typeProject);
+        rig.Signals[Primary]["sprk_matter"] = new EntityReference("sprk_matter", Matter);
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.ReasonCode);
+        rig.Executors["add-todo"].Requests.Single().MatterId.Should().BeNull();
     }
 
     // ── AC2: the dismissal ───────────────────────────────────────────────────────────────────────────────────────
