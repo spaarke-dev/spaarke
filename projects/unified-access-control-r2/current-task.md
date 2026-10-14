@@ -10,7 +10,7 @@
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
 | **Running** | Nothing. The ontology reviews are done: #1874 (145) CLEAN at `75114b170`, #1878 (042) CLEAN at `72fe75054`. Ontology merges them. Their D-139 follow-up PR (one DR per gate decision, written by an ADR-004 job) comes to UAC for review. |
-| **Next Action** | Re-run 187's document leg on dev (read-only) once SPA-r3's deploy `4e23edeb2` is live; they will say when. Then pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). |
+| **Next Action** | Pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). |
 
 ## Done this session
 - **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
@@ -27,7 +27,7 @@
 - **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
 - **word-add-in:** the owner is UATing add-ins on dev at `8a1f3bb11`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
 - **Task 186 (baseline access only):** pending SPA-r3's principal contract. Tell provisioning when the Workforce role is final.
-- **SPA-r3 064 doc-type fix** (`ExternalDataService.cs:142`, `sprk_documenttype` read as a string, which empties external document lists on dev) is on the R3 branch only. They were asked to land it on master.
+- **D-187-G1 (doc-type) is fixed**: on master as `c3445d45e` (#1880) and on dev at `4e23edeb2`. The 187 document leg re-ran and PASSED (15 lists now complete; no over-hiding).  #1886 filed (file-less documents listed, then 409).
 - **Issues filed this period:** #1813, #1817, #1830 (triaged), #1857 (task 187, fixed).
 
 ## Open owner items
