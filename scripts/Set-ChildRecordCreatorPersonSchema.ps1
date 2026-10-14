@@ -47,7 +47,7 @@
                      or relationship counts as included when its table is in the solution with rootcomponentbehavior = 0
                      ("include subcomponents") — the false negative the batch-4 live run found in task 133's verify
                      (notes/batch4-live-gates-2026-10-03.md) is not repeated here. A table listed in $SolutionHomes
-                     (sprk_budgetrevision, sprk_decisionrecord: their column travels in SpaarkeMaster and
+                     (sprk_budgetrevision, sprk_decisionrecord, sprk_signal: their column travels in SpaarkeMaster and
                      OntologyPlatformSolution, which hold the
                      whole table, not in SpaarkeCore) is checked against THOSE solutions instead, read-only: a gap there is
                      reported, never written, so SpaarkeCore is not reported as a false gap. For such a table -Apply
@@ -70,8 +70,9 @@
     does the same for Signals. The writer is not a BFF user, so without the narrow profile every such create is refused by field
     security. In every target environment the profile "Spaarke Ontology Writer Field Writers" must exist, with the writer as
     its only member and the three 4/4/4 rows, BEFORE that BFF deploys: run -Apply, then -Verify to exit 0. For an
-    environment other than dev, sprk_budgetrevision.sprk_createdbyperson and sprk_decisionrecord.sprk_createdbyperson must first arrive by importing
-    SpaarkeMaster / OntologyPlatformSolution (this script will not create it).
+    environment other than dev, sprk_budgetrevision.sprk_createdbyperson, sprk_decisionrecord.sprk_createdbyperson and
+    sprk_signal.sprk_createdbyperson must first arrive by importing SpaarkeMaster / OntologyPlatformSolution (this script will
+    not create them).
 
     ⚠️ A business unit created later needs its default team added to the reader profile (re-run -Apply).
 
@@ -153,7 +154,7 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -186,6 +187,7 @@ function Find-CreatorPersonRelationship([string]$Table, [scriptblock]$Read) {
 $SolutionHomes = @{
     sprk_budgetrevision = @('SpaarkeMaster', 'OntologyPlatformSolution')
     sprk_decisionrecord = @('SpaarkeMaster', 'OntologyPlatformSolution')   # ontology task 142 (D-135), as 147 did for the budget revision
+    sprk_signal         = @('SpaarkeMaster', 'OntologyPlatformSolution')   # ontology task 143 (D-135), as 142 did for the Decision Record
 }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
@@ -440,7 +442,7 @@ foreach ($t in $Tables) {
 Write-Host "`n(c2) $OntologyWriterProfileName (D-136)"
 foreach ($t in $OntologyWriterTables) {
     $a = $attrs[$t]
-    if (-not $a -and $t -notin $Tables) { $a = Try-DvGet (ColumnAttributePath $t) }   # signal: not in $Tables yet (task 143)
+    if (-not $a -and $t -notin $Tables) { $a = Try-DvGet (ColumnAttributePath $t) }   # a narrow-profile table not in $Tables (none since task 143)
     if (-not $a) {
         if ($t -in $Tables) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "grant $OntologyWriterProfileName on $t.$Column (after the column exists)" }
         else { Report 'FAIL' "$t.$Column does not exist in this environment: import the owning solution first (D-135) -- $OntologyWriterProfileName cannot cover it" }
