@@ -203,3 +203,20 @@ The owner approved all four dev changes: 044 apply, BFF from R3, three PCF impor
    - Rollback: the before-images (attribute JSON and form JSON) are in the session scratchpad. The reverse is the same PUT and PATCH with "Is Internal Only", then publish.
 
 **Pending:** the owner checks on dev, using the "Verify after import" list above.
+
+### Step 6b - the hosts the owner actually uses (2026-10-14, owner-approved)
+
+**What the owner found.** The owner checked on dev and saw no switch. The two compose surfaces they use are hosts that 068 had not rebuilt:
+- **The record form's "Messages" modal** is the `CommunicationConversationPanel` PCF (`ConversationModal.tsx:132`), which embeds the shared `ConversationView`.
+- **The "New Email" modal on the Email page** is the `sprk_emailpage` code page (`src/solutions/EmailPage`): `useEmailComposeActions`, then `SendEmailDialog`, then `EmailComposer`.
+
+**What was deployed** (owner approved "Deploy both"):
+- **CommunicationConversationPanel:** bumped 1.18.2 → 1.18.3 (commit `be5c7257e`) and imported with `Import-SolutionScoped.ps1`. Dev reads back 1.18.3.
+- **`sprk_emailpage`:** built from R3 `be5c7257e`, which contains master `3084f0ca1`, the source of word-add-in's 03:00Z deploy. Word-add-in's #1812 marker was present in the build. Deployed with `Deploy-WebResourceInline.ps1` at 21:48:17Z; it reads back byte-equal (1,654,422 bytes).
+- **`sprk_communicationconversationpage.html`** (the full-page conversation page, same `ConversationView`): deployed at 21:48:24Z; it reads back byte-equal.
+
+**Rollback:**
+- Re-import `CommunicationConversationPanelSolution_v1.18.2.zip`, packed in `C:\wtr3-068rb\src\client\pcf\CommunicationConversationPanel\Solution\bin\`.
+- For the two pages, re-upload the saved pre-deploy content (`wr-sprk_emailpage-before.json`, `wr-sprk_communicationconversationpage.html-before.json` in the session scratchpad), or rebuild them from master, then publish.
+
+**Hosts not deployed.** These also get the switch on their next build: the Console (`sprk_spaarkeai`, last deployed by word-add-in) and DocumentUploadWizard (follow-up 4).
