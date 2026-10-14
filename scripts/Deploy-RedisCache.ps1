@@ -20,18 +20,17 @@
     The script is idempotent (NFR-01) — safe to re-run. Pre-existing Redis instances
     in `Succeeded` provisioning state are detected and the deploy is skipped.
 
-    Production and demo environments REJECT execution without an explicit `-Force`
+    The production environment REJECTS execution without an explicit `-Force`
     flag per NFR-05.
 
 .PARAMETER Environment
-    Target environment: dev, staging, prod, or demo.
+    Target environment: dev, staging, or prod. (The old demo environment and its Redis were retired 2026-10-14.)
 
 .PARAMETER ResourceGroup
     Override the resource group. Defaults by environment:
       dev     -> spe-infrastructure-westus2
       staging -> rg-spaarke-staging
       prod    -> rg-spaarke-prod
-      demo    -> rg-spaarke-demo
 
 .PARAMETER RedisName
     Override the cache name. Default: `spaarke-bff-redis-{env}` (must match `redisName` in the
@@ -60,11 +59,10 @@
 
 .PARAMETER SubscriptionId
     Subscription of the cache and the BFF. Default: the az CLI's current subscription. Pass it rather than
-    running `az account set` — the CLI context is shared by every session on the machine. (Demo lives in
-    its own subscription.)
+    running `az account set` — the CLI context is shared by every session on the machine.
 
 .PARAMETER Force
-    Required to target `prod` or `demo` environments per NFR-05. Without `-Force`,
+    Required to target the `prod` environment per NFR-05. Without `-Force`,
     the script exits with code 2 and a NFR-05 message.
 
 .PARAMETER DeployAlerts
@@ -117,14 +115,14 @@
     Constraints:
       FR-11  — parameters per spec.
       NFR-01 — idempotent.
-      NFR-05 — reject prod/demo without `-Force`.
+      NFR-05 — reject prod without `-Force`.
       NFR-06 — `-WhatIf` (plan) + `-VerifyOnly` modes.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'staging', 'prod', 'demo')]
+    [ValidateSet('dev', 'staging', 'prod')]
     [string]$Environment,
 
     [string]$ResourceGroup,
@@ -161,10 +159,10 @@ $subArgs = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 # ---------------------------------------------------------------------------
-# NFR-05 prod/demo gate
+# NFR-05 prod gate
 # ---------------------------------------------------------------------------
-if (($Environment -in @('prod', 'demo')) -and (-not $Force)) {
-    Write-Host "NFR-05: -Environment $Environment requires -Force flag. This project must NOT touch prod/demo without explicit operator intent. Aborting." -ForegroundColor Red
+if (($Environment -eq 'prod') -and (-not $Force)) {
+    Write-Host "NFR-05: -Environment $Environment requires -Force flag. This project must NOT touch prod without explicit operator intent. Aborting." -ForegroundColor Red
     exit 2
 }
 
@@ -176,7 +174,6 @@ if (-not $ResourceGroup) {
         'dev'     { 'spe-infrastructure-westus2' }
         'staging' { 'rg-spaarke-staging' }
         'prod'    { 'rg-spaarke-prod' }
-        'demo'    { 'rg-spaarke-demo' }
     }
 }
 
@@ -196,7 +193,6 @@ if ($DeployAlerts -and -not $AppInsightsName) {
         'dev'     { 'spe-insights-dev-67e2xz' }
         'staging' { 'spe-insights-staging' }
         'prod'    { 'spe-insights-prod' }
-        'demo'    { 'spe-insights-demo' }
     }
 }
 

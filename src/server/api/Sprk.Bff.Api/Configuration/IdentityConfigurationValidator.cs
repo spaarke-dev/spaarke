@@ -212,7 +212,7 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
         // It was settled by measurement: on spaarke-bff-dev (2026-08-21) AgentToken__ClientSecret,
         // API_CLIENT_SECRET, AzureAd__ClientSecret and Dataverse__ClientSecret all hold the same value
         // — BFF-API-ClientSecret — and AgentToken__ClientId is the BFF app registration.
-        // Reconcile-DemoEnvironment.ps1:76 wires the demo environment identically.
+        // (The retired old-demo reconcile script wired its environment identically.)
         //
         // This rule exists because "identical today" is not "identical forever". If they ever diverge,
         // the agent OBO would present a different secret than before the migration and fail with

@@ -246,7 +246,7 @@ az login
 az account show  # Verify correct subscription
 
 # PAC CLI — authenticate with service principal
-pac auth create --environment "https://spaarke-demo.crm.dynamics.com" `
+pac auth create --environment "https://myenv.crm.dynamics.com" `
     --tenant "a221a95e-..." `
     --applicationId "..." `
     --clientSecret "..."
@@ -442,14 +442,14 @@ pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 
 ```powershell
 # Connect PAC CLI to target environment
-pac auth select --environment "https://spaarke-demo.crm.dynamics.com"
+pac auth select --environment "https://myenv.crm.dynamics.com"
 
 # Import SpaarkeMaster
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./deploy/SpaarkeMaster.zip -SolutionUniqueName SpaarkeMaster
 
 # Or via Deploy-Release.ps1 which handles this automatically
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -Version "v1.1.0"
 ```
 
@@ -471,7 +471,7 @@ A single import of SpaarkeMaster deploys:
 
 ```powershell
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -WhatIf
 ```
 
@@ -494,15 +494,15 @@ Reference data scripts are idempotent (safe to re-run every release):
 # Run only AFTER the BFF containing the ISS-018 fix (#1452) is deployed (Phase 2): the playbooks' FetchXML now needs the
 # fetchInGuids helper (corrected 2026-10-08, ISS-018 #1452).
 .\scripts\Deploy-NotificationPlaybooks.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 
 # Chat context mappings (AI chat configuration seed data)
 .\scripts\Deploy-ChatContextMappings.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 
 # Copilot agent configuration (entity descriptions + glossary)
 .\scripts\Deploy-CopilotAgent.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 ```
 
 ### 4.2 Publish (scoped)
@@ -514,14 +514,14 @@ The import script in 4.1 already published exactly SpaarkeMaster's components (i
 Spot-check that key components were imported correctly:
 
 ```powershell
-$token = az account get-access-token --resource "https://spaarke-demo.crm.dynamics.com" --query accessToken -o tsv
+$token = az account get-access-token --resource "https://myenv.crm.dynamics.com" --query accessToken -o tsv
 $headers = @{ "Authorization" = "Bearer $token"; "OData-Version" = "4.0" }
 
 # Check corporate workspace web resource
-Invoke-RestMethod -Uri "https://spaarke-demo.crm.dynamics.com/api/data/v9.2/webresourceset?`$filter=name eq 'sprk_corporateworkspace'&`$select=name,displayname" -Headers $headers
+Invoke-RestMethod -Uri "https://myenv.crm.dynamics.com/api/data/v9.2/webresourceset?`$filter=name eq 'sprk_corporateworkspace'&`$select=name,displayname" -Headers $headers
 
 # Check a PCF control
-Invoke-RestMethod -Uri "https://spaarke-demo.crm.dynamics.com/api/data/v9.2/customcontrols?`$filter=contains(name,'SemanticSearchControl')&`$select=name,version" -Headers $headers
+Invoke-RestMethod -Uri "https://myenv.crm.dynamics.com/api/data/v9.2/customcontrols?`$filter=contains(name,'SemanticSearchControl')&`$select=name,version" -Headers $headers
 ```
 
 ### Dev-Only: Updating Web Resources Without Full Solution Import
@@ -549,7 +549,7 @@ Run comprehensive post-deployment validation to verify the environment is correc
 
 ```powershell
 .\scripts\Validate-DeployedEnvironment.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 ```
 
 ### What Gets Validated
@@ -563,7 +563,7 @@ Run comprehensive post-deployment validation to verify the environment is correc
 
 ### 7 Required Dataverse Environment Variables
 
-| Variable | Schema Name | Expected Value (Demo) |
+| Variable | Schema Name | Expected Value (production) |
 |----------|-------------|----------------------|
 | BFF API Base URL | `sprk_BffApiBaseUrl` | `https://api.spaarke.com` |
 | BFF API App ID | `sprk_BffApiAppId` | `api://bff-api-prod-app-id` |
@@ -634,7 +634,7 @@ When deploying to multiple environments, repeat Phases 2-5 for each environment 
 Deploy to environments in order of risk (lowest first):
 
 1. **Dev** (`https://spaarkedev1.crm.dynamics.com`) — verify in safe environment
-2. **Demo** (`https://spaarke-demo.crm.dynamics.com`) — customer-facing demo
+2. **Demo** — the ACME Corporation stamp (`customerId` `acme`) built by the provisioning control plane (T186). The old demo Dataverse environment `spaarke-demo.crm.dynamics.com` was retired and deleted on 2026-10-14; take the ACME stamp's URL from provisioning, not from static config
 3. **Production customers** — in order of priority
 
 ### Per-Environment Loop
@@ -654,27 +654,27 @@ FOR EACH environment in deployment list:
 ```powershell
 # Single environment
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -Version "v1.1.0"
 
 # Multiple environments (sequential)
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl @("https://spaarkedev1.crm.dynamics.com", "https://spaarke-demo.crm.dynamics.com") `
+    -EnvironmentUrl @("https://spaarkedev1.crm.dynamics.com", "https://myenv.crm.dynamics.com") `
     -Version "v1.1.0"
 
 # Preview without deploying
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -WhatIf
 
 # Skip build (already built)
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -SkipBuild
 
 # Skip specific phases
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" `
     -SkipPhase "BffApi"  # Only deploy solutions + web resources
 ```
 
@@ -709,7 +709,7 @@ fix the content in dev, `Assemble-SpaarkeMasterSolution.ps1 -Version <higher>`, 
 
 ```powershell
 .\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged   # demo's solutionPackageType
+    -EnvironmentUrl "https://myenv.crm.dynamics.com" -PackageType unmanaged   # the environment's solutionPackageType
 ```
 
 *(T218f, 2026-10-08: replaces the re-import of `Deploy-DataverseSolutions.ps1`'s 9-solution list, which retired.)*
@@ -724,7 +724,7 @@ git checkout v1.0.0 -- src/solutions/*/dist/ src/client/external-spa/dist/
 
 # Re-deploy web resources
 .\scripts\Deploy-AllWebResources.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 ```
 
 ### Full Rollback
@@ -745,11 +745,11 @@ git checkout v1.0.0
 
 # 4. Re-deploy web resources
 .\scripts\Deploy-AllWebResources.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 
 # 5. Validate
 .\scripts\Validate-DeployedEnvironment.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+    -DataverseUrl "https://myenv.crm.dynamics.com"
 ```
 
 ---
@@ -783,15 +783,15 @@ For critical production issues requiring immediate deployment. This is an **abbr
 
    Solution fix (fix in dev → Assemble -Version <higher> → export → merge → CI publish, then):
      .\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 `
-         -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged
+         -EnvironmentUrl "https://myenv.crm.dynamics.com" -PackageType unmanaged
 
    Web resource fix:
      .\scripts\Deploy-EventsPage.ps1 `  # or whichever script
-         -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+         -DataverseUrl "https://myenv.crm.dynamics.com"
 
 5. Validate
    .\scripts\Validate-DeployedEnvironment.ps1 `
-       -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+       -DataverseUrl "https://myenv.crm.dynamics.com"
 
 6. Tag hotfix
    git tag -a v1.0.1 -m "Hotfix: {description}"
@@ -841,8 +841,8 @@ Environment details are stored in `config/environments.json`. This file maps env
       "resourceGroup": "spe-infrastructure-westus2",
       "keyVaultName": "spaarke-spekvcert"
     },
-    "demo": {
-      "dataverseUrl": "https://spaarke-demo.crm.dynamics.com",
+    "customer1": {
+      "dataverseUrl": "https://myenv.crm.dynamics.com",
       "bffApiUrl": "https://api.spaarke.com",
       "appServiceName": "spaarke-bff-prod",
       "resourceGroup": "rg-spaarke-platform-prod",
@@ -891,12 +891,12 @@ See `.claude/skills/deploy-new-release/SKILL.md` for full documentation.
 
 | Scenario | Command |
 |----------|---------|
-| Full release to demo | `.\scripts\Deploy-Release.ps1 -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -Version "v1.1.0"` |
-| Preview release plan | `.\scripts\Deploy-Release.ps1 -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -WhatIf` |
-| Deploy only web resources | `.\scripts\Deploy-AllWebResources.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"` |
+| Full release to one environment | `.\scripts\Deploy-Release.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Version "v1.1.0"` |
+| Preview release plan | `.\scripts\Deploy-Release.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -WhatIf` |
+| Deploy only web resources | `.\scripts\Deploy-AllWebResources.ps1 -DataverseUrl "https://myenv.crm.dynamics.com"` |
 | Deploy only BFF API (prod) | `.\scripts\Deploy-BffApi.ps1 -Environment production -AppServiceName spaarke-bff-prod -UseSlotDeploy` |
 | Deploy only SpaarkeMaster | `.\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl "..." -PackageType <managed\|unmanaged>` |
-| Validate after deploy | `.\scripts\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"` |
+| Validate after deploy | `.\scripts\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://myenv.crm.dynamics.com"` |
 | Rollback BFF API | `az webapp deployment slot swap -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging --target-slot production` |
 | Emergency hotfix | See [Emergency Hotfix Procedure](#emergency-hotfix-procedure) |
 
