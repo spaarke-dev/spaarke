@@ -41,10 +41,31 @@ public partial class ChildRecordContainerResolutionTests
         {
             // The analysis is never a record the storage resolver is asked about; its copy is covered by the restamper.
             if (table == "sprk_analysis") continue;
+            // Ontology task 144 (uac-r2 option A): stamped outside the access taxonomy — the storage resolver never reads one
+            // (pinned by StampFreshness_ExemptionIsPinned below and by StampedOutsideAccessTaxonomyGuardTests).
+            if (CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(table)) continue;
             foreach (var source in sources) data.Add(table, source.Intermediate);
         }
 
         return data;
+    }
+
+    [Fact(DisplayName = "Task 144: the StampFreshness theory leaves out only the pinned exemption (Signal, Decision Record), which the storage resolver has no links for")]
+    public void StampFreshness_ExemptionIsPinned()
+    {
+        StampedOutsideAccessTaxonomyPin.AssertPinned();
+
+        var covered = EveryStampSource().Select(row => (string)row[0]).ToHashSet();
+        foreach (var member in CoreAncestorResolver.StampedOutsideAccessTaxonomy)
+        {
+            covered.Should().NotContain(member);
+            RecordContainerResolver.ChildAncestorLinks.For(member).Should().BeNull(
+                CoreAncestorResolver.StampedOutsideAccessTaxonomyReason);
+        }
+
+        covered.Should().BeEquivalentTo(CoreAncestorResolver.StampSourceColumns.Keys
+                .Where(t => t != "sprk_analysis" && !CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(t)),
+            "every other stamped table is covered by the theory");
     }
 
     /// <summary>The column on an intermediate that names its matter (typed on invoice / budget / document).</summary>

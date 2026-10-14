@@ -283,6 +283,41 @@ public sealed class CoreAncestorResolver
             ],
         };
 
+    /// <summary>
+    /// The stamped tables that are OUTSIDE the access taxonomy (ontology task 144; the exemption unified-access-control-r2
+    /// chose, option A): they carry the stamp (<see cref="StampSourceColumns"/>), but they are not in
+    /// <see cref="ChildRecordEntities"/> (nor the TypeScript <c>CHILD_RECORD_ENTITIES</c>), never an intermediate
+    /// (<see cref="IntermediateRootColumns"/>), and never read by the storage resolver. <b>The one source</b> every guard over
+    /// the stamp topology reads (<c>CoreAncestorResolverTests.StampSourceTopology_IsClosed</c>,
+    /// <c>CoreAncestorStampTopologyLockstepTests</c>, the <c>StampFreshness</c> theory); pinned both ways, and
+    /// <c>StampedOutsideAccessTaxonomyGuardTests</c> fails the build if anything links TO one of them. Why:
+    /// <see cref="StampedOutsideAccessTaxonomyReason"/>.
+    /// </summary>
+    public static readonly IReadOnlyList<string> StampedOutsideAccessTaxonomy =
+    [
+        "sprk_signal",
+        "sprk_decisionrecord",
+    ];
+
+    /// <summary>Why <see cref="StampedOutsideAccessTaxonomy"/> exists — the claim its guards hold the code to.</summary>
+    public const string StampedOutsideAccessTaxonomyReason =
+        "Ontology Signals and Decision Records (D-131, child-record contract C2) carry the sprk_regarding{core} stamp so it "
+        + "follows their subject's family when the subject is re-filed. The stamp is never an access input for them: access "
+        + "is D-130 ownership through RecordOwnershipResolver, which reads the stamp only as one more parent (a secure parent "
+        + "wins), and no reader grants on it (SignalCoreRecordAccess reads the row and its immutable core as the caller). "
+        + "They are not in the CHILD access taxonomy, are not intermediates, and nothing is filed under them, so the storage "
+        + "resolver never reads one. The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
+        + "never the owner; the owner moves only through SecureChildReconciler, where a denied or unresolvable re-own writes "
+        + "nothing and an isolated row is released only by an authorised re-file or unsecure, so a refusal never puts a row "
+        + "on a wider owner.";
+
+    private static readonly HashSet<string> StampedOutsideAccessTaxonomySet =
+        new(StampedOutsideAccessTaxonomy, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when <paramref name="entityLogicalName"/> is in <see cref="StampedOutsideAccessTaxonomy"/>.</summary>
+    public static bool IsStampedOutsideAccessTaxonomy(string entityLogicalName) =>
+        !string.IsNullOrWhiteSpace(entityLogicalName) && StampedOutsideAccessTaxonomySet.Contains(entityLogicalName);
+
     /// <summary>The party regarding column names of <paramref name="entity"/> (empty when it has none).</summary>
     public static IReadOnlyList<string> PartyRegardingColumnNames(string entity) =>
         PartyRegardingColumns.TryGetValue(entity, out var parties) ? parties.Select(p => p.Column).ToArray() : [];
