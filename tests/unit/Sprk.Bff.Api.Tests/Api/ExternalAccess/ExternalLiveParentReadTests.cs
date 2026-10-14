@@ -489,6 +489,56 @@ public sealed class ExternalLiveParentReadTests : IClassFixture<ExternalRootEven
     }
 
     // =====================================================================
+    // Fix round 1, D3: the document delete-own check (the service half; the route half is in ExternalDeleteOwnTests).
+    // =====================================================================
+
+    [Fact]
+    public async Task DocumentCheck_WhoseRelatedCommunicationIsUnderSecureX_IsWithheld_ForAnMOnlyReader_AndReadable_ForMAndX()
+    {
+        Data.AddSecureRoot(ExternalGrantRootType.Matter, X);
+        Data.AddFilingRow("sprk_communication", C, ("sprk_regardingmatter", "sprk_matter", X));
+        var doc = Guid.Parse(Data.AddDocument("matters", M, "Carrier", ("_sprk_relatedcommunication_value", C)));
+        var service = Data.NewService();
+
+        (await service.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Document, doc, Holding(matters: new[] { M })))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld);
+        (await service.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Document, doc, Holding(matters: new[] { M, X })))
+            .Should().Be(ExternalDataService.LiveParentDecision.Readable);
+    }
+
+    [Fact]
+    public async Task DocumentCheck_AlsoFiledThroughARelatedTwinToSecureX_IsWithheld_TheSixLinksAreTheStamps()
+    {
+        Data.AddSecureRoot(ExternalGrantRootType.Matter, X);
+        var doc = Guid.Parse(Data.AddDocument("matters", M, "Twin", ("_sprk_relatedmatter_value", X)));
+
+        (await Data.NewService().CheckLiveParentsAsync(ExternalDataService.DeletableKind.Document, doc, Holding(matters: new[] { M })))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld);
+    }
+
+    [Fact]
+    public async Task DocumentCheck_WhoseParentsAreOrdinary_IsReadable()
+    {
+        Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        Data.AddFilingRow("sprk_event", E, ("sprk_regardingmatter", "sprk_matter", O));
+        var doc = Guid.Parse(Data.AddDocument("matters", M, "Ordinary", ("_sprk_relatedevent_value", E)));
+
+        (await Data.NewService().CheckLiveParentsAsync(ExternalDataService.DeletableKind.Document, doc, Holding(matters: new[] { M })))
+            .Should().Be(ExternalDataService.LiveParentDecision.Readable);
+    }
+
+    [Fact]
+    public async Task DocumentCheck_WhoseLiveParentCannotBeRead_IsUnavailable()
+    {
+        Data.AddFilingRow("sprk_communication", C, ("sprk_regardingmatter", "sprk_matter", M));
+        Data.FilingReadThrows = true;
+        var doc = Guid.Parse(Data.AddDocument("matters", M, "Unreadable", ("_sprk_relatedcommunication_value", C)));
+
+        (await Data.NewService().CheckLiveParentsAsync(ExternalDataService.DeletableKind.Document, doc, Holding(matters: new[] { M })))
+            .Should().Be(ExternalDataService.LiveParentDecision.Unavailable);
+    }
+
+    // =====================================================================
     // Helpers
     // =====================================================================
 

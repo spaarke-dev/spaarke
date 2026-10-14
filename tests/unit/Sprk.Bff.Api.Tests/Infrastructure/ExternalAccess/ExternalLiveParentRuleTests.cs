@@ -271,6 +271,20 @@ public sealed class ExternalLiveParentRuleTests
         documents.Should().ContainAll("_sprk_relatedevent_value", "_sprk_relatedcommunication_value", "_sprk_relatedtodo_value", "_sprk_invoice_value");
     }
 
+    /// <summary>Fix round 1, D3: the document delete-own check reads the six root links AND every live-parent lookup.</summary>
+    [Fact]
+    public void TheDocumentLiveParentCheck_SelectsTheSixRootLinks_AndEveryLiveParentLookup()
+    {
+        var url = ExternalDataService.BuildLiveParentCheckUrl("https://org.test/api/data/v9.2", ExternalDataService.DeletableKind.Document, C);
+
+        url.Should().StartWith($"https://org.test/api/data/v9.2/sprk_documents({C})?$select=");
+        var select = url[(url.IndexOf("$select=", StringComparison.Ordinal) + "$select=".Length)..].Split(',');
+        select.Should().Contain(ExternalDataService.DocumentRootLinks.SelectColumns);
+        select.Should().Contain(ExternalMultiRootRule.LiveParentSelect("sprk_document"));
+        select.Should().OnlyHaveUniqueItems();
+        select.Should().NotContain("_sprk_regardingmatter_value", "a document's roots are its own six links, not a to-do's stamps");
+    }
+
     private static ExternalModuleRegistry ExternalModuleRegistryFactory()
     {
         var services = new ServiceCollection();

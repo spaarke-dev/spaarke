@@ -1825,19 +1825,24 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// Task 187: the single-row form of the live-parent rule, for the to-do PATCH and the to-do / event delete-own routes:
-    /// reads the row's stamps and parent lookups, resolves the parents' live roots and the secure flags, and decides with
-    /// <see cref="ExternalMultiRootRule.ChildRowReadable"/>. A row that is absent is <see cref="LiveParentDecision.Withheld"/>
-    /// (the routes' own checks already refuse it); a read that failed is <see cref="LiveParentDecision.Unavailable"/>.
+    /// Task 187: the single-row form of the live-parent rule, for the to-do PATCH and the to-do / event / document
+    /// delete-own routes: reads the row's stamps and parent lookups, resolves the parents' live roots and the secure flags,
+    /// and decides with <see cref="ExternalMultiRootRule.ChildRowReadable"/>. A row that is absent is
+    /// <see cref="LiveParentDecision.Withheld"/> (the routes' own checks already refuse it); a read that failed is
+    /// <see cref="LiveParentDecision.Unavailable"/>.
     /// </summary>
-    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam).</remarks>
+    /// <remarks>
+    /// <c>virtual</c> per ADR-038 section 4 (substitution seam). A to-do's and an event's stamps are its three
+    /// <c>sprk_regarding*</c> roots; a document's are its six root links (<see cref="DocumentRootLinks"/>, owner decision
+    /// D3 of fix round 1), the same input the document list, download and versions decide over.
+    /// </remarks>
     public virtual async Task<LiveParentDecision> CheckLiveParentsAsync(
         DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
         var binding = GetDeletableBinding(kind);
-        if (kind is not (DeletableKind.Todo or DeletableKind.Event))
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "The live-parent check covers to-dos and events.");
+        if (kind is not (DeletableKind.Todo or DeletableKind.Event or DeletableKind.Document))
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "The live-parent check covers to-dos, events and documents.");
 
         Dictionary<string, JsonElement>? row;
         try
@@ -1852,9 +1857,11 @@ public class ExternalDataService
         if (row is null)
             return LiveParentDecision.Withheld;
 
-        var stamps = ExternalMultiRootRule.Stamps(
-            RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
-            RawLookup(row, "_sprk_regardingworkassignment_value"));
+        var stamps = kind == DeletableKind.Document
+            ? DocumentRootLinks.From(row).Links
+            : ExternalMultiRootRule.Stamps(
+                RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
+                RawLookup(row, "_sprk_regardingworkassignment_value"));
         var live = await ReadLiveParentRootsAsync(new[] { ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row) }, ct);
         var roots = ChildRowRoots.Of(binding.EntityLogicalName, row, stamps, live);
         var flags = await ReadSecureRootFlagsAsync(caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
@@ -1870,12 +1877,19 @@ public class ExternalDataService
                 : v.ValueKind == JsonValueKind.String ? v.GetString() : ExternalMultiRootRule.UnresolvedParent;
     }
 
-    /// <summary>The single-row read <see cref="CheckLiveParentsAsync"/> sends: the three stamps and every live-parent lookup. Pure.</summary>
+    /// <summary>
+    /// The single-row read <see cref="CheckLiveParentsAsync"/> sends: the stamps (a to-do's or event's three regarding roots,
+    /// a document's six root links) and every live-parent lookup. Pure.
+    /// </summary>
     internal static string BuildLiveParentCheckUrl(string apiUrl, DeletableKind kind, Guid id)
     {
         var binding = GetDeletableBinding(kind);
-        var columns = new[] { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" }
-            .Concat(ExternalMultiRootRule.LiveParentSelect(binding.EntityLogicalName));
+        IEnumerable<string> stamps = kind == DeletableKind.Document
+            ? DocumentRootLinks.SelectColumns
+            : new[] { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" };
+        var columns = stamps
+            .Concat(ExternalMultiRootRule.LiveParentSelect(binding.EntityLogicalName))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
         return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
     }
 

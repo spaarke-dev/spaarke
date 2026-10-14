@@ -1827,10 +1827,11 @@ public static class ExternalProjectDataEndpoints
             }
         }
 
-        // (3) Task 187 (owner round 99, D-123): a to-do or event whose LIVE parent sits under a SECURE root the caller cannot
-        //     read is behind that root's wall (the creator may have lost access through a re-file). Refused with the same
-        //     403; a read that could not decide is the 503, never a delete.
-        if (kind is ExternalDataService.DeletableKind.Todo or ExternalDataService.DeletableKind.Event)
+        // (3) Task 187 (owner round 99, D-123): a to-do, event or (fix round 1, owner decision D3) document whose LIVE parent
+        //     sits under a SECURE root the caller cannot read is behind that root's wall (the creator may have lost access
+        //     through a re-file). Refused with the same 403; a read that could not decide is the 503, never a delete.
+        if (kind is ExternalDataService.DeletableKind.Todo or ExternalDataService.DeletableKind.Event
+            or ExternalDataService.DeletableKind.Document)
         {
             switch (await dataService.CheckLiveParentsAsync(kind, id, caller, ct))
             {
