@@ -730,12 +730,25 @@ public sealed class IncomingCommunicationProcessor
         // thread key strategy finds it) is explicitly shareable. A reply to an internal-only, unflagged or unreadable
         // parent, a Private thread, or an unresolved thread keeps it internal-only. Partners then see the email through the
         // record it is filed to (the external read filters by regarding record and access), not by default.
+        // Cancellation is caught here, like MessagingIngestor does (fix round 5): the row exists, so it stays internal-only
+        // (true) and processing completes. Letting it escape made the retry dedup on the Graph message id and return early,
+        // and nothing would ever lower the row.
         if (resolvedThreadId is not null)
         {
-            var parentNotShareable = await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
-                _communicationService, _genericEntityService, envelope, _logger, ct);
-            await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
-                _genericEntityService, communicationId, resolvedThreadId, parentNotShareable, _logger, ct);
+            try
+            {
+                var parentNotShareable = await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
+                    _communicationService, _genericEntityService, envelope, _logger, ct);
+                await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                    _genericEntityService, communicationId, resolvedThreadId, parentNotShareable, _logger, ct);
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Internal-only lowering cancelled (non-fatal; the row stays internal-only) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
         }
     }
 

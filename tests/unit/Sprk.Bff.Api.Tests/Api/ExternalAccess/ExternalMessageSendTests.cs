@@ -310,7 +310,12 @@ public class ExternalMessageSendTests
         _appOnly
             .Setup(q => q.QueryAsync("sprk_communications", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _lastReadOData = odata)
-            .ReturnsAsync(rows.ToList());
+            .ReturnsAsync(AppOnlySelectProjection.WithOpenThread(rows));
+        // Owner decision D7: the read shows a row only when its thread reads Open; these cases are not about D7.
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
         var read = new CommunicationThreadReadService(
             Mock.Of<IImpersonatedCommunicationQuery>(MockBehavior.Strict),
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),

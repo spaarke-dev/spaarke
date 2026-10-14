@@ -432,9 +432,9 @@ public class InboundInternalOnlyFlagTests
     [Fact]
     public async Task EmailUpload_NoReplyHeaders_BehavesAsToday_LoweredWhenThreadIsOpen_WithNoParentLookup()
     {
-        // The owner's no-headers decision is pending (CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable).
+        // Owner decision D6 (2026-10-14, final): a no-headers add-in save stays shareable (CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable).
         // While that is true, a header-less add-in save is lowered exactly as before and no parent is looked up.
-        CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable.Should().BeTrue("the pending decision keeps today's behaviour");
+        CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable.Should().BeTrue("owner decision D6 keeps header-less add-in saves visible");
         var dv = new Mock<IDataverseService>();
         var (capture, entities, _) = UploadCapture("open", dvMock: dv);
 
@@ -664,6 +664,39 @@ public class InboundInternalOnlyFlagTests
         var act = () => world.Processor.ResolveThreadAndShareabilityAsync(CommId, ReplyEnvelope(), "graph-1", CancellationToken.None);
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Mailbox_WhenLoweringIsCancelled_DoesNotThrow_AndTheRowIsNotLowered()
+    {
+        // Fix round 5: cancellation used to escape ResolveThreadAndShareabilityAsync; the retry then deduped on the Graph
+        // message id and returned early, so the row (written true) was never lowered. It is now caught like the chat
+        // ingestor does: processing completes, the row stays true, nothing else is written.
+        var world = Mailbox("open");
+        world.Dv.Setup(d => d.UpdateAsync("sprk_communication", CommId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        var act = () => world.Processor.ResolveThreadAndShareabilityAsync(CommId, ReplyEnvelope(), "graph-1", CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        world.Dv.Verify(
+            d => d.UpdateAsync("sprk_communication", CommId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Mailbox_WhenTheParentReadIsCancelled_DoesNotThrow_AndTheRowIsNotLowered()
+    {
+        var world = Mailbox("open", parentFlag: "false");
+        world.Dv.Setup(d => d.RetrieveAsync(
+                "sprk_communication", ParentId, It.Is<string[]>(c => c.Contains("sprk_isinternalonly")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        var act = () => world.Processor.ResolveThreadAndShareabilityAsync(
+            CommId, ReplyEnvelope("<parent@contoso.com>"), "graph-1", CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        VerifyNeverLowered(world.Dv);
     }
 
     // ── Fix round 4 (K3): the mailbox parent rule's less-travelled branches ──

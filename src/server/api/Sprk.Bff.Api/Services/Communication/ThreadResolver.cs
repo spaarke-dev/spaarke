@@ -1087,7 +1087,7 @@ public sealed class ThreadResolver : IThreadResolver
         // only when the thread reads Open AND the parent is not a blocker. A received row stores no In-Reply-To /
         // References, so the sweep cannot read its parent: a row with a Graph message id is a mailbox email whose headers
         // were lost, so it stays internal-only (cannot evaluate = fail closed); a row without one is an add-in save, which
-        // is header-less by construction and follows the owner-pending AddInSaveWithoutReplyHeadersIsShareable decision.
+        // is header-less by construction and follows the AddInSaveWithoutReplyHeadersIsShareable decision (owner D6, 2026-10-14: stays shareable).
         // Only an explicit Incoming direction is lowered; fail closed otherwise. Never throws except on cancellation.
         var isIncoming = email.GetAttributeValue<OptionSetValue>(DirectionField)?.Value == (int)CommunicationDirection.Incoming;
         if (isIncoming)

@@ -10,6 +10,36 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// </summary>
 internal static class AppOnlySelectProjection
 {
+    /// <summary>
+    /// The one thread every seeded row sits in, Open (owner decision D7: the external read shows a row only when its thread
+    /// reads explicitly Open). The suites that are not about D7 seed rows through <see cref="WithOpenThread"/> and answer the
+    /// thread query with <see cref="OpenThreadAnswer"/>; the D7 cases themselves are in CommunicationOpenThreadGateTests.
+    /// </summary>
+    public static readonly Guid OpenThreadId = Guid.Parse("0be7f1e5-0000-4000-8000-000000000001");
+
+    /// <summary>Gives every row without a thread lookup the Open thread.</summary>
+    public static IReadOnlyList<Dictionary<string, JsonElement>> WithOpenThread(IEnumerable<Dictionary<string, JsonElement>> rows) =>
+        rows.Select(r => r.ContainsKey("_sprk_communicationthread_value")
+                ? r
+                : new Dictionary<string, JsonElement>(r)
+                {
+                    ["_sprk_communicationthread_value"] = JsonSerializer.SerializeToElement(OpenThreadId.ToString("D")),
+                })
+            .ToList();
+
+    /// <summary>The thread-privacy answer for the suites that are not about D7: the Open thread, projected through the query's $select.</summary>
+    public static IReadOnlyList<Dictionary<string, JsonElement>> OpenThreadAnswer(string? odata) =>
+        Project(
+            new[]
+            {
+                new Dictionary<string, JsonElement>
+                {
+                    ["sprk_communicationthreadid"] = JsonSerializer.SerializeToElement(OpenThreadId.ToString("D")),
+                    ["sprk_privacystate"] = JsonSerializer.SerializeToElement(100000000),
+                },
+            },
+            odata);
+
     public static IReadOnlyList<Dictionary<string, JsonElement>> Project(
         IEnumerable<Dictionary<string, JsonElement>> rows, string? odata)
     {

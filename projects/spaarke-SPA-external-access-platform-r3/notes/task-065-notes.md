@@ -424,3 +424,83 @@ Seeding: the old `MessagingIngestor`/`ThreadResolver` made the cancellation and 
 made the 3 header tests fail; restored. Filtered run
 (`Communication|InboundInternalOnly|DataverseRecordCreation|CommunicationServiceMessageSend|CommunicationRecordAuthorization|Office|Messaging|ThreadResolver`):
 0 failed / 2278 passed / 9 skipped (the skips are pre-existing integration-gated tests). `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
+
+## Fix round 5 (owner decisions D6/D7, 2026-10-14)
+
+### Owner decisions recorded
+
+- **D6.** Outlook add-in saves without reply headers stay visible to partners. `CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable = true` is
+  final; its comment (and the two call-site comments and the one test comment that said "pending") now state the decision. No behaviour change.
+- **D7.** When a thread is made Private, partners stop seeing its EARLIER messages too. A partner only ever sees an item that sits in a thread that is
+  **explicitly Open at read time**, on top of the existing `sprk_isinternalonly` rule. This closes ISS-009 (#1859).
+- **Licensed users flagged `sprk_isexternal`** stay unable to see Internal Only items. Current behaviour, no change. They are non-internal callers, so the D7 gate
+  applies to them as well (see the read list).
+
+### D7 read-side gate
+
+**Rule.** A non-internal caller (a contact, or a systemuser flagged `sprk_isexternal`) sees a `sprk_communication` only if its `sprk_communicationthread` lookup is set
+AND that thread's `sprk_privacystate` reads Open now. Hidden: no thread, a thread row the read does not return (missing or unreadable), a thread row with no privacy
+value, a Private thread. Internal callers are unchanged (no thread read, no query-shape change).
+
+**How thread privacy is fetched.** One batched read per page of the DISTINCT thread ids of the rows that survived the flag rule: `sprk_communicationthreads`,
+`$select=sprk_communicationthreadid,sprk_privacystate&$filter=<id> or <id>...&$top=<n>`, in chunks of 50 ids (the same URL-length bound the feed uses), never one
+read per row. No `$expand` (the lookup navigation property name is not in the repo metadata, and a wrong case is a 400). The identity matches the message read:
+APP-ONLY for the contact plane (`ReadRegardingAppOnlyAsync`, `ReadRecentForRecordsAppOnlyAsync`), IMPERSONATED as the caller for the flagged-external systemuser reads
+(a thread the caller cannot read is absent, so its rows are hidden). The column name and the "explicitly Open" test are the floor's: `CommunicationInternalOnlyFloor.ThreadPrivacyField`
+(new constant, replacing the two literals) and `CommunicationInternalOnlyFloor.IsConfirmedOpen`, called on a minimal entity built from the JSON row. New helper:
+`Services/Communication/CommunicationOpenThreadGate.cs` (CLAUDE.md section 11: existing = the floor, reused as is; extension = the floor is the write side over
+`IGenericEntityService` while the readers hold the two query seams; cost of nothing = ISS-009).
+A read FAULT propagates (the request fails, nothing is returned); it never turns into "show". The app-only seam being absent throws (fail closed), like the message read.
+Paging and truncation are unchanged: a row the gate hides is filtered after the query exactly like one the flag hid, and never counts toward `Truncated`.
+
+**Every external read of `sprk_communication`, and what was done.**
+
+| # | Read | file:line | Caller | Gate |
+|---|---|---|---|---|
+| 1 | `FilterExternalMessagesAsync` (shared tail) | `CommunicationThreadReadService.cs:564` (gate at :586) | contact or systemuser, per `IsExternalAsync` | gated for non-internal (app-only thread read); the select now carries `_sprk_communicationthread_value` (`ExternalSelect`) |
+| 2 | `ReadRegardingAppOnlyAsync`, the route `GET /api/v1/external/{root}/{id}/messages` (`ExternalMessageEndpoints`) | `CommunicationThreadReadService.cs:439` (calls #1 at :484) | contact / external user | via #1 |
+| 3 | `ReadRecentForRecordsAppOnlyAsync`, the route `GET /api/v1/external/notifications` (`ExternalNotificationFeedEndpoints`) | `CommunicationThreadReadService.cs:632` (calls #1 at :700) | contact / external user | via #1; the feed `unreadCount` is derived from exactly these messages, so a hidden item is never counted |
+| 4 | `ReadThreadAsync` (thread messages) | `CommunicationThreadReadService.cs:218` (gate at :234) | systemuser, flagged external | gated: thread not Open gives an empty result and a null name (same as "none visible") |
+| 5 | `GetUnreadCountAsync` (unread badge) | `CommunicationThreadReadService.cs:290` (gate at :304) | systemuser, flagged external | gated: thread not Open gives count 0 |
+| 6 | `QueryVisibleMessagesAsync`, behind `ReadByRegardingAsync` and `QueryCommunicationsAsync` | `CommunicationThreadReadService.cs:1054` (gate at :1093) | systemuser, flagged external | gated, one batched impersonated thread read |
+| 7 | `ReadVisibleCommunicationAsync` (per-record route gate) | `CommunicationThreadReadService.cs:1286` (gate at :1322) | systemuser, flagged external | gated; the thread lookup is selected only for an external caller |
+| 8 | `CommunicationQueueFeedService.GetQueueFeedAsync` (queue-feed route) | `CommunicationQueueFeedService.cs:133` (gate at :178) | systemuser, flagged external | gated; the thread lookup is selected only for an external caller |
+
+Counts and badges: #5 above, and the feed unread count (#3), which counts only the already-gated list.
+
+**Not gated, with the reason (nothing here lists or counts partner-visible items).**
+
+- `CanCallerSeeMessageAsync`: an impersonated existence probe for the message-deactivate route, documented as access-filter-free; not a read surface.
+- `ReadByRegardingAsync` still lists a Private thread (name, pinned flag) with zero messages for a flagged-external caller: the thread rows come from the impersonated
+  thread query, not `sprk_communication`, and D7 speaks of items. Hiding the thread rows too is a separate decision for the owner.
+- `CommunicationFanOutTargetingService` (who is notified at send time) reads the thread at send time and is the write-side half; it does not list items to a reader.
+- Other readers of `sprk_communication` (AI tools, `ChatDocumentEndpoints`, the todo/analysis filters, `RecordContainerResolver`) are internal-only surfaces, outside the external plane.
+
+**Contradictions with D7.** None found. Note: a flagged-external systemuser used to see any flag-false item in a thread they could read; they now also need the thread Open. That is D7 as stated.
+
+### Retry gap (IncomingCommunicationProcessor)
+
+`ResolveThreadAndShareabilityAsync` now catches `OperationCanceledException` around the parent check and the lowering (warning logged, the row stays `true`, processing
+completes), the same approach as `MessagingIngestor`. Chosen over running `LowerWhenSafeAsync` in the dedup path because it is one catch and the dedup path stays untouched.
+Tests: `Mailbox_WhenLoweringIsCancelled_DoesNotThrow_AndTheRowIsNotLowered`, `Mailbox_WhenTheParentReadIsCancelled_DoesNotThrow_AndTheRowIsNotLowered`.
+
+### Tests
+
+New file `CommunicationOpenThreadGateTests.cs`: open visible; Private hidden; missing privacy value hidden; no thread hidden; unreadable thread hidden; a thread switched to
+Private after the send hides the earlier item (D7); the flag still wins in an Open thread; one batched read for a mixed page; chunking; the thread query shape pinned
+(`$select=sprk_communicationthreadid,sprk_privacystate...`); the message select carries the thread lookup; a thread-read fault fails the read; the app-only seam absent
+refuses; an internal caller sees every case and reads no thread; the feed list; the unread count for a flagged-external user (Open, then Private, zero for Private) and
+unchanged for an internal user; `ReadThreadAsync`, `ReadByRegardingAsync` and `ReadVisibleCommunicationAsync` gated for a flagged-external user and unchanged internally.
+Plus two queue-feed tests in `CommunicationQueueFeedServiceTests`. The existing external suites (`ExternalMessageEndpointsTests`, `ExternalNotificationFeedTests`,
+`ExternalMessageSendTests`) now seed their rows into one Open thread through `AppOnlySelectProjection.WithOpenThread` / `OpenThreadAnswer`, and the feed pinned select
+gained the thread column.
+
+### Results and seeding proof
+
+- Filtered run (`Communication|InboundInternalOnly|DataverseRecordCreation|CommunicationServiceMessageSend|CommunicationRecordAuthorization|ExternalAccess|Office|Messaging|ThreadResolver`):
+  0 failed / 5181 passed / 9 skipped (the skips are the pre-existing integration-gated tests). `Spaarke.ArchTests`: 0 failed / 983 passed.
+  `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
+- New tests: 22 in `CommunicationOpenThreadGateTests`, 2 queue-feed, 2 retry-gap. The first full run (before the fixtures were updated) failed 4 old external cases that had no thread; fixed as described above.
+- **Seeding proof, D7 gate.** With the `FilterExternalMessagesAsync` gate disabled (`if (false && !isInternal ...)`), 10 tests failed (Private thread hidden, no privacy value, no thread, unreadable
+  thread, thread switched to Private after the send (D7), mixed page, chunking, query shape, fault, feed). Restored; the same run is 82 / 82 green.
+- **Seeding proof, retry gap.** With the new catch made inert (`when (ex.Message == "never")`), both new `Mailbox_*Cancelled*` tests failed; restored, 49 / 49 green in `InboundInternalOnly`.

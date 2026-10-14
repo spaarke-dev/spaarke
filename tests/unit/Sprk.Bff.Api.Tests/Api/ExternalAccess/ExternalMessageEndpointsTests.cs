@@ -122,6 +122,8 @@ public class ExternalMessageEndpointsTests
         return services.BuildServiceProvider().GetRequiredService<ExternalModuleRegistry>();
     }
 
+    public ExternalMessageEndpointsTests() => SetupOpenThread();
+
     private CommunicationThreadReadService ReadService() => new(
         _impersonated.Object, // Strict: any impersonated call fails the test — this plane reads app-only.
         new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
@@ -139,7 +141,15 @@ public class ExternalMessageEndpointsTests
             // Each row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
             .Returns<string, string?, CancellationToken>((_, odata, _) =>
                 Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
-                    rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+                    AppOnlySelectProjection.WithOpenThread(rows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+
+    // Owner decision D7: the thread read shows a row only when its thread reads Open. These cases are not about D7, so every
+    // row sits in one Open thread (SetupMessages seeds the lookup).
+    private void SetupOpenThread() =>
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
 
     private Task<IReadOnlyDictionary<string, object?>> ReadRecord(
         string entity, Guid id, string[]? select, CancellationToken ct)
@@ -244,7 +254,7 @@ public class ExternalMessageEndpointsTests
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
             "_sprk_createdbycontact_value,_createdby_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
-            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&" +
+            "_sprk_communicationthread_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&" +
             "$expand=createdby($select=applicationid,accessmode)&");
         _impersonated.VerifyNoOtherCalls();
     }

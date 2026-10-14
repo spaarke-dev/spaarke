@@ -28,13 +28,19 @@ internal static class CommunicationInternalOnlyFloor
 {
     internal const string InternalOnlyField = "sprk_isinternalonly";
 
+    /// <summary>The thread table's logical name (the entity <see cref="ThreadPrivacyField"/> lives on).</summary>
+    internal const string ThreadEntity = "sprk_communicationthread";
+
+    /// <summary>The thread's privacy column (Open / Private). Read by the write-side floor and by the read-side D7 gate
+    /// (<see cref="CommunicationOpenThreadGate"/>); never redefine the name.</summary>
+    internal const string ThreadPrivacyField = "sprk_privacystate";
+
     /// <summary>
-    /// PENDING OWNER DECISION (task 065 fix round 4, F1 part 2): whether an add-in save that carries NO In-Reply-To and no
-    /// References may be lowered to partner-visible when its thread is Open. <c>true</c> keeps today's behaviour (the
-    /// current add-in sends no headers, so the parent is unknown and the capture is treated as having none). Flip this ONE
-    /// value to <c>false</c> to keep every header-less add-in save internal-only instead. Used by the upload capture and by
-    /// the filing sweep (<c>ThreadResolver.ResolveMissingThreadAsync</c>) for a row the add-in created. A save that DOES
-    /// carry headers is unaffected: it always follows the parent rule.
+    /// OWNER DECISION D6 (2026-10-14, final): an Outlook add-in save that carries NO In-Reply-To and no References stays
+    /// visible to partners (it may be lowered to partner-visible when its thread is Open). <c>true</c> is the decision: the
+    /// current add-in sends no headers, so the parent is unknown and the capture is treated as having none. Used by the
+    /// upload capture and by the filing sweep (<c>ThreadResolver.ResolveMissingThreadAsync</c>) for a row the add-in
+    /// created. A save that DOES carry headers is unaffected: it always follows the parent rule.
     /// </summary>
     internal const bool AddInSaveWithoutReplyHeadersIsShareable = true;
 
@@ -43,7 +49,7 @@ internal static class CommunicationInternalOnlyFloor
     /// fail-closed rule as <c>CommunicationFanOutTargetingService.IsExplicitlyOpen</c>).
     /// </summary>
     internal static bool IsConfirmedOpen(DataverseEntity? thread) =>
-        thread?.GetAttributeValue<OptionSetValue>("sprk_privacystate")?.Value == (int)ThreadPrivacyState.Open;
+        thread?.GetAttributeValue<OptionSetValue>(ThreadPrivacyField)?.Value == (int)ThreadPrivacyState.Open;
 
     /// <summary>Reads the thread's privacy; a null row or a fault is "not confirmed Open".</summary>
     internal static async Task<bool> IsThreadConfirmedOpenAsync(
@@ -52,7 +58,7 @@ internal static class CommunicationInternalOnlyFloor
         try
         {
             var thread = await entities.RetrieveAsync(
-                "sprk_communicationthread", threadId, new[] { "sprk_privacystate" }, ct);
+                ThreadEntity, threadId, new[] { ThreadPrivacyField }, ct);
             return IsConfirmedOpen(thread);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
