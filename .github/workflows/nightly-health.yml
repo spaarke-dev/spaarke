@@ -618,9 +618,11 @@ jobs:
           # coverage observation NEVER blocks even on test failures
           mkdir -p coverage-results
           if [ "$SHARD" = "other-projects" ]; then
-            # Every test project of the solution except the big one (which the four
-            # shards above cover). Derived from Spaarke.sln so a new test project is
-            # picked up without editing this workflow.
+            # Every test project of Spaarke.sln that lives under tests\ except the big
+            # one (which the four shards above cover), so a new project added there is
+            # picked up without editing this workflow. NOT covered: a test project outside
+            # tests\ (today src/server/services/Sprk.Provisioning.ControlPlane.Tests);
+            # widen the grep below if its coverage should be counted.
             grep -oE 'tests\\[^"]+\.csproj' Spaarke.sln | tr '\\' '/' | grep -v '/Sprk\.Bff\.Api\.Tests/' > test-projects.txt
             cat test-projects.txt
             while IFS= read -r proj; do
@@ -704,6 +706,13 @@ jobs:
 
           total_lines = len(best)
           covered_lines = sum(1 for h in best.values() if h > 0)
+          if files == 0:
+              # No shard artifact at all is a broken measurement, not 0.0% coverage.
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("coverage_pct=?\n")
+                  f.write("shards_found=0\n")
+              print("::error::No coverage.cobertura.xml found in any shard artifact")
+              raise SystemExit(1)
           if total_lines == 0:
               pct = "0.0"
           else:
@@ -876,8 +885,13 @@ jobs:
     name: Graph App-Role Parity (UAMI SP vs GraphAppRoles.cs)
     runs-on: ubuntu-latest
     # Advisory during rollout window (per r3 deferral doc — do NOT flip
-    # blocking until zero-findings baseline holds ≥ 7 nightly runs).
-    continue-on-error: true
+    # blocking until zero-findings baseline holds ≥ 7 nightly runs). The advisory
+    # behaviour is `continue-on-error` on the STEPS below, not on this job: a job-level
+    # continue-on-error makes `needs.<job>.result` report `success` even when the job
+    # failed, so the alerts leg could never see the failure. The `verdict` step turns
+    # the step outcomes into the explicit job output `failed`, which the alerts leg reads.
+    outputs:
+      failed: ${{ steps.verdict.outputs.failed }}
     permissions:
       id-token: write         # OIDC federated credential for Azure login
       contents: read
@@ -928,7 +942,9 @@ jobs:
           global-json-file: global.json
 
       - name: Azure login (OIDC federated MI)
+        id: login
         if: steps.guard.outputs.configured == 'true'
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.NIGHTLY_GRAPH_READER_CLIENT_ID }}
@@ -936,19 +952,42 @@ jobs:
           subscription-id: ${{ secrets.NIGHTLY_SUBSCRIPTION_ID }}
 
       - name: Restore + build nightly test project
-        if: steps.guard.outputs.configured == 'true'
+        id: build
+        if: steps.guard.outputs.configured == 'true' && steps.login.outcome == 'success'
+        continue-on-error: true
         run: |
           dotnet restore tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/
           dotnet build tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
             -c Release --no-restore
 
       - name: Run Graph app-role parity test
-        if: steps.guard.outputs.configured == 'true'
+        id: parity
+        if: steps.guard.outputs.configured == 'true' && steps.build.outcome == 'success'
+        continue-on-error: true
         # xunit forwards the diff-formatted Assert.Fail message into the
         # workflow log — no --logger-html needed for triage.
         run: |
           dotnet test tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
             -c Release --no-build --logger "console;verbosity=normal"
+
+      # Explicit verdict for the alerts leg (see the job comment above). Not configured
+      # (secrets absent) is a skip, not a failure; any configured step that did not
+      # succeed (login, build, or the parity test itself) is a failure.
+      - name: Record verdict
+        id: verdict
+        if: always()
+        shell: bash
+        env:
+          CONFIGURED: ${{ steps.guard.outputs.configured }}
+          LOGIN: ${{ steps.login.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PARITY: ${{ steps.parity.outcome }}
+        run: |
+          failed=0
+          if [ "$CONFIGURED" = "true" ]; then
+            if [ "$LOGIN" != "success" ] || [ "$BUILD" != "success" ] || [ "$PARITY" != "success" ]; then failed=1; fi
+          fi
+          echo "failed=${failed}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
   # report: create/update single tracking issue
@@ -1046,7 +1085,7 @@ jobs:
           ## Graph app-role parity (UAMI SP vs GraphAppRoles.cs — advisory)
           - Result: **${GRAPH_PARITY_RESULT:-?}**
 
-          Job carries \`continue-on-error: true\` during rollout (per
+          Job steps carry \`continue-on-error: true\` during rollout (per
           customer-provisioning-orchestration-r1 task 067/088 coord-notes) —
           SKIPPED is expected until \`NIGHTLY_UAMI_SP_OBJECT_ID\` /
           \`NIGHTLY_AZURE_TENANT_ID\` / \`NIGHTLY_GRAPH_READER_CLIENT_ID\` /
@@ -1185,6 +1224,17 @@ jobs:
             if [ "$failed" != "0" ]; then
               status=failing
               summary+="- ${failed} integration test(s) failed (${passed} passed). The job itself stays green by design (\`set +e\`), so this is the only place the failure surfaces."$'\n'
+            elif [ "$passed" = "0" ]; then
+              status=failing
+              summary+="- The integration suite reported 0 passed and 0 failed tests: it did not run (no project found, a build break or a host crash before any result). That is a failing check, not a pass."$'\n'
+            fi
+          fi
+
+          if [ "$CHECK" = "nightly-health/graph-app-role-parity" ]; then
+            pfailed="$(jq -r '.["graph-app-role-parity"].outputs.failed // "0"' <<<"$NEEDS_JSON")"
+            if [ "$pfailed" != "0" ]; then
+              status=failing
+              summary+="- The Graph app-role parity test (or its Azure login / build) failed. The job's steps are \`continue-on-error\` during the rollout window, so this output is the only place the failure surfaces."$'\n'
             fi
           fi
 
@@ -1208,4 +1258,4 @@ jobs:
           check: ${{ matrix.check }}
           status: ${{ steps.decide.outputs.status }}
           summary: ${{ steps.decide.outputs.summary }}
-          dry-run: ${{ inputs.dry_run_alerts == true && 'true' || 'false' }}
+          dry-run: ${{ inputs.dry_run_alerts == true || github.ref_name != github.event.repository.default_branch }}

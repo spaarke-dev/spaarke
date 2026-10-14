@@ -64,8 +64,9 @@ permissions:
   issues: write   # quality alert
 
 concurrency:
-  # A mutation run is expensive; never cancel one mid-flight for a newer trigger.
-  group: mutation-nightly
+  # A mutation run is expensive; never cancel one mid-flight for a newer trigger. Keyed by
+  # ref so proof runs on a throwaway branch do not queue behind the default branch.
+  group: mutation-nightly-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -100,7 +101,7 @@ jobs:
 
           since="${SINCE_INPUT:-}"
           if [ -z "$since" ]; then
-            since="$(git rev-list -1 --before='24 hours ago' HEAD)"
+            since="$(git rev-list -1 --first-parent --before='24 hours ago' HEAD)"
             echo "No 'since' input: using the last commit older than 24h."
           fi
           case "$since" in
@@ -165,19 +166,15 @@ jobs:
           dotnet tool install dotnet-stryker --version "$STRYKER_VERSION" --tool-path "$RUNNER_TEMP/stryker"
           "$RUNNER_TEMP/stryker/dotnet-stryker" --version || true
 
-      # Which tests may kill a mutant. Stryker's initial run executes exactly this set
-      # and must be green, so it is the "KEEP path" of ADR-038 (tests that are
-      # maintained, as opposed to scaffolding), derived from the namespaces actually
-      # declared under tests/integration/** and tests/unit/domain/** (2026-10-13):
-      #   Sprk.Bff.Api.Tests.{Seam, AccessControl, Api, Integration, DataMutation,
-      #                       Domain, Contract, Auth, Regression, Tenant}
-      # Not included: Eval (LLM golden-utterance suites), Services/Infrastructure
-      # (mostly unit tests of unrelated services), anything Compose (those tests parse
-      # Git-LFS .docx fixtures, which this job does not fetch, and an LFS pointer would
-      # fail the initial run), and, for cost, Api.Office / Api.Insights / Api.Documents:
-      # host-booting suites that are ~34 of the ~89 test-minutes of the whole suite.
-      # The first proof run kept them and Stryker's initial test run (10,152 tests) had
-      # not finished after 56 minutes. See scripts/ci/run-stryker.sh for the filter.
+      # Which tests may kill a mutant. Stryker's initial run executes exactly this set and
+      # must be green, so the set is derived per run by scripts/ci/run-stryker.sh from the
+      # files being mutated: the dedicated suites of the allowlisted folders (Filters,
+      # Services.Access, Infrastructure.Authentication / Errors) plus every test class in
+      # tests/** that names a type declared in a mutated file. Compose tests are left out
+      # (they parse Git-LFS .docx fixtures, which this job does not fetch; an LFS pointer
+      # would fail the initial run). The earlier design (the broad ADR-038 KEEP set) did
+      # not finish: proof run 38509398853 spent 71 min in the initial run of 9,667 tests,
+      # and it also missed the direct suites, so mutants were reported NoCoverage falsely.
       - name: Mutate (Sprk.Bff.Api)
         id: bff
         if: steps.scope.outputs.bff_count != '0'
@@ -323,4 +320,4 @@ jobs:
           check: mutation-nightly
           status: ${{ steps.decide.outputs.status }}
           summary: ${{ steps.decide.outputs.summary }}
-          dry-run: ${{ inputs.dry_run_alert == true && 'true' || 'false' }}
+          dry-run: ${{ inputs.dry_run_alert == true || github.ref_name != github.event.repository.default_branch }}

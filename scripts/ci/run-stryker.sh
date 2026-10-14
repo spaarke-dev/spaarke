@@ -26,14 +26,69 @@ out="$tmp/stryker-out-$label"
 cfg="$tmp/stryker-$label.json"
 test_dir="tests/unit/Sprk.Bff.Api.Tests"
 
-# The KEEP-path test set (ADR-038): see the comment above the "Mutate" steps in
-# mutation-nightly.yml for how the namespaces were derived and what is excluded and why.
-keep='FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.|FullyQualifiedName~Sprk.Bff.Api.Tests.DataMutation.|FullyQualifiedName~Sprk.Bff.Api.Tests.Contract.|FullyQualifiedName~Sprk.Bff.Api.Tests.Tenant.'
-# Excluded for cost: Compose (LFS fixtures) and the three host-booting namespaces that
-# dominate test time (measured 2026-10-13, summed test-minutes: Api.Office 20.2,
-# Api.Insights 9.0, Api.Documents 4.5 of ~89 in the whole suite). The first proof run
-# with them in (10,152 tests) had not finished Stryker's initial test run after 56 min.
-filter="(${keep})&FullyQualifiedName!~Compose&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Documents.&Category!=Flaky"
+# Test set: only the tests that exercise the code being mutated, not the ADR-038 KEEP set.
+# Stryker's initial test run must be green and must finish inside the job cap. Proof run
+# 38509398853 (cap 100 min) used the broad KEEP set minus three host suites, 9,667 tests:
+# the initial run alone took 71 min and the run was cancelled. A broad set that misses the
+# direct suites (Filters, Services.Access, Infrastructure.Authentication/Errors were not in
+# it) also reports false NoCoverage.
+#
+# So the filter is derived per run from the files being mutated:
+#   1. SEEDS: the dedicated test namespaces of the allowlisted folders (always included).
+#   2. REFERENCING CLASSES: every test class, in a Sprk.Bff.Api.Tests* namespace, declared
+#      in a tests/**/*.cs file that names (whole word) a type declared in a mutated file.
+# A night on which one filter changed therefore runs that filter's tests, not the suite.
+# Limit: a test that reaches a mutated type only indirectly (never names it) is not in the
+# set, so a mutant only that test would kill is reported as surviving / uncovered. Add a
+# namespace to SEEDS below if a dedicated suite is missed.
+ns="FullyQualifiedName~Sprk.Bff.Api.Tests."
+case "$label" in
+  bff)
+    seeds="${ns}Filters.|${ns}Services.Access.|${ns}Infrastructure.Authentication.|${ns}Infrastructure.Errors."
+    ;;
+  *)
+    seeds=""
+    ;;
+esac
+
+# Types declared in the mutated files (plus the file stems, e.g. SecureRootInheritance.Cascade.cs).
+types="$(
+  while IFS= read -r f; do
+    basename "$f" .cs | sed 's/\..*$//'
+    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" | awk '{print $NF}'
+  done < "$files" | sort -u
+)"
+type_re="($(echo "$types" | paste -sd'|'))"
+
+classes="$(
+  { grep -rlwE "$type_re" tests --include='*.cs' || true; } | sort -u | while IFS= read -r tf; do
+    tns="$(grep -m1 -oE '^namespace[[:space:]]+[A-Za-z0-9_.]+' "$tf" | awk '{print $2}')"
+    case "$tns" in
+      Sprk.Bff.Api.Tests|Sprk.Bff.Api.Tests.*) ;;
+      *) continue ;;
+    esac
+    grep -oE '^[[:space:]]*(public|internal)[[:space:]]+((sealed|static|abstract|partial)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+' "$tf" | awk -v n="$tns" '{print n"."$NF}'
+  done | sort -u
+)"
+class_count="$(printf '%s\n' "$classes" | grep -c . || true)"
+include="$seeds"
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  include+="${include:+|}FullyQualifiedName~${c}"
+done <<<"$classes"
+echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count}"
+if [ -z "$include" ]; then
+  echo "::error::no test selected for ${label}: no seed namespace and no test names a mutated type"
+  exit 1
+fi
+
+# Excluded: Compose tests parse Git-LFS .docx fixtures, which this job does not fetch (an
+# LFS pointer fails the initial run), except ComposeDocumentAuthorizationFilterTests, a
+# pure authorization-filter unit test with no fixture.
+filter="(${include})&(FullyQualifiedName!~Compose|FullyQualifiedName~ComposeDocumentAuthorizationFilterTests)&Category!=Flaky"
+
+# Local check of the selection without running Stryker.
+if [ "${STRYKER_PRINT_FILTER_ONLY:-}" = "1" ]; then echo "$filter"; exit 0; fi
 
 # Stryker globs are matched inside the project directory.
 mutate_json="$(sed "s#^${prefix}#**/#" "$files" | jq -R . | jq -sc .)"

@@ -551,4 +551,4 @@ jobs:
           check: client-tests
           status: ${{ steps.decide.outputs.status }}
           summary: ${{ steps.decide.outputs.summary }}
-          dry-run: ${{ inputs.dry_run_alerts == true && 'true' || 'false' }}
+          dry-run: ${{ inputs.dry_run_alerts == true || github.ref_name != github.event.repository.default_branch }}
