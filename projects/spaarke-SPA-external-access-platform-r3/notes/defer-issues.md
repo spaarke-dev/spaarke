@@ -297,6 +297,47 @@ There is a related design question for the owner: when a thread becomes Private,
 
 ---
 
+### ISS-010 — Internal Only is enforced by BFF reads, not by Dataverse security (licensed users flagged external)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-14 |
+| **Source** | Task 065 final re-check (adversarial review). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1864 |
+
+**Description**
+
+Task 065 hides internal-only and Private-thread communications from every external caller on the BFF's own reads:
+- lists, counts and the feed;
+- attachment text;
+- the email AI tools.
+
+A licensed user flagged `sprk_isexternal` (owner 2026-10-14: treated like a partner for Internal Only) still has Dataverse access, and three paths apply Dataverse security only:
+- the generic `dataverse.read_query` chat tool (`DataverseReadQueryHandler`), which reads `sprk_communication` under the user's token;
+- the model-driven app;
+- the Dataverse Web API.
+
+Failure mode: an external licensed user with read on a matter's communications runs `read_query` over `sprk_communication`, or opens the record in the model-driven app, and reads internal-only bodies. Contacts (CIAM and workforce) have no Dataverse access and are not affected.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseReadQueryHandler.cs`
+- `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` (~:997, DELETE route: `CanCallerSeeMessageAsync`; needs Dataverse Write, so it adds no capability)
+- Shared rule: `Services/Communication/CommunicationOpenThreadGate.cs`, `CommunicationThreadReadService.ReadVisibleCommunicationAsync`
+
+**Suggested fix**
+
+- Short term: `read_query` refuses `sprk_communication*` tables when `IsExternalAsync` is true.
+- Real fix: decide whether external licensed users get Dataverse read on communications at all (security role or owner-team design), or whether internal-only rows move under a team or BU they cannot read. Owner and UAC decision.
+
+**Estimated effort**: 0.5 day for the `read_query` guard; the Dataverse-security design is unknown.
+**Blockers**: owner/UAC decision on Dataverse access for licensed users flagged external.
+**Related**: task 065, ISS-009 (#1859, done), UAC unified-access-control-r2.
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |

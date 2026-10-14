@@ -4,7 +4,7 @@
     <title>Messages sent from the model-driven app carry the form's "Internal only" value (default No) and the sender (check-3 item 5)</title>
     <phase>5b Owner check fixes</phase>
     <gate>startable (owner decision 2026-10-13)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag bff-api; changes which messages external users can see</rigor-reason>
     <model-tier>opus</model-tier>

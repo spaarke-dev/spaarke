@@ -12,7 +12,7 @@
 | **Task** | ADR-028 **A9** build (owner-approved design `notes/a9-bff-design.md`, Teams included; ADR amended `63b7c575b`). R3 owns it end to end. Owner check-2 fixes 061–063 |
 | **Step** | 2026-10-13: A9 tasks created (044–048, 058, 059, 074–076); 060 cancelled; 012/056 superseded-in-part notes; 071 widened (9 Teams runs); check-2 fixes 061/062 (startable), 063 (blocked: owner decision on app-only enqueue rule); 002 gained grid-config labels (issue 2). Drift check + POML validator green. SPA deployed to dev (run `38420637859`), S2a pass; owner checks 1–2 done |
 | **Status** | Commits after #1810 (`5bfedfe3d`, notes, `63b7c575b`, task creation) are on the branch, not on master: next PR needs `/conflict-check` (word-add-in PR #1815 may edit `.claude/constraints/auth.md` line 69, adjacent to ours) |
-| **Next Action** | 2026-10-14. Done and merged: 061, 062 (`a379d71fa`), 063 (`70f7649db`), 064 (`15f2dc686`), 066, 067 (dev applied). **045 done**, merged `e6f6c6cd7` (re-check clean; 110 tests pass on the merged tree). It ships only with 046, whose POML now carries the guard removal and a CIAM-plane test. **065:** branch `worktree-agent-a0fca4a29271bc1f5`, fix round 1 `caf7654f4`; blocked on owner questions (item 5) → fix round → pass 2 → merge. Then 044 (schema, live gated), then the PR (`/conflict-check`; publish-size delta for 062/063/064/065 vs fresh master). Raise with owner: auth.md :78/:79 contradiction (needs approval to edit .claude/) |
+| **Next Action** | 2026-10-14. Done and merged: 045 (`e6f6c6cd7`), 061-067, 065 (`bbcb80659`). Master (with UAC #1827) is merged into R3. **044:** committed `5cdc88216`; the dev dry run is clean; the owner must approve `-Apply`, then `-Verify` and the schema record. **068:** startable (client-only). Then 046 (needs 044 on dev), the PR (`/conflict-check`; publish-size delta for 062/063/064/065 vs fresh master; tell provisioning about the S18 IdentityLinkColumns change). |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -26,15 +26,7 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 ## Open owner questions
 1. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
 2. Owner test for 067: create a service request; expect an RQST number other than RQST-0001 (dev next value read 3).
-5. 065 owner decisions 2026-10-14:
-   - (D1) Messages inherit the thread's record link.
-   - (D2) Filed items are visible unless Internal Only. Internal Only hides an item from every non-systemuser, and from systemusers flagged sprk_isexternal (owner confirmed keeping them hidden). The switch is task 068.
-   - (D3) Sender name is OK.
-   - (D4) No dev data fix.
-   - (D5) Received items follow the same rule.
-   - (D6) Outlook add-in saves stay visible until the add-in sends reply headers (068 follow-up).
-   - (D7) Making a thread Private hides its EARLIER messages from partners too: a read-side thread-privacy gate, which closes ISS-009 #1859.
-   Status: fix round 4 is running (re-check findings plus the header-based parent rule). Next: fix round 5 (D7 read gate), then a scoped re-check, then merge.
+5. 065 DONE: merged `bbcb80659`. Owner decisions D1-D9 are in notes/task-065-notes.md. ISS-009 #1859 is closed. ISS-010 #1864 (Internal Only not enforced by Dataverse security for licensed users flagged external) is filed for an owner/UAC decision. Task 068 (the switch) is now startable.
 4. 065 leftover: (d) the ACS endpoint has a read-only check before deploy.
 6. 044: option A; the owner approved the dev dry run 2026-10-14 and it was clean (it would create 1 option, 5 columns, 1 key and FLS on 3 columns; nothing written). Next: the owner approves -Apply, then -Verify, then notes/task-044-schema-record.md.
 3. Owner decisions 2026-10-13 (resolved, recorded in POMLs): 045 = option A (contact-grants reachable; census pins routes); 065 = explicit false for emails too, fix Message→Email mapping (explain how the Message path works); 062 = createdby only when a person; 067 = run (done).
