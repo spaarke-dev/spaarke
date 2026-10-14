@@ -11,8 +11,8 @@ last-reviewed: 2026-09-30
 # CI/CD Pipeline Skill
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-09-30
-> **Reviewed By**: customer-provisioning-orchestration-r1 (plan G24 — workflow sections corrected against `.github/workflows`; full per-workflow reference: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md))
+> **Last Reviewed**: 2026-10-14
+> **Reviewed By**: ci-cd-unit-test-remediation-r1 task 077 (legacy `sdap-ci.yml` retired; full per-workflow reference: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md))
 > **Exemplar rationale**: Workflows evolve quarterly; no single canonical pipeline holds steady. Inventory + status checks live in `notes/inventory/workflows.md` (Phase 0 task 003).
 > **Inventory anomaly #1 RESOLVED**: This skill had zero frontmatter before 2026-05-16. Frontmatter block now in place.
 
@@ -30,7 +30,7 @@ Understanding the distinction between CI, deployment, and sync:
 
 | Term | What It Means | Workflow |
 |------|---------------|----------|
-| **CI (Continuous Integration)** | Build, test, code quality checks | `ci-router.yml` → `ci-tier1-blocking.yml` (blocking) + `ci-tier2-advisory.yml` (advisory). **`Router` is the only required status check** on master (verified 2026-09-30). Legacy `sdap-ci.yml` still runs but is not required (pending deletion) |
+| **CI (Continuous Integration)** | Build, test, code quality checks | `ci-router.yml` → `ci-tier1-blocking.yml` (blocking) + `ci-tier2-advisory.yml` (advisory). Required status checks on master: **`Router`** and **`Client lint (type-aware ratchet)`** (`client-lint.yml`), verified 2026-10-14. Legacy `sdap-ci.yml` was retired 2026-10-14 (archived at `docs/archive/workflows/`); its unmatched checks run in `ci-standalone-checks.yml` (advisory) |
 | **Deployment** | Deploy a component to an environment | Per-component `deploy-*.yml` (see [Deployment Workflows](#deployment-workflows)) — mostly `workflow_dispatch` / operator-driven |
 | **Merge to Master** | Push changes to origin/master | Git operation (not a workflow) |
 | **Sync Main Repo** | Pull origin/master to local main repo | Git operation (needed for worktrees) |
@@ -104,7 +104,7 @@ gh run watch
 | Tier 2 → `ci-tier2-advisory.yml` | Format (`dotnet format`) · Lint (ESLint + Prettier) · Full Unit Tests · ADR Compliance (NetArchTest) · Markdown Link Validator · Last Reviewed Stamp · Plugin Size (ADR-002) · one deduplicated advisory PR comment | No — excluded from the gate by construction |
 | `router-result` (**Router**) | `if: always()` + `re-actors/alls-green` over the tiers — its result IS the required check | **Yes** |
 
-The legacy monolithic `sdap-ci.yml` (and its `sdap-ci-docs-only.yml` fallback) still runs on PRs/pushes but is **not** required.
+The legacy `sdap-ci.yml` and `sdap-ci-docs-only.yml` were retired 2026-10-14 (archived at `docs/archive/workflows/`). Checks with no Router equivalent run in `ci-standalone-checks.yml` (dependency audit, Release build + `deployment-packages`, Compose client gate, client typecheck, PCF ESLint; advisory). Master failures raise quality alerts: `master-ci-alert.yml` (`router-master`, `tier2-master/full-unit-tests`, `master-ci-alert/evaluation`) and the standalone `alerts` job (`ci-standalone/*`).
 
 ### Deployment Workflows
 

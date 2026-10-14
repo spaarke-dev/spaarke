@@ -458,13 +458,14 @@ SUGGEST PR template content for user to paste
 
 ### Step 8: Monitor CI Status
 
-After pushing, CI runs automatically. **Two systems run in parallel today** (updated 2026-08-29):
+After pushing, CI runs automatically. The CI Router runs Tier 1 and Tier 2; `Client lint` and `CI Standalone Checks` run alongside (updated 2026-10-14):
 
 | Workflow | Role | Blocking? |
 |---|---|---|
 | **`CI` (Router)** → `ci-tier1-blocking.yml` | Compile, Arch Tests (MUST-NOT subset), auth/tenant/eval/fidelity gates. Target p95 ≤3 min. | **Yes** — this is the verdict that matters |
 | **`CI` (Router)** → `ci-tier2-advisory.yml` | Full unit tests, format, lint, ADR NetArchTest, markdown links, plugin size | **No — advisory by design.** A red Tier 2 does **not** block a merge |
-| **`SDAP CI`** (legacy `sdap-ci.yml`) | Build & Test, Code Quality, Trivy | Running in parallel pending retirement (task CICD-077) |
+| **`Client lint (type-aware ratchet)`** (`client-lint.yml`) | Typed ESLint ratchet on client packages | **Yes — required** |
+| **`CI Standalone Checks`** (`ci-standalone-checks.yml`) | Dependency audit, Release build + BFF publish, Compose client gate, client typecheck, PCF ESLint | **No — advisory** (red jobs on master raise quality alerts). `sdap-ci.yml` was retired 2026-10-14 (CICD-077) |
 
 Tier 2 being advisory is deliberate, not an oversight — it exists so slow/flaky checks cannot hold up
 high-frequency master pushes. Do **not** "fix" a red Tier 2 by making it blocking.
@@ -534,14 +535,11 @@ Next steps:
 > `git push origin {branch}:master`"*. That is a **direct push that bypasses the PR**, and it is not how
 > work lands on this repo. Every PR merged in the CI-remediation project used `gh pr merge --squash`.
 >
-> A direct push also **starves the CI cutover measurement**: `scripts/ci/shadow-window-status.ps1`
-> enumerates merged **PRs** and compares the legacy vs. new workflow verdict on each merge commit.
-> Work pushed straight to master creates no PR, contributes no comparison, and therefore *delays*
-> retiring `sdap-ci.yml`.
+> (Historical: direct pushes also starved the CI cutover measurement in `scripts/ci/shadow-window-status.ps1`; that window closed when `sdap-ci.yml` was retired on 2026-10-14.)
 >
 > **Master IS protected (enabled 2026-08-29).** A repository **ruleset** — not classic branch
-> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`**
-> check must pass, and force-push/deletion are blocked. A direct push to master is refused.
+> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`** and
+> **`Client lint (type-aware ratchet)`** checks must pass, and force-push/deletion are blocked. A direct push to master is refused.
 >
 > Classic branch protection is **unavailable on this repo** — both `GET` and `PUT` on
 > `/branches/master/protection` return `404 "Branch protection has been disabled on this repository"`
@@ -549,7 +547,7 @@ Next steps:
 > at `gh api repos/spaarke-dev/spaarke/rulesets/21824191`, and read what actually applies with
 > `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
 >
-> **The required context is `Router`** — the literal check-run name — **not** `CI / Router` as some
+> **The required contexts are `Router` and `Client lint (type-aware ratchet)`** — the literal check-run names — **not** `CI / Router` as some
 > planning docs say. `Router` is the router workflow's `always()` aggregate over `classify` + `tier1`;
 > **tier2 is deliberately excluded from its adjudication**, which is what makes Tier 2 advisory in
 > practice. Docs-only PRs skip Tier 1 and `Router` still reports success, so they are not blocked
