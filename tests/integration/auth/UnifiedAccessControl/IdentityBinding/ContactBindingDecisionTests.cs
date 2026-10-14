@@ -382,7 +382,7 @@ public class ContactBindingDecisionTests
         // Fail closed: a caller that forgets to stamp AsOf sees every marker as far-future, never as current, even with the
         // right code.
         => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, Now)
-                { InviteCodeHash = InviteA.StoredValue }, InviteA.Code)
+        { InviteCodeHash = InviteA.StoredValue }, InviteA.Code)
             .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
     [Fact]
