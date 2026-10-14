@@ -24,7 +24,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 public sealed class GraphAdminConsentVerifierTests
 {
     private const string ServicePrincipalId = "sp-object-id-0000-0000-000000000000";
-    private const int ExpectedScopeCount = 5;
+    private static readonly int ExpectedScopeCount = EntraAppRegPermissionCatalog.All.Count;
 
     [Fact]
     public void EvaluateGrantedScopes_NoGrantsAtAll_ReturnsPending_NotVerified()
@@ -40,29 +40,29 @@ public sealed class GraphAdminConsentVerifierTests
     }
 
     [Fact]
-    public void EvaluateGrantedScopes_MissingOneOfFive_ReturnsPending_ListsExactlyTheMissingOne()
+    public void EvaluateGrantedScopes_MissingOneScope_ReturnsPending_ListsExactlyTheMissingOne()
     {
-        // 4 of 5 present (all Graph delegated scopes, missing Dynamics user_impersonation).
-        var grantStrings = new[] { "Files.ReadWrite.All Sites.ReadWrite.All User.Read Mail.Send" };
+        // All Graph delegated scopes present, missing Dynamics user_impersonation.
+        var grantStrings = new[] { "Files.ReadWrite.All FileStorageContainer.Selected Sites.ReadWrite.All User.Read Mail.Send" };
 
         var result = GraphAdminConsentVerifier.EvaluateGrantedScopes(ServicePrincipalId, grantStrings, ExpectedScopeCount);
 
         var pending = result.Should().BeOfType<AdminConsentVerificationResult.Pending>().Subject;
-        pending.GrantedCount.Should().Be(4);
+        pending.GrantedCount.Should().Be(ExpectedScopeCount - 1);
         pending.Diagnostic.Should().Contain("user_impersonation");
         pending.Diagnostic.Should().NotContain("Files.ReadWrite.All is missing");
     }
 
     [Fact]
-    public void EvaluateGrantedScopes_AllFivePresentAcrossMultipleGrantRecords_ReturnsVerified()
+    public void EvaluateGrantedScopes_AllScopesPresentAcrossMultipleGrantRecords_ReturnsVerified()
     {
         // Real Graph shape: multiple oauth2PermissionGrant records (one per
         // resource) each carry a space-delimited Scope string — the Graph
-        // resource's 4 scopes in one grant, the Dynamics resource's 1 scope
+        // resource's 5 scopes in one grant, the Dynamics resource's 1 scope
         // in a second grant.
         var grantStrings = new[]
         {
-            "Files.ReadWrite.All Sites.ReadWrite.All User.Read Mail.Send",
+            "Files.ReadWrite.All FileStorageContainer.Selected Sites.ReadWrite.All User.Read Mail.Send",
             "user_impersonation",
         };
 
@@ -77,12 +77,12 @@ public sealed class GraphAdminConsentVerifierTests
     [Fact]
     public void EvaluateGrantedScopes_ExtraUnrelatedScopesPresent_StillVerifiedWhenAllRequiredPresent()
     {
-        // A tenant admin may have consented to MORE than the 5 required
+        // A tenant admin may have consented to MORE than the required
         // scopes (e.g. a broader admin-consent click) — extras must not
         // cause a false Pending.
         var grantStrings = new[]
         {
-            "Files.ReadWrite.All Sites.ReadWrite.All User.Read Mail.Send openid profile offline_access",
+            "Files.ReadWrite.All FileStorageContainer.Selected Sites.ReadWrite.All User.Read Mail.Send openid profile offline_access",
             "user_impersonation",
         };
 
@@ -94,7 +94,7 @@ public sealed class GraphAdminConsentVerifierTests
     [Fact]
     public void EvaluateGrantedScopes_EmptyOrWhitespaceScopeStringsIgnored_NoThrow()
     {
-        var grantStrings = new[] { "", "   ", "Files.ReadWrite.All Sites.ReadWrite.All User.Read Mail.Send user_impersonation" };
+        var grantStrings = new[] { "", "   ", "Files.ReadWrite.All FileStorageContainer.Selected Sites.ReadWrite.All User.Read Mail.Send user_impersonation" };
 
         var result = GraphAdminConsentVerifier.EvaluateGrantedScopes(ServicePrincipalId, grantStrings, ExpectedScopeCount);
 

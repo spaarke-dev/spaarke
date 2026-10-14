@@ -141,7 +141,7 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 
 | Field | Value |
 |---|---|
-| **Status** | Open — before T186; needs an owner-approved live step |
+| **Status** | Fix applied live — dev Api `CustomerRunGuard__Enabled=True` (deployed 2026-10-13 from `67c80623f`). Open only for the live proof at T186: a second concurrent POST for the same customer is refused |
 | **Urgency** | before T186 |
 | **Filed** | 2026-10-09 (punch-list re-verification, 203b row A27) |
 | **Source** | `infrastructure/bicep/platform-controlplane.bicep` `customerRunGuardEnabled` default false; no `.bicepparam` sets it; live dev Api `CustomerRunGuard__Enabled = False` |
@@ -301,7 +301,7 @@ the BFF's owning project.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Open; F3 resolved, F6 code-fixed 2026-10-14 |
 | **Urgency** | F3 and F6 before T186 (F3 blocks H3 and H10 outright); F2/F4/F5 low |
 | **Filed** | 2026-10-09 (T261) |
 | **Source** | T261 inventory — `notes/t261-stamp-graph-least-privilege.md` §8 (call sites, Learn citations, live reads) |
@@ -333,6 +333,13 @@ the BFF's owning project.
 
 **Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
 (F6).
+
+**Update 2026-10-14.** F3 resolved: read live, `sprk-controlplane-dev-uami` (principal `38f7693f…`) holds
+`Application.ReadWrite.OwnedBy` and `AppRoleAssignment.ReadWrite.All`. The optional removal of the roles it no longer
+needs is still open; it holds `Mail.ReadWrite`, `Mail.Send` and `MailboxSettings.Read` by owner decision D33. F6 is
+fixed in code (e3f13d6b4; live proof at T186 H3): the delegated Files.ReadWrite.All id becomes `863451e7-0667-486c-a5d6-d135439485f0`, and
+delegated FileStorageContainer.Selected (`085ca537-…`) is added. Both ids were read live from the Graph service
+principal. F2, F4 and F5 are unchanged.
 
 ### ISS-022 — Three BFF secrets absent from the canonical catalog: `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`
 
@@ -421,7 +428,7 @@ Until then, merge T263 only together with the approval, or accept that T186 stop
 
 | Field | Value |
 |---|---|
-| **Status** | Open — before T240d production (the column lands with UAC-r2 PR #1801 / owner round 97) |
+| **Status** | Code complete 2026-10-14 (worktree commit bed40c9cc); live proof at T186 H7b (invitedon); codehash proof after the SpaarkeMaster release that carries it |
 | **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
 
@@ -436,6 +443,8 @@ checks); H7b never secures a column itself. If a check ever writes field-securit
 hash, through `scripts/Set-ExternalInviteCodeHashSchema.ps1`. H7b must verify it too, with different grants: Readers
 have **no** permission row for it (UAC's script, `48db7adb3`, never creates one; a missing row and a 0/0/0 row both
 mean no access), and Writers 4/4/4. Any Readers access is a FAIL. The script refuses to run without 184's marker column.
+
+Follow-up (2026-10-14 review): H7b does not check auditing-off / Advanced-Find-off on `sprk_externalinvitecodehash` (the Dataverse seam reads only IsSecured); add with the release that carries the column.
 
 ### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
 

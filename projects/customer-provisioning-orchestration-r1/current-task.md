@@ -2,15 +2,15 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md` D-table. Session narrative → commit messages.
 
-> **Last Updated**: 2026-10-13 SESSION 47. PRs #1809 and #1822 merged (master `67c80623f`). Dev control plane deployed from `67c80623f` (H14m live; all post-deploy checks green). T240d spike S1 done → option 2. D32 Exchange roles applied, mailbox checks M1–M5 and M7 PASS, ISS-024 closed.
+> **Last Updated**: 2026-10-14 SESSION 47. PR #1823 merged (master `8cc1ef392`): SpaarkeMaster 1.2.2.0 source, decision-record delete relation, Crypto Pkcs/Xml 10.0.13 CVE pins. SpaarkeMaster 1.2.2.0 PUBLISHED (run 38493202673). Earlier: PRs #1809 and #1822 merged. Dev control plane deployed from `67c80623f` (H14m live; all post-deploy checks green). T240d spike S1 done → option 2. D32 Exchange roles applied, mailbox checks M1–M5 and M7 PASS, ISS-024 closed.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Task** | T186 (first live E2E via `/provision-environment`, mock customer homed in Dewey Cheatham, stamp in the DEMO subscription) and the T240d build (option 2), in parallel with reviews of UAC task 185 |
-| **Status** | No agents running. The dev control plane is current with master. |
-| **Next Action** | (1) Merge PR #1823 (SpaarkeMaster 1.2.2.0 source), then run `publish-dataverse-solutions-manifest.yml` from master: `publish: false`, then `publish: true`. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34). (3) T240d build. |
+| **Status** | No agents running. The #1827 gate review was sent to UAC on 2026-10-14. UAC is fixing F1 (owner 98c: the inviter always gets `Sent`), F3 (503) and K1 (`#invite=`) in scope. When UAC sends the fix-round head SHA, re-check the fix diff only. Results are in t240d design §10. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
+| **Next Action** | (1) Owner OK to start T186. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34); H6 imports 1.2.2.0. (3) T240d build. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
 ## 🔔 Waiting on the owner
@@ -23,13 +23,13 @@
 
 - Dev control plane `rg-spaarke-platform-dev`: master `67c80623f` (2026-10-13). The Api is swapped to production and the Worker deployed. The sidecar image was built from `d39c066c3` (H14m endpoints). `CustomerRunGuard__Enabled=True`.
 - Spaarke Exchange Admin (app 46670ee2, Exchange SP b5d396bb) holds `Spaarke App RBAC Admin`, `View-Only Recipients`, and the D32 roles `Spaarke Shared Mailbox Create` and `Spaarke Scope Group Membership` (scope `Spaarke Customer Scope Groups`). There is a leftover delegating `sprk-exoadmin-deleg-MailboxSettingsRead` (harmless; remove at the next maintenance).
-- Store: SpaarkeMaster 1.2.1.0 latest. It does NOT yet carry `contact.sprk_externalinvitedon` (UAC #1801, merged).
+- Store: SpaarkeMaster **1.2.2.0** latest (2026-10-14, managed sha256 `691d1dd1…f630f2fb`). It carries `contact.sprk_externalinvitedon` and its field-security profiles. It does NOT carry `sprk_externalinvitecodehash` (UAC #1827, not merged), which needs the next release before T240d production. The workforce role `Spaarke Internal Contact User (Workforce)` is excluded until UAC 186 closes.
 - Demo BFF `spaarke-bff-demo` is stopped (.NET 8). Retire it after T186.
 - T240d spike S1 objects: all deleted (the owner deleted the test user and the spike enterprise app).
 
 ## 📋 Remaining
 
-- **T186 prerequisites:** a new SpaarkeMaster export and version (carrying `sprk_externalinvitedon` plus the `sprk_createdbyperson` locks). Live proofs owed at T186:
+- **T186 prerequisites:** met (SpaarkeMaster 1.2.2.0 published). Live proofs owed at T186:
   - ISS-008 (a second POST for the same customer is refused);
   - T261 OwnedBy ownership at H3;
   - ISS-015 Worker FIC at H6;
@@ -44,6 +44,7 @@
   - H4b `Ciam:*` (Audience = the CIAM API app id; `Ciam:Domain`);
   - H13 probes;
   - CiamUserProvisioningService (authority login.microsoftonline.com, `User.Create`);
+  - `CiamGraphClientFactory`: make `CertificateName` optional under MI-FIC (after #1827 it is required);
   - the production CIAM SPA client (redirect `https://external.spaarke.com`).
 
   Gates are in design §10: BFF at or after 185, SpaarkeMaster carrying both contact columns, the secret-bearing send. The live acceptance checks are the cross-customer ExistingAccount check (UAC §11b) and the SSPR lock-out.

@@ -1100,6 +1100,8 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   not create (H3 keeps exactly `spaarke-uami-trust` and `spaarke-l2-worker`, repairing either by triple), or when anyone but
   the control plane owns it (`appreg-adoption-refused`; nothing is written). The name
   `spaarke-bff-api-{customerId}` is predictable, and an adopted registration gets the stamp's FIC and Dataverse admin.
+- **admin-consent gate (Model 1, Spaarke tenant):** when the run waits on H3's `admin-consent` gate, a Spaarke-tenant admin opens Entra admin center -> App registrations -> `spaarke-bff-api-{customerId}` -> API permissions -> **Grant admin consent for Spaarke**; that covers all 6 delegated permissions in `EntraAppRegPermissionCatalog`. Then advance the gate with `POST /api/runs/{id}/gates/admin-consent/advance` (API surface table above).
+  Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
 their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
@@ -1509,7 +1511,19 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   #1565) — other members of that profile are never touched;
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
-  refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`).
+  refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);
+- a read-only check (S22, ISS-025 / #1803) that `contact.sprk_externalinvitedon` (SpaarkeMaster 1.2.2.0 and later) is
+  field-secured, that `Spaarke BFF-Managed Field Readers` holds Read only (4/0/0) and `Writers` 4/4/4, and that no other
+  profile (System Administrator excepted) can create or update it — a missing column or a wrong lock refuses
+  `secure_setup.invite_marker_lock_incomplete` (Resumable: import SpaarkeMaster) or
+  `secure_setup.invite_marker_lock_other_writer` (QuarantineRequired);
+- the same check for `contact.sprk_externalinvitecodehash` (unified-access-control-r2 task 185) once a SpaarkeMaster release
+  carries it: secured, `Writers` 4/4/4, and no access for `Readers` (no row or 0/0/0) or any other profile (System
+  Administrator excepted), else `secure_setup.invite_code_hash_lock_incomplete` (Resumable) or
+  `secure_setup.invite_code_hash_lock_other_access` (QuarantineRequired). While the column is absent that is the expected
+  state: H7b does not fail, and records an "absent — ships in a later SpaarkeMaster release" note in the `notes` of gate
+  `h7b-secure-record-setup`. Neither check writes a field-security row; auditing and Advanced Find on the hash column are
+  not verified by H7b.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
