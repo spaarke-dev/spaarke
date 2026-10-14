@@ -27,7 +27,7 @@ on:
           - staging
           - production
       artifact_run_id:
-        description: 'Workflow run ID for deployment artifacts (blank = latest successful CI)'
+        description: 'Run ID of a MASTER push run of ci-standalone-checks.yml (has deployment-packages). Blank = latest successful run of that workflow on ANY branch; PR runs carry no artifact, so pass a master run id.'
         required: false
         type: string
       skip_smoke_tests:
