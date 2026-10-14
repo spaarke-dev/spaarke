@@ -947,11 +947,16 @@ prereqs:
         echo ok
       expect: "`ok` - the environment's billing policy output names the stamp subscription {stampSubscriptionId} and shows `Enabled` (the output shape of this preview command is not yet verified live - T186; anchor to the status field once it is); cross-check with `pac licensing list-billing-policies`"
     remediation: |
-      Power Platform admin center → Billing → Billing policies → New billing policy: name `sprk-{customerId}-payg`, the
-      customer's stamp subscription {stampSubscriptionId} and its stamp resource group, region = the environment's
-      region; then add the environment to the policy (Billing policies → the policy → Add environments). Linking makes
-      it a Managed Environment. Meter: Power Apps per app — billed per ACTIVE user per app per month (Microsoft Learn
-      "Pay-as-you-go meters").
+      1. Resource group for the policy's Azure resource (Microsoft.PowerPlatform/accounts), created BEFORE the run — the
+         stamp resource group rg-spaarke-{customerId}-{env} does not exist until H2a, and a policy must not live in a
+         group whose lifecycle is the stamp's: `az group create --name rg-ppbilling-{customerId} --location <stamp
+         region> --subscription {stampSubscriptionId}` (the name is outside the rg-spaarke-* pattern, so the
+         subscription-dedication check ignores it). Microsoft.PowerPlatform must be Registered on the subscription.
+      2. Power Platform admin center → Licensing → Pay-as-you-go plans (older UI: Billing → Billing policies) → New:
+         name `sprk-{customerId}-payg`; subscription {stampSubscriptionId}; resource group rg-ppbilling-{customerId};
+         region = the environment's region (e.g. United States); select the customer's environment. Linking makes it a
+         Managed Environment. Meter: Power Apps per app — billed per ACTIVE user per app per month (Microsoft Learn
+         "Pay-as-you-go meters").
     related_findings: [T232, D2, G10]
 
   - id: PRQ-C-12
