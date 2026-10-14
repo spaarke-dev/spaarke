@@ -232,8 +232,24 @@ internal static class ExternalMultiRootRule
             return value.ValueKind == JsonValueKind.String ? value.GetString() : UnresolvedParent;
         });
 
+    /// <summary>
+    /// A FetchXML (module) row's parent lookups (<see cref="LiveParentLookupsOf"/>), keyed by LOGICAL name as the SDK projects
+    /// them: absent or null is "not filed there" (the SDK omits a null attribute), a GUID, an entity reference or a GUID string
+    /// is the lookup, and anything else is malformed (withheld by the rule, fail closed).
+    /// </summary>
+    internal static LiveParentLookup[] LiveParentsOf(string childTable, IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return LiveParentsOf(childTable, attribute =>
+        {
+            if (!row.TryGetValue(attribute, out var raw) || raw is null)
+                return null; // not filed there
+            return ExternalModuleDescriptor.TryGetAttributeId(row, attribute, out var id) ? id.ToString() : UnresolvedParent;
+        });
+    }
+
     /// <summary>A row's parent lookups, each value read by <paramref name="valueOf"/> (by lookup LOGICAL name).</summary>
-    internal static LiveParentLookup[] LiveParentsOf(string childTable, Func<string, string?> valueOf)
+    private static LiveParentLookup[] LiveParentsOf(string childTable, Func<string, string?> valueOf)
     {
         ArgumentNullException.ThrowIfNull(valueOf);
         return LiveParentLookupsOf(childTable)
@@ -241,6 +257,18 @@ internal static class ExternalMultiRootRule
             .Where(p => !string.IsNullOrWhiteSpace(p.LookupValue))
             .ToArray();
     }
+
+    /// <summary>
+    /// <paramref name="parents"/> without <paramref name="authorized"/>: the one parent a route has already decided for the
+    /// caller (an invoice thread's own invoice, owner round 100), which is not walked again. <c>null</c> removes nothing.
+    /// </summary>
+    internal static LiveParentLookup[] Except(LiveParentLookup[] parents, (string Table, Guid Id)? authorized) =>
+        authorized is not { } skip
+            ? parents
+            : parents
+                .Where(p => !(string.Equals(p.Table, skip.Table, StringComparison.OrdinalIgnoreCase)
+                              && Guid.TryParse(p.LookupValue, out var id) && id == skip.Id))
+                .ToArray();
 
     /// <summary>
     /// Resolves, ONCE for a whole page or row set, the live roots of the distinct parents its rows carry (task 187). No
@@ -392,11 +420,18 @@ public sealed class LiveParentRoots
 }
 
 /// <summary>
-/// Task 187: the multi-root rule's input for ONE external child row, built only by <see cref="Of"/>: its stamped (or typed)
-/// root lookups ∪ the live roots of every parent lookup it carries, with an unresolvable parent entered as
+/// Task 187: the multi-root rule's input for ONE external child row, built only by an <c>Of</c> overload: its stamped (or
+/// typed) root lookups ∪ the live roots of every parent lookup it carries, with an unresolvable parent entered as
 /// <see cref="ExternalMultiRootRule.UnresolvedParent"/> (withheld). Enumerates as the rule input, so the one secure-flag read
 /// (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/>) covers the live roots too.
 /// </summary>
+/// <remarks>
+/// <b>The parents cannot be supplied</b> (fix round 1, R3). <c>Of</c> takes the child TABLE and the ROW as read, and derives
+/// the parents itself through the one lineage map (<see cref="ExternalMultiRootRule.LiveParentsOf(string, IReadOnlyDictionary{string, JsonElement})"/>),
+/// so a caller cannot hand it "no parents" (the stamps-only decision #1857 found). A table outside the lineage map throws.
+/// Enforced by: the type (no overload takes a parent list; <c>ExternalChildRowLiveParentGuardTests</c> checks it by
+/// reflection) and the source guard (no literal empty row).
+/// </remarks>
 public readonly struct ChildRowRoots : IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>
 {
     private readonly (ExternalGrantRootType Root, string? LookupValue)[]? _links;
@@ -410,18 +445,53 @@ public readonly struct ChildRowRoots : IEnumerable<(ExternalGrantRootType Root, 
     internal (ExternalGrantRootType Root, string? LookupValue)[] Links => _links ?? Array.Empty<(ExternalGrantRootType, string?)>();
 
     /// <summary>
-    /// {<paramref name="stamped"/>} ∪ {live roots of every <paramref name="parents"/> entry}. A parent whose value is not a
-    /// GUID, or that <paramref name="live"/> did not resolve, enters as <see cref="ExternalMultiRootRule.UnresolvedParent"/>.
+    /// For a Web API row (raw <c>_..._value</c> columns): {<paramref name="stamped"/>} ∪ {live roots of every parent lookup of
+    /// <paramref name="childTable"/> that <paramref name="row"/> carries}. A parent whose value is not a GUID, or that
+    /// <paramref name="live"/> did not resolve, enters as <see cref="ExternalMultiRootRule.UnresolvedParent"/>. A
+    /// <c>null</c> row is one that came back with no column outside the typed ones: it names no parent.
+    /// </summary>
+    /// <param name="childTable">The row's table; must have an entry in the lineage map.</param>
+    /// <param name="row">The row as read (its <c>$select</c> must carry <see cref="ExternalMultiRootRule.LiveParentSelect"/>).</param>
+    /// <param name="stamped">The row's stamped (or typed) root lookups.</param>
+    /// <param name="live">The live roots the request resolved for its rows' parents.</param>
+    /// <param name="authorizedParent">The one parent the route has already decided for the caller (an invoice thread's own
+    /// invoice, owner round 100): not walked again. Every other parent is.</param>
+    public static ChildRowRoots Of(
+        string childTable,
+        IReadOnlyDictionary<string, JsonElement>? row,
+        IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
+        LiveParentRoots live,
+        (string Table, Guid Id)? authorizedParent = null) =>
+        Build(stamped, ExternalMultiRootRule.Except(
+            ExternalMultiRootRule.LiveParentsOf(LineageChild(childTable), row), authorizedParent), live);
+
+    /// <summary>
+    /// For a FetchXML (module) row, keyed by logical name: {<paramref name="stamped"/>} ∪ {live roots of every parent lookup of
+    /// <paramref name="childTable"/> that <paramref name="row"/> carries}. See the Web API overload.
     /// </summary>
     public static ChildRowRoots Of(
+        string childTable,
+        IReadOnlyDictionary<string, object?> row,
         IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
-        IEnumerable<LiveParentLookup>? parents,
+        LiveParentRoots live) =>
+        Build(stamped, ExternalMultiRootRule.LiveParentsOf(LineageChild(childTable), row), live);
+
+    /// <summary>The table, when it has an entry in the lineage map; a table without one is a programming error.</summary>
+    private static string LineageChild(string childTable) =>
+        !string.IsNullOrWhiteSpace(childTable) && Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling.ContainsKey(childTable)
+            ? childTable
+            : throw new ArgumentException(
+                $"'{childTable}' is not a child table of the lineage map, so its parents cannot be derived.", nameof(childTable));
+
+    private static ChildRowRoots Build(
+        IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
+        IEnumerable<LiveParentLookup> parents,
         LiveParentRoots live)
     {
         ArgumentNullException.ThrowIfNull(stamped);
         ArgumentNullException.ThrowIfNull(live);
         var links = stamped.ToList();
-        foreach (var parent in parents ?? Array.Empty<LiveParentLookup>())
+        foreach (var parent in parents)
         {
             if (string.IsNullOrWhiteSpace(parent.LookupValue))
                 continue; // not filed there

@@ -469,8 +469,8 @@ public sealed class CommunicationThreadReadService
     /// as not filed).</summary>
     private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
         RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn),
-        // Task 187: the row's other parents (thread, invoice, event ...), whose LIVE roots the rule takes in.
-        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalMultiRootRule.LiveParentsOf(CommunicationTable, row));
+        // Task 187: the row itself, whose other parents (thread, invoice, event ...) the rule derives and takes in LIVE.
+        row);
 
     /// <summary>The table the external reads select from.</summary>
     private const string CommunicationTable = "sprk_communication";

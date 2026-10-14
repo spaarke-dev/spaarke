@@ -209,15 +209,9 @@ public sealed class ExternalModuleDescriptor
     public LiveParentLookup[] LiveParents(IReadOnlyDictionary<string, object?> row)
     {
         ArgumentNullException.ThrowIfNull(row);
-        if (!RequireReadOnSecureRoots)
-            return Array.Empty<LiveParentLookup>();
-
-        return ExternalMultiRootRule.LiveParentsOf(RecordEntity, attribute =>
-        {
-            if (!row.TryGetValue(attribute, out var raw) || raw is null)
-                return null; // not filed there
-            return TryGetAttributeId(row, attribute, out var id) ? id.ToString() : ExternalMultiRootRule.UnresolvedParent;
-        });
+        return RequireReadOnSecureRoots
+            ? ExternalMultiRootRule.LiveParentsOf(RecordEntity, row)
+            : Array.Empty<LiveParentLookup>();
     }
 
     /// <summary>
@@ -334,10 +328,11 @@ public sealed class ExternalModuleDescriptor
     /// <see cref="ExternalMultiRootRule.ReadFlagsAsync"/> before <see cref="ScopeRows"/>.
     /// </summary>
     /// <summary>
-    /// Task 187: one module row's rule input: <see cref="RootLinks"/> ∪ the live roots of <see cref="LiveParents"/>.
+    /// Task 187: one module row's rule input (a module with <see cref="RequireReadOnSecureRoots"/>): <see cref="RootLinks"/> ∪
+    /// the live roots of the row's parent lookups, which <see cref="ChildRowRoots"/> derives from the row itself.
     /// </summary>
     public ChildRowRoots RuleInput(IReadOnlyDictionary<string, object?> row, LiveParentRoots? liveParents) =>
-        ChildRowRoots.Of(RootLinks(row), LiveParents(row), liveParents ?? LiveParentRoots.Empty);
+        ChildRowRoots.Of(RecordEntity, row, RootLinks(row), liveParents ?? LiveParentRoots.Empty);
 
     public (ExternalGrantRootType Root, string? LookupValue)[] RootLinks(IReadOnlyDictionary<string, object?> row)
     {

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,7 +48,17 @@ public sealed class ExternalLiveParentRuleTests
     private static readonly NonSecureRootReader NothingOpen = (_, _) =>
         Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType, Guid)>()));
 
-    private static LiveParentLookup[] CommunicationParent(Guid id) => new[] { new LiveParentLookup("sprk_communication", id.ToString()) };
+    /// <summary>A to-do row as the Web API returns it, filed under communication <paramref name="communication"/> (none: no parent).</summary>
+    private static Dictionary<string, JsonElement> TodoUnder(Guid? communication) => communication is { } c
+        ? new() { ["_sprk_regardingcommunication_value"] = JsonSerializer.SerializeToElement(c.ToString()) }
+        : new();
+
+    /// <summary>The parents the rule derives from a to-do row (the live-parent read's input).</summary>
+    private static LiveParentLookup[] CommunicationParent(Guid id) => ExternalMultiRootRule.LiveParentsOf("sprk_todo", TodoUnder(id));
+
+    /// <summary>A to-do row's rule input: its stamped matter (if any) ∪ the live roots of the parents it carries.</summary>
+    private static ChildRowRoots TodoRoots(Dictionary<string, JsonElement> row, LiveParentRoots live, string? stampedMatter = null) =>
+        ChildRowRoots.Of("sprk_todo", row, ExternalMultiRootRule.Stamps(null, stampedMatter, null), live);
 
     // ---- ChildRowRoots + ChildRowReadable ----
 
@@ -55,7 +66,7 @@ public sealed class ExternalLiveParentRuleTests
     public async Task TheUnion_WithholdsARowWhoseParentIsUnderASecureRootTheCallerCannotRead()
     {
         var live = await ExternalMultiRootRule.ReadLiveParentsAsync(FiledUnder(X), new[] { CommunicationParent(C) }, NullLogger.Instance, default);
-        var row = ChildRowRoots.Of(ExternalMultiRootRule.Stamps(null, M.ToString(), null), CommunicationParent(C), live);
+        var row = TodoRoots(TodoUnder(C), live, M.ToString());
 
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None, row).Should().BeFalse();
         ExternalMultiRootRule.ChildRowReadable(Reader(M, X), SecureRootFlags.None, row).Should().BeTrue();
@@ -71,8 +82,8 @@ public sealed class ExternalLiveParentRuleTests
     [Fact]
     public void AParentTheReadDidNotResolve_IsWithheld_AndARowNamingNoParent_IsDecidedOnItsStamps()
     {
-        var unresolved = ChildRowRoots.Of(ExternalMultiRootRule.Stamps(null, M.ToString(), null), CommunicationParent(C), LiveParentRoots.Empty);
-        var noParent = ChildRowRoots.Of(ExternalMultiRootRule.Stamps(null, M.ToString(), null), null, LiveParentRoots.Empty);
+        var unresolved = TodoRoots(TodoUnder(C), LiveParentRoots.Empty, M.ToString());
+        var noParent = TodoRoots(TodoUnder(null), LiveParentRoots.Empty, M.ToString());
 
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None, unresolved).Should().BeFalse();
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None, noParent).Should().BeTrue();
@@ -114,16 +125,16 @@ public sealed class ExternalLiveParentRuleTests
     [Fact]
     public async Task TheRuleAsksTheReaderForAtMostTheBound_AndAParentPastIt_IsUnresolved()
     {
-        var parents = Enumerable.Range(0, ExternalMultiRootRule.MaxLiveParentReads + 1)
-            .Select(_ => CommunicationParent(Guid.NewGuid())).ToList();
+        var rows = Enumerable.Range(0, ExternalMultiRootRule.MaxLiveParentReads + 1)
+            .Select(_ => TodoUnder(Guid.NewGuid())).ToList();
         var calls = new List<int>();
 
-        var live = await ExternalMultiRootRule.ReadLiveParentsAsync(FiledUnder(M, calls), parents, NullLogger.Instance, default);
+        var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
+            FiledUnder(M, calls), rows.Select(r => ExternalMultiRootRule.LiveParentsOf("sprk_todo", r)), NullLogger.Instance, default);
 
         calls.Should().Equal(ExternalMultiRootRule.MaxLiveParentReads);
         live.IsComplete.Should().BeFalse();
-        parents.Count(p => ExternalMultiRootRule.ChildRowReadable(
-                Reader(M), SecureRootFlags.None, ChildRowRoots.Of(Array.Empty<(ExternalGrantRootType, string?)>(), p, live)))
+        rows.Count(r => ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None, TodoRoots(r, live)))
             .Should().Be(ExternalMultiRootRule.MaxLiveParentReads, "the parent the rule did not ask for is unresolved");
     }
 
@@ -137,7 +148,7 @@ public sealed class ExternalLiveParentRuleTests
         live.IsComplete.Should().BeFalse();
         live.Faulted.Should().BeTrue();
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None,
-            ChildRowRoots.Of(Array.Empty<(ExternalGrantRootType, string?)>(), CommunicationParent(C), live)).Should().BeFalse();
+            TodoRoots(TodoUnder(C), live)).Should().BeFalse();
     }
 
     [Fact]
@@ -147,7 +158,7 @@ public sealed class ExternalLiveParentRuleTests
 
         live.IsComplete.Should().BeFalse();
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None,
-            ChildRowRoots.Of(Array.Empty<(ExternalGrantRootType, string?)>(), CommunicationParent(C), live)).Should().BeFalse();
+            TodoRoots(TodoUnder(C), live)).Should().BeFalse();
     }
 
     [Fact]
@@ -163,7 +174,7 @@ public sealed class ExternalLiveParentRuleTests
 
         live.IsComplete.Should().BeFalse();
         ExternalMultiRootRule.ChildRowReadable(Reader(M), SecureRootFlags.None,
-            ChildRowRoots.Of(Array.Empty<(ExternalGrantRootType, string?)>(), CommunicationParent(C), live)).Should().BeFalse();
+            TodoRoots(TodoUnder(C), live)).Should().BeFalse();
     }
 
     // ---- AC5: messages and notifications share SecureRootsFilter ----
@@ -172,7 +183,7 @@ public sealed class ExternalLiveParentRuleTests
     public async Task AMessageWhoseLiveParentIsUnderSecureX_IsWithheld_FromAnMOnlyReader()
     {
         var plain = new MessageRootLookups(null, M.ToString(), null);
-        var carrier = new MessageRootLookups(null, M.ToString(), null, new[] { new LiveParentLookup("sprk_invoice", C.ToString()) });
+        var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
 
         var mOnly = await ExternalMessageEndpoints.SecureRootsFilter(Reader(M), NothingOpen, NullLogger.Instance, FiledUnder(X))
             (new[] { plain, carrier }, default);
@@ -187,7 +198,7 @@ public sealed class ExternalLiveParentRuleTests
     [Fact]
     public async Task AMessageNamingAParent_WithNoLiveReader_IsWithheld_FailClosed()
     {
-        var carrier = new MessageRootLookups(null, M.ToString(), null, new[] { new LiveParentLookup("sprk_invoice", C.ToString()) });
+        var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
 
         var filter = await ExternalMessageEndpoints.SecureRootsFilter(Reader(M), NothingOpen, NullLogger.Instance)(new[] { carrier }, default);
 

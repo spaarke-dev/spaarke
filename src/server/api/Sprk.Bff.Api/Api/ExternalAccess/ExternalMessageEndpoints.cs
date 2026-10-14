@@ -404,7 +404,7 @@ public static class ExternalMessageEndpoints
     /// Shared by the thread read and the notification feed.
     /// </summary>
     /// <remarks>Task 187 (owner round 99, D-123; #1857): the stamps are a COPY, so the live roots of each row's other
-    /// parents (<see cref="MessageRootLookups.Parents"/>) are resolved in one bounded batch first
+    /// parents (derived from <see cref="MessageRootLookups.Row"/>) are resolved in one bounded batch first
     /// (<paramref name="readLiveParents"/>; none given resolves nothing, so a row naming a parent is withheld) and the rule
     /// decides over the union (<see cref="ExternalMultiRootRule.ChildRowReadable"/>).</remarks>
     internal static MessageRootsFilter SecureRootsFilter(
@@ -413,7 +413,7 @@ public static class ExternalMessageEndpoints
         async (candidates, ct) =>
         {
             var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
-                readLiveParents, candidates.Select(r => r.Parents ?? Array.Empty<LiveParentLookup>()), logger, ct)
+                readLiveParents, candidates.Select(r => ExternalMultiRootRule.LiveParentsOf(CommunicationTable, r.Row)), logger, ct)
                 .ConfigureAwait(false);
             var flags = await ExternalMultiRootRule.ReadFlagsAsync(
                 readNonSecureRoots, principal,
@@ -422,9 +422,12 @@ public static class ExternalMessageEndpoints
             return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live));
         };
 
+    /// <summary>The table every message row is read from.</summary>
+    private const string CommunicationTable = "sprk_communication";
+
     /// <summary>Task 187: one message row's rule input, its stamps and its parents' live roots.</summary>
     private static ChildRowRoots RuleInput(MessageRootLookups row, LiveParentRoots live) =>
-        ChildRowRoots.Of(ExternalMultiRootRule.Stamps(row.Project, row.Matter, row.WorkAssignment), row.Parents, live);
+        ChildRowRoots.Of(CommunicationTable, row.Row, ExternalMultiRootRule.Stamps(row.Project, row.Matter, row.WorkAssignment), live);
 
     /// <summary>
     /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside

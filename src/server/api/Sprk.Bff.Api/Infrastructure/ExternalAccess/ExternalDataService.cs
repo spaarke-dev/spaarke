@@ -497,7 +497,7 @@ public class ExternalDataService
             row.SprkMatterValue, row.SprkRelatedmatterValue,
             row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue)
         {
-            Parents = ExternalMultiRootRule.LiveParentsOf(DocumentTable, row.Extra),
+            Row = row.Extra,
         };
 
     /// <summary>
@@ -535,20 +535,26 @@ public class ExternalDataService
         };
 
         /// <summary>
-        /// Task 187: the document's parent lookups that are NOT root links (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/>
-        /// of <c>sprk_document</c>: the related event, communication, to-do, agreement, invoice, the parent and canonical
-        /// document ...), whose LIVE roots join the rule. <c>null</c>: none were read.
+        /// Task 187: the document row as read. Its parent lookups that are NOT root links
+        /// (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/> of <c>sprk_document</c>: the related event, communication,
+        /// to-do, agreement, invoice, the parent and canonical document ...) join the rule with their LIVE roots; the rule
+        /// derives them from the row itself (<see cref="ChildRowRoots"/>). <c>null</c>: no such column came back.
         /// </summary>
-        public IReadOnlyList<LiveParentLookup>? Parents { get; init; }
+        public IReadOnlyDictionary<string, JsonElement>? Row { get; init; }
+
+        /// <summary>The one parent the route already decided for the caller (see <see cref="ForRoute"/>); not walked again.</summary>
+        internal (string Table, Guid Id)? AuthorizedParent { get; init; }
 
         /// <summary>The parents as live-parent read input (empty when none).</summary>
-        internal IReadOnlyList<LiveParentLookup> LiveParents => Parents ?? Array.Empty<LiveParentLookup>();
+        internal IReadOnlyList<LiveParentLookup> LiveParents =>
+            ExternalMultiRootRule.Except(ExternalMultiRootRule.LiveParentsOf(DocumentTable, Row), AuthorizedParent);
 
         /// <summary>
-        /// The rule input: the six root links ∪ the live roots of <see cref="Parents"/>. <paramref name="live"/> <c>null</c>
+        /// The rule input: the six root links ∪ the live roots of the row's parents. <paramref name="live"/> <c>null</c>
         /// resolves nothing, so a document naming a parent is withheld (fail closed).
         /// </summary>
-        public ChildRowRoots RuleInput(LiveParentRoots? live) => ChildRowRoots.Of(Links, Parents, live ?? LiveParentRoots.Empty);
+        public ChildRowRoots RuleInput(LiveParentRoots? live) =>
+            ChildRowRoots.Of(DocumentTable, Row, Links, live ?? LiveParentRoots.Empty, AuthorizedParent);
 
         /// <summary>
         /// Task 187, owner decision 2026-10-11 (option A) kept: on an INVOICE route the caller was authorized for the invoice
@@ -556,15 +562,9 @@ public class ExternalDataService
         /// put every parent of the invoice in the rule). Every other parent still is. A root route changes nothing.
         /// </summary>
         internal DocumentRootLinks ForRoute(DocumentParentKind parentKind, Guid routeParentId) =>
-            parentKind != DocumentParentKind.Invoice || Parents is null
+            parentKind != DocumentParentKind.Invoice
                 ? this
-                : this with
-                {
-                    Parents = Parents
-                        .Where(p => !(string.Equals(p.Table, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
-                                      && Guid.TryParse(p.LookupValue, out var id) && id == routeParentId))
-                        .ToArray(),
-                };
+                : this with { AuthorizedParent = ("sprk_invoice", routeParentId) };
 
         /// <summary>
         /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to, and (task 187) on every
@@ -580,7 +580,7 @@ public class ExternalDataService
             Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
             Raw(row, SelectColumns[4]), Raw(row, SelectColumns[5]))
         {
-            Parents = ExternalMultiRootRule.LiveParentsOf(DocumentTable, row),
+            Row = row,
         };
 
         private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
@@ -1594,13 +1594,13 @@ public class ExternalDataService
         // Task 187 (owner round 99, D-123): the stamp is a COPY, so the to-do's parents (the communication, document, event,
         // invoice ... it is filed under) are read too and their LIVE roots join the rule: a carrier to-do (its pair names
         // ordinary M, its sprk_regardingcommunication a communication under secure X) and a stale copy are withheld.
-        var parents = read.Rows.Select(r => ExternalMultiRootRule.LiveParentsOf(TodoTable, r.Extra)).ToList();
-        var live = await ReadLiveParentRootsAsync(parents, ct);
+        var live = await ReadLiveParentRootsAsync(read.Rows.Select(r => ExternalMultiRootRule.LiveParentsOf(TodoTable, r.Extra)), ct);
         var roots = read.Rows
-            .Select((r, i) => ChildRowRoots.Of(
+            .Select(r => ChildRowRoots.Of(
+                TodoTable, r.Extra,
                 ExternalMultiRootRule.Stamps(
                     r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                parents[i], live))
+                live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
         var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
@@ -1712,13 +1712,13 @@ public class ExternalDataService
         IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
     {
         // Task 187: the stamped roots plus the live roots of the event's parents (see GetTodosAsync).
-        var parents = rows.Select(r => ExternalMultiRootRule.LiveParentsOf(EventTable, r.Extra)).ToList();
-        var live = await ReadLiveParentRootsAsync(parents, ct);
+        var live = await ReadLiveParentRootsAsync(rows.Select(r => ExternalMultiRootRule.LiveParentsOf(EventTable, r.Extra)), ct);
         var roots = rows
-            .Select((r, i) => ChildRowRoots.Of(
+            .Select(r => ChildRowRoots.Of(
+                EventTable, r.Extra,
                 ExternalMultiRootRule.Stamps(
                     r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                parents[i], live))
+                live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
         return (rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList(), flags, live);
@@ -1855,9 +1855,8 @@ public class ExternalDataService
         var stamps = ExternalMultiRootRule.Stamps(
             RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
             RawLookup(row, "_sprk_regardingworkassignment_value"));
-        var parents = ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row);
-        var live = await ReadLiveParentRootsAsync(new[] { parents }, ct);
-        var roots = ChildRowRoots.Of(stamps, parents, live);
+        var live = await ReadLiveParentRootsAsync(new[] { ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row) }, ct);
+        var roots = ChildRowRoots.Of(binding.EntityLogicalName, row, stamps, live);
         var flags = await ReadSecureRootFlagsAsync(caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
         if (ExternalMultiRootRule.ChildRowReadable(caller, flags, roots))
             return LiveParentDecision.Readable;
