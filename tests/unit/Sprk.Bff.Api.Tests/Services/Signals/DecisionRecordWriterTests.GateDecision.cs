@@ -1,0 +1,333 @@
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
+using Xunit;
+using static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+
+namespace Sprk.Bff.Api.Tests.Services.Signals;
+
+/// <summary>
+/// Ontology task 042 (FR-23; main-session decision "A+C"): <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/>, the additive entry
+/// point that records an AUTOMATED communications-gate decision (authorize and deny) through the same content, filing, owner and create
+/// code as a review.
+/// </summary>
+/// <remarks>
+/// ADR-038 pairing: every column, option value and lookup asserted here was read from the LIVE spaarkedev1 schema (read-only describe of
+/// <c>sprk_decisionrecord</c>, 2026-10-14): <c>sprk_confirmedby</c>, <c>sprk_policyversion</c>, <c>sprk_gatesessionid</c> and
+/// <c>sprk_action</c> are NULLABLE (a row without them is creatable); <c>sprk_recordclass</c> Judgement 100000000;
+/// <c>sprk_decisionoutcome</c> Authorized 100000000 / Denied 100000001; <c>sprk_regardingcommunication</c>, <c>sprk_regardingmatter</c>,
+/// <c>sprk_regardingproject</c>, <c>sprk_matter</c>, <c>sprk_project</c>, <c>sprk_corerecordtype</c>, <c>sprk_corerecordid</c> all exist.
+/// The opt-in live seam test in <c>DecisionRecordWriterSeamTests</c> writes both paths against that schema.
+/// </remarks>
+public sealed partial class DecisionRecordWriterTests
+{
+    private static readonly Guid GateEvaluation = Guid.NewGuid();
+    private static readonly Guid GateRule = Guid.NewGuid();
+    private static readonly Guid GateProject = Guid.NewGuid();
+    private static readonly Guid GateWorkAssignment = Guid.NewGuid();
+
+    private static GateDecisionRecordRequest Gate(
+        bool authorize = true, Guid? direct = null, IReadOnlyDictionary<string, object?>? facts = null, string reason = "rule-matched-confidence-met") =>
+        new(CommunicationId, GateEvaluation, authorize, reason,
+            ProposedActionCode: "communication-ri-action", ProposedActionLabel: "Create a review task and notify the communication's owner",
+            facts ?? new Dictionary<string, object?>
+            {
+                ["correlationId"] = GateEvaluation,
+                ["communicationId"] = CommunicationId,
+                ["matchedRuleId"] = GateRule,
+                ["matchedRulePriority"] = 100,
+                ["confidence"] = 0.9,
+                ["threshold"] = 0.7,
+            },
+            PrivilegeFlagged: false, DirectFiledUnderId: direct);
+
+    /// <summary>A communication filed under <paramref name="columns"/> (regarding lookups), in a directory whose roots are ordinary.</summary>
+    private static Harness FiledCommunication(params (string Column, string Entity, Guid Id)[] columns)
+    {
+        var directory = Standard();
+        foreach (var (_, entity, id) in columns)
+            directory.WithOrdinaryRoot(entity, id);
+        directory.WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var h = new Harness(realResolver: directory.Resolver());
+        var row = new Entity("sprk_communication", CommunicationId);
+        foreach (var (column, entity, id) in columns)
+            row[column] = new EntityReference(entity, id);
+        h.Rows[("sprk_communication", CommunicationId)] = row;
+        return h;
+    }
+
+    [Fact]
+    public async Task Gate_Authorize_WritesAJudgementRecordFiledUnderTheCommunication_WithNoHumanNoPolicyVersionNoSignal()
+    {
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId));
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate(authorize: true));
+
+        var row = h.Row;
+        result.RecordClass.Should().Be(RecordedDecisionClass.Judgement);
+        result.ResolvedSignalIds.Should().BeEmpty();
+        Option(row, "sprk_recordclass").Should().Be(100000000, "Judgement is set explicitly (D-17 amendment), not derived");
+        Option(row, "sprk_decisionoutcome").Should().Be(100000000, "Authorized");
+        row.GetAttributeValue<string>("sprk_actioncode").Should().Be("communication-ri-action", "free text, not a catalog code");
+        row.Contains("sprk_action").Should().BeFalse("sprk_action is never set");
+        row.GetAttributeValue<string>("sprk_proposedaction").Should().Be("Create a review task and notify the communication's owner");
+        row.GetAttributeValue<string>("sprk_name").Should().StartWith("Judgement: ");
+        row.GetAttributeValue<string>("sprk_reason").Should().Be("rule-matched-confidence-met");
+
+        // No human, no policy version, no gate tier, no session gate, no Signal (the owner's closed set).
+        row.Contains("sprk_confirmedby").Should().BeFalse("no human decided in enrichment; never the BFF identity or an owner (D-129)");
+        row.Contains("sprk_policyversion").Should().BeFalse("the gate's rules are sprk_communicationrule rows");
+        row.Contains("sprk_gatetier").Should().BeFalse();
+        row.Contains("sprk_gatesessionid").Should().BeFalse("no SessionGate exists in enrichment (criterion 4 as amended)");
+        row.Contains("sprk_assignedtointernal").Should().BeFalse();
+        row.Contains(RecordCreatorPerson.Column).Should().BeFalse("nobody asked: no creator person");
+        row.GetAttributeValue<bool>("sprk_privilegeflagged").Should().BeFalse();
+        row.GetAttributeValue<DateTime>("sprk_decidedon").Should().Be(Now.UtcDateTime);
+
+        // sprk_steps: the one offered step, taken, outcome Authorized; no Signal ids; no follow-ons.
+        using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps"));
+        steps.RootElement.GetProperty("reviewId").GetString().Should().Be(GateEvaluation.ToString("D"));
+        steps.RootElement.GetProperty("resolvedSignalIds").GetArrayLength().Should().Be(0);
+        var step = steps.RootElement.GetProperty("steps").EnumerateArray().Single();
+        step.GetProperty("code").GetString().Should().Be("communication-ri-action");
+        step.GetProperty("taken").GetBoolean().Should().BeTrue();
+        step.GetProperty("outcome").GetString().Should().Be("Authorized");
+        row.GetAttributeValue<string>("sprk_followons").Should().Be("[]");
+
+        // The correlation id and the matched rule id and priority are in the fact snapshot.
+        var snapshot = row.GetAttributeValue<string>("sprk_factsnapshot");
+        snapshot.Should().Contain(GateEvaluation.ToString("D")).And.Contain(GateRule.ToString("D")).And.Contain("\"matchedRulePriority\":100");
+        snapshot.Should().Contain("automated: communications policy gate").And.NotContain("\"role\":null");
+
+        // Filed under the communication, stamped with its matter, and the core context copied (D-34).
+        row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId, "the stamp CoreAncestorResolver derived");
+        row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_matter"]);
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(MatterId.ToString("D").ToLowerInvariant());
+
+        // Owned by the resolver's team over EVERY parent, never a person (D-129/D-130).
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", ChildTeam));
+        h.Row.Contains("owninguser").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Gate_Deny_WritesAJudgementRecordWithOutcomeDenied_NoActionCode_AndTheStepNotTaken()
+    {
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId));
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate(authorize: false, reason: "rule-matched-confidence-below-threshold"));
+
+        var row = h.Row;
+        result.RecordClass.Should().Be(RecordedDecisionClass.Judgement, "a deny is Judgement too, not the Dismissal a review that took nothing derives");
+        Option(row, "sprk_recordclass").Should().Be(100000000);
+        Option(row, "sprk_decisionoutcome").Should().Be(100000001, "Denied");
+        row.Contains("sprk_actioncode").Should().BeFalse("FR-01: a deny has no action");
+        row.Contains("sprk_action").Should().BeFalse();
+        row.GetAttributeValue<string>("sprk_proposedaction").Should().Be("Create a review task and notify the communication's owner",
+            "what the gate proposed is still recorded");
+        row.GetAttributeValue<string>("sprk_name").Should().Be("Judgement: denied (rule-matched-confidence-below-threshold)");
+        row.GetAttributeValue<string>("sprk_reason").Should().Be("rule-matched-confidence-below-threshold");
+        row.Contains("sprk_confirmedby").Should().BeFalse();
+        row.Contains("sprk_policyversion").Should().BeFalse();
+
+        using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps"));
+        var step = steps.RootElement.GetProperty("steps").EnumerateArray().Single();
+        step.GetProperty("code").GetString().Should().Be("communication-ri-action");
+        step.GetProperty("taken").GetBoolean().Should().BeFalse();
+        step.GetProperty("outcome").GetString().Should().Be("Denied", "criterion 7: the proposed action as not taken with outcome Denied");
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId, "queryable per matter on the deny path too");
+    }
+
+    [Fact]
+    public async Task Gate_ACommunicationFiledUnderAProject_RecordsTheProjectAsCore_Criterion9()
+    {
+        var h = FiledCommunication(("sprk_regardingproject", "sprk_project", GateProject));
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_project").Id.Should().Be(GateProject, "D-34: the record's sprk_project is the project");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(GateProject);
+        h.Row.Contains("sprk_matter").Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_project"]);
+        h.Row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(GateProject.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task Gate_AMatterAndAProject_MatterWinsOverProject_ButBothStayStamped_D37()
+    {
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId), ("sprk_regardingproject", "sprk_project", GateProject));
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
+        h.Row.Contains("sprk_project").Should().BeFalse("one core pair: matter over project");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(GateProject, "queryable per project through the stamp");
+    }
+
+    [Fact]
+    public async Task Gate_TheRecordItIsDirectlyFiledUnder_DecidesBeforeMatterOverProject_D37()
+    {
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId), ("sprk_regardingproject", "sprk_project", GateProject));
+
+        await h.Writer.WriteGateDecisionAsync(Gate(direct: GateProject));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_project").Id.Should().Be(GateProject);
+        h.Row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(GateProject.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task Gate_ATieNeitherRuleDecides_StillRecordsTheDecision_WithoutACorePair_AndWarns()
+    {
+        var h = FiledCommunication(("sprk_regardingproject", "sprk_project", GateProject), ("sprk_regardingworkassignment", "sprk_workassignment", GateWorkAssignment));
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.Contains("sprk_corerecordtype").Should().BeFalse();
+        h.Row.Contains("sprk_corerecordid").Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(GateProject, "every stamp stays: the record is queryable by each");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingworkassignment").Id.Should().Be(GateWorkAssignment);
+        h.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("D-37"));
+    }
+
+    [Fact]
+    public async Task Gate_AnUnfiledCommunication_IsStillRecorded_FiledUnderTheCommunicationAlone()
+    {
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var h = new Harness(realResolver: directory.Resolver());
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
+        h.Row.Contains("sprk_regardingmatter").Should().BeFalse();
+        h.Row.Contains("sprk_corerecordtype").Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ChildTeam, "the communication's business unit's default team (D-129)");
+    }
+
+    [Fact]
+    public async Task Gate_ACommunicationUnderASecureMatter_IsASecureChild_OwnedByTheSecureTeam_AndTheOwnerIsAskedAboutEveryParent()
+    {
+        var directory = Standard()
+            .WithSecureRoot("sprk_matter", MatterId)
+            .WithRecord("sprk_communication", CommunicationId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+        var h = new Harness(realResolver: directory.Resolver()) { ReadBackTeam = SecureNamedTeam };
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureNamedTeam);
+        result.SecureOwnerTeamId.Should().Be(SecureNamedTeam, "D-33 / D-123: a gate record on a Secure matter is a secure child");
+        h.Row.Contains(RecordCreatorPerson.Column).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Gate_TheOwnerIsAskedWithTheCoreFirst_ThenTheCommunication_ThenTheStamps_AndNoRequester()
+    {
+        var h = new Harness();
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        var asked = h.OwnerAsks.Should().ContainSingle().Subject;
+        asked.Parents.Should().Equal(Parent("sprk_matter", MatterId), Parent("sprk_communication", CommunicationId));
+        asked.RequestedBy.Should().BeNull("no person asked: a system decision");
+    }
+
+    [Fact]
+    public async Task Gate_AnOwnerRefusal_WritesNothing_AndThrowsTheWritersOneException()
+    {
+        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "no business unit"));
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Gate_ACreateFailure_IsWrapped_NotLeaked()
+    {
+        var h = new Harness();
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse"));
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        var thrown = await act.Should().ThrowAsync<DecisionRecordRefusedException>();
+        thrown.Which.Reason.Should().Be(DecisionRecordRefusalReason.CreateFailed);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+    }
+
+    [Theory]
+    [InlineData("noFacts")]
+    [InlineData("emptyCommunication")]
+    [InlineData("emptyEvaluation")]
+    [InlineData("blankReason")]
+    [InlineData("longActionCode")]
+    [InlineData("blankLabel")]
+    public async Task Gate_AnInvalidRequest_IsRefusedBeforeAnyRead_AndNothingIsWritten(string flaw)
+    {
+        var h = new Harness();
+        var good = Gate();
+        var bad = flaw switch
+        {
+            "noFacts" => good with { Facts = new Dictionary<string, object?>() },
+            "emptyCommunication" => good with { CommunicationId = Guid.Empty },
+            "emptyEvaluation" => good with { EvaluationId = Guid.Empty },
+            "blankReason" => good with { Reason = " " },
+            "longActionCode" => good with { ProposedActionCode = new string('x', 101) },
+            _ => good with { ProposedActionLabel = "" },
+        };
+
+        var act = () => h.Writer.WriteGateDecisionAsync(bad);
+
+        var reason = (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason;
+        reason.Should().Be(flaw == "noFacts" ? DecisionRecordRefusalReason.FactSnapshotMissing : DecisionRecordRefusalReason.ReviewInvalid);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+        h.Entities.Invocations.Should().BeEmpty("validation runs before any Dataverse read");
+    }
+
+    [Fact]
+    public async Task Gate_AFilingThatCannotBeDerived_IsARefusal_NotALostCall_AndNothingIsWritten()
+    {
+        var h = new Harness { RowReadFault = new TimeoutException("dataverse") };
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Gate_TheReviewEntryPointIsUnchanged_AReviewStillNeedsAHumanAPolicyVersionAndASignal()
+    {
+        // WriteAsync keeps every refusal the gate path relaxes: the relaxation is in the new entry point, not in the shared content.
+        var h = new Harness();
+        var review = Request();
+
+        foreach (var broken in new[]
+                 {
+                     review with { ConfirmedByUserId = Guid.Empty },
+                     review with { PolicyVersionId = Guid.Empty },
+                     review with { ResolvedSignalIds = [] },
+                 })
+        {
+            var act = () => h.Writer.WriteAsync(broken);
+            (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        }
+
+        h.Created.Should().BeEmpty();
+    }
+}

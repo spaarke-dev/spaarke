@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Signals;
 /// sprk_workassignment, sprk_corerecordtype (-> sprk_recordtype_ref), sprk_corerecordid, sprk_steps, sprk_followons,
 /// sprk_gatetier, sprk_actioncode, sprk_action (nullable), sprk_confirmedby, sprk_decidedon, sprk_privilegeflagged.
 /// </remarks>
-public sealed class DecisionRecordWriterTests
+public sealed partial class DecisionRecordWriterTests
 {
     private static readonly Guid Review = Guid.NewGuid();
     private static readonly Guid PolicyVersion = Guid.NewGuid();
@@ -46,7 +46,7 @@ public sealed class DecisionRecordWriterTests
 
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
         public Mock<IRecordOwnershipResolver> Ownership { get; } = new();

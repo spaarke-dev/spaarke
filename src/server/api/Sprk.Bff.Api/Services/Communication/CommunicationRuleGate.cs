@@ -3,7 +3,9 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -220,32 +222,49 @@ public sealed class CommunicationRuleGate
 /// call, NO outbox row, NO ping, NO appnotification (the short-circuit is structural: the RI service is only
 /// invoked inside the <c>if (decision.Authorize)</c> branch). Never calls <c>IEventRulesService.FireAsync</c>.
 /// </summary>
+/// <remarks>
+/// <b>The Decision Record (ontology task 042, FR-23).</b> The gate's decision is persisted ONCE, right after the gate returns and BEFORE
+/// the authorize branch, so the authorize and the deny path share one call site and the gate is untouched. The write is
+/// <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/>; it can never change what this consumer does: a refusal or a fault is
+/// logged (<see cref="DecisionRecordEvents.GateDecisionNotRecorded"/>) and metered, and the RI action still runs on an authorize. The
+/// fact snapshot holds ids and numbers only (never the subject, sender or body).
+/// </remarks>
 public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 {
     private const string CommunicationEntity = "sprk_communication";
     private const string RegardingMatterColumn = "sprk_regardingmatter";
     private const string TriageCategoryColumn = "sprk_triagecategory";
 
+    /// <summary>The gate's proposed action as the Decision Record names it: free text, not a <c>DecisionActionCatalog</c> code (task 042).</summary>
+    internal const string ProposedActionCode = "communication-ri-action";
+
+    internal const string ProposedActionLabel = "Create a review task and notify the communication's owner";
+
     private readonly IGenericEntityService _entityService;
     private readonly CommunicationRuleGate _gate;
     private readonly CommunicationRiActionService _riAction;
     private readonly ILogger<RuleGatedAssessedConsumer> _logger;
     private readonly SignalEvaluationTrigger? _signalTrigger;
+    private readonly DecisionRecordWriter? _decisionRecords;
 
     /// <param name="signalTrigger">Ontology task 032 (D-12): queues the matter's Signal re-evaluation once a communication has
     /// been classified. Registered in production; null only where a test builds the consumer without it.</param>
+    /// <param name="decisionRecords">Ontology task 042 (FR-23): writes the gate decision's Decision Record on both paths. Registered in
+    /// production (<c>SignalsModule</c>); null only where a test builds the consumer without it, in which case nothing is recorded.</param>
     public RuleGatedAssessedConsumer(
         IGenericEntityService entityService,
         CommunicationRuleGate gate,
         CommunicationRiActionService riAction,
         ILogger<RuleGatedAssessedConsumer> logger,
-        SignalEvaluationTrigger? signalTrigger = null)
+        SignalEvaluationTrigger? signalTrigger = null,
+        DecisionRecordWriter? decisionRecords = null)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _riAction = riAction ?? throw new ArgumentNullException(nameof(riAction));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _signalTrigger = signalTrigger;
+        _decisionRecords = decisionRecords;
     }
 
     public async Task PublishAsync(CommunicationAssessedSignal signal, CancellationToken ct = default)
@@ -255,12 +274,21 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
         // Resolve the matter (regarding) for rule matching. Tenant is null today (single-tenant per environment);
         // a blank-tenant rule matches all tenants. A read failure resolves matter to null (matches all-matter rules).
         Guid? matterId = null;
+        Guid? directFiledUnderId = null;
         var classified = false;
         try
         {
             var comm = await _entityService
-                .RetrieveAsync(CommunicationEntity, signal.CommunicationId, new[] { RegardingMatterColumn, TriageCategoryColumn }, ct)
+                .RetrieveAsync(
+                    CommunicationEntity, signal.CommunicationId,
+                    new[] { RegardingMatterColumn, TriageCategoryColumn, CoreAncestorResolver.RegardingRecordIdColumn }, ct)
                 .ConfigureAwait(false);
+            // ADR-024 pair id: the record the communication is DIRECTLY filed under -- D-37's first tie-break for the Decision Record's
+            // core. Not the matter lookup (that one only feeds rule matching below, unchanged).
+            directFiledUnderId = Guid.TryParse(
+                comm?.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn)?.Trim(), out var filedUnder) && filedUnder != Guid.Empty
+                ? filedUnder
+                : null;
             var matter = comm?.GetAttributeValue<EntityReference>(RegardingMatterColumn);
             if (matter is not null && matter.Id != Guid.Empty)
             {
@@ -291,6 +319,9 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 
         var decision = await _gate.EvaluateAsync(request, ct).ConfigureAwait(false);
 
+        // Ontology task 042 (FR-23): persist the decision on BOTH paths, from this one call site, before the branch. Never throws.
+        await RecordDecisionAsync(signal, decision, directFiledUnderId, ct).ConfigureAwait(false);
+
         // FR-12 decides; FR-13 (task 042) executes. The RI action path is invoked ONLY on authorize — a DENY
         // returns here with NO seam call, NO outbox row, NO ping, NO appnotification (the short-circuit is
         // structural: nothing below runs on the deny path).
@@ -301,6 +332,86 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
                 signal.CommunicationId, decision.MatchedRuleId, decision.PrivilegeFlagged);
 
             await _riAction.ExecuteAuthorizedActionsAsync(signal, decision, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Task 042: the gate decision's Decision Record, on the authorize AND the deny path. Never changes the gate's outcome or this
+    /// consumer's behaviour: a refusal (already logged and metered by the writer under <see cref="DecisionRecordEvents.WriteRefused"/>) or
+    /// any other fault is logged at Error with <see cref="DecisionRecordEvents.GateDecisionNotRecorded"/> (the ids only) and the
+    /// unclassified ones are metered, so a lost record is visible in App Insights and never silent. Cancellation is not swallowed.
+    /// </summary>
+    private async Task RecordDecisionAsync(
+        CommunicationAssessedSignal signal, CommunicationRuleDecision decision, Guid? directFiledUnderId, CancellationToken ct)
+    {
+        if (_decisionRecords is null)
+        {
+            return;
+        }
+
+        var evaluationId = Guid.NewGuid();
+        try
+        {
+            var facts = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["correlationId"] = evaluationId,
+                ["communicationId"] = signal.CommunicationId,
+                ["gateOutcome"] = decision.Authorize ? "Authorized" : "Denied",
+                ["gateReason"] = decision.Reason,
+                ["confidence"] = decision.Confidence,
+                ["threshold"] = decision.Threshold,
+                ["matchedRuleId"] = decision.MatchedRuleId,
+                ["matchedRulePriority"] = await ReadRulePriorityAsync(decision.MatchedRuleId, ct).ConfigureAwait(false),
+                ["privilegeFlagged"] = decision.PrivilegeFlagged,
+            };
+
+            await _decisionRecords.WriteGateDecisionAsync(
+                new GateDecisionRecordRequest(
+                    CommunicationId: signal.CommunicationId,
+                    EvaluationId: evaluationId,
+                    Authorize: decision.Authorize,
+                    Reason: decision.Reason,
+                    ProposedActionCode: ProposedActionCode,
+                    ProposedActionLabel: ProposedActionLabel,
+                    Facts: facts,
+                    PrivilegeFlagged: decision.PrivilegeFlagged,
+                    DirectFiledUnderId: directFiledUnderId),
+                ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            // The writer has already logged (WriteRefused) and metered this refusal under its own reason.
+            _logger.LogError(DecisionRecordEvents.GateDecisionNotRecorded,
+                "[comms-policy] gate decision NOT recorded (writer refused: {Reason}) | CommunicationId: {CommunicationId}, EvaluationId: {EvaluationId}, Authorized: {Authorize}.",
+                ex.Reason, signal.CommunicationId, evaluationId, decision.Authorize);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(DecisionRecordEvents.GateDecisionNotRecorded, ex,
+                "[comms-policy] gate decision NOT recorded (unexpected failure) | CommunicationId: {CommunicationId}, EvaluationId: {EvaluationId}, Authorized: {Authorize}.",
+                signal.CommunicationId, evaluationId, decision.Authorize);
+            OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.GateRecordFailed);
+        }
+    }
+
+    /// <summary>The matched rule's <c>sprk_priority</c> for the fact snapshot (the gate's decision carries the rule id, not its priority).
+    /// Best effort: a rule that cannot be read leaves the priority out of the snapshot and never costs the record.</summary>
+    private async Task<int?> ReadRulePriorityAsync(Guid? ruleId, CancellationToken ct)
+    {
+        if (ruleId is not { } id || id == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            var rule = await _entityService.RetrieveAsync("sprk_communicationrule", id, new[] { "sprk_priority" }, ct).ConfigureAwait(false);
+            return rule?.GetAttributeValue<int?>("sprk_priority");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[comms-policy] could not read the priority of rule {RuleId} for the Decision Record; recording without it.", id);
+            return null;
         }
     }
 }
