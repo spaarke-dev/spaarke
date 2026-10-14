@@ -66,6 +66,10 @@
          a single auth stack version across services. Api-side ONLY — the
          Worker host has no auth surface. -->
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
+    <!-- GHSA-846f-f764-76mx (HIGH, published 2026-10-13): Microsoft.Identity.Web 4.14.2 brings
+         System.Security.Cryptography.Pkcs 10.0.10 transitively (<= 10.0.12 is vulnerable). Pin the patched
+         10.0.13; the pin also flows to the Tests and LoadTests projects that reference this one. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <!-- JwtBearer transitive via Microsoft.Identity.Web but referenced
          directly per POML step 2 for explicit intent. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />

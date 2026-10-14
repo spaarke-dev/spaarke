@@ -392,6 +392,65 @@ caller on a stamp; none is a boot failure.
 with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
 PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
+### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet — CLOSED 2026-10-13
+
+| Field | Value |
+|---|---|
+| **Status** | **Closed 2026-10-13.** D32 approved 2026-10-10 and applied 2026-10-13 (M1 PASS). Live checks as the app (Worker UAMI → MI-FIC → Spaarke Exchange Admin) the same day: M2, M3, M4a/b, M5, M7 PASS; M6 not run (optional). Results: `notes/t263-customer-shared-mailbox.md` §5. The full ensure route (M4 `Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles) is proven by T186 at H14m |
+| **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
+
+T263 built H14m: `sprk-{customerId}-mail` is created as a shared mailbox, added to `Spaarke-AppAccess-{customerId}`,
+authorization-tested, and recorded as the stamp's verified `sprk_communicationaccount` row. H13 re-checks all of it.
+`Spaarke Exchange Admin` holds only `Spaarke App RBAC Admin` plus `View-Only Recipients`, so it cannot run `New-Mailbox`
+or `Add-DistributionGroupMember`. Widening it is an owner decision (D25; `provisioning.md`).
+
+The sidecar detects the missing cmdlets before any write, so every run fails Resumable at H14m with
+`h14m-mailbox-ensure-failed` ("PRQ-E-16 … not applied") and creates nothing.
+
+**Needs**:
+1. The owner approves D32: the two custom roles plus one scope in `notes/t263-customer-shared-mailbox.md` §5, with
+   the exact cmdlets and parameters.
+2. An Organization Management admin applies them (deployment guide §4.2.1 step 5).
+3. Run live checks M1–M7, notably M5: whether `Get-Recipient -Filter "Members -eq '<DN>'"` works. If it does not, use
+   the one-line fallback in the note.
+
+Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
+
+### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` (and, with UAC 185, `sprk_externalinvitecodehash`) field locks on stamps
+
+| Field | Value |
+|---|---|
+| **Status** | Open — before T240d production (the column lands with UAC-r2 PR #1801 / owner round 97) |
+| **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
+
+UAC-r2 task 184 adds `contact.sprk_externalinvitedon`, the pending-invite marker E11 trusts on the CIAM plane. It is
+field-secured through the existing `Spaarke BFF-Managed Field Readers` (Read) and `Writers` (Read/Create/Update) profiles and
+ships in SpaarkeMaster. A user who could write it could open E11's email bind, so a stamp where the lock did not arrive is
+a tenant-isolation gap. H7b (`SecureRecordSetupProcedure`) already verifies the other BFF-managed column locks but not this
+one. **Fix:** add the column to H7b's lock verification (reuse `scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify`'s
+checks); H7b never secures a column itself. If a check ever writes field-security rows, allow for `0x80041103`
+(MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
+**Widened 2026-10-13 (UAC task 185 design):** UAC task 185 adds `contact.sprk_externalinvitecodehash`, the invite-code
+hash, through `scripts/Set-ExternalInviteCodeHashSchema.ps1`. H7b must verify it too, with different grants: Readers
+have **no** permission row for it (UAC's script, `48db7adb3`, never creates one; a missing row and a 0/0/0 row both
+mean no access), and Writers 4/4/4. Any Readers access is a FAIL. The script refuses to run without 184's marker column.
+
+### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner/business action; **before the first production customer** |
+| **Filed** | 2026-10-13 (ADR-028 A9, owner decision relayed by SPA-r3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1811 |
+
+Under A9, workforce contacts consent to, and sign in through, Spaarke's multitenant workforce SPA client and each
+stamp's multitenant BFF app. Unverified multitenant apps meet risk-based step-up consent and show "unverified" to
+customer admins. **Needs:** a Microsoft AI Cloud Partner Program account, and a verified publisher domain (not
+`*.onmicrosoft.com`) set on those apps. Provisioning's A9 work (H3 v2 tokens + `knownClientApplications`, intake
+`customerWorkforceTenantIds`, admin-consent link): `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->

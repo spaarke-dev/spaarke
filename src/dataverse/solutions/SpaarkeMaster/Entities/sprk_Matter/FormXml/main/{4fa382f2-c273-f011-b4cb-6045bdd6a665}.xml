@@ -1101,8 +1101,6 @@
         <controlDescription forControl="{535b5bb1-2a4e-4fb4-87aa-be8351b15fb2}">
           <customControl formFactor="0" name="sprk_Sprk.SemanticSearchControl">
             <parameters>
-              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
-              <appInsightsKey type="SingleLine.Text" static="true">7a15beb2-6bc5-4cc1-ab17-401556f88ef0</appInsightsKey>
               <searchScope type="Enum" static="true">entity</searchScope>
               <showFilters type="TwoOptions" static="true">false</showFilters>
               <resultsLimit type="Whole.None" static="true">25</resultsLimit>
@@ -1111,8 +1109,6 @@
           </customControl>
           <customControl formFactor="2" name="sprk_Sprk.SemanticSearchControl">
             <parameters>
-              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
-              <appInsightsKey type="SingleLine.Text" static="true">7a15beb2-6bc5-4cc1-ab17-401556f88ef0</appInsightsKey>
               <searchScope type="Enum" static="true">entity</searchScope>
               <showFilters type="TwoOptions" static="true">false</showFilters>
               <resultsLimit type="Whole.None" static="true">25</resultsLimit>
@@ -1121,8 +1117,6 @@
           </customControl>
           <customControl formFactor="1" name="sprk_Sprk.SemanticSearchControl">
             <parameters>
-              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
-              <appInsightsKey type="SingleLine.Text" static="true">7a15beb2-6bc5-4cc1-ab17-401556f88ef0</appInsightsKey>
               <searchScope type="Enum" static="true">entity</searchScope>
               <showFilters type="TwoOptions" static="true">false</showFilters>
               <resultsLimit type="Whole.None" static="true">25</resultsLimit>

@@ -119,6 +119,16 @@ public static class H13Rejections
     /// </summary>
     public const string SecureIsolationInconclusive = "h13-secure-isolation-inconclusive";
 
+    /// <summary>
+    /// Task 263 (#1562): the customer's shared mailbox is missing, foreign, outside its scope group or not authorized for
+    /// the stamp identity's mail roles, or the stamp lacks exactly one active, shared, Verified sprk_communicationaccount
+    /// row for it. QuarantineRequired.
+    /// </summary>
+    public const string CustomerMailboxFailed = "h13-customer-mailbox-failed";
+
+    /// <summary>Task 263: the customer mailbox check reached no verdict (missing input, sidecar or Dataverse unreachable). Resumable.</summary>
+    public const string CustomerMailboxInconclusive = "h13-customer-mailbox-inconclusive";
+
     // ---- Keyless stamp (task 230b, owner D13) ----
 
     /// <summary>
@@ -220,6 +230,9 @@ public static class H13Gates
 
     /// <summary>Flips to Verified when the stamp BFF's secure-record isolation census answers <c>isolated</c> (task 260).</summary>
     public const string SecureIsolationVerified = "h13-secure-isolation";
+
+    /// <summary>Flips to Verified when the customer's shared mailbox and its verified account row are in place (task 263).</summary>
+    public const string CustomerMailboxVerified = "h13-customer-mailbox";
 
     /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";

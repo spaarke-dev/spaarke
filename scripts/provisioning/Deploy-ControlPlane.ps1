@@ -1185,11 +1185,10 @@ if (-not $SkipConfigVerification) {
         try {
             $missing = Get-MissingRequiredConfigKeys -SiteResourceGroup $ResourceGroupName -AppServiceName $WorkerAppServiceName -RequiredKeys $script:WorkerRequiredConfigKeys
             if ($missing.Count -gt 0) {
-                $script:VerificationFailures.Add("Worker site '$WorkerAppServiceName' is MISSING config key(s): $($missing -join ', '). Note: the Worker's required-key list intentionally reflects its CURRENT (pre-C5.1-fix) Bicep shape -- see this script's .DESCRIPTION 'CONFIG-KEY VERIFICATION - DISCOVERED DRIFT' note. A missing key here means the live site diverges even from that shape.") | Out-Null
+                $script:VerificationFailures.Add("Worker site '$WorkerAppServiceName' is MISSING config key(s): $($missing -join ', '). The Worker uses the canonical NFR-05 shape plus AZURE_CLIENT_ID (see .DESCRIPTION 'CONFIG-KEY VERIFICATION') -- STOP and investigate before relying on this deploy.") | Out-Null
             }
             else {
                 Write-Success 'All required Worker config keys present and non-empty.'
-                Write-Info 'Reminder: Worker key SHAPE still diverges from the canonical NFR-05/C5.1 shape used by .Api (filed gap, no owning task as of this script''s authoring).'
             }
         }
         catch {
