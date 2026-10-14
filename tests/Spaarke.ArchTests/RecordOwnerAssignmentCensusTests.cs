@@ -237,7 +237,7 @@ public class RecordOwnerAssignmentCensusTests
         // ── Task 182 (ontology child-record contract C7, audit F4): the ontology writers, as they stand at the head of
         // docs/ontology-platform-design. Each entry says what the code does TODAY. A Pending waiver is not a way
         // to turn the build green: it names the ontology task that routes the writer (contract §4), and that task
-        // moves its entry to Routed when it lands (142 moved the Decision Record's). ─────────────────────────────────────
+        // moves its entry to Routed when it lands (142 moved the Decision Record's, 143 the Signal's). ─────────────────────────────────────
         new CensusEntry("DecisionActionExecutors.cs", "sprk_budgetrevision", 1, Disposition.Routed,
             "Ontology task 044 (D-33/D-38): ReviseBudgetExecutor resolves the revision's owner through "
             + "IRecordOwnershipResolver in its preflight (secure-if-any over the matter and the budget), refuses before any "
@@ -250,12 +250,14 @@ public class RecordOwnerAssignmentCensusTests
             + "refusal or a fault writes nothing. A personal no-core To Do's record goes to its Assigned To's business-unit "
             + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
             + "families (#1778) before any write."),
-        new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Waived,
-            "Pending ontology task 143 (contract C3, audit F2/F3). Today only a secure answer of the resolver (core "
-            + "record, subject as parent) is applied (ApplyTo). An ordinary Signal keeps the writer identity as owner with "
-            + "owningbusinessunit set directly, and a no-core Signal is owned by its subject's owner. Task 143 implements "
-            + "the D-130 owner on every path.",
-            WaiverKind.Pending),
+        new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Routed,
+            "Ontology task 143 (contract C3, audit F2/F3, D-130): BuildEntity writes RecordOwnershipResolver's answer over the "
+            + "Signal's parents (its core record, its subject and every core-ancestor stamp) onto the row with ApplyTo, with "
+            + "the requesting person as RequestedBy (null for every job-raised Signal). A no-core Signal takes the same "
+            + "resolver over its subject, and a personal no-core To Do's Signal goes to its Assigned To's business-unit team "
+            + "(D-134, PersonalToDoAssignee) with secure-parent precedence. A refusal, or an answer that names no team, writes "
+            + "nothing; no owningbusinessunit is written. The job's no-core follow re-owns through SecureChildReconciler."
+            + "ReownOrdinaryRowAsync (UAC task 183)."),
     };
 
     /// <summary>
@@ -523,11 +525,6 @@ public class RecordOwnerAssignmentCensusTests
             "appnotification from a playbook — owned by its recipient."),
         new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
             "A Direct (two-party) thread — per-participant by design (E2)."),
-        new OwnerWriteEntry("SignalWriter.cs", "BuildEntity", 1, OwnerWriteKind.PerUser,
-            "Ontology task 037 (D-35): a Do-lane Signal whose item has NO core record is owner-only: it is owned by the item's " +
-            "own owner, copied from the item and read back. Reached only on CoreAncestorResolver no-core status (Error " +
-            "escalates); every Signal that has a core record takes the resolver's answer (ApplyTo) or the FR-14 business unit. " +
-            "uac-r2 approved on #1355."),
         new OwnerWriteEntry("PlaybookService.cs", "BuildCreatePayload", 1, OwnerWriteKind.PerUser,
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
@@ -535,11 +532,9 @@ public class RecordOwnerAssignmentCensusTests
         // spaarke-ontology-platform-r1 task 043 (owner D-129): DecisionRecordWriter.WriteAsync no longer writes an owner of its own; both
         // the core and the no-core Decision Record take the resolver's answer through ApplyTo (the censused resolver write), so the
         // former PerUser entry for the no-core item's owner is gone.
-        // spaarke-ontology-platform-r1 task 031 (task 037 hand-off, D-35): needs uac-r2 review (listed PerUser, as BuildEntity above).
-        new OwnerWriteEntry("SignalWriter.cs", "ReassignNoCoreOwnerAsync", 1, OwnerWriteKind.PerUser,
-            "A no-core Do-lane Signal follows its item's owner (D-35): when the To Do / event is reassigned, the nightly job "
-            + "reassigns the Signal to the item's CURRENT owner (a user or team read from the item), instead of escalating "
-            + "no_core_owner_mismatch every pass. Reached only for a Signal with no core record whose item still has none."),
+        // spaarke-ontology-platform-r1 task 143 (D-130): SignalWriter writes no owner of its own either. BuildEntity applies the
+        // resolver's answer (ApplyTo) on every path, and ReassignNoCoreOwnerAsync re-owns through SecureChildReconciler.
+        // ReownOrdinaryRowAsync (listed above), so the former PerUser entries for the no-core item's owner are gone.
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
@@ -664,14 +659,9 @@ public class RecordOwnerAssignmentCensusTests
         @"(?:\$@|@\$|\$|@)?""owningbusinessunit(?:@odata\.bind)?""",
         new Regex(@"const\s+string\s+(?<name>\w+)\s*=\s*(?:\$@|@\$|\$|@)?""owningbusinessunit(?:@odata\.bind)?""\s*;", RegexOptions.Compiled));
 
-    private static readonly IReadOnlyList<OwnerWriteEntry> BusinessUnitWrites = new[]
-    {
-        new OwnerWriteEntry("SignalWriter.cs", "BuildEntity", 1, OwnerWriteKind.Pending,
-            "Pending ontology task 143 (contract C3, audit F2): the FR-14 path leaves an ordinary Signal owned by the writer "
-            + "identity and sets owningbusinessunit to the grouping matter's unit. Task 143 implements the D-130 owner "
-            + "(the parent's business-unit default team) and removes this write; F2 waits on the owner's decision to give "
-            + "business-unit default teams Read (0x80040299)."),
-    };
+    // Empty since ontology task 143 removed the last one (SignalWriter.BuildEntity's FR-14 write): every Signal now takes the
+    // resolver's team, and its business unit derives from it.
+    private static readonly IReadOnlyList<OwnerWriteEntry> BusinessUnitWrites = Array.Empty<OwnerWriteEntry>();
 
     [Fact(DisplayName = "Task 182: every direct owningbusinessunit write in the server is censused, and each is Pending removal")]
     public void EveryBusinessUnitWriteIsCensused()
@@ -2054,6 +2044,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
         new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783)"),
+        new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
@@ -2082,6 +2073,8 @@ public class RecordOwnerAssignmentCensusTests
         ["ExternalDataService.cs"] = "external portal: the person is a CONTACT, and sprk_createdbyperson names a systemuser",
         ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
         ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
+        ["SignalReevaluationJob.cs"] = "job-raised Signals (the nightly pass and the event triggers, through the same evaluate-plan-write path): "
+            + "nobody asked, so SignalWriteRequest.RequestedBy is null (ontology task 143)",
     };
 
     private static readonly Regex PersonToken = new(
@@ -2112,9 +2105,11 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Empty(MissingCreatorPersonColumn(created,
             new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" }));
 
-        // The real stamped set carries the budget revision (ontology task 147) and the Decision Record (task 142), so neither is reported.
+        // The real stamped set carries the budget revision (ontology task 147), the Decision Record (task 142) and the Signal
+        // (task 143), so none is reported.
         Assert.Contains("sprk_budgetrevision", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
         Assert.Contains("sprk_decisionrecord", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
+        Assert.Contains("sprk_signal", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
     }
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]

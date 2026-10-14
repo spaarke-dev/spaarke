@@ -376,8 +376,24 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             await GuardAsync(policy, "reassign", signal.SubjectId, counts, writerLogged: true, async () =>
             {
-                await _writer.ReassignNoCoreOwnerAsync(signal.Id, owner, policy.Code, ct).ConfigureAwait(false);
-                counts.Reassigned++;
+                // Task 143: the re-own goes through uac-r2's ReownOrdinaryRowAsync (via the writer), which refuses a Secure-BU row
+                // or team and a user-owned row; a refusal is already logged and metered by the writer and makes the run partial.
+                switch (await _writer.ReassignNoCoreOwnerAsync(signal.Id, owner, policy.Code, ct).ConfigureAwait(false))
+                {
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.Reowned:
+                        counts.Reassigned++;
+                        break;
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.AlreadyOwned:
+                        counts.Unchanged++;
+                        break;
+                    case Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.NotFound
+                        or Sprk.Bff.Api.Services.Access.OrdinaryRowReownOutcome.Conflict:
+                        counts.ChangedSinceRead++;
+                        break;
+                    default:
+                        counts.Refused++;
+                        break;
+                }
             }).ConfigureAwait(false);
         }
 
