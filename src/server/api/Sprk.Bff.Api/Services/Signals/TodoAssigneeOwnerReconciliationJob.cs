@@ -41,7 +41,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// per run (page cap); the nightly one carries a cursor across runs (the distributed cache) until it has read every row.</para>
 /// <para><b>Live filing decides (uac-r2 F1, D-34).</b> Rows are selected by <c>sprk_regardingtodo</c>. A To Do filed under
 /// anything is not personal: under a core record (<see cref="CoreAncestorResolver"/>) its rows are the re-file rule's
-/// (<c>SkippedCored</c>); under a non-core record it keeps its own team (<c>SkippedNotPersonal</c>). A row whose own live
+/// (<c>SkippedCored</c>); under a non-core record it keeps its own team (D-135 K2), so its rows take the To Do's own team, as
+/// the writers give them (<c>FiledNonCore</c>; a row the assignee pass moved earlier comes back). A row whose own live
 /// <c>sprk_regarding{matter,project,workassignment,servicerequest}</c> stamp is set is skipped as cored too. The immutable
 /// decision context (<c>sprk_corerecordid</c>, <c>sprk_corerecordtype</c>) is never read.</para>
 /// <para><b>Secure wins (D-134 item 7).</b> Before a row is written its parents are resolved together
@@ -277,11 +278,22 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         }
         else if (status == StatusOk
                  && (counts.RepairFailures > 0 || counts.Unverified > 0 || counts.Truncated || counts.Resumed
-                     || counts.ClaimHeld > 0 || counts.AccessDenied > 0 || counts.AccessDeniedHeld > 0))
+                     || counts.ClaimHeld > 0 || counts.AccessDenied > 0 || counts.AccessDeniedHeld > 0
+                     || counts.ConfigurationRefusals > 0))
         {
             // A run that did not decide every row, or did not settle every re-own it attempted, is never reported clean.
             // Conflict and Gone are not here: nothing was owed (the row changed or went), and a Conflict is carried.
             status = StatusPartial;
+        }
+
+        if (status == StatusPartial)
+        {
+            // ADR-036: a run that is not a success says why in its ErrorMessage, not only in ResultJson counts.
+            problems.Add(string.Create(CultureInfo.InvariantCulture,
+                $"Partial: {counts.Unverified} row(s) not decided, {counts.RepairFailures} re-own(s) failed, "
+                + $"{counts.AccessDenied + counts.AccessDeniedHeld} refused or held for a missing privilege, "
+                + $"{counts.ClaimHeld} claimed by another run, {counts.ConfigurationRefusals} refused by configuration "
+                + $"(Secure Record unit or team, or a unit's default team); not-decided To Dos are carried to the next run."));
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
@@ -291,15 +303,15 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} mode={Mode} attempt={Attempt} fullPass={FullPass} recentToDos={RecentToDos} "
             + "carriedToDos={CarriedToDos} scanned={Scanned} stale={Stale} reowned={Reowned} alreadyApplied={AlreadyApplied} "
-            + "skippedCored={SkippedCored} skippedNotPersonal={SkippedNotPersonal} skippedSecure={SkippedSecure} "
-            + "skippedRefused={SkippedRefused} skippedUserOwned={SkippedUserOwned} skippedGone={SkippedGone} "
+            + "skippedCored={SkippedCored} filedNonCore={FiledNonCore} skippedSecure={SkippedSecure} "
+            + "skippedRefused={SkippedRefused} configurationRefusals={ConfigurationRefusals} skippedUserOwned={SkippedUserOwned} skippedGone={SkippedGone} "
             + "skippedConflict={SkippedConflict} fallbackNoAssignee={FallbackNoAssignee} fallbackAmbiguous={FallbackAmbiguous} "
             + "fallbackDisabled={FallbackDisabled} accessDenied={AccessDenied} accessDeniedHeld={AccessDeniedHeld} "
             + "claimHeld={ClaimHeld} repairFailures={RepairFailures} unverified={Unverified} scanFailures={ScanFailures} "
             + "truncated={Truncated} resumed={Resumed} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, context.Attempt, counts.FullPass, counts.RecentToDos, counts.CarriedToDos, counts.Scanned,
-            counts.Stale, counts.Reowned, counts.AlreadyApplied, counts.SkippedCored, counts.SkippedNotPersonal,
-            counts.SkippedSecure, counts.SkippedRefused, counts.SkippedUserOwned, counts.SkippedGone, counts.SkippedConflict,
+            counts.Stale, counts.Reowned, counts.AlreadyApplied, counts.SkippedCored, counts.FiledNonCore,
+            counts.SkippedSecure, counts.SkippedRefused, counts.ConfigurationRefusals, counts.SkippedUserOwned, counts.SkippedGone, counts.SkippedConflict,
             counts.FallbackNoAssignee, counts.FallbackAmbiguous, counts.FallbackDisabled, counts.AccessDenied,
             counts.AccessDeniedHeld, counts.ClaimHeld, counts.RepairFailures, counts.Unverified, counts.ScanFailures,
             counts.Truncated, counts.Resumed, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
@@ -325,9 +337,10 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                     counts.Reowned,
                     counts.AlreadyApplied,
                     counts.SkippedCored,
-                    counts.SkippedNotPersonal,
+                    counts.FiledNonCore,
                     counts.SkippedSecure,
                     counts.SkippedRefused,
+                    counts.ConfigurationRefusals,
                     counts.SkippedUserOwned,
                     counts.SkippedGone,
                     counts.SkippedConflict,
@@ -450,10 +463,12 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                         rows.TryAdd((table, e.Id), e);
                     if (truncated)
                     {
+                        // A bound, not a fault: every row read is decided on its own (each row's owner is decided per row),
+                        // and the rest wait for the nightly recompute, whose cursor reaches them. Excluding the batch instead
+                        // would also drop the rows the nightly pass read, so a batch that always overflows would never be decided.
                         run.Counts.Truncated = true;
-                        unread.UnionWith(batch);
                         run.Problems.Add($"{table}: the rows of {batch.Length} recently changed To Do(s) exceeded the page bound; "
-                                         + "they are read again next run.");
+                                         + "the rows read were decided, the rest wait for the nightly recompute.");
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -601,7 +616,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             answer = assignee.Outcome switch
             {
                 PersonalToDoAssignee.Outcome.ToDoNotFound => new ToDoAnswer(todoId, ToDoKind.Gone),
-                PersonalToDoAssignee.Outcome.Filed => await FiledAnswerAsync(todoId, ct).ConfigureAwait(false),
+                PersonalToDoAssignee.Outcome.Filed => await FiledAnswerAsync(run, todoId, ct).ConfigureAwait(false),
                 PersonalToDoAssignee.Outcome.NoAssignedTo or PersonalToDoAssignee.Outcome.NoLinkedUser =>
                     new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.NoAssignee),
                 PersonalToDoAssignee.Outcome.SeveralUsers => new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.Ambiguous),
@@ -621,6 +636,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             case FallbackReason.NoAssignee: run.Counts.FallbackNoAssignee++; break;
             case FallbackReason.Ambiguous: run.Counts.FallbackAmbiguous++; break;
             case FallbackReason.Disabled: run.Counts.FallbackDisabled++; break;
+            case FallbackReason.FiledNonCore: run.Counts.FiledNonCore++; break;
         }
 
         run.ToDos[todoId] = answer;
@@ -628,13 +644,24 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     }
 
     /// <summary>A To Do filed under something: under a core record it is the re-file rule's (cored); otherwise it keeps its own
-    /// team (owner K2). Which one is the To Do's CURRENT core (<see cref="CoreAncestorResolver"/>), never a row's decision context.</summary>
-    private async Task<ToDoAnswer> FiledAnswerAsync(Guid todoId, CancellationToken ct)
+    /// team (owner K2), so its rows take the To Do's own team, as the writers give them. Which one is the To Do's CURRENT core
+    /// (<see cref="CoreAncestorResolver"/>), never a row's decision context. A fault throws (Unverified, carried); a data
+    /// condition a retry does not change (<see cref="CoreAncestorResult.IsPermanent"/>) is refused and not carried.</summary>
+    private async Task<ToDoAnswer> FiledAnswerAsync(Run run, Guid todoId, CancellationToken ct)
     {
         var core = await _coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct).ConfigureAwait(false);
+        if (!core.Succeeded && core.IsPermanent)
+        {
+            _logger.LogWarning("{Prefix} To Do {TodoId}: its core record cannot be derived ({Error}); its rows are refused, not "
+                + "written. correlationId={CorrelationId}", LogPrefix, todoId, core.Error, run.Context.CorrelationId);
+            return new ToDoAnswer(todoId, ToDoKind.CoreRefused, Detail: core.Error);
+        }
+
         if (!core.Succeeded)
             throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
-        return new ToDoAnswer(todoId, core.Stamps.Count > 0 ? ToDoKind.Cored : ToDoKind.NotPersonal);
+        return core.Stamps.Count > 0
+            ? new ToDoAnswer(todoId, ToDoKind.Cored)
+            : new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.FiledNonCore);
     }
 
     /// <summary>The assignee's business-unit team (D-134 via <see cref="RecordOwnershipContext.ForUserTeam"/>), once per user per run.</summary>
@@ -658,7 +685,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         {
             case ToDoKind.Gone: counts.SkippedGone++; return null;
             case ToDoKind.Cored: counts.SkippedCored++; return null;
-            case ToDoKind.NotPersonal: counts.SkippedNotPersonal++; return null;
+            case ToDoKind.CoreRefused: counts.SkippedRefused++; return null;
             case ToDoKind.Unverified:
                 counts.Unverified++;
                 run.Unsettled.Add(todo.TodoId);
@@ -755,6 +782,8 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         if (parents.IsRefused || !parents.IsOwned)
         {
             run.Counts.SkippedRefused++;
+            if (IsConfigurationRefusal(parents.RefusalCode))
+                run.Counts.ConfigurationRefusals++;
             _logger.LogWarning("{Prefix} {Table} {Id}: the ownership resolver refused its parents ({Code}: {Reason}); not written.",
                 LogPrefix, table, id, parents.RefusalCode, parents.Reason);
             return null;
@@ -767,6 +796,8 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             return team.OwningTeamId;
 
         run.Counts.SkippedRefused++;
+        if (IsConfigurationRefusal(todo.AssigneeTeam?.RefusalCode))
+            run.Counts.ConfigurationRefusals++;
         _logger.LogWarning("{Prefix} {Table} {Id}: the business-unit team of the assignee {UserId} was refused ({Code}: {Reason}); "
             + "not written.", LogPrefix, table, id, todo.AssigneeUserId, todo.AssigneeTeam?.RefusalCode, todo.AssigneeTeam?.Reason);
         return null;
@@ -814,6 +845,10 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// <summary>The subjects of every Signal a Decision Record resolved (each Signal's ownership-parent lookups).</summary>
     private static async Task<List<RecordOwnershipParent>> ResolvedSignalSubjectsAsync(Run run, Guid recordId, CancellationToken ct)
     {
+        // Without the Signal table's columns the subjects cannot be asked about, and a record with none would read as ordinary:
+        // not decided (Unverified), never written past an unchecked secure subject.
+        if (!run.HostMap.ContainsKey(SignalTable))
+            throw new InvalidOperationException("the Signal columns were not probed, so the record's resolved subjects cannot be read");
         var lineage = SecureChildLineage.Children[SignalTable].Lookups;
         var columns = run.Hosts(SignalTable).Parents;
         var query = new QueryExpression(SignalTable) { ColumnSet = new ColumnSet(columns.ToArray()), NoLock = true };
@@ -913,7 +948,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                     run.Unsettled.Add(row.TodoId);
                     break;
                 default:
-                    if (SignalWriter.IsAccessDeniedMessage(result.Detail))
+                    if (IsPrivilegeRefusal(result.Detail))
                     {
                         counts.AccessDenied++;
                         denied = true;
@@ -949,6 +984,26 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             }
         }
     }
+
+    /// <summary>
+    /// A refusal that comes from the tenant's configuration, not from one row's data (the Secure Record unit or its team cannot
+    /// be named; a business unit has no single default team). It refuses every row alike, so a run that meets one is partial,
+    /// never a clean "nothing to do".
+    /// </summary>
+    private static bool IsConfigurationRefusal(string? code) =>
+        code is RecordOwnerRefusal.SecureBusinessUnitAmbiguous
+            or RecordOwnerRefusal.SecureOwnerTeamUnresolved
+            or RecordOwnerRefusal.NoDefaultOwnerTeam;
+
+    /// <summary>
+    /// Whether a Failed re-own is Dataverse's privilege refusal (F2: the target team's role lacks Read). The reconciler's
+    /// conditional PATCH (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>) ends in <c>EnsureSuccessStatusCode</c>, so on
+    /// the Web API path the refusal reaches <c>Detail</c> as the HTTP status text "403 (Forbidden)", with no 0x80040299 code;
+    /// an SDK-path fault carries the code or "Privilege Check" text (<see cref="SignalWriter.IsAccessDeniedMessage"/>).
+    /// </summary>
+    internal static bool IsPrivilegeRefusal(string? detail) =>
+        SignalWriter.IsAccessDeniedMessage(detail)
+        || (detail is not null && detail.Contains("403 (Forbidden)", StringComparison.OrdinalIgnoreCase));
 
     // ── The nightly recompute's schedule and cursors ───────────────────────────────────────────────────────────────
 
@@ -1114,14 +1169,15 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         /// <summary>Personal, with one eligible assignee: their team.</summary>
         Assignee,
 
-        /// <summary>Personal, no single eligible assignee: the To Do's own team.</summary>
+        /// <summary>The To Do's own team: personal with no single eligible assignee, or filed under a non-core record (K2).</summary>
         Fallback,
 
         /// <summary>Filed under a core record: the re-file rule's.</summary>
         Cored,
 
-        /// <summary>Filed under a non-core record: keeps its own team (K2), not this job's.</summary>
-        NotPersonal,
+        /// <summary>Its core cannot be derived for a data reason a retry does not change (two cores of one root, a missing
+        /// row): refused, not carried.</summary>
+        CoreRefused,
 
         /// <summary>The To Do no longer exists.</summary>
         Gone,
@@ -1135,6 +1191,9 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         NoAssignee,
         Ambiguous,
         Disabled,
+
+        /// <summary>Not personal: filed under a non-core record, so it keeps its own team (D-135 K2).</summary>
+        FiledNonCore,
     }
 
     private sealed record ToDoAnswer(
@@ -1157,9 +1216,10 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         public int Reowned;
         public int AlreadyApplied;
         public int SkippedCored;
-        public int SkippedNotPersonal;
+        public int FiledNonCore;
         public int SkippedSecure;
         public int SkippedRefused;
+        public int ConfigurationRefusals;
         public int SkippedUserOwned;
         public int SkippedGone;
         public int SkippedConflict;

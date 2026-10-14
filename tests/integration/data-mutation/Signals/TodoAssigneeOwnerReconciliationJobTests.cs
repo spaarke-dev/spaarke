@@ -147,30 +147,46 @@ public class TodoAssigneeOwnerReconciliationJobTests
 
     // ── Live filing (uac-r2 F1, owner K2) ──────────────────────────────────────────────────────────────────────────────
 
-    [Theory(DisplayName = "148 (uac-r2 F1): a To Do filed now (under a core, or a non-core record), or a row stamped with a core — never re-owned")]
-    [InlineData("todo-under-matter", "skippedCored")]
-    [InlineData("row-stamped", "skippedCored")]
-    [InlineData("todo-under-document", "skippedNotPersonal")]
-    public async Task FiledNow_IsNotReowned(string shape, string counter)
+    [Theory(DisplayName = "148 (uac-r2 F1): a To Do filed under a core now, or a row stamped with a core — never re-owned")]
+    [InlineData("todo-under-matter")]
+    [InlineData("row-stamped")]
+    public async Task CoredNow_IsNotReowned(string shape)
     {
         PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
         LinkAssignee(Eligible(Assignee));
-        switch (shape)
-        {
-            case "todo-under-matter": _world.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", Matter)); break;
-            case "todo-under-document": _world.Set("sprk_todo", Todo, "sprk_regardingdocument", new EntityReference("sprk_document", Document)); break;
-        }
+        if (shape == "todo-under-matter")
+            _world.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", Matter));
 
-        // Raised while the To Do was personal; its decision context names no core (sprk_corerecordid null).
-        var signal = Row("sprk_signal", GeneralTeam,
+        // Raised while the To Do was personal; its decision context names no core (sprk_corerecordid null). Owned by a team that
+        // is neither the assignee's nor the To Do's, so any answer this job could give would move it.
+        var signal = Row("sprk_signal", ThirdBuTeam,
             shape == "row-stamped" ? [("sprk_regardingmatter", new EntityReference("sprk_matter", Matter))] : []);
 
         var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
 
         run.Success.Should().BeTrue(run.ErrorMessage);
-        Result(run).GetProperty(counter).GetInt32().Should().Be(1);
-        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
-        _webApi.ConditionalWrites.Should().BeEmpty("a filed row is the re-file rule's, never this job's");
+        Result(run).GetProperty("skippedCored").GetInt32().Should().Be(1);
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(ThirdBuTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty("a cored row is the re-file rule's, never this job's");
+    }
+
+    [Fact(DisplayName = "148 (D-135 K2): a To Do filed under a non-core record is not personal — its rows take the To Do's own team, never the assignee's")]
+    public async Task FiledUnderNonCoreRecord_RowsTakeTheToDosOwnTeam()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        _world.Add("sprk_document", Document, ("owningteam", new EntityReference("team", GeneralTeam)));
+        _world.Set("sprk_todo", Todo, "sprk_regardingdocument", new EntityReference("sprk_document", Document));
+        // Moved to the assignee's team while the To Do was personal; the To Do has since been filed under a document.
+        var signal = Row("sprk_signal", OtherBuTeam);
+        var record = Row("sprk_decisionrecord", OtherBuTeam);
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Result(run).GetProperty("filedNonCore").GetInt32().Should().Be(1, "one To Do, counted once");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "the creator's BU team owns the To Do");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
     }
 
     [Fact(DisplayName = "148 (uac-r2 F1 reverse): a To Do un-filed since its rows were cored — re-owned; the decision context is never read")]
@@ -218,6 +234,29 @@ public class TodoAssigneeOwnerReconciliationJobTests
         Result(run).GetProperty("reowned").GetInt32().Should().Be(0);
         _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(owner));
         _webApi.ConditionalWrites.Should().BeEmpty("nothing secure is ever written");
+    }
+
+    [Theory(DisplayName = "148: the ownership resolver refuses the row's parents — never written, SkippedRefused; a configuration refusal makes the run partial")]
+    [InlineData("parent-missing", TodoAssigneeOwnerReconciliationJob.StatusOk)]          // ParentUnresolved: one row's data
+    [InlineData("secure-unit-ambiguous", TodoAssigneeOwnerReconciliationJob.StatusPartial)] // the tenant's configuration
+    public async Task RefusedParents_AreNeverWritten(string shape, string status)
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var signal = Row("sprk_signal", GeneralTeam,
+            shape == "parent-missing" ? [("sprk_matter", new EntityReference("sprk_matter", Guid.NewGuid()))] : []);
+        if (shape == "secure-unit-ambiguous")
+            _world.Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("skippedRefused").GetInt32().Should().Be(1);
+        Result(run).GetProperty("status").GetString().Should().Be(status);
+        Result(run).GetProperty("configurationRefusals").GetInt32().Should().Be(shape == "secure-unit-ambiguous" ? 1 : 0);
+        if (status != TodoAssigneeOwnerReconciliationJob.StatusOk)
+            run.ErrorMessage.Should().Contain("refused by configuration", "a run that is not a success says why");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
     // ── Already right ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -271,7 +310,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
     }
 
     // Beyond the POML's list (one-line justification): the brief binds "0x80040299 is a defined outcome, never a retry storm".
-    [Fact(DisplayName = "148: a privilege refusal (0x80040299) is AccessDenied and held back — one attempt, not one per tick")]
+    [Fact(DisplayName = "148: a privilege refusal (the Web API's 403, 0x80040299) is AccessDenied and held back — one attempt, not one per tick")]
     public async Task AccessDenied_IsHeldBack_NotRetriedEveryTick()
     {
         PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
@@ -321,24 +360,48 @@ public class TodoAssigneeOwnerReconciliationJobTests
     [InlineData("todo-listing", TodoAssigneeOwnerReconciliationJob.StatusError)]
     [InlineData("row-scan", TodoAssigneeOwnerReconciliationJob.StatusError)]
     [InlineData("assignee-read", TodoAssigneeOwnerReconciliationJob.StatusPartial)]
+    [InlineData("parent-read", TodoAssigneeOwnerReconciliationJob.StatusPartial)] // the ownership resolver's parent read throws
     public async Task ScanOrResolveFault_IsNeverAClean_AndWritesNothing(string fault, string status)
     {
         PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
         LinkAssignee(Eligible(Assignee));
-        var signal = Row("sprk_signal", GeneralTeam);
-        var record = Row("sprk_decisionrecord", GeneralTeam);
+        (string, object)[] parent = fault == "parent-read" ? [("sprk_matter", new EntityReference("sprk_matter", Matter))] : [];
+        var signal = Row("sprk_signal", GeneralTeam, parent);
+        var record = Row("sprk_decisionrecord", GeneralTeam, parent);
         switch (fault)
         {
             case "todo-listing": _world.FailingQueriesOf("sprk_todo"); break;
             case "row-scan": _world.FailingQueriesOf("sprk_signal"); break;
             case "assignee-read": _links.FailLinkRead = true; break;
+            case "parent-read": _world.FailingQueriesOf("sprk_matter"); break;
         }
 
         var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
 
         run.Success.Should().BeFalse("an unread or undecided To Do is not a clean run");
+        run.ErrorMessage.Should().NotBeNullOrWhiteSpace("a run that is not a success says why (ADR-036)");
         Result(run).GetProperty("status").GetString().Should().Be(status);
         _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "148: the Signal table's columns cannot be probed — the nightly pass never writes a DR past its unchecked resolved Signals")]
+    public async Task SignalProbeFault_DecisionRecordIsNotWrittenPastItsResolvedSignals()
+    {
+        PersonalToDo(modified: BeforeNightly.AddDays(-10)); // outside the watermark: only the nightly pass reads its record
+        LinkAssignee(Eligible(Assignee));
+        var record = Row("sprk_decisionrecord", GeneralTeam);
+        _world.Add("sprk_signal", Guid.NewGuid(), ("owningteam", new EntityReference("team", SecureTeam)),
+            ("sprk_decisionrecord", new EntityReference("sprk_decisionrecord", record)),
+            ("sprk_matter", new EntityReference("sprk_matter", SecureMatter)), ("versionnumber", 1L));
+        _clock.SetUtcNow(BeforeNightly.AddHours(2)); // 03:00 UTC
+
+        var run = await Job(writes: "true", failingProbeOf: "sprk_signal").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("fullPass").GetBoolean().Should().BeTrue();
+        Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusError);
+        Result(run).GetProperty("unverified").GetInt32().Should().Be(1, "the record was read but could not be decided");
         _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
         _webApi.ConditionalWrites.Should().BeEmpty();
     }
@@ -375,7 +438,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
         return id;
     }
 
-    private TodoAssigneeOwnerReconciliationJob Job(string? writes)
+    private TodoAssigneeOwnerReconciliationJob Job(string? writes, string? failingProbeOf = null)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => _world);
         entities
@@ -395,7 +458,11 @@ public class TodoAssigneeOwnerReconciliationJobTests
             SecureChildShareWorld.NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         var reconciler = new SecureChildReconciler(entities.Object, ownership, synchronizer, _webApi, configuration,
             NullLogger<SecureChildReconciler>.Instance);
-        var cores = new CoreAncestorResolver(entities.Object, SecureChildShareWorld.ColumnProbe(), NullLogger<CoreAncestorResolver>.Instance);
+        var probe = SecureChildShareWorld.ColumnProbe();
+        CoreAncestorResolver.EntityColumnProbe columns = (table, ct) => table == failingProbeOf
+            ? throw new InvalidOperationException($"Test: the column metadata of {table} is unavailable.")
+            : probe(table, ct);
+        var cores = new CoreAncestorResolver(entities.Object, columns, NullLogger<CoreAncestorResolver>.Instance);
 
         var services = new ServiceCollection();
         services.AddSingleton(entities.Object);
@@ -452,7 +519,11 @@ public class TodoAssigneeOwnerReconciliationJobTests
             if (ConflictOn.Contains(id) || etag != $"W/\"{_world().ValueOf<long>(table, id, "versionnumber")}\"")
                 throw new System.Data.DBConcurrencyException($"{entitySetName}({id}) changed since it was read.");
             if (DeniedOn.Contains(id))
-                throw new HttpRequestException("0x80040299: Read Privilege Check For Owner failed.");
+            {
+                // What the real client throws: UpdateIfMatchAsync ends in EnsureSuccessStatusCode, so the body's 0x80040299 is lost.
+                throw new HttpRequestException("Response status code does not indicate success: 403 (Forbidden).", null,
+                    System.Net.HttpStatusCode.Forbidden);
+            }
 
             var fields = (IDictionary<string, object>)entity;
             var bind = (string)fields["ownerid@odata.bind"];
