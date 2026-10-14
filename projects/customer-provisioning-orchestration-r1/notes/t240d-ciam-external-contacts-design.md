@@ -300,7 +300,9 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
   option b).** Single-environment dev cannot prove it, because every CIAM user there already has one bound contact. It
   runs once a stamp has T240d wired (H3c + H4b `Ciam:*`), using dev and that stamp, both on `spaarkeextid`. On the stamp,
   invite the email of a person who has a CIAM account and no contact there. PASS means all of:
-  - outcome `ExistingAccount`;
+  - outcome `ExistingAccount` in the operator log and telemetry. If UAC adopts finding F1 of our #1827 review
+    (2026-10-14: the inviter gets `Sent` on both branches, so an invite is no cross-customer oracle for "this email
+    has a `spaarkeextid` account"), the HTTP response reads `Sent`, and PASS rests on the remaining bullets;
   - `contact.sprk_externalinvitedon` is written;
   - `sprk_externalobjectid` is still empty;
   - the "sign in with your existing account" email is sent;
@@ -314,6 +316,18 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
   `sprk_externalinvitecodehash`. The production gate also needs 185's secret-bearing send option (review R1): the invite
   body is persisted redacted, enrichment is skipped, and nothing is saved to Sent Items. Until then, the code leaks into
   Dataverse and AI outputs that Y's users can read.
+- **Our #1827 review (UAC task 185, head `df4ce6825`, 2026-10-14).** R1, R2, hash/compare/expiry, option (c) and the
+  schema script all pass. Sent to UAC: F1 (ExistingAccount reveals to the inviter that the email has a `spaarkeextid`
+  account; owner call), F3 (`/invite` and `/invite-and-grant` answer a 500 with no CIAM host; should be a 503
+  `ciam_not_configured`), K1 (the code rides `?invite=`, so the SPA host must not log query strings). #1827 adds no
+  config key, secret or Graph permission: H4b stays §6, H3c stays `User.Create` only.
+- **T240d build item: keyless `CiamGraphClientFactory`.** After #1827, `IsConfigured` and `EnsureConfigured()` require
+  `Ciam:GraphProvisioner:CertificateName`. Stamps set none (§5), so with H4b's `Ciam:*` alone every invite fails
+  (`/grant` Failed `ciam_not_configured`, `/invite` 500). The MI-FIC provisioner change must make the certificate
+  optional when MI-FIC is configured, and fix the authority to `login.microsoftonline.com` (S1).
+- **H7b for `sprk_externalinvitecodehash` (ISS-025).** Verify only: `IsSecured`; Readers with no row or a 0/0/0 row
+  (any read, create or update is a FAIL); Writers 4/4/4; audit off; Advanced Find off; tolerate the platform System
+  Administrator profile; fail on any other profile with access; allow for `0x80041103` MetadataCache lag.
 
 Alternatives rejected:
 - **One shared CIAM API audience**: a token for X authenticates at Y, the "one credential, every customer" pattern D-13

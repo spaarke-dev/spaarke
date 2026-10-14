@@ -9,8 +9,8 @@
 | Field | Value |
 |-------|-------|
 | **Task** | T186 (first live E2E via `/provision-environment`, mock customer homed in Dewey Cheatham, stamp in the DEMO subscription) and the T240d build (option 2), in parallel with reviews of UAC task 185 |
-| **Status** | One agent running: the T240d production-gate review of UAC PR #1827 (task 185, head `df4ce6825`). Send its findings to session `spaarke-wt-unified-access-control-r2-1d`. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
-| **Next Action** | (1) Relay the PR #1827 gate-review findings to UAC. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34); H6 imports 1.2.2.0. (3) T240d build. |
+| **Status** | No agents running. The #1827 gate review was sent to UAC on 2026-10-14 (F1 ExistingAccount oracle is an owner call; F3 is a 500 that should be 503; K1 `?invite=` logging). Waiting for their fix or issue numbers. Results are in t240d design §10. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
+| **Next Action** | (1) Owner OK to start T186. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34); H6 imports 1.2.2.0. (3) T240d build. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
 ## 🔔 Waiting on the owner
@@ -44,6 +44,7 @@
   - H4b `Ciam:*` (Audience = the CIAM API app id; `Ciam:Domain`);
   - H13 probes;
   - CiamUserProvisioningService (authority login.microsoftonline.com, `User.Create`);
+  - `CiamGraphClientFactory`: make `CertificateName` optional under MI-FIC (after #1827 it is required);
   - the production CIAM SPA client (redirect `https://external.spaarke.com`).
 
   Gates are in design §10: BFF at or after 185, SpaarkeMaster carrying both contact columns, the secret-bearing send. The live acceptance checks are the cross-customer ExistingAccount check (UAC §11b) and the SSPR lock-out.
