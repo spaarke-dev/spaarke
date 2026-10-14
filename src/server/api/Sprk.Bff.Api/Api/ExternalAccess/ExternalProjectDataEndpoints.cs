@@ -1450,7 +1450,7 @@ public static class ExternalProjectDataEndpoints
         {
             try
             {
-                await indexing.EnqueueAppOnlyIfApplicableAsync(
+                var result = await indexing.EnqueueAppOnlyIfApplicableAsync(
                     new PostUploadIndexingRequest(
                         TenantId: configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? "",
                         DriveId: pointers.DriveId,
@@ -1464,6 +1464,15 @@ public static class ExternalProjectDataEndpoints
                         Source: ExternalUploadSource,
                         CorrelationId: correlationId),
                     queueCt);
+
+                // The production enqueuer reports its own failure as a result rather than throwing; surface it here with the
+                // document and parent ids so a failed enqueue is findable from the route's log. The 201 is unchanged.
+                if (result.FailureReason is not null)
+                {
+                    logger.LogWarning(
+                        "[EXT-UPLOAD] Queueing indexing for document {DocumentId} ({ParentKind} {ParentId}) failed ({FailureReason}); the upload stands",
+                        documentId, parentKind, parentId, result.FailureReason);
+                }
             }
             catch (Exception ex)
             {

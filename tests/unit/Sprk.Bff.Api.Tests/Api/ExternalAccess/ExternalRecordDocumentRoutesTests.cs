@@ -5,6 +5,7 @@ using Azure.Core;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -720,7 +721,32 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         job.Payload.RootElement.GetProperty("Source").GetString().Should().Be("ExternalUpload");
 
         // Both queues run under a bounded token of their own: a hung Service Bus must not hold the 201 (was None).
-        _fixture.QueueTokens.Should().HaveCount(2).And.OnlyContain(t => t.CanBeCanceled && !t.IsCancellationRequested);
+        // And that token is NOT the request's own: HttpContext.RequestAborted is also cancellable and not yet cancelled, so
+        // the check above alone would pass a route that still queued under the caller's token (cancelled on disconnect).
+        var calls = _fixture.QueueTokens.ToList();
+        calls.Should().HaveCount(2);
+        calls.Should().OnlyContain(c => c.Queue.CanBeCanceled && !c.Queue.IsCancellationRequested);
+        calls.Should().OnlyContain(c => c.Request.HasValue && c.Request.Value.CanBeCanceled,
+            "the double must have seen the request's RequestAborted token for the comparison to mean anything");
+        calls.Should().OnlyContain(c => c.Queue != c.Request!.Value, "the queues must not run under HttpContext.RequestAborted");
+    }
+
+    // The production enqueuer returns Failed (it catches its own failures); the route logs that and still answers 201.
+    [Fact]
+    public async Task Upload_WhenTheIndexEnqueueReturnsFailed_IsLoggedWithTheDocumentAndParent_AndStill201()
+    {
+        _fixture.Principal = CollaborateOn("matters", RecordA);
+        _fixture.IndexReturnsFailed = true;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/matters/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        _fixture.SubmittedJobs.Should().ContainSingle("a failed index enqueue does not stop the profile");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("indexing")
+            && e.Message.Contains(created!.SprkDocumentid!) && e.Message.Contains(RecordA.ToString()));
     }
 
     // The production enqueuer catches and logs its own failures; this pins the route's defensive catch, so that no
@@ -1131,11 +1157,18 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>Task 063: every job submitted to the job queue (the document profile).</summary>
         public ConcurrentQueue<JobContract> SubmittedJobs { get; } = new();
 
-        /// <summary>Task 063: the cancellation token each post-upload queue call received.</summary>
-        public ConcurrentQueue<CancellationToken> QueueTokens { get; } = new();
+        /// <summary>
+        /// Task 063: for each post-upload queue call, the token it received and the token of the request being served
+        /// (<c>HttpContext.RequestAborted</c>, read through <see cref="IHttpContextAccessor"/> inside the double). A queue
+        /// token that equals the request's would be cancelled with the caller's disconnect.
+        /// </summary>
+        public ConcurrentQueue<(CancellationToken Queue, CancellationToken? Request)> QueueTokens { get; } = new();
 
         /// <summary>Set to make the index enqueue throw (after recording the request).</summary>
         public Exception? IndexFault { get; set; }
+
+        /// <summary>Set to make the index enqueue return <see cref="PostUploadIndexingResult.Failed"/> (the production enqueuer's failure shape).</summary>
+        public bool IndexReturnsFailed { get; set; }
 
         /// <summary>Set to make the job submit throw (nothing is recorded).</summary>
         public Exception? JobFault { get; set; }
@@ -1167,6 +1200,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             SubmittedJobs.Clear();
             QueueTokens.Clear();
             IndexFault = null;
+            IndexReturnsFailed = false;
             JobFault = null;
             UploadFault = null;
             UploadReturnsNoHandle = false;
@@ -1177,6 +1211,10 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             RowFaults.Clear();
             VerifyPointers = false;
         }
+
+        /// <summary>The served request's <c>RequestAborted</c> token, or null when no request is in flight on this flow.</summary>
+        private CancellationToken? RequestAbortedToken() =>
+            Services.GetRequiredService<IHttpContextAccessor>().HttpContext?.RequestAborted;
 
         /// <summary>The row the container resolver reads for (<paramref name="entity"/>, <paramref name="id"/>).</summary>
         private Entity RecordRow(string entity, Guid id)
@@ -1301,15 +1339,18 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
 
                 // Task 063: the two post-upload queues, recorded. The index enqueue records the request, then throws when
                 // IndexFault is set; the job submit throws when JobFault is set.
+                services.AddHttpContextAccessor();
                 var indexing = new Mock<IPostUploadIndexingEnqueuer>();
                 indexing.Setup(i => i.EnqueueAppOnlyIfApplicableAsync(It.IsAny<PostUploadIndexingRequest>(), It.IsAny<CancellationToken>()))
                     .Returns((PostUploadIndexingRequest request, CancellationToken token) =>
                     {
                         IndexRequests.Enqueue(request);
-                        QueueTokens.Enqueue(token);
-                        return IndexFault is { } fault
-                            ? Task.FromException<PostUploadIndexingResult>(fault)
-                            : Task.FromResult(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
+                        if (IndexFault is { } fault)
+                            return Task.FromException<PostUploadIndexingResult>(fault);
+                        return Task.FromResult(IndexReturnsFailed
+                            ? PostUploadIndexingResult.Failed("ServiceBusException")
+                            : PostUploadIndexingResult.Submitted(Guid.NewGuid()));
                     });
                 services.RemoveAll<IPostUploadIndexingEnqueuer>();
                 services.AddSingleton(indexing.Object);
@@ -1327,7 +1368,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                         if (JobFault is { } fault)
                             return Task.FromException(fault);
                         SubmittedJobs.Enqueue(job);
-                        QueueTokens.Enqueue(token);
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
                         return Task.CompletedTask;
                     });
                 services.RemoveAll<JobSubmissionService>();
