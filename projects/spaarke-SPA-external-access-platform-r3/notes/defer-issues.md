@@ -361,7 +361,7 @@ Failure mode: a partner clicks a listed document and gets an error.
 
 **Suggested fix**
 
-Add `hasFile` to the external document DTO, and have the SPA show the row without a download action. Or omit file-less rows from the list. Owner choice: hiding them changes what a partner can see is filed.
+**Owner decision 2026-10-14:** show the row without a download button. Add `hasFile` to the external document DTO; the SPA hides download and versions when it is false. Rows are not omitted.
 
 **Estimated effort**: hours.
 **Blockers**: none.
