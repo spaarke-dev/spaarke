@@ -695,10 +695,20 @@ public partial class SignalReevaluationJobTests
         var id = OrdinarySignalWhoseWitnessMovedIntoSecureX(h, Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001b4"));
         h.Org.Rows[id]["sprk_duedate"] = null!;
 
+        var policySignalReads = 0;
+        h.Sysadmin.FaultOn = q =>
+        {
+            if (q.EntityName == "sprk_signal" && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_dedupekey")) policySignalReads++;
+            return null;
+        };
+
         var result = await h.RunAsync();
 
         result.ResultJson.Should().Contain("\"policyFailures\":0").And.Contain("\"evidenceRedacted\":1");
         h.Org.ConditionalUpdates.Where(u => u.Fields.ContainsKey("sprk_evidencerefs")).Should().ContainSingle();
+        // uac-r2 re-check F3: the write count alone cannot see a second pass (the redaction is monotonic and the fake's write
+        // updates the row), so the policy's Signals must be read exactly once: by its own pass, never again by the sweep.
+        policySignalReads.Should().Be(1, "the sweep skips a policy that already reached its own redaction");
     }
 
     [Fact]
