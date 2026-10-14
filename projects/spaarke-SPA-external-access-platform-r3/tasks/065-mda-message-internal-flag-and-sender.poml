@@ -32,7 +32,8 @@
   </context>
 
   <constraints>
-    <constraint source="owner 2026-10-13">The send request gains an optional isInternalOnly (bool). The BFF writes sprk_isinternalonly explicitly on every message it creates through these builders: the request value when present, otherwise false. The web resource sends the form's current sprk_isinternalonly value.</constraint>
+    <constraint source="owner 2026-10-13 (escalation answer)">The send request gains an optional isInternalOnly (bool). ALL THREE record builders — BuildMessageDataverseRecordAsync, BuildDataverseRecordAsync and BuildDataverseRecordForUserAsync — write sprk_isinternalonly explicitly for EVERY communication type (messages and emails): the request value when present, otherwise false. Owner: "'no' for emails too (internal only is internal for all records)". The one exception (main session's fail-closed call, owner may override): a Message sent into a Private thread with no request value is written true. If privacy is not determinable inside the builder, STOP and report rather than improvising.</constraint>
+    <constraint source="owner 2026-10-13 (escalation answer)">The web resource sends the form's current sprk_isinternalonly value, and maps sprk_communicationtype 100000004 to "Message" (today it falls through to "Email", so a Message-type form sends a real email and creates a second Email record). With the mapping fixed, a Message-type send takes the BFF's existing Message path (SendMessageAsync → ACS Chat via the channel dispatcher, one sprk_communication of type Message, no email).</constraint>
     <constraint source="security (fail closed)">CommunicationAccessFilter's null handling is NOT changed: a null flag still hides the row from external callers. Old rows are not corrected (owner).</constraint>
     <constraint source="project">sprk_sentby is set to the sending systemuser using the existing oid → systemuserid resolution; if it cannot be resolved, the message is still sent and the existing warning is logged.</constraint>
     <constraint source="project">No email is sent on message post (spec C6) — unchanged.</constraint>
@@ -57,7 +58,8 @@
   </steps>
 
   <escalation>
-    <trigger>If any other caller of these builders sends messages that must default to internal (e.g. internal-only channels), STOP and escalate with the list instead of defaulting them to visible.</trigger>
+    <trigger>RESOLVED 2026-10-13: the owner chose explicit false for emails too (all callers of the three builders). RegistrationEmailService sends are never filed to a record and are unaffected.</trigger>
+    <trigger>If the Message path cannot work from the model-driven form (it needs input the form does not have, such as an ACS thread or participant list, or it needs Acs configuration that is not in appsettings.json or the dev app settings template), STOP and report what is missing before changing the mapping.</trigger>
   </escalation>
 
   <outputs>
@@ -70,7 +72,9 @@
     <criterion testable="true">Send with isInternalOnly true → sprk_isinternalonly = true; the external read for a contact does not return it.</criterion>
     <criterion testable="true">Unresolvable sender oid → message still created, sprk_sentby unset, warning logged.</criterion>
     <criterion testable="true">CommunicationAccessFilter null-flag behaviour unchanged (existing tests pass).</criterion>
-    <criterion testable="true">The web resource sends the form's Internal-only value.</criterion>
+    <criterion testable="true">The web resource sends the form's Internal-only value, and a form with sprk_communicationtype 100000004 sends communicationType "Message".</criterion>
+    <criterion testable="true">An email send (shared mailbox and user mode) with isInternalOnly absent → sprk_isinternalonly = false; with true → true.</criterion>
+    <criterion testable="true">A Message into a Private thread with isInternalOnly absent → sprk_isinternalonly = true.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 

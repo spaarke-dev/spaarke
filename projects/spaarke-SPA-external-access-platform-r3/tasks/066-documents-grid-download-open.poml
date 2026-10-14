@@ -4,7 +4,7 @@
     <title>Documents grid and document detail: download/open the file (check-3 items 2-3)</title>
     <phase>5b Owner check fixes</phase>
     <gate>startable (owner decision 2026-10-13: download/open is sufficient for R3)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags frontend; modifies .tsx</rigor-reason>
     <model-tier>sonnet</model-tier>

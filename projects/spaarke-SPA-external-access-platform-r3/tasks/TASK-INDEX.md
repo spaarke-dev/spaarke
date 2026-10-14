@@ -51,7 +51,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
 | 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | ✅ [done] merged 15f2dc686; reaches dev with the next BFF deploy | none | S/h | FULL | CHK3 |
 | 065 | MDA message send carries "Internal only" (default No) + sender (check-3 #5) | P5b | 🔲 [open] | none | O/h | FULL | CHK3 |
-| 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
+| 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK3 |
 | 067 | Service Request automatic numbers RQST-{SEQNUM:4} (check-2 #3) | P5b | ✅ [done] dev applied 2026-10-13 (next value 3); owner create-test pending | none (owner yes 2026-10-13; dev apply gated) | S/h | STANDARD | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | 🔲 [open] | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
