@@ -15,8 +15,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// unified-access-control-r2 task 185 slice F (ADR-010 path C: lazy validation instead of a service locator) — a BFF host
 /// with NO <c>Ciam:*</c> configuration. The CIAM provisioner validates its configuration at first use, so the shared invite
 /// service (which injects it directly) resolves there, and <c>/grant</c> needs no CIAM. <c>/invite</c> and
-/// <c>/invite-and-grant</c> keep their pre-slice-F answer: the global handler's 500 <c>server_error</c>, with nothing read
-/// or written. The grant side of the same host is <c>GrantSendsInviteTests.Grant_OnAHostWithNoCiamConfiguration_*</c>.
+/// <c>/invite-and-grant</c> answer a 503 ProblemDetails carrying <c>ciam_not_configured</c> (§12 I-11, the code /grant
+/// reports), with nothing read or written. The grant side of the same host is
+/// <c>GrantSendsInviteTests.Grant_OnAHostWithNoCiamConfiguration_*</c>.
 /// KEEP path: <c>tests/integration/auth/**</c>.
 /// </summary>
 public class NoCiamHostInviteTests : IClassFixture<NoCiamHostInviteTests.NoCiamFixture>
@@ -37,7 +38,7 @@ public class NoCiamHostInviteTests : IClassFixture<NoCiamHostInviteTests.NoCiamF
     [Theory]
     [InlineData("/api/v1/external-access/invite")]
     [InlineData("/api/v1/external-access/invite-and-grant")]
-    public async Task TheInviteRoutes_KeepTheirServerError500_AndReadOrWriteNothing(string path)
+    public async Task TheInviteRoutes_Answer503CiamNotConfigured_AndReadOrWriteNothing(string path)
     {
         using (var scope = _fixture.Services.CreateScope())
         {
@@ -57,10 +58,11 @@ public class NoCiamHostInviteTests : IClassFixture<NoCiamHostInviteTests.NoCiamF
             accessLevel = (int)ExternalAccessLevel.ViewOnly,
         });
 
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "§12 I-11: a 503, never the global handler's 500");
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        body.RootElement.GetProperty("extensions").GetProperty("code").GetString().Should().Be("server_error",
-            "the global exception handler answers, as when the provisioner's constructor threw");
+        body.RootElement.GetProperty("reasonCode").GetString().Should().Be(
+            Sprk.Bff.Api.Api.ExternalAccess.Dtos.GrantInviteStatus.CiamNotConfiguredReasonCode, "the code /grant already reports");
         _fixture.RootFlags.Reads.Should().NotContain(r => r.RecordId == matterId, "the record's policy is never read");
         _fixture.DataverseClient.Verify(
             c => c.CreateAsync(It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Never,

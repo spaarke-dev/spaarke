@@ -89,10 +89,11 @@ public static class InviteExternalUserEndpoint
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        // Task 185 slice F: the CIAM provisioner now constructs on a host without Ciam:* and validates at first use. This
-        // route needs CIAM for every request, so it keeps its pre-slice-F answer there: the global handler's 500
-        // (server_error) before anything is read or written, as when the provisioner's constructor threw.
-        ciamProvisioner.EnsureConfigured();
+        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
+        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything is read or written.
+        if (!ciamProvisioner.IsConfigured)
+            return CiamNotConfiguredResult(httpContext);
 
         // ── Validation ───────────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(request.Email))
@@ -312,6 +313,23 @@ public static class InviteExternalUserEndpoint
             extensions: new Dictionary<string, object?>
             {
                 ["reasonCode"] = refusal.ReasonCode,
+                ["traceId"] = httpContext.TraceIdentifier,
+            });
+
+    /// <summary>
+    /// Task 185 §12 I-11: the 503 ProblemDetails of <c>/invite</c> and <c>/invite-and-grant</c> on a host with no
+    /// <c>Ciam:*</c> configuration, carrying <see cref="GrantInviteStatus.CiamNotConfiguredReasonCode"/> (the code
+    /// <c>/grant</c> reports in its <c>invite</c> field). Answered before anything is read or written.
+    /// </summary>
+    internal static IResult CiamNotConfiguredResult(HttpContext httpContext)
+        => Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "External sign-in is not configured",
+            detail: "This environment has no external identity (CIAM) configuration, so no external user can be invited. "
+                + "Nothing was created or sent.",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = GrantInviteStatus.CiamNotConfiguredReasonCode,
                 ["traceId"] = httpContext.TraceIdentifier,
             });
 

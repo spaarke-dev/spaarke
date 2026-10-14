@@ -80,10 +80,11 @@ public static class InviteAndGrantExternalUserEndpoint
         TimeProvider timeProvider,
         CancellationToken ct)
     {
-        // Task 185 slice F: the CIAM provisioner now constructs on a host without Ciam:* and validates at first use. This
-        // route needs CIAM for every request, so it keeps its pre-slice-F answer there: the global handler's 500
-        // (server_error) before anything is read or written, as when the provisioner's constructor threw.
-        ciamProvisioner.EnsureConfigured();
+        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
+        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything is read or written: no contact, no account, no grant.
+        if (!ciamProvisioner.IsConfigured)
+            return InviteExternalUserEndpoint.CiamNotConfiguredResult(httpContext);
 
         // ── Validation ───────────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(request.Email))
