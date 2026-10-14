@@ -361,7 +361,10 @@ public partial class SignalReevaluationJobTests
 
         result.Success.Should().BeFalse();
         h.Org.WriteCalls.Should().Be(0, "a duplicate episode 1 would otherwise be raised beside the unreadable key");
-        metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DedupeKeyUnparseable).Should().BeGreaterThanOrEqualTo(1);
+        // Task 145 (uac-r2 re-check F1): once each, though the evidence sweep reads the policy's Signals again.
+        metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DedupeKeyUnparseable).Should().Be(1);
+        result.ResultJson.Should().Contain("\"unparseableKeys\":1").And.Contain("\"policyFailures\":1");
+        h.Log.Count(e => e.Message.Contains("has a dedupe key that is not")).Should().Be(1);
     }
 
     [Fact]
@@ -709,6 +712,43 @@ public partial class SignalReevaluationJobTests
         // uac-r2 re-check F3: the write count alone cannot see a second pass (the redaction is monotonic and the fake's write
         // updates the row), so the policy's Signals must be read exactly once: by its own pass, never again by the sweep.
         policySignalReads.Should().Be(1, "the sweep skips a policy that already reached its own redaction");
+    }
+
+    [Fact]
+    public async Task Run_T145Sweep_APolicyWithAnUnparseableKey_CountsItOnce_AndStillRedactsItsParseableSignals()
+    {
+        // uac-r2 re-check F1: the policy's pass fails on the bad key (counted, logged and metered once). The sweep then redacts
+        // the Signals it can parse, without counting the bad key again.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var id = OrdinarySignalWhoseWitnessMovedIntoSecureX(h, Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001b5"));
+        h.Org.SeedSignal($"{PolicyCode}|sprk_matter|{Lower(MatterId)}", SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        using var metrics = new MetricCapture();
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"unparseableKeys\":1").And.Contain("\"policyFailures\":1");
+        metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DedupeKeyUnparseable).Should().Be(1);
+        h.Log.Count(e => e.Message.Contains("has a dedupe key that is not")).Should().Be(1);
+        ShouldBeRedactedOnceBySweep(h, result, id);
+    }
+
+    [Fact]
+    public async Task Run_T145Sweep_ASweepReadFailureForAPolicyThatAlreadyFailed_IsNotCountedTwice()
+    {
+        // uac-r2 re-check F1: the policy's own read of its Signals faults, then the sweep's re-read faults too. One policy failure.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        OrdinarySignalWhoseWitnessMovedIntoSecureX(h, Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001b6"));
+        var reads = 0;
+        h.Sysadmin.FaultOn = q => q.EntityName == "sprk_signal" && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_dedupekey") && ++reads > 0
+            ? new TimeoutException("Dataverse timed out.")
+            : null;
+
+        var result = await h.RunAsync();
+
+        reads.Should().Be(2, "the precondition: the policy's own read and the sweep's re-read both faulted");
+        result.Success.Should().BeFalse();
+        result.ResultJson.Should().Contain("\"policyFailures\":1");
+        h.Org.ConditionalUpdates.Should().BeEmpty();
     }
 
     [Fact]

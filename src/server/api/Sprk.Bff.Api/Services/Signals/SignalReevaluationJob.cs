@@ -107,7 +107,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         foreach (var policy in policies)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var failuresBefore = counts.PolicyFailures + counts.InvalidPolicies;
             await EvaluatePolicyAsync(policy, counts, cancellationToken).ConfigureAwait(false);
+            if (counts.PolicyFailures + counts.InvalidPolicies > failuresBefore)
+            {
+                counts.PoliciesFailedThisRun.Add(policy.Code);
+            }
         }
 
         // Task 145 (uac-r2 review F1 on #1874): an in-force policy that stopped before its redaction (invalid rule, no current
@@ -749,8 +754,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 145: reads the Signals of each policy in <paramref name="policyCodes"/> that this run has not yet sent through
     /// <see cref="RedactStoredEvidenceAsync"/> (<see cref="RunCounts.EvidenceRedactionAttempted"/>), and redacts their stored
     /// evidence. Never twice per policy per run. A policy whose Signals cannot be read is a policy failure (logged, nothing
-    /// written, the run fails visibly, the next pass retries); a family-read fault is handled by <see cref="RedactStoredEvidenceAsync"/>
-    /// the same way.
+    /// written, the run fails visibly, the next pass retries) unless the policy already failed this run, which is not counted
+    /// again; a family-read fault is handled by <see cref="RedactStoredEvidenceAsync"/> the same way. The sweep reads in
+    /// <c>forRedactionSweep</c> mode (uac-r2 re-check F1): an unparseable dedupe key is skipped without being counted, logged or
+    /// metered again, and the policy's parseable Signals are still redacted.
     /// </summary>
     private async Task SweepStoredEvidenceAsync(IEnumerable<string> policyCodes, string why, RunCounts counts, CancellationToken ct)
     {
@@ -760,13 +767,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
             if (counts.EvidenceRedactionAttempted.Contains(code)) continue;
             try
             {
-                var signals = await ReadPolicySignalsAsync(code, counts, ct).ConfigureAwait(false);
+                var signals = await ReadPolicySignalsAsync(code, counts, ct, forRedactionSweep: true).ConfigureAwait(false);
                 await RedactStoredEvidenceAsync(code, signals, counts, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 counts.EvidenceRedactionAttempted.Add(code);
-                counts.PolicyFailures++;
+                // One failure per policy per run: a policy that already failed the run is logged here but not counted twice.
+                if (counts.PoliciesFailedThisRun.Add(code)) counts.PolicyFailures++;
                 _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                     "Policy {PolicyCode} {Why}, and its Signals could not be read ({ExceptionType}); their stored evidence was not checked this run.",
                     code, why, ex.GetType().Name);
@@ -775,7 +783,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     }
 
     private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(
-        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
+        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null, bool forRedactionSweep = false)
     {
         // A scoped (event-trigger) pass reads only the one subject's episodes: the planner closes every open Signal whose
         // subject is not a hit, so handing it the policy's other subjects would close them (task 032).
@@ -824,6 +832,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
                 if (!SignalWriter.TryParseDedupeKey(key, out var code, out var subjectEntity, out var subjectId, out var episode))
                 {
+                    if (forRedactionSweep)
+                    {
+                        // Task 145 (uac-r2 re-check F1): counting, logging and metering an unparseable key (and failing the run)
+                        // is the evaluation pass's job; the sweep only redacts, and a row with no readable subject cannot be placed.
+                        continue;
+                    }
+
                     counts.UnparseableKeys++;
                     unparseable++;
                     _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
@@ -888,6 +903,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>Task 145 (uac-r2 F1 on #1874): the policies whose stored evidence this run already checked (or tried to), so the
         /// sweeps after the policy loop reach every other policy exactly once.</summary>
         public HashSet<string> EvidenceRedactionAttempted { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 145 (uac-r2 re-check F1): the policies that already failed this run (a policy failure or an invalid rule),
+        /// so a sweep's own read failure for one of them is logged but not counted a second time.</summary>
+        public HashSet<string> PoliciesFailedThisRun { get; } = new(StringComparer.Ordinal);
         public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
         /// <summary>#1661 round 2 F3: policies planned NOTHING this pass because their secure-family partitions could not be read (each is
