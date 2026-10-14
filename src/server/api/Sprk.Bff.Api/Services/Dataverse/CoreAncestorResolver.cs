@@ -326,8 +326,10 @@ public sealed class CoreAncestorResolver
         + "follows their subject's family when the subject is re-filed. The stamp is never an access input for them: access "
         + "is D-130 ownership through RecordOwnershipResolver, which reads the stamp only as one more parent (a secure parent "
         + "wins), and no reader grants on it (SignalCoreRecordAccess reads the row and its immutable core as the caller). "
-        + "They are not in the CHILD access taxonomy, are not intermediates, and nothing is filed under them, so the storage "
-        + "resolver never reads one. The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
+        + "They are not in the CHILD access taxonomy and are not intermediates; nothing in the stamp or storage topology is "
+        + "filed under them, so the storage resolver never reads one, and the only lineage edge into one is Signal to "
+        + "Decision Record, which only narrows (a secure Decision Record makes its Signal secure). "
+        + "The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
         + "never the owner; the owner moves only through SecureChildReconciler, where a denied or unresolvable re-own writes "
         + "nothing and an isolated row is released only by an authorised re-file or unsecure, so a refusal never puts a row "
         + "on a wider owner.";

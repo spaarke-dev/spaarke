@@ -63,9 +63,10 @@ public partial class ChildRecordContainerResolutionTests
                 CoreAncestorResolver.StampedOutsideAccessTaxonomyReason);
         }
 
-        covered.Should().BeEquivalentTo(CoreAncestorResolver.StampSourceColumns.Keys
-                .Where(t => t != "sprk_analysis" && !CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(t)),
-            "every other stamped table is covered by the theory");
+        // An independent list (review F3: deriving it from the same filter the theory uses proved nothing). A table added to
+        // StampSourceColumns must be added here AND to the theory, or be exempted by name.
+        covered.Should().BeEquivalentTo(["sprk_todo", "sprk_event", "sprk_communication", "sprk_memo"],
+            "every stamped table except sprk_analysis and the pinned exemption is covered by the theory");
     }
 
     /// <summary>The column on an intermediate that names its matter (typed on invoice / budget / document).</summary>

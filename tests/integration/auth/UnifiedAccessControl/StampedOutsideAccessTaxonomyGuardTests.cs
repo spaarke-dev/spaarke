@@ -66,8 +66,9 @@ internal static class StampedOutsideAccessTaxonomyPin
 /// <summary>
 /// Ontology task 144 (unified-access-control-r2's option A, condition 3): the exemption's SAFETY claim — "nothing is filed
 /// under a Signal or a Decision Record, so the storage resolver never reads one and no child inherits through one" — is a
-/// guard, not prose. It fails the build when any stamp source, any storage-resolver link, or any lineage lookup of a CHILD
-/// taxonomy table TARGETS a member of <see cref="CoreAncestorResolver.StampedOutsideAccessTaxonomy"/>.
+/// guard, not prose. It fails the build when any stamp source, any storage-resolver link, or any lineage lookup of ANY
+/// <see cref="SecureChildLineage"/> table TARGETS a member of <see cref="CoreAncestorResolver.StampedOutsideAccessTaxonomy"/> —
+/// except the one allowlisted edge (<see cref="AllowedLineageEdges"/>), which only narrows.
 /// </summary>
 public class StampedOutsideAccessTaxonomyGuardTests
 {
@@ -75,9 +76,27 @@ public class StampedOutsideAccessTaxonomyGuardTests
     internal sealed record Link(string Owner, string Column, string Target, string Topology);
 
     /// <summary>
+    /// The lineage edges INTO a member that exist on purpose, each with its reason. Signal → Decision Record: a Signal resolved by
+    /// a Decision Record carries a lookup to it, and the ownership rule reads that Decision Record as one more parent
+    /// (secure-if-any) — so the edge can only make the Signal MORE restricted, never readable more widely. Adding an edge here
+    /// needs uac-r2's review.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<(string Owner, string Column, string Target), string> AllowedLineageEdges =
+        new Dictionary<(string, string, string), string>
+        {
+            [("sprk_signal", "sprk_decisionrecord", "sprk_decisionrecord")] =
+                "a Signal's resolving Decision Record is one more ownership parent (secure-if-any): it only narrows",
+        };
+
+    private static bool IsAllowed(Link link) =>
+        link.Topology == LineageTopology && AllowedLineageEdges.ContainsKey((link.Owner, link.Column, link.Target));
+
+    private const string LineageTopology = "SecureChildLineage";
+
+    /// <summary>
     /// Every link the stamp and storage topology declares: each stamp source (a child → the intermediate its copy comes from),
     /// each intermediate's root column, each storage-resolver link (followed, intermediate, carrier), and each lineage lookup
-    /// of a CHILD taxonomy table.
+    /// of EVERY secure-child lineage table (the CHILD taxonomy and the tables outside it, Signals and Decision Records included).
     /// </summary>
     internal static IReadOnlyList<Link> RealTopology()
     {
@@ -98,23 +117,34 @@ public class StampedOutsideAccessTaxonomyGuardTests
         }
 
         foreach (var child in CoreAncestorResolver.ChildRecordEntities)
-        {
             SecureChildLineage.Children.Should().ContainKey(child, $"every CHILD taxonomy table has a lineage row ({child})");
-            links.AddRange(SecureChildLineage.Children[child].Lookups
-                .Select(l => new Link(child, l.Key, l.Value, "SecureChildLineage(CHILD taxonomy)")));
-        }
+
+        foreach (var (table, lineage) in SecureChildLineage.Children)
+            links.AddRange(lineage.Lookups.Select(l => new Link(table, l.Key, l.Value, LineageTopology)));
 
         return links;
     }
 
-    /// <summary>The links that name a member of <paramref name="members"/> — what the guard refuses.</summary>
+    /// <summary>The links that name a member of <paramref name="members"/> and are not allowlisted — what the guard refuses.</summary>
     internal static IReadOnlyList<Link> LinksTargeting(IEnumerable<Link> links, IReadOnlyCollection<string> members) =>
-        links.Where(l => members.Contains(l.Target, StringComparer.OrdinalIgnoreCase)).ToList();
+        links.Where(l => members.Contains(l.Target, StringComparer.OrdinalIgnoreCase) && !IsAllowed(l)).ToList();
 
     [Fact(DisplayName = "Task 144 (uac-r2 condition 2): the exemption is exactly Signal and Decision Record, each one stamped, neither in the C# or TypeScript CHILD taxonomy")]
     public void Exemption_IsPinnedBothWays() => StampedOutsideAccessTaxonomyPin.AssertPinned();
 
-    [Fact(DisplayName = "Task 144 (uac-r2 condition 3): no stamp source, storage-resolver link or CHILD lineage lookup targets a Signal or a Decision Record")]
+    [Fact(DisplayName = "Task 144 (uac-r2 condition 3): every allowlisted lineage edge still exists (a stale allowlist fails)")]
+    public void AllowedLineageEdges_AllExist()
+    {
+        var lineage = RealTopology().Where(l => l.Topology == LineageTopology).ToList();
+        foreach (var (edge, reason) in AllowedLineageEdges)
+        {
+            reason.Should().NotBeNullOrWhiteSpace();
+            lineage.Should().Contain(new Link(edge.Owner, edge.Column, edge.Target, LineageTopology),
+                $"the allowlisted edge {edge.Owner}.{edge.Column} -> {edge.Target} must exist, or its allowance is stale");
+        }
+    }
+
+    [Fact(DisplayName = "Task 144 (uac-r2 condition 3): no stamp source, storage-resolver link or lineage lookup of any table targets a Signal or a Decision Record (Signal -> DR excepted)")]
     public void NothingIsFiledUnderAnExemptedTable()
     {
         var topology = RealTopology();
@@ -133,14 +163,20 @@ public class StampedOutsideAccessTaxonomyGuardTests
         }
     }
 
-    [Fact(DisplayName = "Task 144 (uac-r2 condition 3, must fire): a link injected to a Signal is caught")]
+    [Fact(DisplayName = "Task 144 (uac-r2 condition 3, must fire): a link injected to a Signal is caught, and so is a NEW lineage edge into a member")]
     public void Guard_Fires_OnAnInjectedLink()
     {
         var injected = new Link("sprk_todo", "sprk_regardingsignal", "sprk_signal", "injected");
         var injectedDr = new Link("sprk_event", "sprk_regardingdecisionrecord", "sprk_decisionrecord", "injected");
+        // A lineage edge of a table OUTSIDE the CHILD taxonomy (the shape the earlier scan missed), and the allowlisted column
+        // on another table: neither is allowed.
+        var newLineageEdge = new Link("sprk_spendsignal", "sprk_signal", "sprk_signal", LineageTopology);
+        var sameColumnOtherTable = new Link("sprk_todo", "sprk_decisionrecord", "sprk_decisionrecord", LineageTopology);
 
-        LinksTargeting(RealTopology().Append(injected).Append(injectedDr), CoreAncestorResolver.StampedOutsideAccessTaxonomy)
-            .Should().BeEquivalentTo([injected, injectedDr]);
+        LinksTargeting(
+                RealTopology().Append(injected).Append(injectedDr).Append(newLineageEdge).Append(sameColumnOtherTable),
+                CoreAncestorResolver.StampedOutsideAccessTaxonomy)
+            .Should().BeEquivalentTo([injected, injectedDr, newLineageEdge, sameColumnOtherTable]);
     }
 
     [Fact(DisplayName = "Task 144 (uac-r2 condition 3, must not fire): links between ordinary tables, and a link FROM a Signal, are not caught")]
