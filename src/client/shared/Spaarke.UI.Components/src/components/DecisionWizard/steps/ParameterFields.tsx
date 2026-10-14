@@ -1,0 +1,175 @@
+/**
+ * ParameterFields - the form of one action or Next step, built from the plan's `parameters` and nothing else (the UI never
+ * switches on an action, a rule or a lane). One editor per `DecisionParameterKind`.
+ *
+ * - Text / TextArea / Choice / Money / Date: Fluent inputs. The shown value is what the user typed, else the starting value
+ *   (a templated draft, D-53), which is marked "Prefilled from this item" until it is edited.
+ * - Person / Lookup: the shared `LookupField` over the host's `lookup` search. A Lookup that has exactly one candidate is
+ *   pre-selected (D-18: a matter with one budget); with several the user picks.
+ *
+ * Fluent v9 tokens only (ADR-021). React 16/17-safe.
+ */
+
+import * as React from 'react';
+import {
+  Caption1,
+  Field,
+  Input,
+  MessageBar,
+  MessageBarBody,
+  Select,
+  Textarea,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { LookupField } from '../../LookupField/LookupField';
+import type { ILookupItem } from '../../../types/LookupTypes';
+import { fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '../decisionDraft';
+import type { StepScope } from '../decisionDraft';
+import { useDecisionItem } from '../decisionItemContext';
+import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
+
+const useStyles = makeStyles({
+  form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
+  prefilled: { color: tokens.colorNeutralForeground3 },
+});
+
+const INVALID: Partial<Record<DecisionParameter['kind'], string>> = {
+  Money: 'Enter an amount of zero or more.',
+  Date: 'Enter a date.',
+  Choice: 'Choose one of the options.',
+};
+
+interface FieldProps {
+  parameter: DecisionParameter;
+  scope: StepScope;
+}
+
+const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
+  const { draft, update, lookup, item } = useDecisionItem();
+  const styles = useStyles();
+  const id = fieldValue(draft, scope, parameter.code);
+  const name = fieldLabel(draft, scope, parameter.code);
+  const value: ILookupItem | null = id ? { id, name: name ?? id } : null;
+  const kind = parameter.kind === 'Person' ? 'Person' : 'Lookup';
+
+  const search = React.useCallback(
+    (query: string) =>
+      lookup
+        ? lookup({ kind, entity: parameter.lookupEntity, parameterCode: parameter.code, query })
+        : Promise.resolve([]),
+    [lookup, kind, parameter.lookupEntity, parameter.code]
+  );
+
+  // D-18: one candidate is pre-selected as a starting value; several are left for the user to pick.
+  const preselected = React.useRef(false);
+  const hasValue = id !== '';
+  React.useEffect(() => {
+    // Only a REQUIRED lookup is pre-selected: an optional one (an outside firm) is never filled in for the user.
+    if (kind !== 'Lookup' || !parameter.required || !lookup || hasValue || preselected.current) return undefined;
+    preselected.current = true;
+    let cancelled = false;
+    void search('')
+      .then(found => {
+        if (!cancelled && found.length === 1) update(d => withLookup(d, scope, parameter.code, found[0], true));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, lookup, hasValue, search, update, scope, parameter.code, parameter.required]);
+
+  if (!lookup) {
+    return (
+      <MessageBar intent="warning" data-testid={`field-${parameter.code}`}>
+        <MessageBarBody>
+          {parameter.label} cannot be searched from here{item.core?.name ? ` for ${item.core.name}` : ''}.
+          {parameter.required ? ' It is required, so this step cannot be completed.' : ''}
+        </MessageBarBody>
+      </MessageBar>
+    );
+  }
+
+  return (
+    <div data-testid={`field-${parameter.code}`}>
+      <LookupField
+        label={parameter.label}
+        required={parameter.required}
+        value={value}
+        onChange={picked => update(d => withLookup(d, scope, parameter.code, picked))}
+        onSearch={search}
+        openOnFocus
+        placeholder={`Search ${parameter.label.toLowerCase()}`}
+      />
+      {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
+    </div>
+  );
+};
+
+const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
+  const { draft, update } = useDecisionItem();
+  const styles = useStyles();
+  const value = fieldValue(draft, scope, parameter.code);
+  const typed = draft.values[scope]?.[parameter.code] !== undefined;
+  const prefilled = !typed && value !== '';
+  const invalid = value.trim() !== '' && !parameterValid(parameter, value);
+  const set = (next: string) => update(d => withValue(d, scope, parameter.code, next));
+  const hint = prefilled ? 'Prefilled from this item. Edit it as needed.' : (parameter.hint ?? undefined);
+
+  let control: React.ReactElement;
+  switch (parameter.kind) {
+    case 'TextArea':
+      control = <Textarea rows={6} resize="vertical" value={value} onChange={(_e, data) => set(data.value)} />;
+      break;
+    case 'Choice':
+      control = (
+        <Select value={value} onChange={(_e, data) => set(data.value)}>
+          <option value="">Choose...</option>
+          {(parameter.options ?? []).map(o => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      );
+      break;
+    case 'Date':
+      control = <Input type="date" value={value} onChange={(_e, data) => set(data.value)} />;
+      break;
+    case 'Money':
+      control = <Input inputMode="decimal" value={value} onChange={(_e, data) => set(data.value)} />;
+      break;
+    default:
+      control = <Input value={value} onChange={(_e, data) => set(data.value)} />;
+  }
+
+  return (
+    <Field
+      label={parameter.label}
+      required={parameter.required}
+      hint={hint ? <span className={prefilled ? styles.prefilled : undefined}>{hint}</span> : undefined}
+      validationState={invalid ? 'error' : 'none'}
+      validationMessage={invalid ? (INVALID[parameter.kind] ?? 'Check this value.') : undefined}
+      data-testid={`field-${parameter.code}`}
+    >
+      {control}
+    </Field>
+  );
+};
+
+/** The editable form of an action or Next step. */
+export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScope }> = ({ action, scope }) => {
+  const styles = useStyles();
+  if (action.parameters.length === 0) return null;
+  return (
+    <div className={styles.form} data-testid="parameter-fields">
+      {action.parameters.map(p =>
+        p.kind === 'Person' || p.kind === 'Lookup' ? (
+          <LookupParameter key={p.code} parameter={p} scope={scope} />
+        ) : (
+          <ScalarParameter key={p.code} parameter={p} scope={scope} />
+        )
+      )}
+    </div>
+  );
+};
