@@ -14,13 +14,18 @@ Usage:
   python spend-report.py [--days N | --since YYYY-MM-DD | --today] [--tz local|utc]
                          [--project SUBSTR ...] [--format text|json|csv|html]
                          [--out PATH] [--open] [--archive [PATH]] [--source transcripts|archive]
+                         [--model-fit [--launch-log PATH] [--repo PATH]]
+
+--model-fit: was each piece of work run on the right model? Matches the agent launch log
+(%USERPROFILE%\\.claude\\spend-archive\\agent-launches.csv, written by scripts/quality/require-agent-model.py)
+to the sub-agent transcripts and tabulates work type x model (see scripts/ai-cost/README.md).
 
 Durable archive: transcripts are deleted by Claude Code after a retention period, so
 `--archive [PATH]` upserts this run's days into a CSV (default
 %USERPROFILE%\\.claude\\spend-archive\\spend-daily.csv) and never lets a day's total go down.
 `--source archive` reports from that file instead of the transcripts.
 """
-import argparse, csv, glob, importlib.util, io, json, os, sys, tempfile, time
+import argparse, csv, glob, html, importlib.util, io, json, os, re, sys, tempfile, time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -115,6 +120,31 @@ def resolve_window(days, since, today, tz, now=None):
     return (t - timedelta(days=(14 if days is None else days) - 1)).isoformat(), t.isoformat()
 
 
+def call_figures(u, model):
+    """Token counts and list-price cost parts of one assistant `usage` record (rules in the module doc)."""
+    pin, pout, pcr = gpc.price_for(model)
+    inp = u.get("input_tokens", 0) or 0
+    out = u.get("output_tokens", 0) or 0
+    cr = u.get("cache_read_input_tokens", 0) or 0
+    cc = u.get("cache_creation") or {}
+    w5 = cc.get("ephemeral_5m_input_tokens")
+    w1 = cc.get("ephemeral_1h_input_tokens")
+    if w5 is None and w1 is None:
+        w5, w1 = u.get("cache_creation_input_tokens", 0) or 0, 0
+    w5 = w5 or 0
+    w1 = w1 or 0
+    sp = 2 if u.get("speed") == "fast" else 1
+    return {"input": inp, "output": out, "cache_read": cr, "cache_write": w5 + w1,
+            "cost_cache_read": sp * cr * pcr / 1e6,
+            "cost_cache_write": sp * (w5 * pin * 1.25 + w1 * pin * 2) / 1e6,
+            "cost_input": sp * inp * pin / 1e6, "cost_output": sp * out * pout / 1e6,
+            "ctx": inp + cr + w5 + w1}
+
+
+def is_subagent_file(f):
+    return os.sep + "subagents" + os.sep in f or os.path.basename(f).startswith("agent-")
+
+
 def collect(since_day, tz=None, root=None):
     """Single pass. Returns (rows keyed (day, project, model, kind), stats).
 
@@ -133,8 +163,7 @@ def collect(since_day, tz=None, root=None):
         nfiles += 1
         folder = os.path.relpath(f, root).split(os.sep)[0]
         proj = project_name(folder)
-        kind = "subagent" if (os.sep + "subagents" + os.sep in f or
-                              os.path.basename(f).startswith("agent-")) else "main"
+        kind = "subagent" if is_subagent_file(f) else "main"
         with open(f, encoding="utf-8", errors="ignore") as fh:
             for line in fh:
                 if '"usage"' not in line:
@@ -161,31 +190,19 @@ def collect(since_day, tz=None, root=None):
                 if day < since_day:
                     continue
                 model = m.get("model", "") or "unknown"
-                pin, pout, pcr = gpc.price_for(model)
-                inp = u.get("input_tokens", 0) or 0
-                out = u.get("output_tokens", 0) or 0
-                cr = u.get("cache_read_input_tokens", 0) or 0
-                cc = u.get("cache_creation") or {}
-                w5 = cc.get("ephemeral_5m_input_tokens")
-                w1 = cc.get("ephemeral_1h_input_tokens")
-                if w5 is None and w1 is None:
-                    w5, w1 = u.get("cache_creation_input_tokens", 0) or 0, 0
-                w5 = w5 or 0
-                w1 = w1 or 0
-                sp = 2 if u.get("speed") == "fast" else 1
-                ctx = inp + cr + w5 + w1
+                fg = call_figures(u, model)
                 r = rows[(day, proj, model, kind)]
                 r["calls"] += 1
-                r["input"] += inp
-                r["output"] += out
-                r["cache_read"] += cr
-                r["cache_write"] += w5 + w1
-                r["cost_cache_read"] += sp * cr * pcr / 1e6
-                r["cost_cache_write"] += sp * (w5 * pin * 1.25 + w1 * pin * 2) / 1e6
-                r["cost_input"] += sp * inp * pin / 1e6
-                r["cost_output"] += sp * out * pout / 1e6
-                r["ctx"] += ctx
-                r["big"] += ctx > BIG_CTX
+                r["input"] += fg["input"]
+                r["output"] += fg["output"]
+                r["cache_read"] += fg["cache_read"]
+                r["cache_write"] += fg["cache_write"]
+                r["cost_cache_read"] += fg["cost_cache_read"]
+                r["cost_cache_write"] += fg["cost_cache_write"]
+                r["cost_input"] += fg["cost_input"]
+                r["cost_output"] += fg["cost_output"]
+                r["ctx"] += fg["ctx"]
+                r["big"] += fg["ctx"] > BIG_CTX
     return rows, {"files": nfiles}
 
 
@@ -487,6 +504,507 @@ def write_archive(path, rows):
             os.remove(tmp)
         raise
 
+
+# --- model fit (--model-fit) --------------------------------------------------------------
+# Was each piece of work run on the right model? Claude Code keeps every sub-agent's transcript in
+# <project>/<session>/subagents/agent-<id>.jsonl with a sibling agent-<id>.meta.json that carries the
+# launch description, agentType, toolUseId and the requested model. The PreToolUse hook
+# scripts/quality/require-agent-model.py logs each allowed launch (agent-launches.csv); a launch is matched to
+# its transcript, the work is classified, and cost/size/rework are tabulated per work type x model.
+
+DEFAULT_LAUNCH_LOG = os.path.join(os.path.expanduser("~"), ".claude", "spend-archive", "agent-launches.csv")
+DESC_MAX = 120            # the hook truncates descriptions to this
+MATCH_SLACK_S = 5         # a transcript may start a moment before the hook logged the launch
+MATCH_WINDOW_S = 120      # nearest-start-time fallback: transcript must start this soon after the launch
+MIN_N = 3                 # fewest rework-known launches a row needs before a flag may compare it
+UNDER_MARGIN = 0.25       # "well above the type's average" = this many points (0.25 = 25 pp)
+TOP_TIER = ("opus", "fable", "mythos")
+
+# Work categories: the first keyword match in the description wins. Specific agent types keep the
+# category they imply; only `implementer` is refined (a deploy or test run is not implementation).
+CATEGORY_KEYWORDS = [
+    ("deploy", re.compile(r"\bdeploy\w*", re.I)),
+    ("review", re.compile(r"\b(review\w*|verif\w*)", re.I)),
+    ("research", re.compile(r"\b(research\w*|investigat\w*)", re.I)),
+    ("map", re.compile(r"\b(map|mapping|find|search\w*|inventor\w*)\b", re.I)),
+    ("implement", re.compile(r"\b(implement\w*|fix\w*|add)\b", re.I)),
+    ("test", re.compile(r"\btest\w*", re.I)),
+]
+TYPE_CATEGORY = {"code-mapper": "map", "explore": "map", "adversarial-reviewer": "review",
+                 "implementer": "implement", "researcher": "research", "plan": "plan",
+                 "claude-code-guide": "lookup"}
+
+REWORK_LINE = re.compile(r"^[\s>*\-`#]*\**rework\**:\s*\**\s*(none|fix-round-(\d+)|escalated-to-([A-Za-z0-9._-]+))"
+                         r"(?![A-Za-z0-9_-])(.*)$", re.I)
+TASK_REF = re.compile(r"\btask[\s#_-]*(\d{1,4})\b", re.I)
+REWORK_RANK = {"none": 0, "fix": 1, "escalated": 2}
+
+
+def model_family(model):
+    m = (model or "").lower()
+    for fam in ("opus", "fable", "mythos", "sonnet", "haiku"):
+        if fam in m:
+            return fam
+    return "other"
+
+
+def work_type(kind, description):
+    """(subagent type, category) for a launch. A blank type is the general-purpose built-in."""
+    k = (kind or "").strip().lower() or "general-purpose"
+    cat = next((name for name, rx in CATEGORY_KEYWORDS if rx.search(description or "")), None)
+    if k in TYPE_CATEGORY and not (k == "implementer" and cat in ("deploy", "test")):
+        cat = TYPE_CATEGORY[k]
+    return k, cat or "other"
+
+
+def iso_epoch(ts):
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def norm_desc(s):
+    return " ".join(str(s or "").split())[:DESC_MAX]
+
+
+def subagent_session(relparts):
+    """Session id of a sub-agent transcript: the folder above `subagents/` (<project>/<session>/subagents/...)."""
+    if "subagents" in relparts:
+        i = relparts.index("subagents")
+        if i >= 1:
+            return relparts[i - 1]
+    return relparts[1] if len(relparts) > 2 else ""
+
+
+def read_meta(jsonl_path):
+    p = jsonl_path[:-len(".jsonl")] + ".meta.json"
+    try:
+        with open(p, encoding="utf-8") as fh:
+            m = json.load(fh)
+        return m if isinstance(m, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def collect_model_fit(since_day, until_day, tz=None, root=None):
+    """One pass over the transcripts. Returns (units, main_calls, stats).
+
+    units: one dict per sub-agent transcript that started in the window (cost/calls/context, the model it
+    mostly used, its meta file). main_calls: {model family: calls} of main-session transcripts in the window."""
+    root = root or gpc.CLAUDE_PROJECTS
+    cutoff = mtime_cutoff(since_day, tz)
+    seen, units, main_calls, nfiles = set(), [], defaultdict(int), 0
+    for f in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(f) < cutoff:
+                continue
+        except OSError:
+            continue
+        nfiles += 1
+        rel = os.path.relpath(f, root).split(os.sep)
+        sub = is_subagent_file(f)
+        u_ = {"calls": 0, "cost": 0.0, "ctx": 0, "start": None, "fam": defaultdict(int)} if sub else None
+        with open(f, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if '"usage"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                m = e.get("message") or {}
+                u = m.get("usage")
+                if not u or e.get("type") != "assistant" or m.get("model") == "<synthetic>":
+                    continue
+                ts = e.get("timestamp")
+                if not ts:
+                    continue
+                k = (m.get("id"), e.get("requestId"))
+                if k[0] and k in seen:
+                    continue
+                seen.add(k)
+                try:
+                    ep = iso_epoch(ts)
+                    day = day_of(ts, tz)
+                except (ValueError, OverflowError, OSError):
+                    continue
+                fam = model_family(m.get("model", "") or "unknown")
+                if sub:
+                    fg = call_figures(u, m.get("model", "") or "unknown")
+                    u_["calls"] += 1
+                    u_["cost"] += fg["cost_cache_read"] + fg["cost_cache_write"] + fg["cost_input"] + fg["cost_output"]
+                    u_["ctx"] += fg["ctx"]
+                    u_["fam"][fam] += 1
+                    if u_["start"] is None or ep < u_["start"]:
+                        u_["start"] = ep
+                        u_["start_day"] = day
+                elif since_day <= day <= until_day:
+                    main_calls[fam] += 1
+        if sub and u_["calls"] and since_day <= u_["start_day"] <= until_day:
+            fam = max(sorted(u_["fam"]), key=lambda x: u_["fam"][x])      # most-used family; ties by name
+            units.append({"file": f, "folder": rel[0], "project": project_name(rel[0]),
+                          "session": subagent_session(rel), "agent_id": os.path.basename(f)[:-len(".jsonl")],
+                          "meta": read_meta(f), "start": u_["start"], "calls": u_["calls"], "cost": u_["cost"],
+                          "ctx": u_["ctx"], "family": fam, "launch": None})
+    return units, dict(main_calls), {"files": nfiles}
+
+
+def read_launches(path, since_day, until_day, tz=None):
+    """(launches in the window, total data lines read, malformed lines skipped). Missing file = ([], 0, 0)."""
+    out, total, bad = [], 0, 0
+    try:
+        fh = open(path, encoding="utf-8", newline="")
+    except OSError:
+        return out, 0, 0
+    with fh:
+        for rec in csv.DictReader(fh):
+            total += 1
+            try:
+                ep = iso_epoch(rec["ts_utc"])
+                day = day_of(rec["ts_utc"], tz)
+            except (KeyError, TypeError, ValueError, AttributeError):
+                bad += 1
+                continue
+            if not (since_day <= day <= until_day):
+                continue
+            session = (rec.get("session_id") or "").strip()
+            if not session and rec.get("transcript_path"):
+                session = os.path.splitext(os.path.basename(rec["transcript_path"]))[0]
+            out.append({"ts": ep, "session": session, "project": rec.get("project") or "",
+                        "tool": rec.get("tool") or "", "kind": (rec.get("subagent_type") or "").strip(),
+                        "model": rec.get("model") or "", "effort": rec.get("effort") or "",
+                        "description": norm_desc(rec.get("description")),
+                        "tool_use_id": (rec.get("tool_use_id") or "").strip(), "unit": None})
+    out.sort(key=lambda l: l["ts"])
+    return out, total, bad
+
+
+def match_launches(launches, units):
+    """Pair each Agent/Task launch with its sub-agent transcript (sets launch["unit"] and unit["launch"]).
+
+    1. tool_use_id equal to the meta file's toolUseId (exact).
+    2. Same session, same description (and the same agent type when both are known); of several, the
+       transcript that started first at/after the launch.
+    3. Same session, transcript with no meta description: the nearest start within MATCH_WINDOW_S after the launch.
+    A transcript is used once. Returns the number of pairs. Workflow launches are not matched: their
+    agents appear as transcripts of their own."""
+    cand = [l for l in launches if l["tool"] != "Workflow"]
+
+    def link(l, u):
+        l["unit"], u["launch"] = u, l
+
+    def first_after(l, pool):
+        ok = [u for u in pool if u["launch"] is None and u["start"] >= l["ts"] - MATCH_SLACK_S]
+        return min(ok, key=lambda u: u["start"]) if ok else None
+
+    by_tool = {u["meta"].get("toolUseId"): u for u in units if u["meta"].get("toolUseId")}
+    for l in cand:
+        u = by_tool.get(l["tool_use_id"]) if l["tool_use_id"] else None
+        if u is not None and u["launch"] is None:
+            link(l, u)
+
+    def kind_of(s):
+        return (s or "").strip().lower() or "general-purpose"
+
+    for l in cand:
+        if l["unit"] is not None:
+            continue
+        pool = [u for u in units if u["session"] == l["session"]
+                and norm_desc(u["meta"].get("description")) == l["description"]
+                and (not u["meta"].get("agentType") or kind_of(u["meta"]["agentType"]) == kind_of(l["kind"]))]
+        u = first_after(l, pool)
+        if u is not None:
+            link(l, u)
+
+    for l in cand:
+        if l["unit"] is not None:
+            continue
+        pool = [u for u in units if u["session"] == l["session"] and not u["meta"].get("description")
+                and u["start"] <= l["ts"] + MATCH_WINDOW_S]
+        u = first_after(l, pool)
+        if u is not None:
+            link(l, u)
+    return sum(1 for l in cand if l["unit"] is not None)
+
+
+def parse_rework(repo_root):
+    """{(project slug lower-case, task number): (class, detail)} from `rework:` lines in task notes.
+
+    Files read: projects/*/notes/*.md and projects/*/tasks/*.poml (+ .md). Format per line:
+    `rework: none | fix-round-<N> | escalated-to-<model>`, optionally followed by `task <NNN>`; without that the
+    task number comes from the file name (`task-042-x.md`, `042-x.poml`). The worst value per task wins."""
+    out = {}
+    pats = [os.path.join(repo_root, "projects", "*", "notes", "*.md"),
+            os.path.join(repo_root, "projects", "*", "tasks", "*.poml"),
+            os.path.join(repo_root, "projects", "*", "tasks", "*.md")]
+    for pat in pats:
+        for f in sorted(glob.glob(pat)):
+            try:
+                with open(f, encoding="utf-8", errors="ignore") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            if "rework" not in text.lower():
+                continue
+            slug = os.path.basename(os.path.dirname(os.path.dirname(f))).lower()
+            name = os.path.basename(f)
+            fm = TASK_REF.search(name) or re.match(r"(\d{1,4})-", name)       # task-042-x.md | 042-x.poml
+            file_task = int(fm.group(1)) if fm else None
+            for line in text.splitlines():
+                m = REWORK_LINE.match(line)
+                if not m:
+                    continue
+                tm = TASK_REF.search(m.group(4))
+                tid = int(tm.group(1)) if tm else file_task
+                if tid is None:
+                    continue
+                if m.group(1).lower() == "none":
+                    val = ("none", "")
+                elif m.group(2):
+                    val = ("fix", m.group(2))
+                else:
+                    val = ("escalated", m.group(3))
+                old = out.get((slug, tid))
+                if old is None or REWORK_RANK[val[0]] >= REWORK_RANK[old[0]]:
+                    out[(slug, tid)] = val
+    return out
+
+
+def unit_rework(unit, rework):
+    """'none' | 'fix' | 'escalated' | 'unknown' for a transcript: the task id comes from the launch description
+    (else the meta description) and the project from the transcript folder; no id or no record = unknown."""
+    desc = unit["launch"]["description"] if unit["launch"] else norm_desc(unit["meta"].get("description"))
+    m = TASK_REF.search(desc or "")
+    if not m:
+        return "unknown"
+    for slug in gpc.slug_candidates(unit["project"]):
+        v = rework.get((slug, int(m.group(1))))
+        if v:
+            return v[0]
+    return "unknown"
+
+
+def unit_work(unit):
+    if unit["launch"]:
+        return work_type(unit["launch"]["kind"], unit["launch"]["description"])
+    return work_type(unit["meta"].get("agentType"), norm_desc(unit["meta"].get("description")))
+
+
+def build_fit_rows(units, rework):
+    g = {}
+    for u in units:
+        kind, cat = unit_work(u)
+        r = g.setdefault((kind, cat, u["family"]), {
+            "work_type": f"{kind} / {cat}", "subagent_type": kind, "category": cat, "model": u["family"],
+            "launches": 0, "logged": 0, "cost_total": 0.0, "calls": 0, "ctx": 0,
+            "rework_known": 0, "rework_fix": 0, "rework_escalated": 0, "flag": ""})
+        r["launches"] += 1
+        r["logged"] += u["launch"] is not None
+        r["cost_total"] += u["cost"]
+        r["calls"] += u["calls"]
+        r["ctx"] += u["ctx"]
+        rw = unit_rework(u, rework)
+        if rw != "unknown":
+            r["rework_known"] += 1
+            r["rework_fix"] += rw == "fix"
+            r["rework_escalated"] += rw == "escalated"
+    rows = list(g.values())
+    for r in rows:
+        r["cost_per_launch"] = r["cost_total"] / r["launches"]
+        r["avg_calls"] = r["calls"] / r["launches"]
+        r["avg_ctx"] = r["ctx"] / r["calls"] if r["calls"] else 0
+        r["rework_rate"] = ((r["rework_fix"] + r["rework_escalated"]) / r["rework_known"]) if r["rework_known"] else None
+    flag_rows(rows)
+    by_wt = defaultdict(float)
+    for r in rows:
+        by_wt[r["work_type"]] += r["cost_total"]
+    rows.sort(key=lambda r: (-by_wt[r["work_type"]], r["work_type"], -r["cost_total"], r["model"]))
+    return rows
+
+
+def pct(x):
+    return f"{100 * x:.0f}%"
+
+
+def flag_rows(rows):
+    """Sets row["flag"] to 'OVER: ...' or 'UNDER: ...' (or ""), judged within each work type."""
+    by_wt = defaultdict(list)
+    for r in rows:
+        by_wt[r["work_type"]].append(r)
+    for rs in by_wt.values():
+        known = sum(r["rework_known"] for r in rs)
+        avg = sum(r["rework_fix"] + r["rework_escalated"] for r in rs) / known if known else None
+        sonnet = next((r for r in rs if r["model"] == "sonnet"), None)
+        for r in rs:
+            why = []
+            if r["model"] in TOP_TIER:
+                if r["category"] in ("map", "deploy"):
+                    why.append(f"{r['model']} on {r['category']} work")
+                if (sonnet and sonnet["rework_known"] >= MIN_N and r["rework_known"] >= MIN_N
+                        and sonnet["rework_rate"] <= r["rework_rate"]):
+                    why.append(f"sonnet rework {pct(sonnet['rework_rate'])} <= {pct(r['rework_rate'])}")
+                if why:
+                    r["flag"] = "OVER: " + "; ".join(why)
+            elif r["model"] == "sonnet":
+                if r["rework_escalated"]:
+                    why.append(f"{r['rework_escalated']} escalated")
+                if r["rework_known"] >= MIN_N and avg is not None and r["rework_rate"] - avg >= UNDER_MARGIN:
+                    why.append(f"rework {pct(r['rework_rate'])} vs type avg {pct(avg)}")
+                if why:
+                    r["flag"] = "UNDER: " + "; ".join(why)
+
+
+def fit_summary(launches, units, bad_lines, total_lines, log_exists, log_path, main_calls):
+    cand = [l for l in launches if l["tool"] != "Workflow"]
+    sub_calls = defaultdict(int)
+    for u in units:
+        sub_calls[u["family"]] += u["calls"]
+    return {"launch_log": log_path, "launch_log_exists": log_exists, "log_lines": total_lines,
+            "log_lines_malformed": bad_lines, "launches_in_window": len(launches),
+            "workflow_launches": len(launches) - len(cand), "agent_launches": len(cand),
+            "transcripts": len(units), "matched": sum(1 for l in cand if l["unit"] is not None),
+            "unmatched_launches": sum(1 for l in cand if l["unit"] is None),
+            "unmatched_transcripts": sum(1 for u in units if u["launch"] is None),
+            "main_calls": dict(main_calls), "subagent_calls": dict(sub_calls)}
+
+
+def share_text(calls):
+    tot = sum(calls.values())
+    if not tot:
+        return "none"
+    return ", ".join(f"{k} {pct(v / tot)} ({v:,})" for k, v in sorted(calls.items(), key=lambda kv: -kv[1]))
+
+
+def rework_text(r):
+    if not r["rework_known"]:
+        return "unknown"
+    return f"{r['rework_fix'] + r['rework_escalated']}/{r['rework_known']} {pct(r['rework_rate'])}"
+
+
+def fit_text(rows, summ, since, until, tzl):
+    L = [f"Model fit {since}..{until}, days in {tzl}",
+         "",
+         f"Main-session calls by model (policy adherence): {share_text(summ['main_calls'])}",
+         f"Sub-agent calls by model:                       {share_text(summ['subagent_calls'])}",
+         "",
+         f"Agent launches logged {summ['agent_launches']}  matched to a transcript {summ['matched']}  "
+         f"unmatched launches {summ['unmatched_launches']}  (+ {summ['workflow_launches']} workflow launches; their agents are transcripts)",
+         f"Sub-agent transcripts {summ['transcripts']}  with a launch record {summ['matched']}  "
+         f"unmatched transcripts (no launch record) {summ['unmatched_transcripts']}  -- still counted in the table below",
+         ("Launch log: " + summ["launch_log"] + ("" if summ["launch_log_exists"] else "  (not found: every transcript is unmatched)")
+          + (f"  [{summ['log_lines_malformed']} malformed lines skipped]" if summ["log_lines_malformed"] else "")),
+         "", f"{'work type / model':<46}{'n':>5}{'logged':>7}{'est $':>9}{'$/launch':>9}{'calls':>7}{'ctx':>7}{'rework':>13}  flag"]
+    last = None
+    for r in rows:
+        if r["work_type"] != last:
+            L.append(r["work_type"])
+            last = r["work_type"]
+        L.append(f"  {r['model']:<44}{r['launches']:>5}{r['logged']:>7}{r['cost_total']:>9,.0f}{r['cost_per_launch']:>9,.1f}"
+                 f"{r['avg_calls']:>7.0f}{r['avg_ctx'] / 1000:>6.0f}k{rework_text(r):>13}  {r['flag']}")
+    if not rows:
+        L.append("(no sub-agent transcripts in this window)")
+    L += ["", "n = sub-agent transcripts; logged = those matched to a launch record; calls = average per launch; ctx = average per call;",
+          "rework = (fix rounds + escalations) / launches with a `rework:` line in task notes; unknown = no task id or no line."]
+    return "\n".join(L) + "\n"
+
+
+FIT_CSV_COLUMNS = ["section", "work_type", "subagent_type", "category", "model", "launches", "logged", "cost_total",
+                   "cost_per_launch", "avg_calls", "avg_ctx", "rework_known", "rework_fix", "rework_escalated",
+                   "rework_rate", "flag", "tz"]
+
+
+def fit_csv(rows, summ, tz_name):
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=FIT_CSV_COLUMNS)
+    w.writeheader()
+    for r in rows:
+        d = {k: r.get(k, "") for k in FIT_CSV_COLUMNS}
+        for k in ("cost_total", "cost_per_launch", "avg_calls", "avg_ctx"):
+            d[k] = round(r[k], 4)
+        d["rework_rate"] = "" if r["rework_rate"] is None else round(r["rework_rate"], 4)
+        d.update(section="work", tz=tz_name)
+        w.writerow(d)
+    for sec, key in (("main_calls", "main_calls"), ("subagent_calls", "subagent_calls")):
+        for fam, n in sorted(summ[key].items()):
+            w.writerow({"section": sec, "model": fam, "launches": n, "tz": tz_name})
+    for label in ("agent_launches", "matched", "unmatched_launches", "workflow_launches", "transcripts",
+                  "unmatched_transcripts"):
+        w.writerow({"section": "match", "work_type": label, "launches": summ[label], "tz": tz_name})
+    return buf.getvalue()
+
+
+FIT_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spaarke Model Fit</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2330;--mute:#667085;--line:#e3e6eb;--over:#b54708;--under:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--fg:#e6e9ef;--mute:#9aa3b2;--line:#2a313d;--over:#f0a550;--under:#f06b8b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0}.sub{color:var(--mute);font-size:12px;margin:2px 0 12px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;min-width:0}
+.panel h2{font-size:14px;margin:0 0 8px}.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,td.f,th.f{text-align:left}
+th{color:var(--mute);font-weight:600}
+tr.wt td{font-weight:650;background:color-mix(in srgb,var(--line) 40%,transparent)}
+.over{color:var(--over)}.under{color:var(--under)}
+p{margin:4px 0}
+</style></head><body><div class="wrap">
+<h1>Spaarke Model Fit</h1><div class="sub">__RANGE__</div>
+<div class="panel"><h2>Policy adherence and matching</h2>__SUMMARY__</div>
+<div class="panel"><h2>Work type by model</h2><div class="tw"><table><thead><tr>
+<th>Work type / model</th><th>n</th><th>Logged</th><th>Est. $</th><th>$/launch</th><th>Avg calls</th><th>Avg ctx</th><th>Rework</th><th class="f">Flag</th></tr></thead>
+<tbody>__ROWS__</tbody></table></div></div>
+<div class="sub">n = sub-agent transcripts; logged = matched to a launch record; rework = (fix rounds + escalations) / launches with a
+<code>rework:</code> line in task notes (unknown = no task id or no line). Estimated at list price from local transcripts; not an invoice.</div>
+</div></body></html>
+"""
+
+
+def fit_html(rows, summ, since, until, tzl):
+    e = html.escape
+    body, last = [], None
+    for r in rows:
+        if r["work_type"] != last:
+            body.append(f'<tr class="wt"><td colspan="9">{e(r["work_type"])}</td></tr>')
+            last = r["work_type"]
+        cls = "over" if r["flag"].startswith("OVER") else "under" if r["flag"].startswith("UNDER") else ""
+        body.append(f'<tr><td>&nbsp;&nbsp;{e(r["model"])}</td><td>{r["launches"]}</td><td>{r["logged"]}</td>'
+                    f'<td>${r["cost_total"]:,.0f}</td><td>${r["cost_per_launch"]:,.1f}</td><td>{r["avg_calls"]:.0f}</td>'
+                    f'<td>{r["avg_ctx"] / 1000:.0f}k</td><td>{e(rework_text(r))}</td><td class="f {cls}">{e(r["flag"])}</td></tr>')
+    if not rows:
+        body.append('<tr><td colspan="9">No sub-agent transcripts in this window.</td></tr>')
+    s = [f'<p>Main-session calls by model: {e(share_text(summ["main_calls"]))}</p>',
+         f'<p>Sub-agent calls by model: {e(share_text(summ["subagent_calls"]))}</p>',
+         f'<p>Agent launches logged {summ["agent_launches"]}; matched {summ["matched"]}; unmatched launches '
+         f'{summ["unmatched_launches"]} (+ {summ["workflow_launches"]} workflow launches).</p>',
+         f'<p>Sub-agent transcripts {summ["transcripts"]}; with a launch record {summ["matched"]}; unmatched '
+         f'transcripts {summ["unmatched_transcripts"]} (still in the table).</p>',
+         f'<p>Launch log: {e(summ["launch_log"])}{"" if summ["launch_log_exists"] else " (not found)"}</p>']
+    out = FIT_HTML.replace("__RANGE__", e(f"{since} to {until} (days in {tzl})")).replace("__SUMMARY__", "".join(s))
+    return out.replace("__ROWS__", "".join(body))
+
+
+def model_fit_report(since, until, tz, tz_name, projects, repo_root, launch_log, root=None):
+    """Everything --model-fit prints: (rows, summary). Pure function of the transcripts, the launch log and the notes."""
+    units, main_calls, st = collect_model_fit(since, until, tz, root)
+    launches, total, bad = read_launches(launch_log, since, until, tz)
+    if projects:
+        keep = lambda p: any(x.lower() in p.lower() for x in projects)
+        units = [u for u in units if keep(u["project"])]
+        launches = [l for l in launches if keep(l["project"])]
+    match_launches(launches, units)
+    rows = build_fit_rows(units, parse_rework(repo_root))
+    summ = fit_summary(launches, units, bad, total, os.path.exists(launch_log), launch_log, main_calls)
+    summ["files"] = st["files"]
+    return rows, summ
+
+
 def filter_flat(flatrows, projects):
     if not projects:
         return list(flatrows)
@@ -496,6 +1014,23 @@ def filter_flat(flatrows, projects):
 def fail(msg):
     print(f"spend-report: {msg}", file=sys.stderr)
     sys.exit(2)
+
+
+def emit(out, a, nrows, note, t0):
+    """Write the rendered report to --out, or stdout."""
+    if a.out:
+        with open(a.out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(out)
+        print(f"wrote {a.out} ({nrows} rows, {note}, {time.time()-t0:.1f}s)", file=sys.stderr)
+        if a.format == "html" and a.open:
+            import webbrowser
+            webbrowser.open("file:///" + os.path.abspath(a.out).replace("\\", "/"))
+    else:
+        # newline="": no "\n" -> "\r\n" translation, so csv (already CRLF) is not doubled to "\r\r\n"
+        # on Windows and stdout matches what --out writes.
+        sys.stdout.reconfigure(encoding="utf-8", newline="")
+        sys.stdout.write(out)
+        print(f"({note}, {time.time()-t0:.1f}s)", file=sys.stderr)
 
 
 def main():
@@ -518,9 +1053,19 @@ def main():
     ap.add_argument("--source", choices=["transcripts", "archive"], default="transcripts",
                     help="where rows come from: the local transcripts (default) or the archive, "
                          "which also covers days whose transcripts were deleted")
+    ap.add_argument("--model-fit", action="store_true",
+                    help="work type x model table: cost, size and rework per kind of work, flagging over- and "
+                         "under-provisioned models; uses the agent launch log and task-note `rework:` lines")
+    ap.add_argument("--launch-log", metavar="PATH",
+                    help=f"--model-fit: the agent launch log (default $SPAARKE_AGENT_LAUNCH_LOG or "
+                         f"{DEFAULT_LAUNCH_LOG.replace('%', '%%')})")
+    ap.add_argument("--repo", metavar="PATH", default=os.path.dirname(os.path.dirname(HERE)),
+                    help="--model-fit: repo root whose projects/*/notes and tasks hold the `rework:` lines (default: this repo)")
     a = ap.parse_args()
     if a.today and (a.days is not None or a.since):
         ap.error("--today cannot be combined with --days or --since")
+    if a.model_fit and (a.archive or a.source == "archive"):
+        ap.error("--model-fit reads the transcripts; it cannot be combined with --archive or --source archive")
     if a.since:
         try:
             datetime.strptime(a.since, "%Y-%m-%d")
@@ -531,6 +1076,26 @@ def main():
     archive_path = a.archive or DEFAULT_ARCHIVE
     tz_name = a.tz or "local"
     note = ""
+
+    if a.model_fit:
+        tz = resolve_tz(tz_name)
+        since, until = resolve_window(a.days, a.since, a.today, tz)
+        log = a.launch_log or os.environ.get("SPAARKE_AGENT_LAUNCH_LOG") or DEFAULT_LAUNCH_LOG
+        rows, summ = model_fit_report(since, until, tz, tz_name, a.project, a.repo, log)
+        tzl = tz_label(tz_name)
+        if a.format == "text":
+            out = fit_text(rows, summ, since, until, tzl)
+        elif a.format == "json":
+            out = json.dumps({"tz": tz_name, "tz_label": tzl, "since": since, "until": until,
+                              "summary": summ, "rows": rows}, indent=1)
+        elif a.format == "csv":
+            out = fit_csv(rows, summ, tz_name)
+        else:
+            out = fit_html(rows, summ, since, until, tzl)
+            if not a.out:
+                a.out = os.path.join(tempfile.gettempdir(), "spaarke-model-fit.html")
+        emit(out, a, len(rows), f"{summ['files']} files", t0)
+        return
 
     if a.source == "archive":
         if not os.path.exists(archive_path):
@@ -591,19 +1156,7 @@ def main():
         out = html_report(fr, since, until, tz_name, tzl)
         if not a.out:
             a.out = os.path.join(tempfile.gettempdir(), "spaarke-ai-spend.html")
-    if a.out:
-        with open(a.out, "w", encoding="utf-8", newline="") as fh:
-            fh.write(out)
-        print(f"wrote {a.out} ({len(fr)} rows, {note}, {time.time()-t0:.1f}s)", file=sys.stderr)
-        if a.format == "html" and a.open:
-            import webbrowser
-            webbrowser.open("file:///" + os.path.abspath(a.out).replace("\\", "/"))
-    else:
-        # newline="": no "\n" -> "\r\n" translation, so csv (already CRLF) is not doubled to "\r\r\n"
-        # on Windows and stdout matches what --out writes.
-        sys.stdout.reconfigure(encoding="utf-8", newline="")
-        sys.stdout.write(out)
-        print(f"({note}, {time.time()-t0:.1f}s)", file=sys.stderr)
+    emit(out, a, len(fr), note, t0)
     if archive_failed:
         sys.exit(2)
 
