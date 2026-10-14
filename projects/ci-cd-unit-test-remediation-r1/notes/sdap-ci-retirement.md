@@ -10,10 +10,11 @@
 
 | Legacy job / step (`sdap-ci.yml`) | Disposition | Now |
 |---|---|---|
-| **Security Scan**: Trivy fs scan, SARIF to the Security tab | Mapped to a nightly; per-PR **dropped** | `nightly-health.yml` `trivy-fs` (counts HIGH/CRITICAL nightly). Per-PR job was `continue-on-error` and never gated; Trivy findings are a standing backlog, not a per-change regression. **Consequence:** the repo-filesystem SARIF upload to the Security tab stops (the provisioning-sidecar image scan still uploads its SARIF). |
+| **Security Scan**: Trivy fs scan, SARIF to the Security tab | **Preserved** (review fix F3) | `ci-standalone-checks.yml` `trivy-fs`: same settings (`skip-dirs: knowledge`, `.trivyignore`, SARIF, upload with `if: always()`), same SARIF category (`.github/workflows/sdap-ci.yml:security-scan`) so existing code-scanning alerts continue as one series. Reports only; alerts only if the scan itself errors. `nightly-health.yml` `trivy-fs` still counts HIGH/CRITICAL nightly. |
 | **Build & Test (Debug)**: full suite, two-pass classifier | Mapped | Tier 2 `Full Unit Tests (Debug)`, 4 shards, same classifier (`scripts/ci/classify-and-retry.ps1`). Master failures now raise `tier2-master/full-unit-tests` (`master-ci-alert.yml`). |
 | Build & Test: coverage collection + upload | Mapped | `nightly-health.yml` `coverage-observation` (ADR-038: coverage is observation, never a gate). |
 | Build & Test: `Release` matrix entry (removed 2026-06-24; FR-B07 restore) | **Preserved** | `ci-standalone-checks.yml` `release-build`: Release build of the whole solution. Tests stay in Debug (Tier 2). |
+| Build & Test: `dotnet test` where the Router `bff` filter does not match (review fix F2) | **Preserved** | `ci-standalone-checks.yml` `unit-tests-outside-router` (ControlPlane.Tests, Core.Tests, Scheduling.Tests, Bff.Api.IntegrationTests, Spe.Integration.Tests) and `bff-seam-contract-tests` (the test classes in changed `tests/integration/{seam,contract,tenant,Shared}` / `tests/unit/domain` files, which compile into `Sprk.Bff.Api.Tests`). The cleaner fix is widening the Router `bff` filter (`src/server/services/**`, `tests/unit/**`, `tests/integration/**`), which needs the no-edit rule released. |
 | **Eval Gate (Golden Utterances)** | Mapped | Tier 1 `eval-gate` (same command, blocking). |
 | **Client Quality**: PCF ESLint | **Preserved** | `ci-standalone-checks.yml` `pcf-eslint` (same command). Tier 2 `lint` runs it only when SpaarkeAi/BFF paths change, and `client-lint.yml` does not cover `src/client/pcf/**`, so a PCF-only PR would otherwise get no ESLint. |
 | Client Quality: Prettier check | Mapped (legacy check was vacuous) | It ran **after** `prettier --write`, so it could never fail. Tier 2 `lint` runs a real `prettier --check` on SpaarkeAi/BFF PRs; `.husky/pre-commit` formats staged files. A real check finds **48** unformatted files under `src/client/` today (local run 2026-10-14), which the legacy job hid. |
@@ -46,17 +47,17 @@ Both legacy files were **moved** to `docs/archive/workflows/` (GitHub does not e
 | `ci-standalone/compose-client-gate` | same | job not success | next green master run |
 | `ci-standalone/client-typecheck` | same | job not success | next green master run |
 | `ci-standalone/pcf-eslint` | same | job not success | next green master run |
+| `ci-standalone/unit-tests-outside-router`, `/bff-seam-contract-tests`, `/verdict-script-tests` | same | job not success | next green master run |
+| `ci-standalone/trivy-fs` | same | the scan itself errored (findings never fail it) | next green master run |
 | `master-ci-alert/evaluation` | `master-ci-alert.yml` | the verdict script failed (GitHub API errors after 3 retries, script bug), so the two alerts above were not updated | next successful evaluation |
 
 All use `.github/actions/quality-alert` (PR #1837): one issue per check, label `quality-alert`, assigned to the
 owner, edited in place, closed with "Recovered". Decision logic for the first two is
 `scripts/ci/master-ci-verdict.ps1`. It judges master's **current state**, not the triggering run alone: the newest
-25 completed master push runs, each job (and each Tier 2 shard) from the most recent run that executed it. So a
+100 completed master push runs, each job (and each Tier 2 shard) from the most recent run that executed it. So a
 docs-only push (Tier 1 skipped, Router green) cannot close a compile-break alert, a path-gated job keeps its last
-real result, and runs finishing out of order cannot hide an older run's failure. Known limits: a job not executed
-in the last 25 master runs drops out of the evaluation; a job that failed and was then renamed or removed stays
-red until it ages out. The standalone alerts skip posting when a newer master
-run of that workflow has already completed. Replay any past state with `-AsOf`:
+real result, and runs finishing out of order cannot hide an older run's failure. A job the open alert issue lists as failing that no run in the window executed stays failing ("has not executed since …"), so a path-gated failure cannot age out and be reported Recovered (review fix F4); a newer queued/running master run holds `ok` back (K1). Known limit: a job that failed and was then renamed or removed never runs again, so its alert stays open until closed by hand. The standalone alerts skip posting when a newer, non-cancelled master
+run of that workflow has already completed (K2). Replay any past state with `-AsOf`:
 
 | Replayed run | router-master | tier2 | |
 |---|---|---|---|
@@ -75,6 +76,9 @@ Its three `dawidd6/action-download-artifact` steps named `workflow: sdap-ci.yml`
 (up to 30 days old) and then nothing. The three lines now name `ci-standalone-checks.yml`, which is the only
 change, made to keep the workflow functioning as before. It is a separate commit so it can be reverted alone.
 
-Pre-existing hazard, **not** fixed (spec MUST + owner call): the blank-input search has no `branch` filter, so
-under `sdap-ci.yml` it could pick a PR run's artifact. The new workflow uploads `deployment-packages` on master
-pushes only, so that case now fails loudly instead. Recommended: add `branch: master` to the three steps.
+Review fix K3: the three download steps now also set `branch: master` (only when `artifact_run_id` is blank:
+the action rejects `branch` together with `run_id`), `event: push`, `workflow_conclusion: completed` and
+`search_artifacts: true`. A blank run id therefore takes the latest completed master push run that carries
+`deployment-packages`; the default `workflow_conclusion: success` would have skipped a run whose `release-build`
+passed but an unrelated standalone job was red and silently picked an older build. `if_no_artifact_found` was
+`error`, which is not a valid value (`fail | warn | ignore`) and fell through to `ignore`; it is now `fail`.

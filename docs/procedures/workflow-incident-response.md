@@ -26,7 +26,7 @@ This runbook is **specific to GitHub Actions workflow failures**. For broader pr
 | Workflow | Purpose | Trigger |
 |---|---|---|
 | `ci-router.yml` (name `CI`; calls `ci-tier1-blocking.yml` + `ci-tier2-advisory.yml`) | PR gate: required check `Router` (Tier 1 blocking, Tier 2 advisory) | push/PR |
-| `ci-standalone-checks.yml` | Dependency audit, Release build + BFF publish (`deployment-packages`), Compose client gate, shared-lib `tsc`; not required, raises quality alerts on master | push/PR + manual |
+| `ci-standalone-checks.yml` | Dependency audit, Release build + BFF publish (`deployment-packages`), Compose client gate, shared-lib `tsc`, PCF ESLint (`pcf-eslint`), unit tests outside the Router `bff` filter, changed seam/contract test classes, per-change Trivy SARIF (`trivy-fs`); not required, raises quality alerts on master | push/PR + manual |
 | `master-ci-alert.yml` | Raises/clears `router-master` and `tier2-master/full-unit-tests` quality alerts | `workflow_run` on `CI` (master) |
 | `adr-audit.yml` | ADR architecture audit | weekly + manual |
 | `deploy-bff-api.yml` | BFF API staging-slot deploy | push to `master` (api paths) + manual |
