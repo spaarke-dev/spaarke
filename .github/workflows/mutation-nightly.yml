@@ -43,10 +43,9 @@
 name: mutation-nightly
 
 on:
-  schedule:
-    # 05:00 UTC: an hour before nightly-health (06:00) so the two do not contend for
-    # runners, and early enough that the 24h window ends just before it.
-    - cron: '0 5 * * *'
+  # schedule re-enabled after a dispatch run completes end to end within its cap, see issue #1870.
+  # When re-adding (cron '0 5 * * *'): 05:00 UTC is an hour before nightly-health (06:00) so the
+  # two do not contend for runners, and early enough that the 24h window ends just before it.
   workflow_dispatch:
     inputs:
       since:
@@ -79,9 +78,11 @@ jobs:
   mutate:
     name: Mutate changed security code
     runs-on: ubuntu-latest
-    # Pilot baseline: ~17 min locally on 4 vCPU for 3 files, most of it instrumenting
-    # the whole assembly rather than testing mutants. 60 min leaves room for a heavier day.
-    timeout-minutes: 60
+    # PROVISIONAL (dispatch only until issue #1870 is closed). Measured: ~28-44 min of fixed
+    # cost (build, instrumenting the whole assembly, coverage capture) plus ~7 s per mutant;
+    # 14 changed files (3,448 mutants) did not finish in 240 min. Set this to ~1.5x the
+    # duration of a complete proof run before re-adding the schedule.
+    timeout-minutes: 240
     outputs:
       verdict: ${{ steps.summarize.outputs.verdict }}
       alert_summary: ${{ steps.summarize.outputs.alert_summary }}
@@ -296,7 +297,7 @@ jobs:
           if [ "$MUTATE_RESULT" != "success" ]; then
             status=failing
             case "$MUTATE_RESULT" in
-              cancelled) why="was **cancelled**, which is what a job that reaches its 60-minute \`timeout-minutes\` reports" ;;
+              cancelled) why="was **cancelled**, which is what a job that reaches its \`timeout-minutes\` cap reports" ;;
               *)         why="finished **${MUTATE_RESULT}** (a Stryker stage errored: build break, crash, or an unusable initial test run)" ;;
             esac
             summary="The mutation job ${why}. A mutation run that did not complete is a failing check, not a pass."

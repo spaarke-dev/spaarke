@@ -108,7 +108,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          SCHEDULED                                    │
-│  mutation-nightly.yml (daily, 05:00 UTC)                              │
+│  mutation-nightly.yml (dispatch only; schedule pending #1870)         │
 │  issues-dashboard.yml (every 6h + issue events)                       │
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
@@ -166,7 +166,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-spaarke-ai.yml` | Deploy SpaarkeAi | Auto deploy (push) to dev; manual+approval to prod | Build the single-file HTML bundle, deploy it as the `sprk_spaarkeai` Dataverse web resource |
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
 | `issues-dashboard.yml` | issues-dashboard | Scheduled + issue events / advisory | Regenerates the pinned Issues & Quality Dashboard issue (see Quality alerts) |
-| `mutation-nightly.yml` | mutation-nightly | Scheduled / advisory | Stryker.NET mutation run over the allowlisted security/contract BFF files changed in the last 24h; raises the `mutation-nightly` quality alert |
+| `mutation-nightly.yml` | mutation-nightly | Dispatch only (schedule pending #1870) / advisory | Stryker.NET mutation run over the allowlisted security/contract BFF files changed in the last 24h; raises the `mutation-nightly` quality alert |
 | `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; one quality alert per check + rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time); PR dry run | Packs SpaarkeMaster managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, checks both, and publishes them with the `dataverse-solutions-latest.json` manifest H6 reads (T218d) |
@@ -680,12 +680,12 @@ Runs the full NetArchTest suite (`continue-on-error: true` on the test step itse
 
 ## Scheduled Workflows
 
-Seven workflows run on a `schedule:` trigger. Three of them (`mutation-nightly.yml`, `nightly-health.yml`, `client-tests.yml`) also raise [quality alerts](#quality-alerts). There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
+Six workflows run on a `schedule:` trigger (`mutation-nightly.yml` is dispatch-only until #1870 proves a complete run). Two of them (`nightly-health.yml`, `client-tests.yml`), plus `mutation-nightly.yml`, also raise [quality alerts](#quality-alerts). There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
 
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `issues-dashboard.yml` | Every 6 hours (also on issue open/close/label events) | Regenerates the pinned `📊 Issues & Quality Dashboard` issue: open quality alerts, last result of each nightly, new / stale issues, totals | No — edits one issue body in place, never comments |
-| `mutation-nightly.yml` | Daily, 05:00 UTC | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
+| `mutation-nightly.yml` | **Dispatch only** (daily 05:00 UTC once #1870 is closed) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
 | `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — one quality alert per check + rolling tracking issue |
 | `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — quality alert `client-tests` + job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
@@ -705,8 +705,8 @@ Seven workflows run on a `schedule:` trigger. Three of them (`mutation-nightly.y
 | `coverage-shard` + `coverage-observation` | Coverage over the whole suite in 5 shards (the 4 namespace shards plus the other test projects of `Spaarke.sln`; measured 4-20 min), merged per source line — **observation only, never a gate** (ADR-038) | 45 min per shard, 10 min merge |
 | `trivy-fs` | Full filesystem Trivy scan, `exit-code: 0` (never fails the job; counts are reported) | 20 min |
 | `dep-audit` | Full transitive `dotnet`/`npm` vulnerability audit across every `package-lock.json` root | 20 min |
-| `graph-app-role-parity` | Compares a customer UAMI service principal's Graph app roles against `GraphAppRoles.cs`; `continue-on-error: true`; **self-skips today** because the four `NIGHTLY_*` secrets it needs (`NIGHTLY_GRAPH_READER_CLIENT_ID`, `NIGHTLY_AZURE_TENANT_ID`, `NIGHTLY_SUBSCRIPTION_ID`, `NIGHTLY_UAMI_SP_OBJECT_ID`) have never been populated | n/a |
-| `report` | Legacy log: appends a comment to the rolling issue "Nightly Health — {date}". **Off by default** (the alerts and the [dashboard](#quality-alerts) replaced it; rolling issue #408 is closed). Restore with `-f post_tracking_comment=true` | 10 min |
+| `graph-app-role-parity` | Compares a customer UAMI service principal's Graph app roles against `GraphAppRoles.cs`; its steps (not the job) are `continue-on-error`, and a `verdict` step exposes the job output `failed` that the alerts leg reads; **self-skips today** because the four `NIGHTLY_*` secrets it needs (`NIGHTLY_GRAPH_READER_CLIENT_ID`, `NIGHTLY_AZURE_TENANT_ID`, `NIGHTLY_SUBSCRIPTION_ID`, `NIGHTLY_UAMI_SP_OBJECT_ID`) have never been populated | n/a |
+| `report` | Legacy log: appends a comment to the rolling issue "Nightly Health — {date}". **Off by default** (the alerts and the [dashboard](#quality-alerts) replaced it; rolling issue #408 is to be closed with a pointer to the dashboard right after this change merges; closing it earlier would let the next master run open a fresh one). Restore with `-f post_tracking_comment=true` | 10 min |
 | `alerts` | One [quality alert](#quality-alerts) per check above (matrix); a job that is cancelled, timed out or skipped is a failing check | 5 min |
 
 **Manual dispatch**: `gh workflow run nightly-health.yml -f update_baseline=true` (commits the current bundle sizes as the new baseline). Other inputs: `dry_run_alerts=true` (print the alert decisions instead of posting them) and `post_tracking_comment=true` (restore the legacy per-night comment).
@@ -731,10 +731,10 @@ Stryker.NET 5.0.0 (installed with `dotnet tool install --tool-path`, pinned) ove
 |---|---|
 | Allowlist | `src/server/api/Sprk.Bff.Api/{Api/Filters, Infrastructure/Errors, Infrastructure/Authentication, Services/Access}/**` and `src/server/shared/Spaarke.Dataverse/**AccessRights*` (the latter is a second Stryker run, `project=Spaarke.Dataverse.csproj`). Edit the pathspecs in the `Resolve scope` step to widen it. |
 | Window | Commits from the last 24h, or `-f since=<git ref>` on dispatch. Stryker `since` mode then mutates only the changed lines. No allowlisted file changed: the job succeeds in about a minute and the alert is `ok`. |
-| Tests that may kill a mutant | The ADR-038 KEEP-path namespaces of `Sprk.Bff.Api.Tests` (`Api`, `Integration`, `Domain`, `Seam`, `Regression`, `AccessControl`, `Auth`, `DataMutation`, `Contract`, `Tenant`), minus anything `Compose` (Git-LFS fixtures). Defined in `scripts/ci/run-stryker.sh`. |
+| Tests that may kill a mutant | Derived per run by `scripts/ci/run-stryker.sh` from the files being mutated: the dedicated suites `Filters.`, `Services.Access.`, `Infrastructure.Authentication.`, `Infrastructure.Errors.` plus every test class in `tests/**` that names a type declared in a mutated file (worst case, all 52 files: 4,661 tests; 14 files: 2,746). Compose tests are excluded (Git-LFS fixtures). The broad ADR-038 KEEP set (9,667 tests, with Api.Office / Api.Insights / Api.Documents already excluded) took 71 min for the initial run alone and was dropped. A test that reaches a mutated type without naming it is not selected. |
 | Output | `mutation-report` artifact (HTML + JSON), a per-file table (killed / survived / no-coverage / score) and every surviving mutant with `file:line` in the job summary (`scripts/ci/summarize-mutation-report.py`). |
-| Alert | `mutation-nightly`: `failing` when a changed file has surviving or no-coverage mutants, or the run errors or hits its 60-minute cap; `ok` otherwise. |
-| Timeout | 60 min (pilot: ~17 min for 3 files, mostly instrumenting the whole assembly). |
+| Alert | `mutation-nightly`: `failing` when a changed file has surviving or no-coverage mutants, or the run errors or hits its cap; `ok` otherwise. |
+| Timeout / duration | Provisional 240 min. **No run has completed end to end yet** (issue #1870): proof runs measured 28-44 min of fixed cost (build, instrumenting the 165,676-mutant assembly, coverage capture) plus ~7 s per mutant; a 14-file window (3,448 mutants) did not finish in 240 min, so a heavy night cannot finish. This is why the schedule is off. Set the cap to ~1.5x a complete run before re-enabling it. |
 
 **Manual dispatch**: `gh workflow run mutation-nightly.yml -f since=<ref>` (optionally `-f dry_run_alert=true` to print the alert decision instead of posting it). Use a `since` ref that predates the file you want mutated, otherwise the window is empty.
 
@@ -749,13 +749,13 @@ A quality alert is a GitHub issue that says "this scheduled check is failing", b
 | `failing` | Body **edited in place** (current summary, run link, "failing since" date kept from the original). No new comment. | Reopened, body rewritten, one comment "Failing again" | Created, with one comment |
 | `ok` | Comment "Recovered in <run>" and **closed** | nothing | nothing |
 
-The action never fails the calling job: if it cannot post it prints a `::warning::` and exits 0. Callers need `issues: write` and a checkout of `.github/actions`. `dry-run: true` prints the decision instead of writing (the nightly workflows expose it as a dispatch input).
+The action never fails the calling job: if it cannot post it prints a `::warning::` and exits 0. Callers need `issues: write` and a checkout of `.github/actions`. `dry-run: true` prints the decision instead of writing. The nightly workflows expose it as a dispatch input and force it on whenever the run is not on the default branch, so a branch or proof run can never open or close a real alert.
 
 **What raises one today**
 
 | Check | Raised by | `failing` when |
 |---|---|---|
-| `nightly-health/flake-hunt`, `/bundle-size`, `/vuln-scan`, `/full-integration`, `/coverage-observation`, `/trivy-fs`, `/dep-audit`, `/graph-app-role-parity` | `nightly-health.yml` job `alerts` | the job is **not `success`** (failure, cancelled, which is how a job that hits its `timeout-minutes` reports, or skipped). Additionally: `flake-hunt` when a flake is found or a run/shard result is missing; `full-integration` when any test failed (its job stays green by design). Vulnerability and Trivy *counts* are not alerted: they are a standing backlog, and an alert that can never close gets ignored. |
+| `nightly-health/flake-hunt`, `/bundle-size`, `/vuln-scan`, `/full-integration`, `/coverage-observation`, `/trivy-fs`, `/dep-audit`, `/graph-app-role-parity` | `nightly-health.yml` job `alerts` | the job is **not `success`** (failure, cancelled, which is how a job that hits its `timeout-minutes` reports, or skipped). Additionally: `flake-hunt` when a flake is found or a run/shard result is missing; `full-integration` when any test failed or when 0 tests passed (it did not run; its job stays green by design); `coverage-observation` when no shard produced a coverage file; `graph-app-role-parity` when a configured step failed (steps are `continue-on-error`, so the job reports success; the alert reads the job's `failed` output). Vulnerability and Trivy *counts* are not alerted: they are a standing backlog, and an alert that can never close gets ignored. So `vuln-scan`, `trivy-fs` and `dep-audit` raise their alert only if the job itself fails (crash, timeout, skipped), which they are built not to do on findings. |
 | `client-tests` | `client-tests.yml` job `alert` | any package is `fail`, `install-failed` or `deps-build-failed`, or the baseline is incomplete. The alert lists the packages and links the known issues (#1788-#1793). |
 | `mutation-nightly` | `mutation-nightly.yml` job `alert` | surviving or no-coverage mutants on changed lines, or the run errors, is cancelled or times out. |
 
