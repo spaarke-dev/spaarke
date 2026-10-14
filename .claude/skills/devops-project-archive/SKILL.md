@@ -37,7 +37,7 @@ Close out a project cleanly:
 2. Set `Closed Date` field (from PR merge date if provided, else today)
 3. Capture final `Task Count` / `Tasks Completed` values (via `/devops-project-sync`)
 4. Close the GitHub Issue with appropriate state (`Status=Done` or label `cancelled`)
-5. **Retain** `projects/{name}/` folder + worktree (no destructive operations)
+5. **Retain** `projects/{name}/` folder + worktree (no destructive operations). **Never rename or move the folder** — no `x-` prefix, no `projects/_archive/`. A rename breaks every link to the project (the Issue's Quick Links, the board's Project Folder field, links from other projects and skills) and makes history tools see a new project on archive day. "Archived" is the `.archived` marker plus board Status, not the folder name. The 37 older `x-` folders keep their names (renaming them back would break the links that now point at them). Enforced by: `tests/Spaarke.ArchTests/ProjectFolderArchivePrefixGuardTests.cs` (fails on a new `projects/x-*` folder).
 6. Write `.archived` marker file with archive date + final status + closing PR # (if any) + note that worktree is intentionally preserved
 
 Remote branch is preserved — branch history stays on GitHub for audit.

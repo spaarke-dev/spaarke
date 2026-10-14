@@ -638,6 +638,11 @@ This task is MANDATORY for all projects and must include these steps:
      - All documentation is current
      - No critical code-review issues remaining
      - Repository cleanup completed
+
+  7. Archive:
+     - /devops-project-archive (closes the Issue, sets board Status, writes projects/{project-name}/.archived)
+     - Do NOT rename or move the project folder (no `x-` prefix): the folder keeps its name so links and
+       history stay valid. An ArchTest fails on a new projects/x-* folder.
 ```
 
 ### Step 4: Generate Task Files
