@@ -1698,10 +1698,16 @@ public static class ExternalProjectDataEndpoints
         // Task 187 (owner round 99, D-123; #1857): the to-do's root is its STAMP, a copy. A to-do whose live parent (the
         // communication, document, event, invoice ... it is filed under) sits under a SECURE root the caller cannot read is
         // behind that root's wall, so it is refused with the same response, and nothing is written. A read that could not
-        // decide refuses too (fail closed).
-        if (await dataService.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Todo, id, callerContext, ct)
-            != ExternalDataService.LiveParentDecision.Readable)
-            return DenyTodoWrite();
+        // decide refuses too (fail closed), as a 503: a transient failure is not "no access" (fix round 1, R4).
+        switch (await dataService.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Todo, id, callerContext, ct))
+        {
+            case ExternalDataService.LiveParentDecision.Readable:
+                break;
+            case ExternalDataService.LiveParentDecision.Unavailable:
+                return TodoWriteUnavailable();
+            default:
+                return DenyTodoWrite();
+        }
 
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
@@ -1715,6 +1721,9 @@ public static class ExternalProjectDataEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>The reason code when a to-do PATCH could not be checked right now (nothing was written).</summary>
+    internal const string TodoWriteUnavailableReasonCode = "sdap.access.todo_write_unavailable";
+
     /// <summary>The ONE refusal of a to-do PATCH: out of scope, too few rights, or (task 187) behind a live parent's secure root.</summary>
     private static IResult DenyTodoWrite() =>
         Results.Problem(statusCode: 403, title: "Forbidden",
@@ -1723,6 +1732,15 @@ public static class ExternalProjectDataEndpoints
             {
                 ["reasonCode"] = "sdap.access.deny.insufficient_rights"
             });
+
+    /// <summary>
+    /// A to-do PATCH whose live parents could not be checked right now (task 187, fix round 1 R4): the delete-own 503's
+    /// shape with its own reasonCode, so the SPA can say "try again" rather than "no access". Nothing was written.
+    /// </summary>
+    private static IResult TodoWriteUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Update unavailable",
+            detail: "The to-do could not be checked right now, and nothing was changed. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = TodoWriteUnavailableReasonCode });
 
     // -------------------------------------------------------------------------------------------
     // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)

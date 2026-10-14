@@ -410,8 +410,12 @@ public sealed class ExternalLiveParentReadTests : IClassFixture<ExternalRootEven
         Data.Requests.Should().Contain(r => r.StartsWith("PATCH"));
     }
 
+    /// <summary>
+    /// Fix round 1, R4: a live-parent read that FAILED is not "no access". It is the 503 of the delete-own shape (its own
+    /// reasonCode, "nothing was changed"), never a 403 and never a write. Fail closed either way: nothing is written.
+    /// </summary>
     [Fact]
-    public async Task PatchTodo_WhoseLiveParentCannotBeRead_Is403_FailClosed()
+    public async Task PatchTodo_WhoseLiveParentCannotBeRead_Is503_AndWritesNothing()
     {
         _fixture.Principal = Holding(matters: new[] { M }, rights: AccessRights.Read | AccessRights.Write);
         Data.AddFilingRow("sprk_communication", C, ("sprk_regardingmatter", "sprk_matter", M));
@@ -422,7 +426,10 @@ public sealed class ExternalLiveParentReadTests : IClassFixture<ExternalRootEven
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{todo}", new { sprk_name = "renamed" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.TodoWriteUnavailableReasonCode);
+        body.Should().NotContain("insufficient_rights");
         Data.Requests.Should().NotContain(r => r.StartsWith("PATCH"));
     }
 
