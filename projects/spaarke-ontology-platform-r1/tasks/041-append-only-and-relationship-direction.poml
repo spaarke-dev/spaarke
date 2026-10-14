@@ -4,7 +4,7 @@
     <title>Verify append-only by privilege and the 1-to-N relationship direction</title>
     <phase>4 The Decision Record</phase>
     <gate>040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Verifies the security property the defensibility story rests on, and a relationship easy to build backwards.</rigor-reason>
     <model-tier>sonnet</model-tier>

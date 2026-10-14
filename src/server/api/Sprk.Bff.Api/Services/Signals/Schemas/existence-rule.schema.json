@@ -98,7 +98,7 @@
       }
     },
     "filterValue": {
-      "description": "A scalar, an array of scalars (e.g. an id list), a single-operator comparison object, or a two-bound relative-date range. No variant admits a cross-clause variable reference.",
+      "description": "A scalar, an array of scalars (e.g. an id list), a single-operator comparison object, a two-bound relative-date range, or a null test (task 061). No variant admits a cross-clause variable reference.",
       "anyOf": [
         { "$ref": "#/$defs/scalar" },
         {
@@ -114,8 +114,20 @@
             "^(>=|<=|>|<|<>|=)$": { "$ref": "#/$defs/scalar" }
           }
         },
-        { "$ref": "#/$defs/dateRange" }
+        { "$ref": "#/$defs/dateRange" },
+        { "$ref": "#/$defs/nullTest" }
       ]
+    },
+    "nullTest": {
+      "description": "Task 061 (D-54): a null test on the row's OWN column, written {\"null\": true} (the column has no value) or {\"notNull\": true} (it has one). It carries no operand: the only accepted value is the literal true, so a value that looks like a comparison ({\"null\": \"x\"}, {\"null\": 5}, {\"null\": false}) is refused rather than guessed at, and null is never written as a JSON null (that would overload '=' and '<>'). Exactly one member, so the two tests cannot be combined. Compiles to FetchXML operator 'null' / 'not-null' on the column, in the same AND filter as every other condition.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "null": { "const": true },
+        "notNull": { "const": true }
+      }
     },
     "dateRange": {
       "description": "Owner decision D-40 (task 024): a date field may take exactly ONE lower bound ('>=' or '>') plus ONE upper bound ('<=' or '<'), both relative dates, e.g. {\">=\": \"now\", \"<=\": \"now+3d\"}. Compiles to two conditions in the same AND filter -- still one Dataverse filter (CM-3). Nothing more: no third bound, no two lower or two upper bounds, no '=' or '<>', no absolute or numeric bound.",
