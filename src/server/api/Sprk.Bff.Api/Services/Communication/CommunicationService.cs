@@ -677,7 +677,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // left a delivered message with no record (and, for chat, an echo that would persist it UNFILED) behind a success
         // response.
         var preparedRecord = await BuildMessageDataverseRecordAsync(
-            request, senderEmail, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
+            request, senderEmail, senderParticipant.RecordId, correlationId, ct,
+            Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
 
         try
         {
@@ -879,16 +880,24 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// after the send under the AS-BUILT schema names — <c>sprk_acsmessageid</c> (the echo-dedup key) and
     /// <c>sprk_acsthreadid</c> — and creates it. Mirrors <see cref="Channels.MessagingIngestor"/>'s persist shape for
     /// the inbound direction so both directions land one comparable record.
+    /// <para>Task 065 (external-access r3, owner 2026-10-13): <c>sprk_sentby</c> is the resolved sending systemuser, and
+    /// <c>sprk_isinternalonly</c> is written explicitly — the request's value, else <c>false</c>, except a message into
+    /// a <see cref="SendCommunicationRequest.ThreadId"/> not confirmed Open, which is <c>true</c>
+    /// (<see cref="TargetThreadIsNotConfirmedOpenAsync"/>). Without a <c>ThreadId</c> the message gets a fresh ACS thread,
+    /// so it lands in a newly created Open thread (<c>ThreadResolver.CreateThreadAsync</c>) and is not internal-only.</para>
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildMessageDataverseRecordAsync(
         SendCommunicationRequest request,
         string senderEmail,
+        Guid senderSystemUserId,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
+        var isInternalOnly = request.IsInternalOnly
+            ?? (request.ThreadId is { } threadId && await TargetThreadIsNotConfirmedOpenAsync(threadId, correlationId, ct));
 
         var communication = new DataverseEntity("sprk_communication")
         {
@@ -900,8 +909,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_bodyformat"] = new OptionSetValue((int)request.BodyFormat),
             ["sprk_to"] = request.To is { Length: > 0 } ? string.Join("; ", request.To) : string.Empty,
             ["sprk_from"] = senderEmail,
+            ["sprk_sentby"] = new EntityReference("systemuser", senderSystemUserId),
             ["sprk_subject"] = subject,
             ["sprk_body"] = request.Body,
+            ["sprk_isinternalonly"] = isInternalOnly,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
         };
@@ -922,6 +933,63 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         owner.ApplyTo(communication);
 
         return communication;
+    }
+
+    /// <summary>
+    /// True unless the target <c>sprk_communicationthread</c>'s <c>sprk_privacystate</c> is EXPLICITLY Open — a Private
+    /// thread, a missing value, or a read failure all count as not Open (fail closed, the same rule as
+    /// <c>CommunicationFanOutTargetingService.IsExplicitlyOpen</c>). Task 065: decides the default internal-only flag
+    /// of a message sent into that thread with no explicit choice. Never fails the send.
+    /// </summary>
+    private async Task<bool> TargetThreadIsNotConfirmedOpenAsync(Guid threadId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var thread = await _genericEntityService.RetrieveAsync(
+                "sprk_communicationthread", threadId, new[] { "sprk_privacystate" }, ct);
+            var privacy = thread?.GetAttributeValue<OptionSetValue>("sprk_privacystate")?.Value;
+            return privacy != (int)Membership.ThreadPrivacyState.Open;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not read the privacy of target thread {ThreadId}; the message is written internal-only (fail closed) | CorrelationId: {CorrelationId}",
+                threadId, correlationId);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Stamps <c>sprk_sentby</c> with the sending systemuser resolved from the caller's Entra object id (the existing
+    /// oid → systemuserid resolution, task 146 r1 user-mode path). Unresolvable or failing → no stamp and a warning;
+    /// the communication is still sent and recorded.
+    /// </summary>
+    private async Task StampSentByFromObjectIdAsync(DataverseEntity communication, string? userObjectId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userObjectId))
+            return;
+
+        try
+        {
+            var systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+            if (systemUserId.HasValue)
+            {
+                communication["sprk_sentby"] = new EntityReference("systemuser", systemUserId.Value);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Could not resolve systemuser for Azure AD OID {UserObjectId}; sprk_sentby will be null",
+                    userObjectId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to resolve systemuser for sprk_sentby (Azure AD OID: {UserObjectId}); continuing without",
+                userObjectId);
+        }
     }
 
     /// <summary>
@@ -1333,7 +1401,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // the owner after the send (in the best-effort record step) answered success for a delivered email that had no
         // record.
         var preparedRecord = await BuildDataverseRecordAsync(
-            request, senderResult, correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
+            request, senderResult,
+            httpContext is null ? null : CallerResolution.ResolveObjectId(httpContext.User),
+            correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
 
         // Step 3+4: Send via the email channel seam (dispatch by CommunicationType — ADR-045 rule 4).
         // The sender owns Graph message construction, transport, and provider-error mapping; a provider
@@ -1942,35 +2012,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_from"] = userEmail,
             ["sprk_subject"] = request.Subject,
             ["sprk_body"] = request.Body,
+            // Task 065 (owner 2026-10-13): explicit for every type — the request's value, else false.
+            ["sprk_isinternalonly"] = request.IsInternalOnly ?? false,
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
         };
 
         // Resolve Azure AD oid → Dataverse systemuserid for sprk_sentby lookup
-        if (!string.IsNullOrEmpty(userObjectId))
-        {
-            try
-            {
-                var systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
-                if (systemUserId.HasValue)
-                {
-                    communication["sprk_sentby"] = new EntityReference("systemuser", systemUserId.Value);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Could not resolve systemuser for Azure AD OID {UserObjectId}; sprk_sentby will be null",
-                        userObjectId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Failed to resolve systemuser for sprk_sentby (Azure AD OID: {UserObjectId}); continuing without",
-                    userObjectId);
-            }
-        }
+        await StampSentByFromObjectIdAsync(communication, userObjectId, ct);
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })
@@ -2122,12 +2172,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Builds — BEFORE the send — the Dataverse sprk_communication record that tracks a shared-mailbox email, with its
-    /// filing and owner decided (task 146 r1).
+    /// filing and owner decided (task 146 r1). Task 065: <c>sprk_isinternalonly</c> is explicit (the request's value,
+    /// else false) and <c>sprk_sentby</c> is the calling user (<paramref name="senderObjectId"/>) — the mailbox is only
+    /// the From address.
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildDataverseRecordAsync(
         SendCommunicationRequest request,
         ApprovedSenderResult sender,
+        string? senderObjectId,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -2144,10 +2197,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_from"] = sender.Email,
             ["sprk_subject"] = request.Subject,
             ["sprk_body"] = request.Body,
+            ["sprk_isinternalonly"] = request.IsInternalOnly ?? false,
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
         };
+
+        await StampSentByFromObjectIdAsync(communication, senderObjectId, ct);
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })

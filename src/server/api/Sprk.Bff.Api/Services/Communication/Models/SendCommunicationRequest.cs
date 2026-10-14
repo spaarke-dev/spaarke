@@ -120,4 +120,13 @@ public sealed record SendCommunicationRequest
     /// instead of find-or-create — same send path, not a new branch. Optional.
     /// </summary>
     public Guid? ThreadId { get; init; }
+
+    /// <summary>
+    /// The sender's "Internal only" choice (spaarke-SPA-external-access-platform-r3 task 065, owner 2026-10-13). The
+    /// persisted <c>sprk_communication.sprk_isinternalonly</c> is ALWAYS written explicitly, for every communication
+    /// type: this value when present, otherwise <c>false</c> — except a Message sent into a Private (or unreadable)
+    /// <see cref="ThreadId"/> with no value, which is written <c>true</c> (fail closed). The external read hides a row
+    /// whose flag is unset, so an implicit value would hide every message from external participants. Optional.
+    /// </summary>
+    public bool? IsInternalOnly { get; init; }
 }

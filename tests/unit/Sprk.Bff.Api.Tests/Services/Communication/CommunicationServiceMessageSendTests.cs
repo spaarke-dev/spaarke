@@ -11,6 +11,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -467,6 +468,133 @@ public class CommunicationServiceMessageSendTests
 
         persisted.Should().NotBeNull();
         persisted!.GetAttributeValue<string>("sprk_inreplyto").Should().Be("parent-comm-id-123");
+    }
+
+    // ── task 065 (external-access r3, owner 2026-10-13): the persisted message carries an EXPLICIT internal-only
+    //    flag and its sender, so the external read (which hides a row whose flag is unset — fail closed) shows it ──
+
+    private static readonly Guid SenderSystemUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid TargetThreadId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    /// <summary>A contact (external) caller of the external read, evaluated by the REAL access filter.</summary>
+    private static CommunicationAccessDecision ExternalContactDecision(Entity persisted) =>
+        new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>())
+            .EvaluateMessage(new CommunicationAccessContext(Guid.Empty, IsInternalUser: false, CallerContactId: Guid.NewGuid()), persisted);
+
+    private static Mock<IGenericEntityService> EntityServiceCapturing(Action<Entity> capture)
+    {
+        var entity = EntityServiceCreating();
+        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capture(e))
+            .ReturnsAsync(Guid.NewGuid());
+        return entity;
+    }
+
+    private static void ThreadWithPrivacy(Mock<IGenericEntityService> entity, int? privacyState)
+    {
+        var thread = new Entity("sprk_communicationthread") { Id = TargetThreadId };
+        if (privacyState is { } state)
+            thread["sprk_privacystate"] = new OptionSetValue(state);
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithoutIsInternalOnly_PersistsMessageVisibleToExternalContact()
+    {
+        Entity? persisted = null;
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), EntityServiceCapturing(e => persisted = e).Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest(), AuthenticatedContext(), CancellationToken.None);
+
+        persisted.Should().NotBeNull();
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+        ExternalContactDecision(persisted).IsVisible.Should().BeTrue(
+            "a message the sender did not mark internal is visible to an external participant on the record");
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_StampsSentByWithTheSendingSystemUser()
+    {
+        Entity? persisted = null;
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), EntityServiceCapturing(e => persisted = e).Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest(), AuthenticatedContext(), CancellationToken.None);
+
+        var sentBy = persisted!.GetAttributeValue<EntityReference>("sprk_sentby");
+        sentBy.Should().NotBeNull();
+        sentBy!.LogicalName.Should().Be("systemuser");
+        sentBy.Id.Should().Be(SenderSystemUserId);
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithIsInternalOnlyTrue_PersistsMessageHiddenFromExternalContact()
+    {
+        Entity? persisted = null;
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), EntityServiceCapturing(e => persisted = e).Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { IsInternalOnly = true }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+        ExternalContactDecision(persisted).IsVisible.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoPrivateThreadWithoutIsInternalOnly_PersistsInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: 100000001); // Private
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue(
+            "a message into a Private thread with no explicit choice fails closed to internal-only");
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoOpenThreadWithoutIsInternalOnly_PersistsNotInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: 100000000); // Open
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoPrivateThreadWithIsInternalOnlyFalse_PersistsTheSendersChoice()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: 100000001); // Private
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(
+            MessageRequest() with { ThreadId = TargetThreadId, IsInternalOnly = false }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoThreadWhosePrivacyIsUnreadable_PersistsInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: null); // privacy not readable → not confirmed Open
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
     }
 
     // ── Inbound-echo scaffolding: the REAL handler + REAL ingestor over the shared boundary ──

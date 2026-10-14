@@ -55,7 +55,8 @@ public class DataverseRecordCreationTests
             .ReturnsAsync(Guid.NewGuid());
     }
 
-    private CommunicationService CreateService(CommunicationOptions? options = null)
+    private CommunicationService CreateService(
+        CommunicationOptions? options = null, ICommunicationDataverseService? communicationDataverse = null)
     {
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
@@ -82,7 +83,7 @@ public class DataverseRecordCreationTests
         return new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object, emlGenerationService),
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            communicationDataverse ?? Mock.Of<ICommunicationDataverseService>(),
             _genericEntityServiceMock.Object,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here
@@ -541,6 +542,105 @@ public class DataverseRecordCreationTests
         // Assert
         _capturedEntity.Should().NotBeNull();
         _capturedEntity!.LogicalName.Should().Be("sprk_communication");
+    }
+
+    #endregion
+
+    #region Internal-only flag and sender (task 065, external-access r3)
+
+    // Owner 2026-10-13: every outbound record carries an EXPLICIT sprk_isinternalonly — the request value, else
+    // false — because the external read hides a row whose flag is unset (fail closed). The sender is stamped from
+    // the caller's oid through the existing oid → systemuserid resolution.
+
+    private const string CallerOid = "33333333-3333-3333-3333-333333333333";
+    private static readonly Guid CallerSystemUserId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+    private static Microsoft.AspNetCore.Http.HttpContext CallerContext() => new Microsoft.AspNetCore.Http.DefaultHttpContext
+    {
+        User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[]
+            {
+                new System.Security.Claims.Claim("oid", CallerOid),
+                new System.Security.Claims.Claim("preferred_username", "caller@contoso.com"),
+            },
+            "test"))
+    };
+
+    private static ICommunicationDataverseService ResolvingCaller()
+    {
+        var comm = new Mock<ICommunicationDataverseService>();
+        comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(CallerOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserId);
+        return comm.Object;
+    }
+
+    private SendCommunicationRequest UserModeRequest(bool? isInternalOnly)
+    {
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMockGraphClient());
+        return CreateValidRequest() with { SendMode = SendMode.User, IsInternalOnly = isInternalOnly };
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailboxWithoutIsInternalOnly_WritesInternalOnlyFalse()
+    {
+        await CreateService().SendAsync(CreateValidRequest());
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailboxWithIsInternalOnlyTrue_WritesInternalOnlyTrue()
+    {
+        await CreateService().SendAsync(CreateValidRequest() with { IsInternalOnly = true });
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendAsync_UserModeWithoutIsInternalOnly_WritesInternalOnlyFalse()
+    {
+        await CreateService().SendAsync(UserModeRequest(isInternalOnly: null), CallerContext());
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_UserModeWithIsInternalOnlyTrue_WritesInternalOnlyTrue()
+    {
+        await CreateService().SendAsync(UserModeRequest(isInternalOnly: true), CallerContext());
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailbox_StampsSentByWithTheCallingSystemUser()
+    {
+        await CreateService(communicationDataverse: ResolvingCaller()).SendAsync(CreateValidRequest(), CallerContext());
+
+        var sentBy = _capturedEntity!.GetAttributeValue<EntityReference>("sprk_sentby");
+        sentBy.Should().NotBeNull();
+        sentBy!.LogicalName.Should().Be("systemuser");
+        sentBy.Id.Should().Be(CallerSystemUserId);
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailboxWhenCallerOidUnresolvable_CreatesRecordWithoutSentByAndLogsWarning()
+    {
+        // The default ICommunicationDataverseService double resolves no systemuser for the oid.
+        var response = await CreateService().SendAsync(CreateValidRequest(), CallerContext());
+
+        response.CommunicationId.Should().NotBeNull("the email is sent and its record is still created");
+        _capturedEntity!.Attributes.ContainsKey("sprk_sentby").Should().BeFalse();
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("sprk_sentby")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     #endregion
