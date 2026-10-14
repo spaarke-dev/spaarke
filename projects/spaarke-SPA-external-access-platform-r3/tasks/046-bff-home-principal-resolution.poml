@@ -95,7 +95,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Design note §3/§4. Two adversarial passes. Send the PR to UAC for review.</notes>
+  <notes>Design note §3/§4. Two adversarial passes. Send the PR to UAC for review. From 045 (notes/task-045-notes.md, Fix round 1 and re-check): 045 left a temporary guard at the top of WorkforcePrincipalResolver.ResolveAsync that denies any WorkforceHome identity (sdap.access.deny.workforce_home_resolution_pending). This task removes it along with the test ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup, and replaces both with the home branch. Also add a test proving that a WorkforceHome principal never resolves on the CIAM plane (CiamContactPrincipalStrategy calls ResolveCiamCallerAsync, which has no WorkforceHome check), or deny WorkforceHome for the CIAM strategy in CallerPrincipalResolver.ResolveAsync.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

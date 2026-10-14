@@ -157,3 +157,18 @@ GUID; with a real tenant the same token is not refused for that reason); `Defaul
 
 **Seeding proof.** Guard disabled (`if (false && ...)`) and the K3 branch disabled together: the deny test and all five
 K3 cases failed (6 failed, 1 passed - the Bearer control, as it should); both restored byte-for-byte, then 165 / 91 pass.
+
+## Re-check of fix round 1 (2026-10-14, scoped, sonnet adversarial-reviewer)
+
+No F-class finding. The reviewer confirmed:
+- There is no bypass of `ResolveAsync`.
+- A mixed principal (WorkforceHome plus Bearer identities) is still denied (`Identities.Any`).
+- No legitimate Bearer caller is denied.
+- The fail-closed tenant rule has a single caller, the WorkforceHome `OnTokenValidated`.
+
+Tests: 110 filtered unit tests and 4 census ArchTests pass. Merged into R3 as `e6f6c6cd7`.
+
+Known limits:
+- K4: the guard sits only in the Workforce-plane resolver. `CiamContactPrincipalStrategy` calls `ResolveCiamCallerAsync` without it. Today a WorkforceHome principal cannot reach the CIAM plane: WorkforceHome requires an exact `login.microsoftonline.com/{tid}/v2.0` issuer and rejects the CIAM tenant, and `DeterminePlane` reads that same `tid` first. **046 carries this:** when 046 replaces the guard, it adds a test that a WorkforceHome principal never resolves on the CIAM plane, or it denies WorkforceHome at the top of `CallerPrincipalResolver.ResolveAsync` for the CIAM strategy.
+- K4: if `AzureAd:TenantId` is misconfigured, `SpaarkeTenantUnknown` logs a Warning for every external request. This only happens in an already-broken config, and the noise helps surface it.
+- Test gap: no resolver test covers a mixed principal. `Any` covers it by construction.

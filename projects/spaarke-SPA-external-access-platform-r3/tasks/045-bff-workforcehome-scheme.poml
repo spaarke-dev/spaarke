@@ -4,7 +4,7 @@
     <title>BFF WorkforceHome JwtBearer scheme on ExternalCollaboration only + scheme census ArchTest + must-reject tests</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>startable (A9 on master via PR #1810; design approved 2026-10-13)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, auth; adds an authentication scheme</rigor-reason>
     <model-tier>opus</model-tier>
