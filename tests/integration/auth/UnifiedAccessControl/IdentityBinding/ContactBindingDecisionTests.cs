@@ -312,6 +312,38 @@ public class ContactBindingDecisionTests
         => ContactBindingDecision.Decide(Ciam(code: code), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
             intent);
 
+    /// <summary>
+    /// Task 185 (design note §5.1): the operator-only reason for each not-invited deny, in DecideIntent's order; none for a
+    /// bind or a fault. The reason never carries the code or the hash (it is one of five fixed words).
+    /// </summary>
+    [Theory]
+    [InlineData("no-marker")]
+    [InlineData("column-missing")]
+    [InlineData("marker-expired")]
+    [InlineData("no-stored-hash")]
+    [InlineData("no-code-presented")]
+    [InlineData("code-mismatch")]
+    [InlineData("binds")]
+    [InlineData("faulted-read")]
+    public void E11_Ciam_EachNotInvitedDeny_HasItsOperatorReason_AndOnlyThose(string row)
+    {
+        var (intent, code, expected) = row switch
+        {
+            "no-marker" => (Intent(invitedOn: null, hash: InviteA.StoredValue), InviteA.Code, "no-marker"),
+            "column-missing" => (Intent(inviteStatus: LookupStatus.ColumnMissing), InviteA.Code, "no-marker"),
+            "marker-expired" => (Invited(Now.AddDays(-31)), InviteA.Code, "marker-expired"),
+            "no-stored-hash" => (Intent(invitedOn: Now), InviteA.Code, "no-stored-hash"),
+            "no-code-presented" => (Invited(), (string?)null, "no-code-presented"),
+            "code-mismatch" => (Invited(), InviteCode.Create(ContactA).Code, "code-mismatch"),
+            "binds" => (Invited(), InviteA.Code, (string?)null),
+            _ => (Intent(inviteStatus: LookupStatus.Failed), InviteA.Code, (string?)null),
+        };
+
+        ContactBindingDecision.NotInvitedReason(Ciam(code: code), intent, ContactA).Should().Be(expected);
+        var deniedNotInvited = CiamE11(intent, code).DenyCode == ContactBindingDecision.DenyContactNotInvited;
+        deniedNotInvited.Should().Be(expected is not null, "a reason exists exactly when the leg denies not-invited");
+    }
+
     // ── The marker's 30-day window and its clock-skew tolerance (owner round 97) ─────────────────────────────
 
     /// <summary>

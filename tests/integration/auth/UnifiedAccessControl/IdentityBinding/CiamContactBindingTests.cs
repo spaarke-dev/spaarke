@@ -420,6 +420,25 @@ public class CiamContactBindingTests
         log.Messages.Should().NotContain(m => m.Contains(invite.Code) || m.Contains(invite.StoredValue));
     }
 
+    /// <summary>
+    /// Design note §5.1: a not-invited deny logs its operator-only reason (here <c>code-mismatch</c>), and that line carries
+    /// neither the presented code nor the stored hash. The HTTP deny code is unchanged.
+    /// </summary>
+    [Fact]
+    public async Task AWrongCode_IsDenied_AndTheLogNamesTheReason_NeverTheCodeOrTheHash()
+    {
+        var invite = InviteCode.Create(ContactA);
+        var wrong = InviteCode.Create(ContactA).Code;
+        _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+
+        var result = await Binder(_store, log).ResolveCiamCallerAsync(CiamOid.ToString(), Email, wrong, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        log.Messages.Should().Contain(m => m.Contains("code-mismatch") && m.Contains(ContactA.ToString()));
+        log.Messages.Should().NotContain(m => m.Contains(wrong) || m.Contains(invite.Code) || m.Contains(invite.StoredValue));
+    }
+
     /// <summary>AC1: a squatted CIAM account carrying the invitee's email presents no code — denied, nothing written or flagged.</summary>
     [Fact]
     public async Task ASquattedAccount_PresentingNoCode_IsDeniedNotInvited_NothingWritten_NothingFlagged()

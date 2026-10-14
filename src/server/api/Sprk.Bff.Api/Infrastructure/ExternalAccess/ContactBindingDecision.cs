@@ -778,6 +778,27 @@ public static class ContactBindingDecision
     }
 
     /// <summary>
+    /// Task 185 (design note §5.1): the OPERATOR-only reason E11's marker leg answered <see cref="DenyContactNotInvited"/> —
+    /// <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>, in
+    /// the order <see cref="DecideIntent"/> tests them. For the binder's log line only: it names no code and no hash, and
+    /// the HTTP answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
+    /// </summary>
+    internal static string? NotInvitedReason(BindingRequest request, BindIntentLookup intent, Guid contactId)
+    {
+        if (intent.ContactId != contactId || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+            return null;
+        if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
+            return "no-marker";
+        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+            return "marker-expired";
+        if (string.IsNullOrEmpty(intent.InviteCodeHash))
+            return "no-stored-hash";
+        if (string.IsNullOrEmpty(request.InviteCode))
+            return "no-code-presented";
+        return InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId) ? null : "code-mismatch";
+    }
+
+    /// <summary>
     /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the
     /// invite: an invite nobody acted on for a month is no longer this environment's intent. A re-invite overwrites the
     /// marker and so restarts the window.

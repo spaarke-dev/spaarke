@@ -645,8 +645,16 @@ public sealed class ContactIdentityBinder
             }
 
             // The marker's age is measured at the decision time, from this binder's clock (owner round 97: 30 days).
-            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs,
-                intent with { AsOf = _time.GetUtcNow() });
+            var asOf = intent with { AsOf = _time.GetUtcNow() };
+            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs, asOf);
+
+            // Design note §5.1: an operator-only, non-secret reason for a not-invited deny (never the code or the hash).
+            if (decision.DenyCode == ContactBindingDecision.DenyContactNotInvited
+                && ContactBindingDecision.NotInvitedReason(request, asOf, invitee) is { } reason)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] Contact {ContactId} is not invited for this sign-in: {NotInvitedReason}.", invitee, reason);
+            }
         }
 
         return (decision, emailLookup);
