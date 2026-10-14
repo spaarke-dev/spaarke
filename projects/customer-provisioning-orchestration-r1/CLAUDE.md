@@ -87,7 +87,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 **How to work**
 - Build the process, not the environment (2026-08-23). Never `pac admin copy` from another environment as a shortcut; every gap found is fixed here.
 - End state: provisioning runs E2E with no human interaction (2026-09-01). L2 has no web UI in r1.
-- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30). Its purpose: build a brand-new environment to execute, test and confirm the end-to-end process (owner 2026-10-08).
+- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30). Its purpose: build a brand-new environment to execute, test and confirm the end-to-end process (owner 2026-10-08). The run must leave a fully documented, repeatable process: record every step, special instruction and surprise in `notes/t186-acme-run-log.md` as it happens, and carry each lesson into the operator documents before T186 closes (owner 2026-10-14). Customer: `acme`, "ACME Corporation" (D35).
 - T218 defines the complete solution package and is a hard blocker for T186 (2026-09-28). All solutions ship to every customer (2026-09-01).
 - Every environment, Spaarke's own included, imports only the canonical SpaarkeMaster built by CI from git — never solutions the dev team creates or manages by hand (owner 2026-10-08, #1401 → T218f).
 - Every defect found is fixed in scope, or filed and reported. Review limits cap ceremony, never fixing (2026-10-06; task-execute Step 9.5).

@@ -1,0 +1,67 @@
+# T186 — ACME Corporation demo stamp: run log and lessons
+
+> **Purpose** (owner 2026-10-14): T186 is the first live end-to-end provisioning run. It must leave a process that is
+> **fully documented and repeatable**. Every step, every special instruction and every surprise is recorded here AS IT
+> HAPPENS. Each lesson names the operator document it changes; the run is not closed until every lesson row says
+> `applied` (the doc carries it) or `not needed` (with the reason).
+>
+> Operator documents this run feeds: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (the procedure),
+> `docs/guides/PROVISIONING-PREREQUISITES.md` + `scripts/provisioning-prereqs/prereqs.yaml` (prerequisites),
+> `.claude/skills/provision-environment/SKILL.md` (the skill), `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`.
+
+## 1. Run facts
+
+| Item | Value |
+|---|---|
+| customerId | `acme` |
+| Display name | ACME Corporation (owner D35 — not Dewey Cheatham, which reads as a law firm; Spaarke's focus is corporations) |
+| Subscription | DEMO `2ff9ee48-6f1d-4664-865c-f11868dd1b50` (in management group `spaarke-customers`) |
+| Stamp resource group | `rg-spaarke-acme-{env}` (created by H2a) |
+| Dataverse environment | `spaarke-acme` — created by the owner (PRQ-C-09) |
+| Environment security group | `sprk-acme-users` — Entra `7de5a154-2604-438b-b1cd-462406a869a9` (PRQ-C-10) |
+| Solution package | SpaarkeMaster **managed** (D34) |
+| Customer workforce directory | ACME Workforce tenant — created by the owner (PRQ-C-13) |
+
+## 2. Prerequisites — who, when, evidence
+
+| Id | What | Who | Status / evidence |
+|---|---|---|---|
+| PRQ-S-00 | Dedicated subscription | Spaarke | met — DEMO sub holds no other customer's `rg-spaarke-*` |
+| PRQ-S-03 | Resource providers | Spaarke | met; `Microsoft.SignalRService` also registered 2026-10-14 (see L4) |
+| PRQ-S-04 | L2 Worker UAMI (`38f7693f-…`) Owner on the subscription | Spaarke | **done 2026-10-14** — `az deployment sub create … controlplane-subscription-rbac.bicep principalId=38f7693f-…` → Succeeded; role list shows Owner |
+| PRQ-S-06 | Subscription in `spaarke-customers` | Spaarke | met |
+| PRQ-C-10 | Group `sprk-acme-users` | Spaarke | **created 2026-10-14** (`az ad group create`, security-enabled, assigned, no members). Owner selects it when creating the environment |
+| PRQ-C-09 | Dataverse environment `spaarke-acme` + L2 Worker as System Administrator application user | owner (env) / Spaarke (app user) | pending |
+| PRQ-C-11 | PAYG billing policy on the DEMO sub, linked to the environment | owner | pending |
+| PRQ-C-12 | Guest access on (`restrictguestuseraccess = false`) | Spaarke | pending (after environment) |
+| PRQ-C-08 | Exchange group `Spaarke-AppAccess-acme` | owner | pending |
+| PRQ-C-13 | ACME workforce tenant id(s) | owner | pending |
+| PRQ-C-14 | ACME outbound B2B attestation | owner (as ACME's Entra admin) | pending |
+| PRQ-E-13 | Registry placeholder row on spaarkedev1 | Spaarke (skill Step 1) | pending |
+| — | SpaarkeMaster release carrying `contact.sprk_externalinvitecodehash` (1.2.3.0) | Spaarke | in progress 2026-10-14 (owner OK) — not needed by T186 itself, needed before T240d production |
+
+## 3. Pre-run clean-up of the old demo (owner D35)
+
+The old `spaarke-demo` stack predates the Model 1 dedicated-stamp design and is not reused: its Dataverse environment
+held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
+
+| Item | Action | When |
+|---|---|---|
+| Dataverse environment `spaarke-demo` | deleted by the owner | 2026-10-14 |
+| `spaarke-bff-demo`, `spaarke-demo-plan` | deleted | 2026-10-14 |
+| `spaarke-demo-sbus`, `spaarke-openai-demo`, `spaarke-docintel-demo`, `spaarke-cosmos-demo-ai`, `spaarke-bff-redis-demo`, `spaarke-demo-insights` | deletion requested (0 calls/messages in 30 days) | 2026-10-14 |
+| `mi-bff-api-demo`, `spaarke-demo-logs`, apps "Spaarke BFF API - Demo" `da03fe1a…` / "Spaarke UI - Demo" `8d356f5b…` | to delete after the above | — |
+| 10 test accounts `@demo.spaarke.com` (`ralph.logotest`, `e2e.test`, `e2e.test2`, `test.user`, `test.user2`, `demo.final`, `ribbon.test`, `ralph.test`, `final.test`, `full.e2e`) | deleted (Entra recycle bin, 30 days) | 2026-10-14 |
+| Registry row "Demo 1" | already inactive — kept (rows are never deleted) | — |
+| **Kept** | `WestUS2Plan`, `spaarke-linkedin-refresh`, `spaarke-content-reminder`, `sprkdemosa`, `sprk-demo-kv`, Smart Detection action group (website functions); Syntex account `1f3cfdfb` (owner); group "Spaarke Demo Users" `745bfdf6` (dev BFF demo approvals); real users Jessica, Lori, Chelsea; `demo@` (approved sender mailbox); `uac.child.user` (UAC test user) | — |
+| Undecided | `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` | owner |
+
+## 4. Lessons
+
+| # | Lesson | Changes | Status |
+|---|---|---|---|
+| L1 | A pre-existing environment that holds SpaarkeMaster unmanaged cannot be adopted for a managed stamp; every stamp starts from a NEW environment. | Deployment guide (environment creation step): say "new environment, never one that held Spaarke solutions" | open |
+| L2 | Legacy resource groups mix products: `rg-spaarke-demo` also hosts the website's functions. Inventory consumers (app settings, code references, metrics) before deleting anything, and delete resource by resource, never the group. | Deployment guide (decommission / environment-retirement note) | open |
+| L3 | The website demo-request flow is independent of customer stamps: website → `spaarke-bff-dev` → `sprk_registrationrequest` in spaarkedev1 → "Approve Demo Access" → the registry row "Dev" (spaarkedev1, BU "Spaarke Demo"). It adds users to group `745bfdf6`. Retargeting it to a stamp needs a code change (it ignores the row's `sprk_securitygroupid`) and a cross-stamp identity decision. | Deployment guide § demo; owner decision | open |
+| L4 | `Microsoft.SignalRService` is not required: SignalR is conditional (`signalrEnabled`, default false) and ARM registers it on demand. Registering it early is harmless. | none — not needed | not needed |
+| L5 | A read-only agent asked to list app settings printed secret values into its transcript. Prompts for settings reads must say "names only; never print values" and filter with `--query "[].name"`. | `.claude/constraints/agent-cost.md` or provisioning.md agent-prompt note | open |
