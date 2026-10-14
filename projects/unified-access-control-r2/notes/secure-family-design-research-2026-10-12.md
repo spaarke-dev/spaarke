@@ -1,6 +1,6 @@
 # Secure family: design options and research (2026-10-12)
 
-**Status: direction approved in round 94; team type under owner decision (round 95); not built.**
+**Status: direction approved in round 94; team type DECIDED in round 100b (2026-10-14): C, an owner team per family; not built. The §7 spikes are the build's verification phase (spike 1 is dropped: it only matters for B).**
 
 **Research:** researcher memory `.claude/agent-memory/researcher/dataverse-secure-family-access-teams-2026-10-12.md` holds the full findings and every source URL.
 
