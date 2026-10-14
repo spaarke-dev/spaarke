@@ -300,9 +300,10 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
   option b).** Single-environment dev cannot prove it, because every CIAM user there already has one bound contact. It
   runs once a stamp has T240d wired (H3c + H4b `Ciam:*`), using dev and that stamp, both on `spaarkeextid`. On the stamp,
   invite the email of a person who has a CIAM account and no contact there. PASS means all of:
-  - outcome `ExistingAccount` in the operator log and telemetry. If UAC adopts finding F1 of our #1827 review
-    (2026-10-14: the inviter gets `Sent` on both branches, so an invite is no cross-customer oracle for "this email
-    has a `spaarkeextid` account"), the HTTP response reads `Sent`, and PASS rests on the remaining bullets;
+  - the HTTP response (and any grant flow's `invite.status`) reads `Sent`, never `ExistingAccount`: owner decision
+    UAC round 98c (2026-10-14, our #1827 review F1), so an invite is no cross-customer oracle for "this email has a
+    `spaarkeextid` account";
+  - `ExistingAccount` appears in the operator log and telemetry only;
   - `contact.sprk_externalinvitedon` is written;
   - `sprk_externalobjectid` is still empty;
   - the "sign in with your existing account" email is sent;
@@ -317,9 +318,10 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
   body is persisted redacted, enrichment is skipped, and nothing is saved to Sent Items. Until then, the code leaks into
   Dataverse and AI outputs that Y's users can read.
 - **Our #1827 review (UAC task 185, head `df4ce6825`, 2026-10-14).** R1, R2, hash/compare/expiry, option (c) and the
-  schema script all pass. Sent to UAC: F1 (ExistingAccount reveals to the inviter that the email has a `spaarkeextid`
-  account; owner call), F3 (`/invite` and `/invite-and-grant` answer a 500 with no CIAM host; should be a 503
-  `ciam_not_configured`), K1 (the code rides `?invite=`, so the SPA host must not log query strings). #1827 adds no
+  schema script all pass. Sent to UAC, all fixed in scope in #1827's fix round: F1 (the inviter learned ExistingAccount;
+  owner round 98c: the inviter always gets `Sent`), F3 (no CIAM host gives 503 `ciam_not_configured` on `/invite` and
+  `/invite-and-grant`, not a 500), K1 (the code moves to `#invite=`, with `?invite=` accepted as a fallback; both are
+  stripped before MSAL). We re-check the fix diff when UAC sends the head SHA. #1827 adds no
   config key, secret or Graph permission: H4b stays §6, H3c stays `User.Create` only.
 - **T240d build item: keyless `CiamGraphClientFactory`.** After #1827, `IsConfigured` and `EnsureConfigured()` require
   `Ciam:GraphProvisioner:CertificateName`. Stamps set none (§5), so with H4b's `Ciam:*` alone every invite fails

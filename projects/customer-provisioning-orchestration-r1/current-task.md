@@ -9,7 +9,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | T186 (first live E2E via `/provision-environment`, mock customer homed in Dewey Cheatham, stamp in the DEMO subscription) and the T240d build (option 2), in parallel with reviews of UAC task 185 |
-| **Status** | No agents running. The #1827 gate review was sent to UAC on 2026-10-14 (F1 ExistingAccount oracle is an owner call; F3 is a 500 that should be 503; K1 `?invite=` logging). Waiting for their fix or issue numbers. Results are in t240d design §10. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
+| **Status** | No agents running. The #1827 gate review was sent to UAC on 2026-10-14. UAC is fixing F1 (owner 98c: the inviter always gets `Sent`), F3 (503) and K1 (`#invite=`) in scope. When UAC sends the fix-round head SHA, re-check the fix diff only. Results are in t240d design §10. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
 | **Next Action** | (1) Owner OK to start T186. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34); H6 imports 1.2.2.0. (3) T240d build. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
