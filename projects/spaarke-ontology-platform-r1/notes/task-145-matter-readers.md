@@ -89,6 +89,12 @@ sweep).
   outcome. The sweep skips those policies, so a family-read fault in the policy's own pass is not retried within the run.
 - **Faults:** a sweep that cannot read a policy's Signals writes nothing, counts a policy failure and logs at Error, so the run
   fails visibly. A family-read fault inside the sweep is handled by `RedactStoredEvidenceAsync` the same way.
+- **Never counted twice (uac-r2 re-check F1).**
+  - The sweep reads with `ReadPolicySignalsAsync(..., forRedactionSweep: true)`. In that mode an unparseable dedupe key is
+    skipped without being counted, logged or metered, and the read does not throw. So the policy's parseable Signals are still
+    redacted; this closes uac-r2's K-a, where one bad key left the whole policy unredacted.
+  - `RunCounts.PoliciesFailedThisRun` holds the policies whose own pass already failed the run (a policy failure or an invalid
+    rule). A sweep read failure for one of them is logged but not counted again.
 
 ## 3. Stamp backfill (criterion 4)
 
@@ -169,11 +175,17 @@ under secure X, and breaks the policy's own pass one way. It then asserts:
 | `Run_T145Sweep_APartitionSkipInTheSuppressionPass_…` | #1661 skip (one businessunit timeout) |
 | `Run_T145Sweep_AFaultPlacingTheHits_…` | `hitPartitions is null` (a timeout after the suppression pass) |
 | `Run_T145Sweep_ADismissalFactsReadFailure_…` | `PartitionsUnavailable` from the Decision Record facts read |
-| `Run_T145Sweep_APolicyThatReachedItsOwnRedaction_IsNotSweptAgain` | not twice: one write, `policyFailures:0` |
+| `Run_T145Sweep_APolicyThatReachedItsOwnRedaction_IsNotSweptAgain` | not twice: one write, `policyFailures:0`, and the policy's `sprk_signal` read runs exactly once (uac-r2 re-check F3) |
+| `Run_T145Sweep_APolicyWithAnUnparseableKey_CountsItOnce_AndStillRedactsItsParseableSignals` | re-check F1: `unparseableKeys:1`, `policyFailures:1`, one metric, one log line; the parseable Signal is redacted |
+| `Run_T145Sweep_ASweepReadFailureForAPolicyThatAlreadyFailed_IsNotCountedTwice` | re-check F1: both reads fault, `policyFailures:1` |
 
-Mutation: dropping the in-force sweep turns all six stop-path tests red. The not-twice test does not catch removal of the
-skip, because the redaction is monotonic and the row is re-read, so a second pass writes nothing. The skip is kept for cost
-and for one count.
+Mutation: dropping the in-force sweep turns all six stop-path tests red. Removing the sweep's skip guard turns the not-twice
+test red (2 reads instead of 1). Before re-check F3 it asserted only the write count, which could not see the second pass.
+
+Re-check F1:
+- the two new tests, and the tightened `Run_PolicyWithAKeyThatIsNotEpisodeScoped_…`, fail on the previous job file;
+- the tightened test asserts the `DedupeKeyUnparseable` metric is exactly 1 (was `>= 1`), plus `unparseableKeys:1` and
+  `policyFailures:1`.
 
 Other items from this round:
 - **pass 2 K1:** `SignalSuppressionTests.T145_AWitnessFiledUnderSecureXButStillOwnedByAnOrdinaryTeam_IsInXsFamily_AndGivesNoDetail`.
@@ -216,6 +228,11 @@ Mutations killed:
   - K2 and K3: §7.
   - K4: handed to 038.
   - K5: `2e2f4ab7b`.
+- **uac-r2 re-check of `3835015ed..a8a163f96`.** It closed F1 and K4 and raised two fix-now items:
+  - F1 (double counting by the sweep's re-read): `b7d82fae3`.
+  - F3 (a not-twice test that proved nothing): `b15f52d6d`.
+
+  K-a was closed by the F1 fix; K-b and K-c are in §7.
 - **uac-r2 review of #1874 at `3835015ed`** (changes requested):
   - F1, the in-force sweep: `a96404372`.
   - K4, the comma release test: `10bba2fe1`.
@@ -321,6 +338,18 @@ Adversarial review pass 1 (2026-10-14) found the following.
 - **K-145-13. Pass 2 K3. A Signal whose dedupe-key policy code matches no `sprk_policy` is never read by either pass.** That
   happens when the policy is deleted or its code edited in Dataverse. Its stored detail is then never redacted. No BFF path
   renames or deletes policies.
+- **K-145-14. uac-r2 re-check K-b. A policy with more than `SignalEvaluator.MaxPages` pages of Signals is never redacted.**
+  `ReadPolicySignalsAsync` throws past the page cap, in the policy's pass and in the sweep. That is a policy failure each run
+  (visible), but its stored evidence is never checked. It predates 145: the same cap stops the policy's evaluation.
+- **K-145-15. uac-r2 re-check K-c. The publish and event-trigger paths have no sweep.**
+  - `ReevaluatePolicyAsync` (on publish) and the scoped event-trigger pass run the policy's own redaction only when the pass
+    completes.
+  - A policy that stops early on those paths relies on the nightly pass, which sweeps. Worst case: until the next nightly run.
+- **K-145-16. A bad key on a policy whose own pass did not read its Signals is not counted.** This covers Off/Retired policies
+  and in-force policies that stopped before the read.
+  - The sweep (re-check F1) skips an unparseable key silently, so such a key is counted only once its policy is evaluated.
+  - Its Signal cannot be placed (no readable subject), so it is not redacted either.
+  - Before 145, those policies' Signals were not read at all.
 - **Pass 2 K4, handed to task 038.** `EvidenceLine.tsx:82-87` renders a redacted line (no `text`) as tier Missing, "No value
   recorded", which misstates a withheld witness as absent. It is not wired to production yet. 038 owns it, with the read-time
   filter B; 145 does not touch it.
