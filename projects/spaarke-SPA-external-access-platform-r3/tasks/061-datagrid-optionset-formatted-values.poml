@@ -4,7 +4,7 @@
     <title>Shared DataGrid shows option-set labels from @formattedValues (check-2 issue 1: Status shows raw JSON)</title>
     <phase>5b Owner check-2 fixes</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared .tsx used by several surfaces</rigor-reason>
     <model-tier>sonnet</model-tier>
