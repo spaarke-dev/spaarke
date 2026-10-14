@@ -1206,7 +1206,7 @@ if (-not $SkipStep0_5) {
 }
 ```
 
-Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
+Recipes that need the customer's subscription (PRQ-S-*, PRQ-C-03, PRQ-C-11) run with the operator's az
 sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
 `spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
 "group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
@@ -1268,7 +1268,7 @@ $environmentId = pac data create --entity sprk_dataverseenvironment `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
-Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — belt-and-suspenders since PRQ-E-13 was deleted from prereqs.yaml; the placeholder-record-exists check now lives here exclusively):
+Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — PRQ-E-13 is retired in prereqs.yaml because this step creates the row after the customer pass (T186 L13), so the placeholder-record-exists check lives here exclusively):
 
 ```powershell
 if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {
