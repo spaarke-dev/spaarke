@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Office;
@@ -41,7 +42,9 @@ public enum ReconciledFilingResult
 /// the owner re-derived by <see cref="Dataverse.IRecordOwnershipResolver.ReparentAsync"/> (the named Secure team under a
 /// secure record). It applies the decision the capture already evaluated for THIS save, with the save's record as the
 /// caller-supplied regarding (rung 0) — narrowed by the resolver to that one record, so nothing else the engine proposed is
-/// written by the caller's act, and the provenance marks every dropped candidate not written. Then <see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step after every re-file (the row's share
+/// written by the caller's act, and the provenance marks every dropped candidate not written. Then the core-ancestor re-stamp
+/// of what is filed under the communication (<see cref="CoreAncestorRestamper.AfterWriteAsync"/>, ontology task 144 — the
+/// same call the communication filing route and the AI update tool make), then <see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step after every re-file (the row's share
 /// mirror and task 148's pass over what is filed under it). Nothing here writes a regarding column by hand.</para>
 /// <para><b>Authorization: the communication re-file rule.</b> <c>PATCH /api/communications/{id}/filing</c> requires Write on
 /// the communication as the caller (<c>CommunicationRecordAuthorizationFilter</c>, <c>Refile</c>) and AppendTo on the record
@@ -69,6 +72,7 @@ public sealed class ReconciledEmailFiling
     private readonly IGenericEntityService _dataverse;
     private readonly CallerRecordAccessProbe _accessProbe;
     private readonly SecureChildReconciler _children;
+    private readonly CoreAncestorRestamper _restamper;
     private readonly ILogger<ReconciledEmailFiling> _logger;
     private readonly SignalEvaluationTrigger? _signalTrigger;
 
@@ -79,6 +83,7 @@ public sealed class ReconciledEmailFiling
         IGenericEntityService dataverse,
         CallerRecordAccessProbe accessProbe,
         SecureChildReconciler children,
+        CoreAncestorRestamper restamper,
         ILogger<ReconciledEmailFiling> logger,
         SignalEvaluationTrigger? signalTrigger = null)
     {
@@ -86,6 +91,7 @@ public sealed class ReconciledEmailFiling
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
         _children = children ?? throw new ArgumentNullException(nameof(children));
+        _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
         _logger = logger;
         _signalTrigger = signalTrigger;
     }
@@ -129,6 +135,22 @@ public sealed class ReconciledEmailFiling
             await _associationResolver
                 .ApplyToExistingRecordAsync(communicationId, capture.Decision, target.EntityId, ct)
                 .ConfigureAwait(false);
+
+            // Ontology task 144: the rows filed under the communication (to-dos, events, Signals, Decision Records) copy its
+            // root, so they are re-stamped NOW, in the same operation — the filing route and the AI update tool do the same.
+            // A stamp left stale since the communication was unfiled outside the BFF is corrected here rather than at the
+            // 5-minute job. Before the step below, which reads those stamps as ownership parents. Never throws (no caller
+            // token is passed); a child that fails is logged and the reconciliation job repairs it.
+            var restamp = await _restamper
+                .AfterWriteAsync(CommunicationEntity, communicationId, FilingColumns, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!restamp.Complete)
+            {
+                _logger.LogWarning(
+                    "Office save filed communication {CommunicationId}, but the core-ancestor re-stamp of what is filed under it " +
+                    "did not finish (failures={Failures} truncated={Truncated}); the reconciliation job completes it within one " +
+                    "cycle (ontology task 144).", communicationId, restamp.Failures.Count, restamp.Truncated);
+            }
 
             // The one step after every re-file. Never throws; the filing above stands.
             await _children.AfterRefileAsync(

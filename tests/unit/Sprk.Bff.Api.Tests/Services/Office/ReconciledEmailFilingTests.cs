@@ -14,9 +14,11 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Domain.Signals;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -92,7 +94,8 @@ public class ReconciledEmailFilingTests
                     NullLogger<SecureChildShareSynchronizer>.Instance),
                 null!, configuration, NullLogger<SecureChildReconciler>.Instance);
             var filing = new ReconciledEmailFiling(
-                resolver, Dataverse.Object, Probe.Object, children, NullLogger<ReconciledEmailFiling>.Instance, Trigger?.Object);
+                resolver, Dataverse.Object, Probe.Object, children, Stamps.Restamper, NullLogger<ReconciledEmailFiling>.Instance,
+                Trigger?.Object);
 
             var outcome = await capture.CaptureWithOutcomeAsync(request, "user-oid", CancellationToken.None);
             if (outcome is not null && Rewrite is { } rewrite)
@@ -102,6 +105,10 @@ public class ReconciledEmailFilingTests
 
         /// <summary>Optionally changes the evaluated decision before the filing sees it (a second engine proposal).</summary>
         public Func<AssociationDecision, AssociationDecision>? Rewrite { get; set; }
+
+        /// <summary>Ontology task 144: the rows filed under the communication, as the core-ancestor re-stamp reads and writes them
+        /// (the REAL <see cref="CoreAncestorRestamper"/> over an in-memory Dataverse; empty unless a test seeds it).</summary>
+        public StampWorld Stamps { get; } = new();
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
@@ -146,6 +153,56 @@ public class ReconciledEmailFilingTests
         ((EntityReference)write["sprk_regardingmatter"]).Id.Should().Be(MatterId);
         world.Ownership.Reparents.Should().ContainSingle("the owner is re-derived from the record it is now filed under")
             .Which.EntityLogicalName.Should().Be("sprk_communication");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: filing the reconciled communication re-stamps what is filed under it in the same operation — a stale copy left by an out-of-BFF unfiling does not wait for the 5-minute job")]
+    public async Task FileIfUnfiled_RestampsTheRowsFiledUnderTheCommunication()
+    {
+        // The communication was on another matter and was unfiled on its form (no BFF path ran), so its Signal, Decision
+        // Record and to-do still carry that matter's copy. The save files it to MatterId; the stamp double holds the
+        // communication as the filing leaves it.
+        var staleMatter = Guid.NewGuid();
+        var signal = Guid.NewGuid();
+        var decisionRecord = Guid.NewGuid();
+        var todo = Guid.NewGuid();
+        var world = new World(reconciled: true, Unfiled());
+        world.Stamps
+            .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)], pairId: MatterId.ToString())
+            .Row("sprk_signal", signal,
+                [("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", staleMatter)],
+                pairId: CanonicalId.ToString())
+            .Row("sprk_decisionrecord", decisionRecord,
+                [("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", staleMatter)],
+                pairId: CanonicalId.ToString())
+            .Row("sprk_todo", todo,
+                [("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", staleMatter)],
+                pairId: CanonicalId.ToString());
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        world.Stamps.Lookup("sprk_signal", signal, "sprk_regardingmatter").Should().Be(MatterId);
+        world.Stamps.Lookup("sprk_decisionrecord", decisionRecord, "sprk_regardingmatter").Should().Be(MatterId);
+        world.Stamps.Lookup("sprk_todo", todo, "sprk_regardingmatter").Should().Be(MatterId);
+        world.Stamps.Patches.Should().NotContain(p => p.Entity == "sprk_communication",
+            "the communication's own filing is the association engine's write, never the restamper's");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: a filing that is refused re-stamps nothing")]
+    public async Task FileIfUnfiled_NotPermitted_RestampsNothing()
+    {
+        var world = new World(reconciled: true, Unfiled());
+        world.CallerMay(AccessRights.Read);
+        world.Stamps
+            .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
+            .Row("sprk_signal", Guid.NewGuid(),
+                [("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", Guid.NewGuid())],
+                pairId: CanonicalId.ToString());
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.NotPermitted);
+        world.Stamps.Patches.Should().BeEmpty();
     }
 
     [Fact]
