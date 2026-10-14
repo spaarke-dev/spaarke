@@ -12,14 +12,16 @@
 |---|---|
 | **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
 | **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | 2026-10-13: #1805 (141) `d6b952bdf` and #1824 (142) `9c188eda3` MERGED. D-136 narrow writer profile LIVE on spaarkedev1. Task 143 RUNNING (opus, `C:\wts-143`); it now rebases on the base and opens its PR, which then goes to uac-r2 review → merge. Then 144 → 145 → 146; 148 after 143. Code Quality is red repo-wide (Dependencies audit, new crypto advisories, #1826; the job is continue-on-error), so merge past it on evidence with a PR comment. |
+| **Next Action** | 2026-10-13: merged #1805 (141), #1824 (142) `9c188eda3`, #1747 (1659) `171bccbfe`. 143 → PR #1834 (head `4356397a2`), with uac-r2 reviewing; merge on CLEAN using `scratchpad/merge-when-green3.sh` (ignores the informational Code Quality job, #1826). Q7 live seam PASSED at `4356397a2` (zz-037 = 0). Lanes running: 058 (`C:\wts-058`), 050 (`C:\wts-050`; no Dataverse writes until owner approval), Q11 rename (`C:\wts-q11`). After 143 merges: start 148, and 144 once uac-r2's C4/C7 PR lands; then 042. Asked the owner for a standing approval for ontology dev data writes (050 row, 041 live non-admin test, 061 policy rows). |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **143** D-130 owner on Signal writers | (opens after rebase on `9c188eda3`) | Running (opus, two adversarial passes). | uac-r2 review → merge. |
-| **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
+| **143** D-130 owner on Signal writers | #1834 `4356397a2` | uac-r2 reviewing; Q7 live passed | merge on CLEAN |
+| **058** decision wizard | — | running (sonnet xhigh) | PR → merge |
+| **050** worklist grid row | — | running (sonnet); live apply needs owner OK | PR → apply after approval |
+| **Q11** F-nn → I-nn rename | — | running (sonnet; stops on I-nn collisions) | PR → merge |
 
 Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
 
@@ -38,8 +40,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 ## Waiting / owner
 
 - **D-137 (owner, 2026-10-13):** Q25 approved (#1747 merging); Q26 done (Basic User on the Dev 1/Test 1 default teams; #1776 closed); Q23 confirmed via D-135; Q24 Reviewed only; Q22 event individual = `sprk_assignedto` (038/059 POMLs updated); Q11 + Q15 recommended options.
-- **Q7 live re-run (main session runs it):** env `SIGNALS_LIVE_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`. Filter `FullyQualifiedName~SignalWriterSeamTests.WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate&DisplayName~sprk_todo`. Afterwards, zz-037 rows must be 0.
-- **Q11 (D-121/D-137):** F-nn → I-nn rename in one commit once #1747 merges.
+- **Q7: DONE 2026-10-13** (passed at `4356397a2`; zz-037 = 0). Re-run recipe: env `SIGNALS_LIVE_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`. Filter `FullyQualifiedName~SignalWriterSeamTests.WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate&DisplayName~sprk_todo`. Afterwards, zz-037 rows must be 0.
 - **Q8:** #1111 to master after 035 + 055.
 - Owner decisions page https://claude.ai/artifact/ADCv42eKukX2BQx7d62Mop (Q1–Q19 answered).
 

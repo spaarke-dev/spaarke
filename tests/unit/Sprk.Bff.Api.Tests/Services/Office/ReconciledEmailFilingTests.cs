@@ -15,6 +15,8 @@ using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -90,7 +92,7 @@ public class ReconciledEmailFilingTests
                     NullLogger<SecureChildShareSynchronizer>.Instance),
                 null!, configuration, NullLogger<SecureChildReconciler>.Instance);
             var filing = new ReconciledEmailFiling(
-                resolver, Dataverse.Object, Probe.Object, children, NullLogger<ReconciledEmailFiling>.Instance);
+                resolver, Dataverse.Object, Probe.Object, children, NullLogger<ReconciledEmailFiling>.Instance, Trigger?.Object);
 
             var outcome = await capture.CaptureWithOutcomeAsync(request, "user-oid", CancellationToken.None);
             if (outcome is not null && Rewrite is { } rewrite)
@@ -100,7 +102,13 @@ public class ReconciledEmailFilingTests
 
         /// <summary>Optionally changes the evaluated decision before the filing sees it (a second engine proposal).</summary>
         public Func<AssociationDecision, AssociationDecision>? Rewrite { get; set; }
+
+        /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
+        public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
     }
+
+    /// <summary>The communication as it reads after the filing: on the matter, with or without a triage category.</summary>
+    private static DataverseEntity FiledToMatter(bool classified) => FilingSignalDoubles.Communication(CanonicalId, MatterId, classified);
 
     private static DataverseEntity Unfiled() => new("sprk_communication", CanonicalId);
 
@@ -261,6 +269,111 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.NotApplicable, "a new capture is created WITH its filing");
+    }
+
+    // ── Ontology D-48 / #1659: a classified communication filed to a matter queues the association-confirmed trigger ──
+
+    [Fact]
+    public async Task FileIfUnfiled_FiledToAMatter_WhenClassified_QueuesTheAssociationConfirmedTrigger_Once()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CanonicalId);
+        trigger.Verify(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_FiledToAMatter_WhenNotClassified_QueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: false)) { Trigger = trigger };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_AlreadyFiled_QueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, FiledToMatter(classified: true)) { Trigger = trigger };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_CallerMayNotChangeIt_QueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+        world.CallerMay(AccessRights.Read);
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.NotPermitted);
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_WhenTheWriteFails_QueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+        world.Dataverse
+            .Setup(d => d.UpdateAsync("sprk_communication", CanonicalId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse down"));
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Failed);
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_UnfiledSave_QueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+
+        var (_, result) = await world.SaveAsync(PaneSave(target: null));
+
+        result.Should().Be(ReconciledFilingResult.NotApplicable);
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_WhenTheTriggerThrows_IsStillFiled()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        trigger.Setup(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("bus down"));
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed, "the filing stands; a Signal that could not be refreshed live never fails the save");
+        world.CommunicationWrites.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_WithNoTriggerRegistered_IsStillFiled()
+    {
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true));
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
     }
 
     [Fact]
