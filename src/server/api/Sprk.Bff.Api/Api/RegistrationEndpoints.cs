@@ -483,18 +483,17 @@ public static class RegistrationEndpoints
             // The link points at the environment the record was written to, which the
             // caller takes from RegistrationDataverseService.DataverseBaseUrl.
             //
-            // It used to come from the default sprk_dataverseenvironment row, via
-            // DataverseEnvironmentRecord.SelectDefault. That row describes where demos
-            // are provisioned, which is a different environment and has nothing to say
-            // about where a registration request lives. With no row flagged as default
+            // It used to come from the default sprk_dataverseenvironment row (the
+            // removed DataverseEnvironmentRecord.SelectDefault). That row describes where
+            // demos are provisioned, which is a different environment and has nothing to
+            // say about where a registration request lives. With no row flagged as default
             // the selection fell through to the first by name, "Demo 1", so every
             // notification deep-linked into spaarke-demo for a record that only exists
             // in spaarkedev1, and the admin got "Record Is Unavailable".
             //
-            // SelectDefault is still correct for its other caller, DemoExpirationService,
-            // which really does want the demo environment. Do not fix this class of bug
-            // by flagging a row as default: that would silently redirect team removal and
-            // SPE revoke on expiry.
+            // No registry-wide "default" or "first active" pick exists any more:
+            // DemoExpirationService reads each request's own DataverseEnvironmentId, as the
+            // approve path does. Do not reintroduce one by flagging a row as default.
             var recordUrl = BuildRegistrationRecordUrl(dataverseUrl, appId, recordId);
 
             await emailService.SendAdminNotificationAsync(
