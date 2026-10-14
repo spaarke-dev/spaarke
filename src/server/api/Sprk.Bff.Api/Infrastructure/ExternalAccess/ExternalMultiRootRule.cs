@@ -178,10 +178,17 @@ internal static class ExternalMultiRootRule
     // union. A parent that cannot be resolved withholds the row (fail closed).
 
     /// <summary>
-    /// The most distinct non-root parent records one request walks (task 187). Past it nothing more is read, and a row whose
-    /// filing needs an unread record is withheld (fail closed, logged, <c>Truncated</c> where the list has it).
+    /// The most distinct non-root parent records one request walks (task 187): the hard upper bound. Past it nothing more is
+    /// read, and only a row whose filing needs an unread record is withheld (fail closed, logged, <c>Truncated</c> where the
+    /// list has it).
     /// </summary>
-    internal const int MaxLiveParentReads = 500;
+    /// <remarks>
+    /// Fix round 1 (R1): sized against the external list cap (<see cref="ExternalDataService.MaxCollectionRows"/>, 5,000 rows),
+    /// four records per row, so a busy matter's full page (each to-do under its own communication, and that communication under
+    /// its own thread: two records per row) never reaches it. The old bound of 500 emptied a page of 251 such to-dos. Cost at
+    /// the bound: 20,000 / 200 ids per query = 100 filing queries, split further by table and level.
+    /// </remarks>
+    internal const int MaxLiveParentReads = 4 * ExternalDataService.MaxCollectionRows;
 
     /// <summary>
     /// The rule input standing for a parent whose live roots could not be resolved (a read fault, a parent that did not come

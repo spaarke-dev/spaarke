@@ -103,8 +103,16 @@ public sealed class ExternalLiveParentRuleTests
         live.Should().BeSameAs(LiveParentRoots.Empty);
     }
 
+    /// <summary>
+    /// The RULE's own trim only: it never asks the reader for more than the bound. This fake reader resolves everything it is
+    /// asked, so it says nothing about the walk's bound (fix round 1, R1: the real walk once withheld every row of a 251-row
+    /// page while this test passed). The walk's bound is tested through the REAL walk in <c>ExternalLiveParentReadTests</c>
+    /// (<c>APageOfTodos_EachUnderItsOwnCommunicationAndThread_ListsEveryRow</c>,
+    /// <c>ThePartOfALevelThatFitsTheBound_IsRead_AndOnlyTheChainsItCuts_AreUndetermined</c>,
+    /// <c>PastTheBound_OnlyTheRowWhoseParentsDoNotFit_IsWithheld_AndTheListSaysTruncated</c>).
+    /// </summary>
     [Fact]
-    public async Task PastTheBound_TheRestAreUnresolved_AndTheirRowsWithheld()
+    public async Task TheRuleAsksTheReaderForAtMostTheBound_AndAParentPastIt_IsUnresolved()
     {
         var parents = Enumerable.Range(0, ExternalMultiRootRule.MaxLiveParentReads + 1)
             .Select(_ => CommunicationParent(Guid.NewGuid())).ToList();
@@ -116,7 +124,7 @@ public sealed class ExternalLiveParentRuleTests
         live.IsComplete.Should().BeFalse();
         parents.Count(p => ExternalMultiRootRule.ChildRowReadable(
                 Reader(M), SecureRootFlags.None, ChildRowRoots.Of(Array.Empty<(ExternalGrantRootType, string?)>(), p, live)))
-            .Should().Be(ExternalMultiRootRule.MaxLiveParentReads, "exactly the one row past the bound is withheld");
+            .Should().Be(ExternalMultiRootRule.MaxLiveParentReads, "the parent the rule did not ask for is unresolved");
     }
 
     [Fact]

@@ -246,6 +246,107 @@ public sealed class ExternalLiveParentReadTests : IClassFixture<ExternalRootEven
         body.Truncated.Should().BeTrue("the row was withheld only because its live parent could not be decided");
     }
 
+    // =====================================================================
+    // Fix round 1 (R1): the walk bound must not empty a normal list. Through the REAL walk (ParentLineageWalk over the
+    // filing double), never a fake reader: a busy matter's to-dos, each under its own communication and that communication's
+    // own thread, all list. Only a row whose chain the bound actually cuts is withheld.
+    // =====================================================================
+
+    [Theory]
+    [InlineData(251)]
+    [InlineData(3000)]
+    public async Task APageOfTodos_EachUnderItsOwnCommunicationAndThread_ListsEveryRow(int count)
+    {
+        _fixture.Principal = Holding(matters: new[] { M });
+        Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        for (var n = 0; n < count; n++)
+        {
+            var communication = Guid.NewGuid();
+            var thread = Guid.NewGuid();
+            Data.AddFilingRow("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", O));
+            Data.AddFilingRow("sprk_communication", communication,
+                ("sprk_communicationthread", "sprk_communicationthread", thread), ("sprk_regardingmatter", "sprk_matter", O));
+            Data.AddTodoWith("matters", M, $"To-do {n}", ("_sprk_regardingcommunication_value", communication.ToString()));
+        }
+
+        var body = await Todos(M);
+
+        body.Value.Should().HaveCount(count, "{0} to-dos with ordinary chains read {1} records, well inside the bound", count, 2 * count);
+        body.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ThePartOfALevelThatFitsTheBound_IsRead_AndOnlyTheChainsItCuts_AreUndetermined()
+    {
+        // Five to-dos' communications, each under its own thread, under ordinary O. A bound of 7 reads the five communications
+        // (level 1) and two of the five threads (level 2): exactly the three chains through an unread thread are cut.
+        Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        var communications = new List<Guid>();
+        for (var n = 0; n < 5; n++)
+        {
+            var communication = Guid.NewGuid();
+            var thread = Guid.NewGuid();
+            Data.AddFilingRow("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", O));
+            Data.AddFilingRow("sprk_communication", communication, ("sprk_communicationthread", "sprk_communicationthread", thread));
+            communications.Add(communication);
+        }
+
+        var walk = new Sprk.Bff.Api.Services.Dataverse.ParentLineageWalk(
+            Data.FilingReader,
+            (table, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling.TryGetValue(table, out var lookups) ? lookups.Keys : Array.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase)),
+            Array.Empty<string>());
+
+        var (tops, faulted) = await walk.TopsOfManyAsync(
+            communications.Select(c => ("sprk_communication", c)).ToList(),
+            Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot, maxReads: 7, default);
+
+        faulted.Should().BeFalse();
+        communications.Select(c => tops[("sprk_communication", c)].Status).Should().Equal(
+            Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Found,
+            Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Found,
+            Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Undetermined,
+            Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Undetermined,
+            Sprk.Bff.Api.Services.Dataverse.ParentTopsStatus.Undetermined);
+        tops[("sprk_communication", communications[0])].Tops.Select(t => (t.Table, t.Id)).Should().Equal(("sprk_matter", O));
+    }
+
+    [Fact]
+    public async Task PastTheBound_OnlyTheRowWhoseParentsDoNotFit_IsWithheld_AndTheListSaysTruncated()
+    {
+        // Each to-do names eight distinct parents (every non-root lookup a to-do has), each filed directly under ordinary O.
+        // The first MaxLiveParentReads / 8 to-dos fit the bound exactly; the one after them does not.
+        _fixture.Principal = Holding(matters: new[] { M });
+        Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        var lookups = ExternalMultiRootRule.LiveParentLookupsOf("sprk_todo");
+        lookups.Should().HaveCount(8);
+        var fitting = ExternalMultiRootRule.MaxLiveParentReads / lookups.Count;
+        var ids = new List<string>();
+        for (var n = 0; n <= fitting; n++)
+        {
+            var columns = new List<(string Column, string Value)>();
+            foreach (var (column, table) in lookups)
+            {
+                var parent = Guid.NewGuid();
+                Data.AddFilingRow(table, parent, (RootColumnOf(table), "sprk_matter", O));
+                columns.Add(($"_{column}_value", parent.ToString()));
+            }
+
+            ids.Add(Data.AddTodoWith("matters", M, $"To-do {n:D5}", columns.ToArray()));
+        }
+
+        var body = await Todos(M);
+
+        body.Value.Select(t => t.SprkTodoid).Should().BeEquivalentTo(ids.Take(fitting), "only the last row's parents are past the bound");
+        body.Truncated.Should().BeTrue("a row was withheld only because the bound stopped the read");
+    }
+
+    /// <summary>The lookup through which a record of <paramref name="table"/> is filed directly under a matter.</summary>
+    private static string RootColumnOf(string table) =>
+        Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling[table]
+            .First(l => string.Equals(l.Value, "sprk_matter", StringComparison.OrdinalIgnoreCase)).Key;
+
     [Fact]
     public async Task AParentLookupThatIsNotAGuid_IsWithheld()
     {

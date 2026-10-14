@@ -784,6 +784,22 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         }
 
         /// <summary>
+        /// Task 187 fix round 1 (R1): <see cref="AddTodo"/> with extra raw columns set at seed time (e.g. a parent lookup
+        /// <c>_sprk_regardingcommunication_value</c>), so a page of thousands of rows is seeded without a scan per row.
+        /// </summary>
+        public string AddTodoWith(string segment, Guid record, string name, params (string Column, string Value)[] columns)
+        {
+            var id = AddTodo(segment, record, name);
+            lock (_sets)
+            {
+                var row = _sets["sprk_todos"][^1];
+                foreach (var (column, value) in columns) row[column] = value;
+            }
+
+            return id;
+        }
+
+        /// <summary>
         /// Seeds a document filed to <paramref name="segment"/>'s record <paramref name="record"/> through that root's typed
         /// lookup, plus any <paramref name="extra"/> link columns (e.g. <c>_sprk_matter_value</c>, <c>_sprk_relatedmatter_value</c>).
         /// </summary>

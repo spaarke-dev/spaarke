@@ -277,7 +277,8 @@ internal sealed class ParentLineageWalk
     /// the three roots) is a top without a query: its existence and its secure state are the caller's next read to decide (the
     /// external secure-flag read counts a root it cannot read as secure).</para>
     /// <para><b>Bounded, fail closed.</b> At most <paramref name="maxReads"/> distinct non-terminal records are read and at most
-    /// <see cref="MaxDepth"/> levels are followed. A start whose filing reaches a record that was not read (past either bound),
+    /// <see cref="MaxDepth"/> levels are followed; a level the bound cuts is read up to the bound, in frontier order. A start
+    /// whose filing reaches a record that was not read (past either bound),
     /// a record that did not come back, or a read that faulted is <see cref="ParentTopsStatus.Undetermined"/>; it never
     /// guesses a top. A loop that reaches no top is Undetermined too. Never throws (cancellation aside): a fault is reported
     /// through <c>Faulted</c>.</para>
@@ -307,8 +308,14 @@ internal sealed class ParentLineageWalk
             var read = 0;
             for (var depth = 1; frontier.Count > 0 && depth <= MaxDepth; depth++)
             {
-                if (read + frontier.Count > maxReads)
-                    break; // the bound: nothing more is read, and a start that needs it is Undetermined
+                // The bound (task 187 fix round 1, R1): the part of the level that fits is read; the rest is not, and only a
+                // start whose filing reaches an unread record is Undetermined. (Stopping the WHOLE level emptied a normal list:
+                // 251 to-dos, each under its own communication and thread, read 251 + 251 and listed none.)
+                var remaining = maxReads - read;
+                if (remaining <= 0)
+                    break;
+                if (frontier.Count > remaining)
+                    frontier = frontier.Take(remaining).ToList();
 
                 await LoadAsync(frontier, ct).ConfigureAwait(false);
                 read += frontier.Count;
