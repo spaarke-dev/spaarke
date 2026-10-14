@@ -351,6 +351,7 @@ public partial class SignalReevaluationJobTests
 
         denied.Should().Be(new SignalClosureOutcome(0, 0, 1, AccessDenied: 1));
         transient.Should().Be(new SignalClosureOutcome(0, 0, 1), "a transient failure is not a privilege refusal");
+        denied.Plus(denied).Should().Be(new SignalClosureOutcome(0, 0, 2, AccessDenied: 2), "Plus sums the denied count too");
     }
 
     [Fact]
