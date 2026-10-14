@@ -534,11 +534,6 @@ jobs:
         # not blocking — see docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         run: dotnet format whitespace --verify-no-changes --verbosity diagnostic
 
-      - name: ADR policy check (Legacy PowerShell)
-        shell: pwsh
-        run: ./scripts/adr_policy_check.ps1 -RepoRoot .
-        continue-on-error: true  # Legacy script - NetArchTest is primary validation
-
       - name: ADR architecture tests (NetArchTest)
         id: adr-tests
         run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --logger "trx;LogFileName=adr-results.trx" --results-directory ./TestResults

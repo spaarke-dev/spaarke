@@ -215,6 +215,9 @@ public static class E2EAcceptanceModule
         // it delegates to a scoped registry client the lifetime must widen.
         services.AddScoped<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();
 
+        // Task 263: H13's customer-mailbox check — reuses H14m's seams (ICustomerMailboxClient, ICommunicationAccountStore,
+        // registered by AddH14IntegrationWiringHandler). Scoped: the account store is scoped.
+        services.AddScoped<ICustomerMailboxVerifier, CustomerMailboxVerifier>();
         services.AddScoped<H13E2EAcceptanceGateHandler>();
 
         return services;

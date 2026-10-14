@@ -1356,17 +1356,19 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../p
 ```
 
 ### `Set-ExternalFlagForB2BGuests.ps1`
-**Purpose:** One-off data step: every B2B guest system user (`#EXT#` in its user name, `systemuser.domainname`) gets `sprk_isexternal = Yes`; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so guests must be marked explicitly. JSON report of every user listed.
-**Usage:** 🛑 **Do NOT run this on a Model 1 customer stamp** (#1564): every customer employee there is a B2B guest (`#EXT#`) in Spaarke's tenant, so it would mark every customer employee external. Wait for unified-access-control-r2 to decide the rule (customer deployment guide §7.7 / §12.2 Phase 7b). For other environments: 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
-**Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003)
-**Dependencies:** Azure CLI (`az login`, Write on systemuser), PowerShell 7+
+**Purpose:** Data step that sets `sprk_isexternal = Yes` on B2B guest system users (`#EXT#` in `systemuser.domainname`) who are outsiders; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so outsider guests must be marked explicitly. JSON report of every guest with its class, home directory and action.
+**Modes (one is required):** `-CustomerTenantIds <guid[]>` on a **Model 1** stamp (spaarkeai-word-add-in-r1 task 126, owner 2026-10-13; ADR-028 A8/A9) — the stamp's `WorkforceIdentity__CustomerTenantIds__N` list. Each guest's email domain is resolved with Graph `findTenantInformationByDomainName` (the operator's `az login` Graph token); the customer's own staff (a listed directory, or a `systemuserid` in `-InternalUserIds`) are never written, a guest of another directory not already Yes is set to Yes (No is the column default, not a decision), and an unresolvable or inconsistent guest is reported as "review" and never written. Guards: the stamp's own directory or an empty id is refused as a customer directory; `-Apply` is refused when guests resolve to other directories but none to the customer's. Each PATCH uses the row's ETag. `-AllGuestsExternal` where every guest is an outsider (the task 114 behaviour: every guest still blank or No is set).
+**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §7.7 / §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0 only when nothing is left to set or to review). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
+**Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003; Model 1 mode 2026-10-13 by `spaarkeai-word-add-in-r1` task 126)
+**Dependencies:** Azure CLI (`az login`, Write on systemuser; a Graph token for `-CustomerTenantIds`), PowerShell 7+. Tests: `tests/scripts/Set-ExternalFlagForB2BGuests.Tests.ps1` (Pester 3.4).
 **Owner:** `unified-access-control-r2`
-**Last Used:** never run (written, not executed — task 114).
+**Last Used:** 2026-10-13, dry run only on spaarkedev1 with `-CustomerTenantIds` (task 126): 0 to set, 0 to review. Never applied.
 
 ```powershell
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"            # dry run (list)
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply     # PATCH If-Match:*, report
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = every guest is Yes
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>"           # Model 1 dry run (report)
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>" -Apply    # PATCH If-Match:<row ETag>, report
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>" -Verify   # exit 0 = nothing to set or review
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -AllGuestsExternal                                                             # not Model 1: every guest is an outsider
 ```
 
 ### `Set-SecureFlagFieldSecurity.ps1`

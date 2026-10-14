@@ -7,7 +7,8 @@
 // (unified-access-control-r2 INCOMING-141 / task 141; T255), built exactly as S10/S11/S12/S14 — plus S19–S21 (ISS-020 / #1565):
 // the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
 // S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
-// ships). Every step READS first
+// ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
+// contact.sprk_externalinvitecodehash, VERIFIED ONLY. Every step READS first
 // and writes only what is missing, so a second run against a configured environment performs no write at all.
 //
 // THREE PHASES
@@ -60,13 +61,17 @@ public sealed record SecureRecordSetupRequest(
     Guid CustomerBusinessUnitId,
     bool DryRun);
 
-/// <summary>The configured objects, for the handler's gate evidence.</summary>
+/// <summary>
+/// The configured objects, for the handler's gate evidence. <paramref name="Notes"/> are read-only observations that are
+/// not writes (S22: an external-invite column that is not in the environment yet).
+/// </summary>
 public sealed record SecureRecordSetupState(
     Guid BusinessUnitId,
     Guid OwnerTeamId,
     Guid RoleId,
     int PrivilegeCount,
-    IReadOnlyList<string> LockedTables);
+    IReadOnlyList<string> LockedTables,
+    IReadOnlyList<string>? Notes = null);
 
 /// <summary>How a setup ended. <see cref="Actions"/> lists the writes performed (or, on a dry run, planned).</summary>
 public abstract record SecureRecordSetupOutcome(IReadOnlyList<string> Actions)
@@ -149,6 +154,22 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S21: the role (in the ROOT unit) that must hold NO Read on <see cref="NoAccessEntryTable"/>.</summary>
     public const string CoreUserRoleName = "Spaarke Core User";
 
+    /// <summary>S22 (ISS-025 / #1803): the table of both external-invite columns.</summary>
+    public const string InviteTable = "contact";
+
+    /// <summary>
+    /// S22: the pending-invite marker (unified-access-control-r2 task 184). Ships in SpaarkeMaster 1.2.2.0 — absent is a
+    /// failure. Readers 4/0/0, Writers 4/4/4 (<c>scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify</c>).
+    /// </summary>
+    public const string InviteMarkerColumn = "sprk_externalinvitedon";
+
+    /// <summary>
+    /// S22: the invite-code hash (unified-access-control-r2 task 185). NOT in SpaarkeMaster 1.2.2.0 — absent is the expected
+    /// state and is recorded, not failed. Readers no access, Writers 4/4/4
+    /// (<c>scripts/Set-ExternalInviteCodeHashSchema.ps1 -Verify</c>).
+    /// </summary>
+    public const string InviteCodeHashColumn = "sprk_externalinvitecodehash";
+
     /// <summary>The depth the codified set grants.</summary>
     public const string BasicDepth = "Basic";
 
@@ -195,6 +216,7 @@ public sealed class SecureRecordSetupProcedure
         var dryRun = request.DryRun;
         var dv = _dataverse;
         var actions = new List<string>();
+        var notes = new List<string>();
 
         SecureRecordSetupOutcome Refuse(FailureClass failureClass, string code, string diagnostic)
         {
@@ -579,6 +601,88 @@ public sealed class SecureRecordSetupProcedure
                 "scripts/Set-NoAccessEntryRolePrivileges.ps1 (dry run, then -Apply) or re-import SpaarkeMaster. Nothing was written.");
         }
 
+        // S22 (ISS-025 / #1803) — the external-invite columns' locks, VERIFIED ONLY (the columns, their grants and the profiles
+        // ship in SpaarkeMaster; H7b never secures a column and writes no field-permission row). Expectations are those of
+        // scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify and scripts/Set-ExternalInviteCodeHashSchema.ps1 -Verify.
+        //   sprk_externalinvitedon     : secured; Readers 4/0/0; Writers 4/4/4; nobody else may create or update. ABSENT = fail
+        //                                (it ships in 1.2.2.0).
+        //   sprk_externalinvitecodehash: ABSENT is expected until the SpaarkeMaster release that carries it (recorded, logged,
+        //                                not failed). Present: secured; Writers 4/4/4; NO other profile may read, create or
+        //                                update it — the Readers profile has no row or a 0/0/0 row. System Administrator is
+        //                                the platform's own profile and is exempt (owner decision F4).
+        var markerSecured = await dv.IsAttributeSecuredAsync(t, InviteTable, InviteMarkerColumn, ct).ConfigureAwait(false);
+        var markerPermissions = (await dv.ListFieldPermissionsAsync(t, InviteMarkerColumn, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, InviteTable))
+            .ToArray();
+        var markerReader = markerPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+        var markerWriter = markerPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+        if (markerSecured != true
+            || markerReader is null || markerReader.CanRead != FieldPermissionAllowed
+            || markerWriter is null || markerWriter.CanRead != FieldPermissionAllowed
+            || markerWriter.CanCreate != FieldPermissionAllowed || markerWriter.CanUpdate != FieldPermissionAllowed)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete,
+                $"{InviteTable}.{InviteMarkerColumn}: IsSecured={markerSecured?.ToString() ?? "(no such column)"}, " +
+                $"'{ReaderProfileName}' read={markerReader?.CanRead.ToString() ?? "(none)"}, " +
+                $"'{WriterProfileName}' read/create/update=" +
+                $"{(markerWriter is null ? "(none)" : $"{markerWriter.CanRead}/{markerWriter.CanCreate}/{markerWriter.CanUpdate}")} " +
+                "(expected secured, 4, 4/4/4). The package's pending-invite lock (unified-access-control-r2 task 184) is " +
+                "incomplete — the column ships in SpaarkeMaster 1.2.2.0 and later: import SpaarkeMaster (H6), then resume. " +
+                "Nothing was written.");
+        }
+        var markerOtherWriters = markerPermissions
+            .Where(p => p.ProfileId != writerProfileId
+                        && !systemAdministratorProfiles.Contains(p.ProfileId)
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (markerOtherWriters.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter,
+                $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{InviteMarkerColumn}: " +
+                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                "member). Whoever can write the marker can open a contact to an email bind. Nothing was written.");
+        }
+
+        var codeHashSecured = await dv.IsAttributeSecuredAsync(t, InviteTable, InviteCodeHashColumn, ct).ConfigureAwait(false);
+        if (codeHashSecured is null)
+        {
+            var note = $"{InviteTable}.{InviteCodeHashColumn}: absent — ships in a later SpaarkeMaster release " +
+                       "(unified-access-control-r2 task 185); its lock is not verified in this environment yet.";
+            notes.Add(note);
+            _logger.LogInformation("H7b S22: {Note}", note);
+        }
+        else
+        {
+            var hashPermissions = (await dv.ListFieldPermissionsAsync(t, InviteCodeHashColumn, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, InviteTable))
+                .ToArray();
+            var hashWriter = hashPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+            if (codeHashSecured != true
+                || hashWriter is null || hashWriter.CanRead != FieldPermissionAllowed
+                || hashWriter.CanCreate != FieldPermissionAllowed || hashWriter.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InviteCodeHashLockIncomplete,
+                    $"{InviteTable}.{InviteCodeHashColumn}: IsSecured={codeHashSecured}, '{WriterProfileName}' read/create/update=" +
+                    $"{(hashWriter is null ? "(none)" : $"{hashWriter.CanRead}/{hashWriter.CanCreate}/{hashWriter.CanUpdate}")} " +
+                    "(expected secured, 4/4/4). The package's invite-code lock (unified-access-control-r2 task 185) is " +
+                    "incomplete: import SpaarkeMaster (H6), then resume. Nothing was written.");
+            }
+            var hashOtherAccess = hashPermissions
+                .Where(p => p.ProfileId != writerProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanRead > 0 || p.CanCreate > 0 || p.CanUpdate > 0))
+                .ToArray();
+            if (hashOtherAccess.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess,
+                    $"Profiles other than '{WriterProfileName}' can read, create or update {InviteTable}.{InviteCodeHashColumn}: " +
+                    $"{string.Join(", ", hashOtherAccess.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={p.CanRead}/{p.CanCreate}/{p.CanUpdate}"))}" +
+                    $" (the Readers profile must hold no row or 0/0/0 — every default team is its member). Only the BFF may " +
+                    "touch the invite-code hash; who was granted access is an operator decision. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access.");
+        }
+
         // §6 T4 — the ROOT unit's default team must not reach the secure unit by depth.
         var rootDefaultTeams = await dv.FindDefaultTeamsAsync(t, root.Id, ct).ConfigureAwait(false);
         if (rootDefaultTeams.Count != 1)
@@ -796,7 +900,7 @@ public sealed class SecureRecordSetupProcedure
         }
 
         return new SecureRecordSetupOutcome.Applied(actions.ToArray(), new SecureRecordSetupState(
-            businessUnitId.Value, teamId.Value, roleId.Value, wanted.Count, lockedTables));
+            businessUnitId.Value, teamId.Value, roleId.Value, wanted.Count, lockedTables, notes.ToArray()));
     }
 
     private static async Task<string?> RepairNullFlagsAsync(

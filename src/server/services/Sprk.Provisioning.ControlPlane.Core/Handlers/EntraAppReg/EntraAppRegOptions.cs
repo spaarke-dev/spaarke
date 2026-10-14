@@ -10,7 +10,7 @@
 // shape (shell-out era) with the Graph-SDK-port shape:
 //   - ExpectedAppRoleCount -> ExpectedDelegatedScopeCount (RENAMED + re-scoped;
 //     see file-header note in EntraAppRegPermissionCatalog.cs — this counts the
-//     5 DELEGATED oauth2PermissionGrant scopes H3's own consent verifier checks,
+//     DELEGATED oauth2PermissionGrant scopes H3's own consent verifier checks,
 //     NOT the 14 application-only app-roles H10 already owns).
 //   - NEW Model 1 fields (SharedBffAppRegistrationId/Audience/KeyVaultName) —
 //     RETIRED 2026-09-29 (task 222 per D-13). The shared-app-reg branch was
@@ -39,7 +39,7 @@ public sealed class EntraAppRegOptions
     /// <summary>
     /// Expected number of DELEGATED oauth2PermissionGrant scopes H3's real
     /// <see cref="IAdminConsentVerifier"/> checks for (per
-    /// <see cref="EntraAppRegPermissionCatalog.All"/> — 5 as of task 130).
+    /// <see cref="EntraAppRegPermissionCatalog.All"/> — 6 as of ISS-018 F6, 2026-10-14).
     /// Renamed from the Wave-C4 scaffold's <c>ExpectedAppRoleCount</c> (which
     /// conflated this with H10's app-only catalog — see
     /// EntraAppRegPermissionCatalog.cs file header for the scope correction).
