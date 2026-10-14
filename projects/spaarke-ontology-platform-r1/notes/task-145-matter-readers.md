@@ -47,7 +47,7 @@ or the column stays as context.
 communication detail.
 
 **After:** `SignalSuppressionService.EvidenceWithinPartitionAsync` (called once per policy run at the top of
-`SignalReevaluationJob.ApplyAsync`, for every reconcile and create) keeps a line's text and source only when the witness's
+`SignalReevaluationJob.ApplyAsync`, for every reconcile and create; evidence is stored only when a row is created, so an existing Signal is not rewritten, see §6) keeps a line's text and source only when the witness's
 secure-root family equals the Signal's family and neither is Undetermined. Otherwise it writes the line with `Text = null,
 Source = null`; ref, tier, confidence, asOf and clause stay, and the UI renders a missing text as Missing. Both families come from
 `PartitionsAsync`, the one partition truth (uac-r2's `SecureRootsAboveAsync` walk). The witness rows come from
@@ -103,6 +103,9 @@ without `-Apply` about 10 minutes later: `stampEmpty` should be 0 on both tables
 | `…T145_WhenTheFamiliesCannotBeRead_EveryLineLosesItsDetail_FailClosed` | fail closed | → pass |
 | `SignalReevaluationJobTests.Run_T145_AWitnessAlsoFiledUnderASecureProject_IsWrittenWithoutItsSubjectOrSender` | the job writes the filtered lines (the written `sprk_evidencerefs` has no text or source; ref, asOf and clause stay) | fails with the job unfiltered → pass |
 | `DecisionCommitServiceTests.T145_TheDecisionsMatter_IsTheCorePairsMatter_NeverTheTypedSprkMatter` (2 cases) | the commit route's matter is the core pair's | 2/2 fail on the HEAD file → pass |
+| `SignalSuppressionTests.T145_ASignalAndAWitnessBothUndetermined_AreNeverTheSameFamily_AndGiveNoDetail` | review F3: two Undetermined families are never equal | fails with the Undetermined guards removed → pass |
+| `SignalReevaluationJobTests.Run_T145_AReconcileOfAWitnessAlsoFiledUnderASecureProject_AttemptsNoSubjectOrSender` | review F3: a reconcile's create-first payload is filtered too | fails with `Writable` removed from the reconcile → pass |
+| `DecisionCommitServiceTests.T145_AProjectCoresDecision_HasNoMatter_EvenWhenATypedSprkMatterIsSet` | review F3: only a matter core gives the decision a matter | fails under `MatterId => Core?.Id` → pass |
 | Pester `Invoke-OntologyStampBackfill.Tests.ps1` (8) | the backfill classification, with must-fire and must-not-fire cases | new |
 
 The existing `Run_PathBHit_WritesOneWitnessLinePerExistsClause…` stays as the ordinary control.
@@ -131,10 +134,41 @@ Mutations killed:
 
 Published size: the measurement is in the PR body.
 
-## 6. Known limits and items for uac-r2
+## 6. OPEN: review F1 — evidence is written at create only (needs a design decision)
 
-- **K-145-1. The witness ref stays on a cleared line.** `sprk_communication:{id}` stays without its text, so a reader of the
-  Signal learns that a witness exists. The Signal itself already reveals that its predicate held. The line keeps its ref so that
+Adversarial review pass 1 (2026-10-14) found the following.
+- `SignalWriter` writes `sprk_evidencerefs` only on create. A reconcile updates only `sprk_lastevaluated` and `sprk_duedate`.
+- So the filter protects every NEW Signal, and every Signal re-created after its row is gone.
+- An existing Signal keeps the detail it had at create in two cases:
+  - its witness later becomes secure (it is re-filed under secure X), or
+  - the Signal's own family changes.
+- A pass whose family read faulted strips detail permanently, and nothing restores it.
+- The Decision Record's `factSnapshot` also freezes the evidence "as it stood" on an append-only record.
+
+The fix is not mechanical. Each option changes what the stored evidence means.
+- **A. Redaction pass in the job.** Each pass, read `sprk_evidencerefs` of every Signal of the policy, open AND resolved. Clear
+  `text`/`source` on the stored lines whose witness family no longer equals the Signal's. Make the write conditional on the
+  version.
+  - Costs: a new write on existing Signals, and a walk over all of them.
+  - It never restores detail.
+  - It does not touch a Decision Record snapshot already written.
+- **B. Read-time filter.** The Signal read route (task 038, in flight) and the decision wizard drop `text`/`source` per the
+  caller's families.
+  - Protects every reader without rewriting stored rows.
+  - But the stored row still holds the detail. A direct Dataverse read (a model-driven view of `sprk_evidencerefs`) bypasses it.
+- **C. A + B.**
+
+**Recommendation: C, or A as the D-123 floor.**
+
+Ownership and approval:
+- uac-r2 should rule on whether a stored-but-unrendered field breaches D-123.
+- The Decision Record snapshot question (an append-only record carrying detail from a later-secure communication) needs the
+  owner.
+
+## 7. Known limits and items for uac-r2
+
+- **K-145-1. The witness ref and date stay on a cleared line.** `sprk_communication:{id}` and its `asOf` (the received date)
+  stay without the text, so a reader of the Signal learns that a witness exists and when it arrived. The Signal itself already reveals that its predicate held. The line keeps its ref so that
   dated evidence (D-119 asOf/clause) and the drill-through stay intact, and the drill-through is itself access-checked.
 - **K-145-2. SignalWriter writes no stamp at create.** This was already a known item in 144. The DR writer stamps at create
   through `CoreAncestorResolver.StampAsync`; a Signal gets its stamp only from the job, once the hold is released. Recommendation:

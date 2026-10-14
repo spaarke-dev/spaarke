@@ -1570,6 +1570,22 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task T145_ASignalAndAWitnessBothUndetermined_AreNeverTheSameFamily_AndGiveNoDetail()
+    {
+        // Review F3: two families that cannot be named are never equal, so Undetermined == Undetermined keeps no detail (D-123).
+        var s = new Store();
+        var subject = FiledCommunication(s, MatterId, owner: Store.SecureOwner);
+        var witness = FiledCommunication(s, MatterId, owner: Store.SecureOwner);
+        var hit = Hit(MatterId, subject) with { Evidence = MatterHitQuoting(MatterId, witness).Evidence };
+        (await s.Service.PartitionsOfHitsAsync(Code, [hit], default))![("sprk_communication", subject)].IsUndetermined
+            .Should().BeTrue("the precondition: the Signal's own family is Undetermined");
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        evidence[("sprk_communication", subject)].Should().ContainSingle().Which.Text.Should().BeNull();
+    }
+
+    [Fact]
     public async Task T145_WhenTheFamiliesCannotBeRead_EveryLineLosesItsDetail_FailClosed()
     {
         var s = new Store();

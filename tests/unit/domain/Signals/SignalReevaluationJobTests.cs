@@ -422,6 +422,31 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_T145_AReconcileOfAWitnessAlsoFiledUnderASecureProject_AttemptsNoSubjectOrSender()
+    {
+        // Review F3: a reconcile also goes create-first (SignalWriter.WriteAsync), so the payload it attempts (and writes if the row is
+        // gone) is filtered exactly as a create's is.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        // A different due date is what makes the planner reconcile (an identical one is "unchanged" and writes nothing).
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId, due: new DateTime(2020, 1, 1));
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a5");
+        h.Sysadmin.SecureProject(secureProject);
+        var witness = h.Sysadmin.WitnessRows["sprk_communication"].Single();
+        witness["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject);
+        witness["owningteam"] = new EntityReference("team", h.Sysadmin.SecureTeamId!.Value);
+        var attempted = new List<Entity>();
+        h.Org.CreateFaultFor = e => { attempted.Add(e); return null; };
+
+        var run = await h.RunAsync();
+
+        run.ResultJson.Should().Contain("\"updated\":1", "the row exists: this pass is a reconcile");
+        h.Org.CreatedPayloads.Should().BeEmpty("the row exists: this pass is a reconcile");
+        var evidence = attempted.Should().ContainSingle().Subject.GetAttributeValue<string>("sprk_evidencerefs");
+        evidence.Should().Contain($"sprk_communication:{Lower(CommunicationId)}")
+            .And.NotContain("Rate increase").And.NotContain("partner@firm.example");
+    }
+
+    [Fact]
     public async Task Run_NoCoreToDoWhoseOwnerAnswerChanged_ReownsItsSignalToTheNewTeam_ThroughTheReconciler_Once()
     {
         // Task 143: the item's answer moves to another ordinary team (its user moved unit, or D-134's assignee changed). The job

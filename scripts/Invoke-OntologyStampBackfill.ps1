@@ -36,8 +36,10 @@
       3. the owner has approved the dev-data change.
     The live command (one line):
       & ./scripts/Invoke-OntologyStampBackfill.ps1 -Apply
-    It prints the report, then sets the app setting (ShouldProcess: -WhatIf shows it, -Confirm asks). Re-run the default
-    mode about 10 minutes later: stampEmpty should be 0 on both tables. To hold the tables again, remove the setting:
+    It prints the report, then sets the app setting (ShouldProcess: -WhatIf shows it, -Confirm asks). Changing an app setting
+    RESTARTS the web app (a short BFF outage on dev). It refuses when CoreAncestor__StampReconciliation__WritesEnabled is
+    false on the app (the job would then write nothing and the check below would mislead). Re-run the default mode about
+    10 minutes later: stampEmpty should be 0 on both tables. To hold the tables again, remove the setting:
       az webapp config appsettings delete --resource-group rg-spaarke-dev --name spaarke-bff-dev --setting-names CoreAncestor__StampReconciliation__ReportOnlyTables
 
     Auth: the operator's own az CLI identity (reader in Dataverse; Website Contributor on the web app for -Apply). No secrets.
@@ -186,7 +188,11 @@ if (-not $Apply) {
 $current = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='$SettingName'].value | [0]" -o tsv 2>$null
 Write-Host "Current $SettingName on $WebAppName = '$current' (absent = the default hold: sprk_signal,sprk_decisionrecord)"
 if ($current -eq $SettingReleaseValue) { Write-Host 'Already released; nothing to change.'; return }
-if ($PSCmdlet.ShouldProcess("$ResourceGroup/$WebAppName", "set $SettingName='$SettingReleaseValue' (the stamp job then writes Signals and Decision Records every 5 minutes)")) {
+$writes = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='CoreAncestor__StampReconciliation__WritesEnabled'].value | [0]" -o tsv 2>$null
+if ($writes -and $writes -ne 'true') {
+    throw "CoreAncestor__StampReconciliation__WritesEnabled is '$writes' on ${WebAppName}: the stamp job writes nothing, so releasing the hold would not backfill. Turn writes on first (owner decision)."
+}
+if ($PSCmdlet.ShouldProcess("$ResourceGroup/$WebAppName", "set $SettingName='$SettingReleaseValue' (restarts the app; the stamp job then writes Signals and Decision Records every 5 minutes)")) {
     az webapp config appsettings set --resource-group $ResourceGroup --name $WebAppName --settings "$SettingName=$SettingReleaseValue" --output none
     if ($LASTEXITCODE -ne 0) { throw "az webapp config appsettings set failed (exit $LASTEXITCODE)." }
     Write-Host "Released. Re-run this script without -Apply in ~10 minutes: stampEmpty should be 0 on both tables."
