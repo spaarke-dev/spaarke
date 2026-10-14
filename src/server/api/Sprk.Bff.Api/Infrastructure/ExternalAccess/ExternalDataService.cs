@@ -2448,7 +2448,7 @@ public class ExternalDataService
 
     /// <summary>
     /// EVERY 1:N relationship from <c>sprk_servicerequest</c> (solution source
-    /// <c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ServiceRequest.xml</c>, 8 relationships, all
+    /// <c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ServiceRequest.xml</c>, 9 relationships, all
     /// <c>CascadeDelete=RemoveLink</c>): deleting the request would orphan every row listed here, so ANY row (active or not)
     /// blocks the delete. A relationship added to the solution must be added here; the pinned test
     /// <c>TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships</c> reads the solution XML and fails until it is.
@@ -2458,6 +2458,7 @@ public class ExternalDataService
         new("sprk_analysis", "sprk_analysises", "sprk_regardingservicerequest"),
         new("sprk_communication", "sprk_communications", "sprk_regardingservicerequest"),
         new("sprk_communicationthread", "sprk_communicationthreads", "sprk_regardingservicerequest"),
+        new("sprk_decisionrecord", "sprk_decisionrecords", "sprk_regardingservicerequest"),
         new("sprk_document", "sprk_documents", "sprk_relatedservicerequest"),
         new("sprk_event", "sprk_events", "sprk_regardingservicerequest"),
         new("sprk_memo", "sprk_memos", "sprk_regardingservicerequest"),
@@ -2477,7 +2478,7 @@ public class ExternalDataService
     /// active or inactive, app-only (owner decision 2026-10-11, option A: a request with activity is not deletable).
     /// </summary>
     /// <remarks>
-    /// All eight probes run; a probe that FAILS (non-success status of any kind, transport error, token failure) makes the
+    /// All nine probes run; a probe that FAILS (non-success status of any kind, transport error, token failure) makes the
     /// whole answer unknown and throws <see cref="DataverseUnavailableException"/>, even when another probe found a row:
     /// "could not tell" is never reported as "none". Nothing is deleted on an exception (the caller answers 503).
     /// <c>virtual</c> per ADR-038 §4 (substitution seam).

@@ -554,7 +554,7 @@ public sealed class A42FicReconciliationTests
     {
         var options = Options.Create(new EntraAppRegOptions
         {
-            ExpectedDelegatedScopeCount = 5,
+            ExpectedDelegatedScopeCount = EntraAppRegPermissionCatalog.All.Count,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options, NullLogger<H3EntraAppRegHandler>.Instance);
@@ -667,10 +667,10 @@ public sealed class A42FicReconciliationTests
         private FakeVerifier(AdminConsentVerificationResult result) => _result = result;
 
         public static FakeVerifier Verified()
-            => new(new AdminConsentVerificationResult.Verified(5, 5, null));
+            => new(new AdminConsentVerificationResult.Verified(EntraAppRegPermissionCatalog.All.Count, EntraAppRegPermissionCatalog.All.Count, null));
 
         public static FakeVerifier Pending()
-            => new(new AdminConsentVerificationResult.Pending(0, 5, "consent not yet granted", null));
+            => new(new AdminConsentVerificationResult.Pending(0, EntraAppRegPermissionCatalog.All.Count, "consent not yet granted", null));
 
         public Task<AdminConsentVerificationResult> VerifyAsync(
             string bffAppRegId, string tenantId, int expectedDelegatedScopeCount, CancellationToken ct)

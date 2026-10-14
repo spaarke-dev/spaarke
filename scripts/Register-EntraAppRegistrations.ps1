@@ -279,13 +279,14 @@ $SecretExpiryDate = (Get-Date).AddMonths($SecretExpiryMonths).ToString("yyyy-MM-
 
 # Microsoft Graph API well-known IDs
 #
-# NOTE: these four IDs are DELEGATED scopes (OAuth2PermissionScopes) requested at app-registration
+# NOTE: these five IDs are DELEGATED scopes (OAuth2PermissionScopes) requested at app-registration
 # creation time — a DIFFERENT concern from the app-only APPLICATION roles the BFF identity holds.
 # Do NOT merge these with the application-role list. The canonical source of truth for the BFF's
 # expected Graph APPLICATION (app-only) roles is:
 #   src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
 $GraphApiId = "00000003-0000-0000-c000-000000000000"
-$GraphFilesReadWriteAll = "75359482-378d-4052-8f01-80520e7db3cd"   # Files.ReadWrite.All (delegated)
+$GraphFilesReadWriteAll = "863451e7-0667-486c-a5d6-d135439485f0"   # Files.ReadWrite.All (delegated) -- ISS-018 F6: 75359482-... is the APPLICATION-role id
+$GraphFileStorageContainerSelectedDelegated = "085ca537-6565-41c2-aca7-db852babc212"   # FileStorageContainer.Selected (delegated) -- OBO SharePoint Embedded
 $GraphSitesReadWriteAll = "89fe6a52-be36-487e-b7d8-d061c450a026"   # Sites.ReadWrite.All (delegated)
 $GraphUserRead          = "e1fe6dd8-ba31-4d61-89e7-88639da4683d"   # User.Read (delegated)
 $GraphMailSend          = "e383f46e-2787-4529-855e-0e479a3ffac0"   # Mail.Send (delegated)
@@ -299,7 +300,7 @@ $DynamicsCrmUserImpersonation = "78ce3f0f-a1ce-49c2-8cde-64b5c0896db4"  # user_i
 # task 213.4. `FileStorageContainerTypeReg.Selected` is deliberately NOT hardcoded here:
 # it lives on a non-Graph API surface in some tenants and the operator adds it manually
 # per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Step 1 fallback.
-$GraphFileStorageContainerSelected = "085ca537-6565-41c2-aca7-db852babc212"  # FileStorageContainer.Selected (Application)
+$GraphFileStorageContainerSelected = "40dc41bc-0f7e-42ff-89bd-d9516947e474"  # FileStorageContainer.Selected (Application) -- ISS-018 F6: was 085ca537-... (the DELEGATED scope id)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
@@ -1582,7 +1583,7 @@ if (-not $SkipBffApi) {
             Write-Info "DRY RUN: Would create app '$BffApiDisplayName' with:"
             Write-Info "  - Platform: Web"
             Write-Info "  - Redirect URIs: https://$ProductionApiDomain/.auth/login/aad/callback"
-            Write-Info "  - Graph permissions: Files.ReadWrite.All, Sites.ReadWrite.All, User.Read, Mail.Send (delegated)"
+            Write-Info "  - Graph permissions: Files.ReadWrite.All, FileStorageContainer.Selected, Sites.ReadWrite.All, User.Read, Mail.Send (delegated)"
             Write-Info "  - Dynamics CRM permissions: user_impersonation (delegated)"
             Write-Info "  - Exposed API scope: user_impersonation"
             $BffApiAppId = "00000000-0000-0000-0000-000000000000"
@@ -1593,6 +1594,7 @@ if (-not $SkipBffApi) {
                     resourceAppId = $GraphApiId
                     resourceAccess = @(
                         @{ id = $GraphFilesReadWriteAll; type = "Scope" }
+                        @{ id = $GraphFileStorageContainerSelectedDelegated; type = "Scope" }
                         @{ id = $GraphSitesReadWriteAll; type = "Scope" }
                         @{ id = $GraphUserRead; type = "Scope" }
                         @{ id = $GraphMailSend; type = "Scope" }
@@ -1623,6 +1625,7 @@ if (-not $SkipBffApi) {
                         resourceAppId = $GraphApiId
                         resourceAccess = @(
                             @{ id = $GraphFilesReadWriteAll; type = "Scope" }
+                            @{ id = $GraphFileStorageContainerSelectedDelegated; type = "Scope" }
                             @{ id = $GraphSitesReadWriteAll; type = "Scope" }
                             @{ id = $GraphUserRead; type = "Scope" }
                             @{ id = $GraphMailSend; type = "Scope" }
@@ -1661,7 +1664,7 @@ if (-not $SkipBffApi) {
             # Add Graph permissions
             az ad app permission add --id $BffApiAppId `
                 --api $GraphApiId `
-                --api-permissions "$($GraphFilesReadWriteAll)=Scope $($GraphSitesReadWriteAll)=Scope $($GraphUserRead)=Scope $($GraphMailSend)=Scope" `
+                --api-permissions "$($GraphFilesReadWriteAll)=Scope $($GraphFileStorageContainerSelectedDelegated)=Scope $($GraphSitesReadWriteAll)=Scope $($GraphUserRead)=Scope $($GraphMailSend)=Scope" `
                 --output none 2>&1
 
             # Add Dynamics CRM permission

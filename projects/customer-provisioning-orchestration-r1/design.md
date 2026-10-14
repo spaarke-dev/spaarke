@@ -1179,11 +1179,12 @@ After H2a Bicep completes, handler **H2b** invokes **`scripts/ai-search/Deploy-A
 
 **v3.5 note (2026-08-19)**: this table is genericized across both models — Model 1 has exactly ONE live instance (see the v3.5 tenancy note above); Model 2 creates one per customer. The confidential-credential mechanism (client secret vs FIC) is **pluggable per FR-39** during auth-v4's phased rollout, not a fixed "24 months, always a secret" story going forward — see §9.6's cross-reference for how this differs from Path X.
 
-**API Permissions (5):**
+**API Permissions (6; corrected 2026-10-14, ISS-018 F6: the Files id was the application-role id, and FileStorageContainer.Selected was added for OBO SPE):**
 
 | API | Permission | Type | GUID |
 |-----|-----------|------|------|
-| Microsoft Graph | Files.ReadWrite.All | Delegated | `75359482-378d-4052-8f01-80520e7db3cd` |
+| Microsoft Graph | Files.ReadWrite.All | Delegated | `863451e7-0667-486c-a5d6-d135439485f0` |
+| Microsoft Graph | FileStorageContainer.Selected | Delegated | `085ca537-6565-41c2-aca7-db852babc212` |
 | Microsoft Graph | Sites.ReadWrite.All | Delegated | `89fe6a52-be36-487e-b7d8-d061c450a026` |
 | Microsoft Graph | User.Read | Delegated | `e1fe6dd8-ba31-4d61-89e7-88639da4683d` |
 | Microsoft Graph | Mail.Send | Delegated | `e383f46e-2787-4529-855e-0e479a3ffac0` |
