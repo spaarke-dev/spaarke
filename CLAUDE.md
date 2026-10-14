@@ -177,6 +177,7 @@ For Microsoft and AI platform topics where training data may be stale (Azure AI 
 Configured in `.claude/settings.json`:
 - `PostToolUse` on Edit/Write runs `scripts/quality/post-edit-lint.sh`, which returns lint findings to the agent as `additionalContext` (advisory, best-effort within its 4-second linter timeout); `Stop` runs `scripts/quality/task-quality-gate.sh`.
 - `SessionStart` with the `compact` matcher runs `.claude/hooks/reinject-project-state.ps1`, which re-injects the current project's `current-task.md` and its standing-directive and gotcha sections after compaction. It finds the project from the `work/<project>` branch or the `spaarke-wt-<project>` worktree folder.
+- `SessionStart` with the `startup|resume` matcher runs `scripts/quality/quality-alert-banner.py`, which shows the open `quality-alert` issues (failing nightly checks, opened and auto-closed by `.github/actions/quality-alert`). It reads a cache and refreshes it in the background, so it never waits on the network.
 - `PreToolUse` on Agent/Task/Workflow runs `scripts/quality/require-agent-model.py`, which denies an agent launch that names no model (the session then chooses one); `env` and top-level keys set concurrency caps, the workflow size guideline and the auto-compact window (`.claude/constraints/agent-cost.md`).
 - `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9), and `git stash pop/apply/drop/clear` — the stash stack is shared by every worktree, so a pop can apply another session's work.
 
