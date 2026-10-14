@@ -94,8 +94,9 @@ internal static class SecureChildLineage
         // not lookups to a parent; sprk_action and sprk_policyversion are not filing.
         // unified-access-control-r2 task 182 (child-record contract C4): the subject's regarding lookups, the same eight as
         // the Signal row, live on spaarkedev1 2026-10-12 (ontology task 140, #1763). sprk_regardingservicerequest is left
-        // out, as on the Signal row (see the remarks). The typed core lookups stay until ontology task 145's backfill into
-        // the stamp columns is verified (contract C2).
+        // out, as on the Signal row (see the remarks). The typed core lookups STAY: they are the decision context (D-34, the
+        // core the decision was made on) and a lineage parent, not a stamp awaiting retirement. Ontology task 144 K1 and 145
+        // keep them; the stamp follows the subject, the typed core does not, so stamp == core is no reason to retire one.
         T("sprk_decisionrecord", "sprk_decisionrecords",
             new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment) }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
