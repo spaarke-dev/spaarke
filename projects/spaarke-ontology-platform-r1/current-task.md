@@ -41,7 +41,7 @@ Merge: `scratchpad/merge-when-green3.sh <pr> <full sha> docs/ontology-platform-d
 ## Owner items still open
 
 - The DR `sprk_factsnapshot` after a re-file into secure (145 F1): redact via a service write, or store references only. 145 files it as an issue.
-- Q8: #1111 to master after 035 + 055.
+- **D-140:** #1111 to master NOW (supersedes Q8). Sync lane `C:/wts-sync` (branch `sync/ontology-master-2026-10-14`, opus agent) merges master into the branch → PR into docs → then #1111. The master push auto-deploys the dev BFF = the 035 deploy (pre-flight + notify first; alerts after).
 
 ## Coordination
 
