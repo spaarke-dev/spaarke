@@ -118,6 +118,14 @@ public static class SignalsModule
         services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
         services.AddSingleton<SignalEvaluatorHealthCheck>();
 
+        // Task 148 (D-135 item 2, follow the assignee): every 5 minutes (recently changed To Dos) and nightly (all), a personal
+        // To Do's Signals and Decision Records are re-owned to its current Assigned To's team, only through uac-r2's
+        // SecureChildReconciler.ReownOrdinaryRowAsync. REPORT-ONLY unless Ontology:TodoAssigneeOwner:WritesEnabled=true (owner).
+        // ADR-036 IScheduledJob on the shared host (ADR-052: BFF placement). Unconditional: CoreAncestorResolver,
+        // IRecordOwnershipResolver, TimeProvider and IConfiguration are singletons; the scoped services it resolves per run
+        // (IGenericEntityService, AssignedAccessStore, SecureChildReconciler, IIdempotencyService) are registered unconditionally.
+        services.AddScheduledJob<TodoAssigneeOwnerReconciliationJob>(TodoAssigneeOwnerReconciliationJob.DefaultCronSchedule);
+
         // Task 032 (D-12, D-48): the event triggers. ONE ADR-004 IJobHandler on the main queue that calls the nightly job's own
         // scoped evaluate-plan-write path (no second evaluator), and the enqueue the classification path, the budget-revision
         // create and the association-confirmed filing path call. Unconditional (bff-extensions.md F.1).
