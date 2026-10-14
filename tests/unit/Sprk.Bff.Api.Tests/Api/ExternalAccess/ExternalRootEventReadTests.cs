@@ -499,10 +499,29 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                     {
                         return new EntityCollection(_filing
                             .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
-                            .Select(kv => kv.Value)
+                            .Select(kv => Projected(kv.Value, query.ColumnSet))
                             .ToList());
                     }
                 });
+        }
+
+        /// <summary>
+        /// Task 187 fix round 1 (R5): a stored row as the SDK returns it for <paramref name="columns"/>: only the requested
+        /// attributes (and the id). A walk whose select leaves a filing lookup out reads it as "not filed", so a test fails.
+        /// </summary>
+        private static Entity Projected(Entity stored, ColumnSet? columns)
+        {
+            if (columns is null || columns.AllColumns)
+                return stored;
+
+            var row = new Entity(stored.LogicalName, stored.Id);
+            foreach (var column in columns.Columns)
+            {
+                if (stored.Attributes.TryGetValue(column, out var value))
+                    row[column] = value;
+            }
+
+            return row;
         }
 
         // ---- The filing world (effective secure status: a work assignment filed under a secure matter is secure) ----
