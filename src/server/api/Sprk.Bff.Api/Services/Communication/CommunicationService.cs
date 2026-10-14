@@ -882,9 +882,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// the inbound direction so both directions land one comparable record.
     /// <para>Task 065 (external-access r3, owner 2026-10-13): <c>sprk_sentby</c> is the resolved sending systemuser, and
     /// <c>sprk_isinternalonly</c> is written explicitly — the request's value, else <c>false</c>, except a message into
-    /// a <see cref="SendCommunicationRequest.ThreadId"/> not confirmed Open, which is <c>true</c>
-    /// (<see cref="TargetThreadIsNotConfirmedOpenAsync"/>). Without a <c>ThreadId</c> the message gets a fresh ACS thread,
-    /// so it lands in a newly created Open thread (<c>ThreadResolver.CreateThreadAsync</c>) and is not internal-only.</para>
+    /// a <see cref="SendCommunicationRequest.ThreadId"/> not confirmed Open, which is always <c>true</c>
+    /// (<see cref="ApplyTargetThreadAsync"/>, run inside <see cref="ResolveOutboundOwnerAsync"/>). Without a <c>ThreadId</c>
+    /// the message gets a fresh ACS thread, so it lands in a newly created Open thread (<c>ThreadResolver.CreateThreadAsync</c>)
+    /// and is not internal-only.</para>
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildMessageDataverseRecordAsync(
@@ -896,7 +897,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
-        var isInternalOnly = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct);
+        var isInternalOnly = RequestedInternalOnly(request);
 
         var communication = new DataverseEntity("sprk_communication")
         {
@@ -935,40 +936,123 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// The <c>sprk_isinternalonly</c> an outbound row is built with BEFORE the reply-inheritance check (task 065, owner
-    /// 2026-10-13; fix round 1): the request's explicit value always wins; otherwise <c>true</c> when the send targets a
-    /// <see cref="SendCommunicationRequest.ThreadId"/> not confirmed Open (<see cref="TargetThreadIsNotConfirmedOpenAsync"/>),
-    /// else <c>false</c>. <see cref="ResolveOutboundOwnerAsync"/> may then raise it to <c>true</c> for a reply/forward that
-    /// quotes a parent not explicitly marked shareable (<see cref="CopyRegardingFromSourceAsync"/>). Used by all three builders.
+    /// The <c>sprk_isinternalonly</c> an outbound row is built with, before <see cref="ResolveOutboundOwnerAsync"/> may
+    /// RAISE it to <c>true</c>: the request's value, else <c>false</c>. Two raise-only rules follow in that method: a
+    /// target thread not confirmed Open (task 065 fix round 2, <see cref="ApplyTargetThreadAsync"/>) and a reply/forward
+    /// quoting a parent not explicitly marked shareable (fix round 1, <see cref="CopyRegardingFromSourceAsync"/>).
+    /// Used by all three builders.
     /// </summary>
-    private async Task<bool> ResolveRequestedInternalOnlyAsync(
-        SendCommunicationRequest request, string correlationId, CancellationToken ct) =>
-        request.IsInternalOnly
-        ?? (request.ThreadId is { } threadId && await TargetThreadIsNotConfirmedOpenAsync(threadId, correlationId, ct));
+    private static bool RequestedInternalOnly(SendCommunicationRequest request) => request.IsInternalOnly ?? false;
 
     /// <summary>
-    /// True unless the target <c>sprk_communicationthread</c>'s <c>sprk_privacystate</c> is EXPLICITLY Open — a Private
-    /// thread, a missing value, or a read failure all count as not Open (fail closed, the same rule as
-    /// <c>CommunicationFanOutTargetingService.IsExplicitlyOpen</c>). Task 065: decides the default internal-only flag
-    /// of a message sent into that thread with no explicit choice. Never fails the send.
+    /// What one read of a <see cref="SendCommunicationRequest.ThreadId"/> target yields (task 065 fix round 2): whether the
+    /// thread is EXPLICITLY Open, and its typed regarding anchor.
     /// </summary>
-    private async Task<bool> TargetThreadIsNotConfirmedOpenAsync(Guid threadId, string correlationId, CancellationToken ct)
+    /// <param name="ConfirmedOpen">
+    /// True only when <c>sprk_privacystate</c> reads Open. Private, a missing value, a null row and a failed read are all
+    /// false (fail closed, the same rule as <c>CommunicationFanOutTargetingService.IsExplicitlyOpen</c>).
+    /// </param>
+    /// <param name="Regarding">
+    /// The thread's typed regarding lookup (first populated, ADR-024 priority order, the same anchor <c>ThreadResolver</c>
+    /// files a message under); null for a thread with none and for an unreadable thread (never guessed).
+    /// </param>
+    /// <param name="RegardingName">The thread's denormalized regarding display name, if any.</param>
+    /// <param name="RegardingUrl">The thread's denormalized regarding url, if any.</param>
+    private sealed record TargetThread(bool ConfirmedOpen, EntityReference? Regarding, string? RegardingName, string? RegardingUrl);
+
+    private static readonly TargetThread UnreadableTargetThread = new(false, null, null, null);
+
+    /// <summary>
+    /// Reads the target thread ONCE for the two things a send into it needs (task 065 fix round 2): its privacy and its
+    /// typed regarding. Never fails the send; a failed read is <see cref="UnreadableTargetThread"/>.
+    /// </summary>
+    private async Task<TargetThread> ReadTargetThreadAsync(Guid threadId, string correlationId, CancellationToken ct)
     {
         try
         {
+            var columns = new List<string> { "sprk_privacystate", "sprk_regardingrecordname", "sprk_regardingrecordurl" };
+            columns.AddRange(ThreadResolver.ThreadRegardingColumns);
+
             var thread = await _genericEntityService.RetrieveAsync(
-                "sprk_communicationthread", threadId, new[] { "sprk_privacystate" }, ct);
-            var privacy = thread?.GetAttributeValue<OptionSetValue>("sprk_privacystate")?.Value;
-            return privacy != (int)Membership.ThreadPrivacyState.Open;
+                "sprk_communicationthread", threadId, columns.ToArray(), ct);
+            if (thread is null)
+                return UnreadableTargetThread;
+
+            var privacy = thread.GetAttributeValue<OptionSetValue>("sprk_privacystate")?.Value;
+
+            EntityReference? regarding = null;
+            foreach (var (entityLogicalName, field) in Engine.RegardingFieldMap.All)
+            {
+                if (thread.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
+                {
+                    regarding = new EntityReference(
+                        string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id);
+                    break;
+                }
+            }
+
+            return new TargetThread(
+                privacy == (int)Membership.ThreadPrivacyState.Open,
+                regarding,
+                thread.GetAttributeValue<string>("sprk_regardingrecordname"),
+                thread.GetAttributeValue<string>("sprk_regardingrecordurl"));
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Could not read the privacy of target thread {ThreadId}; the message is written internal-only (fail closed) | CorrelationId: {CorrelationId}",
+                "Could not read target thread {ThreadId}; the message is written internal-only and inherits no regarding (fail closed) | CorrelationId: {CorrelationId}",
                 threadId, correlationId);
-            return true;
+            return UnreadableTargetThread;
         }
+    }
+
+    /// <summary>
+    /// Task 065 fix round 2 (owner 2026-10-14): the two things a send into a <see cref="SendCommunicationRequest.ThreadId"/>
+    /// takes from the thread, from one read.
+    /// <para><b>A Private or unreadable thread is always internal-only.</b> <c>sprk_isinternalonly</c> is raised to
+    /// <c>true</c> even when the request says <c>false</c>, so no client toggle can publish a Private-thread item to
+    /// partners. An explicitly Open thread keeps the request value, else <c>false</c>.</para>
+    /// <para><b>Regarding inheritance (D1).</b> A post into a record's thread is filed against that record: the new row
+    /// gets the thread's typed regarding lookup, the denormalized pointer and the FR-26 core-ancestor stamp (the same
+    /// <see cref="StampCoreAncestorOrThrowAsync"/> an associated email runs), so the external read
+    /// (<c>_{regarding}_value eq id</c>) and the ancestor-derived access see it. Skipped when the request carries its own
+    /// association or the row already carries a typed regarding (a reply's inherited one): it never overwrites. A thread
+    /// with no typed regarding, or one that cannot be read, writes none.</para>
+    /// </summary>
+    private async Task ApplyTargetThreadAsync(
+        DataverseEntity communication, SendCommunicationRequest request, Guid threadId, string correlationId, CancellationToken ct)
+    {
+        var thread = await ReadTargetThreadAsync(threadId, correlationId, ct);
+
+        if (!thread.ConfirmedOpen)
+            communication["sprk_isinternalonly"] = true;
+
+        if (thread.Regarding is not { } regarding)
+            return;
+
+        var hasOwnRegarding = request.Associations is { Length: > 0 }
+            || Engine.RegardingFieldMap.AllRegardingFields.Any(communication.Attributes.ContainsKey);
+        if (hasOwnRegarding)
+            return;
+
+        var field = Engine.RegardingFieldMap.FieldFor(regarding.LogicalName);
+        if (field is null)
+            return;
+
+        communication[field] = regarding;
+        await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
+
+        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record.
+        if (!string.IsNullOrWhiteSpace(thread.RegardingName))
+            communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
+        communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
+        if (!string.IsNullOrWhiteSpace(thread.RegardingUrl))
+            communication["sprk_regardingrecordurl"] = TruncateTo(thread.RegardingUrl, 200);
+
+        _logger.LogInformation(
+            "Inherited regarding {EntityType}:{RegardingId} from target thread {ThreadId} | CorrelationId: {CorrelationId}",
+            regarding.LogicalName, regarding.Id, threadId, correlationId);
     }
 
     /// <summary>
@@ -2025,7 +2109,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_body"] = request.Body,
             // Task 065 (owner 2026-10-13): explicit for every type — the request's value, else false; true into a
             // thread not confirmed Open or when quoting a parent not explicitly shareable (fix round 1).
-            ["sprk_isinternalonly"] = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct),
+            ["sprk_isinternalonly"] = RequestedInternalOnly(request),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
@@ -2091,10 +2175,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Task 065 fix round 1 (F1): a reply/forward quotes the parent's body, so with no explicit choice it is
             // internal-only unless the parent is EXPLICITLY not internal-only. A true, null or unreadable parent flag, or
             // a failed source read, gives true (fail closed). An explicit request value always wins. Raise-only: the
-            // thread check in ResolveRequestedInternalOnlyAsync may already have set it.
+            // target-thread rule below can only raise it too.
             if (request.IsInternalOnly is null && !sourceExplicitlyNotInternal)
                 communication["sprk_isinternalonly"] = true;
         }
+
+        // Task 065 fix round 2: a send into a target thread takes its privacy floor and, when the request files nothing of
+        // its own, its regarding. After the reply inheritance, so a reply's inherited regarding is never overwritten.
+        if (request.ThreadId is { } targetThreadId)
+            await ApplyTargetThreadAsync(communication, request, targetThreadId, correlationId, ct);
 
         // Map primary association (regarding lookup + FR-26 stamp + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
@@ -2218,7 +2307,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_from"] = sender.Email,
             ["sprk_subject"] = request.Subject,
             ["sprk_body"] = request.Body,
-            ["sprk_isinternalonly"] = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct),
+            ["sprk_isinternalonly"] = RequestedInternalOnly(request),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
@@ -2299,28 +2388,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // and - via the reply path - communication), so an email filed against an invoice would
             // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
             // that matter.
-            var stamp = await _coreAncestors
-                .StampAsync(communication, primary.EntityType, primary.EntityId, ct)
-                .ConfigureAwait(false);
-
-            if (!stamp.Succeeded)
-            {
-                // NFR-01 fail-closed, in this class's existing error contract (SdapProblemException, as
-                // ValidateRequest uses). Recording an unstamped communication would leave a row nobody
-                // downstream of the regarding record can see - a silent under-grant, worse than a loud
-                // failure the caller can retry.
-                throw new SdapProblemException(
-                    code: "CORE_ANCESTOR_DERIVATION_FAILED",
-                    title: "Regarding association could not be resolved",
-                    detail: "The core-record ancestor of the regarding target could not be derived, so the "
-                          + "communication cannot be filed with correct access inheritance.",
-                    statusCode: 502,
-                    extensions: new Dictionary<string, object>
-                    {
-                        ["correlationId"] = correlationId,
-                        ["regardingEntityType"] = primary.EntityType,
-                    });
-            }
+            await StampCoreAncestorOrThrowAsync(communication, primary.EntityType, primary.EntityId, correlationId, ct);
         }
         else
         {
@@ -2337,6 +2405,39 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         if (primary.EntityUrl is not null)
             communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
+    }
+
+    /// <summary>
+    /// The FR-26 core-ancestor stamp for a communication whose typed regarding lookup is already bound (task 052), shared
+    /// by an explicit association (<see cref="MapAssociationFieldsAsync"/>) and a thread-inherited regarding
+    /// (<see cref="ApplyTargetThreadAsync"/>, task 065 fix round 2).
+    /// </summary>
+    /// <exception cref="SdapProblemException">502 when the ancestor cannot be derived (NFR-01 fail closed).</exception>
+    private async Task StampCoreAncestorOrThrowAsync(
+        DataverseEntity communication, string entityType, Guid entityId, string correlationId, CancellationToken ct)
+    {
+        var stamp = await _coreAncestors
+            .StampAsync(communication, entityType, entityId, ct)
+            .ConfigureAwait(false);
+
+        if (!stamp.Succeeded)
+        {
+            // NFR-01 fail-closed, in this class's existing error contract (SdapProblemException, as
+            // ValidateRequest uses). Recording an unstamped communication would leave a row nobody
+            // downstream of the regarding record can see - a silent under-grant, worse than a loud
+            // failure the caller can retry.
+            throw new SdapProblemException(
+                code: "CORE_ANCESTOR_DERIVATION_FAILED",
+                title: "Regarding association could not be resolved",
+                detail: "The core-record ancestor of the regarding target could not be derived, so the "
+                      + "communication cannot be filed with correct access inheritance.",
+                statusCode: 502,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["regardingEntityType"] = entityType,
+                });
+        }
     }
 
     /// <summary>

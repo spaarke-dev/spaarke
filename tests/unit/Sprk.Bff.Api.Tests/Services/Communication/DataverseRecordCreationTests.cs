@@ -769,9 +769,22 @@ public class DataverseRecordCreationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SendAsync_EmailIntoPrivateThreadWithExplicitFalse_TheExplicitValueWins(bool userMode)
+    public async Task SendAsync_EmailIntoPrivateThreadWithExplicitFalse_WritesInternalOnly(bool userMode)
     {
+        // Fix round 2 (owner 2026-10-14): a Private thread is always internal-only; an explicit false cannot publish into it.
         ThreadPrivacyReturns(100000001); // Private
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: false, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailIntoOpenThreadWithExplicitFalse_WritesNotInternalOnly(bool userMode)
+    {
+        ThreadPrivacyReturns(100000000); // Open
 
         await SendEmailAsync(EmailRequest(userMode, isInternalOnly: false, threadId: TargetThreadId));
 

@@ -165,3 +165,78 @@ Seeding proof (unit tests, filtered to `DataverseRecordCreationTests` + `Communi
   unreadable-thread (throws, null row) and Message cases. Restored.
 - Restored: 86 passed in those two classes; `Sprk.Bff.Api.Tests.Services.Communication` + `CommunicationAccessFilter` +
   `CommunicationRecordAuthorization`: 1221 passed, 0 failed. `dotnet build Sprk.Bff.Api -warnaserror`: 0 warnings, 0 errors.
+
+## Fix round 2 (owner decisions 2026-10-14)
+
+Merged `work/spaarke-SPA-external-access-platform-r3` into the branch first (merge, no conflicts; BFF builds).
+
+Owner decisions:
+- **D1 YES.** A Message posted into a record's thread is linked to that record. The Console and model-driven send
+  (`CommunicationMessageActionsApp.tsx`) carries `communicationType: 'message'` + `threadId` and no association, and the
+  external read (`ReadRegardingAppOnlyAsync`) filters on the typed lookup `_{regarding}_value eq id`, so it never returned
+  those messages. Closes O1.
+- **D2.** All filed emails are partner-visible by default for now; the builders' explicit `false` default stays. A
+  per-message "Internal only" toggle is a separate client task. Closes O2 for now.
+- **D3.** The individual sender's name on shared-mailbox emails is OK. Closes O3 (K7).
+- **D4.** No dev data correction; old rows stay as they are.
+
+### Change (`CommunicationService.cs`, `SendCommunicationRequest.cs`)
+
+One read of the target thread (`ReadTargetThreadAsync`: `sprk_privacystate`, the thread's typed regarding columns from
+`ThreadResolver.ThreadRegardingColumns`, and its denormalized name/url) now feeds both rules, run from
+`ResolveOutboundOwnerAsync` (`ApplyTargetThreadAsync`), which all three builders already call. This replaces fix round 1's
+`ResolveRequestedInternalOnlyAsync` / `TargetThreadIsNotConfirmedOpenAsync` (a privacy-only read inside each builder), so a
+send into a thread is still one read.
+
+| Rule | Behaviour |
+|---|---|
+| Private thread is always internal | The builders write `request.IsInternalOnly ?? false`; `ApplyTargetThreadAsync` then RAISES the flag to `true` when the thread is not explicitly Open (Private, privacy missing, null row, failed read), even when the request says `false`. An explicit Open thread keeps the request value, else `false`. Messages and emails. |
+| D1 regarding inheritance | When `ThreadId` is set, the request has no `Associations`, and the row carries no typed regarding yet (a reply's inherited one wins), the row gets the thread's typed regarding lookup via `RegardingFieldMap.FieldFor` (the same columns `MapAssociationFieldsAsync` writes), then the FR-26 core-ancestor stamp, then `sprk_regardingrecordid/name/url`. |
+| Own association wins | `Associations` non-empty: nothing inherited; `MapAssociationFieldsAsync` runs as before. |
+| Thread has no typed regarding | Nothing written; the send proceeds as before. |
+| Thread unreadable | No regarding is written (never guessed) and the flag is `true` (fix round 1 behaviour kept). |
+
+- The core-ancestor stamp was extracted from `MapAssociationFieldsAsync` into `StampCoreAncestorOrThrowAsync` and is shared:
+  the inherited regarding gets the same stamp and the same 502 `CORE_ANCESTOR_DERIVATION_FAILED` fail-closed contract as an
+  associated email. No new columns, services, DI or endpoints.
+- Only the thread's anchor (the first populated typed lookup in ADR-024 priority order, the same one
+  `ThreadResolver.ReadTypedRegardingAnchorFromThread` files a message under) is inherited, not every populated lookup. A
+  thread carries one anchor, the stamp takes one target, and a multi-lookup thread would give the row two competing parents.
+- `sprk_associationcount` is not set for an inherited regarding (no association was supplied).
+- The `SendCommunicationRequest.IsInternalOnly` XML doc now states the Private-thread floor; the `ThreadId` doc states the
+  inheritance.
+- `AssignExplicitThreadAsync` (the post-create thread stamp and owner reparent) is unchanged. It reads the thread again;
+  that is the existing path, not this task's read.
+
+### Tests
+
+`CommunicationServiceMessageSendTests.cs`: inherited regarding written and core-ancestor stamped (invoice thread, matter
+ancestor via `WithAncestors`); the request's own association wins and nothing is inherited; a thread with no regarding writes
+none; an unreadable thread (read throws, request says `false`) writes no regarding and flag `true`; Private thread plus
+explicit `false` gives `true` (the round 1 test `..._PersistsTheSendersChoice` was inverted and renamed
+`..._PersistsInternalOnly`); Open plus explicit `false` gives `false`. `BuildOutboundSut` gained an optional
+`coreAncestors` parameter.
+`DataverseRecordCreationTests.cs`: email Private plus explicit `false` gives `true` (both modes; the round 1 test
+`..._TheExplicitValueWins` was inverted and renamed); email Open plus explicit `false` gives `false` (both modes).
+
+Extra tests beyond the list: none. The core-ancestor assertion is inside the inherited-regarding test (the brief requires
+the stamp to run). The unreadable-thread test uses an explicit `false`, so it also proves the flag floor on that branch.
+
+Filtered run `FullyQualifiedName~Communication` in `Sprk.Bff.Api.Tests`: 1591 passed, 2 skipped (pre-existing live-integration
+skips), 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors. Nothing else measured.
+
+### Seeding proof (rule 2 only)
+
+Dropped the override (`if (false && !thread.ConfirmedOpen)` in `ApplyTargetThreadAsync`) and re-ran the filtered
+Communication run: 17 failed / 1574 passed. The named tests fail, including
+`SendAsync_ForMessageType_IntoPrivateThreadWithIsInternalOnlyFalse_PersistsInternalOnly` and
+`SendAsync_EmailIntoPrivateThreadWithExplicitFalse_WritesInternalOnly` (both modes), plus the fail-closed and privacy-default
+tests that ride on the same line. Restored (file touched to force a rebuild): 1591 passed, 0 failed.
+
+### Not done / for the operator
+
+- The per-message "Internal only" toggle in the client is a separate task (D2). Until it exists, a client that sends
+  `isInternalOnly: false` into a Private thread now gets `true`; that is the intended floor.
+- The inbound builders listed under "Fix the class" (`MessagingIngestor`, `EmailUploadCaptureService`,
+  `IncomingCommunicationProcessor`) still write no `sprk_isinternalonly`. Unchanged and still outside this task.
+- Publish-size delta not measured (no new package, endpoint, service or DI registration).

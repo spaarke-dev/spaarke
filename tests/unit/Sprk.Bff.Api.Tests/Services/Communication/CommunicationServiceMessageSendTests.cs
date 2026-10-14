@@ -132,7 +132,8 @@ public class CommunicationServiceMessageSendTests
         IThreadResolver? threadResolver = null,
         ICommunicationEnrichmentService? enrichment = null,
         ICommunicationDataverseService? communicationDataverse = null,
-        Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService? directThreadAccess = null)
+        Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService? directThreadAccess = null,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? coreAncestors = null)
     {
         var options = MinimalOptions();
 
@@ -163,7 +164,7 @@ public class CommunicationServiceMessageSendTests
             null!,  // JobSubmissionService — not exercised on the message path
             enrichment ?? Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            coreAncestors ?? Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             threadResolver,
@@ -571,8 +572,9 @@ public class CommunicationServiceMessageSendTests
     }
 
     [Fact]
-    public async Task SendAsync_ForMessageType_IntoPrivateThreadWithIsInternalOnlyFalse_PersistsTheSendersChoice()
+    public async Task SendAsync_ForMessageType_IntoPrivateThreadWithIsInternalOnlyFalse_PersistsInternalOnly()
     {
+        // Fix round 2 (owner 2026-10-14): a Private thread is always internal-only; the request cannot publish into it.
         Entity? persisted = null;
         var entity = EntityServiceCapturing(e => persisted = e);
         ThreadWithPrivacy(entity, privacyState: 100000001); // Private
@@ -581,7 +583,124 @@ public class CommunicationServiceMessageSendTests
         await sut.SendAsync(
             MessageRequest() with { ThreadId = TargetThreadId, IsInternalOnly = false }, AuthenticatedContext(), CancellationToken.None);
 
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue(
+            "an explicit false must not publish a message into a Private thread to partners");
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoOpenThreadWithIsInternalOnlyFalse_PersistsNotInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: 100000000); // Open
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(
+            MessageRequest() with { ThreadId = TargetThreadId, IsInternalOnly = false }, AuthenticatedContext(), CancellationToken.None);
+
         persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoUnreadableThreadWithIsInternalOnlyFalse_WritesNoRegardingAndInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(
+            MessageRequest() with { ThreadId = TargetThreadId, IsInternalOnly = false }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+        RegardingFieldsOf(persisted).Should().BeEmpty("a regarding is never guessed for a thread that cannot be read");
+        persisted.Contains("sprk_regardingrecordid").Should().BeFalse();
+    }
+
+    // -- Fix round 2 (owner 2026-10-14, D1): a message posted into a record's thread is linked to that record, so the
+    //    external read (_{regarding}_value eq id) and the core-ancestor stamp see it --
+
+    private static readonly Guid ThreadInvoiceId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid AncestorMatterId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+    private static readonly Guid OwnMatterId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+
+    /// <summary>The typed regarding lookups present on a persisted communication.</summary>
+    private static string[] RegardingFieldsOf(Entity e) =>
+        Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields.Where(e.Contains).ToArray();
+
+    private static void ThreadAnchoredToInvoice(Mock<IGenericEntityService> entity)
+    {
+        var thread = new Entity("sprk_communicationthread") { Id = TargetThreadId };
+        thread["sprk_privacystate"] = new OptionSetValue(100000000); // Open
+        thread["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", ThreadInvoiceId);
+        thread["sprk_regardingrecordname"] = "INV-001";
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoRecordThread_InheritsTheThreadsRegardingAndStampsItsCoreAncestor()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadAnchoredToInvoice(entity);
+        // The invoice is a child-class target: its matter ancestor is only stamped if the FR-26 stamp runs on the
+        // inherited regarding, the way it does for an associated email.
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(),
+            coreAncestors: Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.WithAncestors(
+                ("sprk_regardingmatter", AncestorMatterId)));
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        var invoice = persisted!.GetAttributeValue<EntityReference>("sprk_regardinginvoice");
+        invoice.Should().NotBeNull();
+        invoice!.LogicalName.Should().Be("sprk_invoice");
+        invoice.Id.Should().Be(ThreadInvoiceId);
+        persisted.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(AncestorMatterId,
+            "the core-ancestor stamp runs on the inherited regarding");
+        persisted.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ThreadInvoiceId.ToString());
+        persisted.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("INV-001");
+        persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoRecordThreadWithOwnAssociation_KeepsItAndInheritsNothing()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadAnchoredToInvoice(entity);
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(
+            MessageRequest() with
+            {
+                ThreadId = TargetThreadId,
+                Associations = new[] { new CommunicationAssociation { EntityType = "sprk_matter", EntityId = OwnMatterId } },
+            },
+            AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(OwnMatterId);
+        persisted.Contains("sprk_regardinginvoice").Should().BeFalse("the request's own association wins; the thread's is not added");
+        persisted.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(OwnMatterId.ToString());
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoThreadWithNoRegarding_WritesNone()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        ThreadWithPrivacy(entity, privacyState: 100000000); // Open, no typed regarding
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        RegardingFieldsOf(persisted!).Should().BeEmpty();
+        persisted!.Contains("sprk_regardingrecordid").Should().BeFalse();
+        persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
     }
 
     [Fact]
