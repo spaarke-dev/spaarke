@@ -10,7 +10,7 @@
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
 | **Running** | Nothing. The ontology reviews are done: #1874 (145) CLEAN at `75114b170`, #1878 (042) CLEAN at `72fe75054`. Ontology merges them. Their D-139 follow-up PR (one DR per gate decision, written by an ADR-004 job) comes to UAC for review. |
-| **Next Action** | Pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). |
+| **Next Action** | 136/037/039 (+135 gate) wait on the owner's combined CIAM session, checklist §14 (the agent does the BFF grants on request). Workforce half PASSED 2026-10-14 (notes/task-136 §12). Then pick the next uac-r2 item with the owner: 036, 099, 090 wrap-up, 013/058 bookkeeping. |
 
 ## Done this session
 - **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
@@ -35,6 +35,7 @@
 - Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), DI-81 #1879 (column audit); and enabling 148's writes after its report-only dev run.
 - Restate the Model 1 `-Apply` rule once #1815 merges.
 - Task 186 ceiling decision.
+- Checklist §14 (the combined CIAM session closes 135's gate, 136, 037 and 039). #1889: pre-marker secure containers are refused by SpeContainerOwnershipGuard (a provisioning fix, or a one-off marker write needing owner approval).
 - #1747 and #1776.
 - F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
 

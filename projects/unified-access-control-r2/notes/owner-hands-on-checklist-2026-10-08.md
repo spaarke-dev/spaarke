@@ -164,3 +164,19 @@ The server-side checks PASSED on 2026-10-14 (G0–G3 and G5, `batch5-live-gates-
 1. **Carrier To Do.** As an internal user, create a To Do filed under an ordinary matter M that testuser1 can see externally. Set its "regarding communication" to an email that is filed under a secure project testuser1 can't read. **PASS:** testuser1's external To Do list for M does not show it; a user who can read both does see it.
 2. **Clean up:** delete the throwaway To Do.
 
+
+## 14. Combined CIAM session: tasks 135 gate, 136, 037 and 039 (on dev since 2026-10-01)
+
+The workforce half passed on 2026-10-14 (`task-136-rights-based-read-gates.md` §12). The rest needs a CIAM sign-in plus three things only you can do on the forms, about 20 minutes in total. Tell me before you start: I'll make the grants through the BFF and read the results. Everything is reversed at the end.
+
+**You'll need:** a CIAM test contact that belongs to an organization (an active contact-organization row). The agent can add one through the BFF if you'd rather.
+
+**Why the order:** the BFF refuses an organization grant on a record that is already Secure, and a new contact grant on a Restricted record. So the realistic way to reach these states is to grant first and then change the record.
+
+1. **Organization grant, then Secure (136, 037 (ii)).** I grant the contact's organization access to a new ordinary test project. You set that project to Secure on its form. **PASS:** signed in as the CIAM contact, the project isn't listed, and a direct link to one of its documents is refused.
+2. **Direct grant (136, 037 (iii)).** I add a direct View Only grant for the contact. **PASS:** the project is listed and its documents open read-only; creating a To Do is refused.
+3. **Restricted (037 (i)).** I grant the contact access to a second ordinary test project. You set it to Restricted. **PASS:** it isn't listed and its documents can't be downloaded.
+4. **No Access (039).** On the project from step 2, add the contact to the No Access List on its form. **PASS:** access stops on the next request. Remove the entry. **PASS:** access returns within about a minute.
+5. **Clean-up:** I revoke every grant. You set both test projects back to ordinary (or leave them; they hold no real data).
+
+Note: the existing secure project `31e232ae…` can't stream documents on dev (#1889, its container predates the ownership marker), so this uses new test projects. Making a project Secure gives it its own container, which stays afterwards (containers are never deleted; add it to the Remove-TestContainers list).
