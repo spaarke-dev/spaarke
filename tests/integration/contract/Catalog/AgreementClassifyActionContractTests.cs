@@ -212,5 +212,3 @@ public class AgreementClassifyActionContractTests
         throw new InvalidOperationException("Could not locate the repo root (Spaarke.sln).");
     }
 }
-
-// ci-validation: temporary, reverted in the next commit
