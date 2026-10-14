@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Services.Registration;
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
-/// <item>Every link and button opens the invite link (<c>{portal}/?customer={key}&amp;invite={code}</c>); its code matches
+/// <item>Every link and button opens the invite link (<c>{portal}/?customer={key}#invite={code}</c>, §12 I-12); its code matches
 /// the stored hash. The visible link text stays the plain portal URL, so the code is never printed as text.</item>
 /// <item>Both are SYSTEM MAIL: the stored <c>sprk_body</c> is the same email with "[invitation link removed]" in place of the
 /// link, and the send is not enriched.</item>
@@ -120,7 +120,7 @@ public class RegistrationEmailInviteTests
 
         var sent = _channel.LastRequest.Should().NotBeNull().And.Subject.As<ChannelSendRequest>().Communication;
         var encodedLink = System.Net.WebUtility.HtmlEncode(invite.InviteUrl);
-        encodedLink.Should().Be($"{PortalUrl}/?customer=acme&amp;invite={invite.Code}");
+        encodedLink.Should().Be($"{PortalUrl}/?customer=acme#invite={invite.Code}", "§12 I-12: the code rides in the fragment");
 
         // Every link and button opens the invite link, and its code is the one whose hash was stored.
         Regex.Matches(sent.Body, "href=\"([^\"]*)\"").Select(m => m.Groups[1].Value)

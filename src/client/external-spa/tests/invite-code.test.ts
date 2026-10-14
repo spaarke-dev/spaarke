@@ -1,5 +1,6 @@
 // The invite code's carriage (unified-access-control-r2 task 185; design note 185-invite-code-design.md §4): captured
-// from `?invite=` on landing, stripped from the URL at once (keeping `customer`), kept in sessionStorage across the MSAL
+// from `#invite=` (§12 I-12; `?invite=` as a fallback) on landing, stripped from the URL at once (keeping `customer` and
+// every other part), kept in sessionStorage across the MSAL
 // redirect, sent as X-Spaarke-Invite-Code on CIAM-plane BFF calls for the link's customer, and cleared after the first
 // 2xx. The denied state shows the server's `contact_not_invited` guidance (owner Q9).
 //
@@ -134,6 +135,84 @@ describe('captureInviteCode', () => {
 
     expect(second.invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
     expect(window.location.href).not.toContain(CODE);
+  });
+});
+
+// §12 I-12: the link carries the code in the fragment, so no server or proxy log on the way to the SPA sees it.
+describe('captureInviteCode reads the fragment first', () => {
+  it('stores #invite= and strips it, keeping the query string', async () => {
+    const { invite } = await load();
+    land(`/workspace?customer=contoso&tab=docs#invite=${CODE}`);
+
+    invite.captureInviteCode();
+
+    expect(window.location.pathname).toBe('/workspace');
+    expect(window.location.search).toBe('?customer=contoso&tab=docs');
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain(CODE);
+    expect(window.location.href).not.toContain('invite');
+    expect(JSON.parse(sessionStorage.getItem(invite.INVITE_CODE_STORAGE_KEY)!)).toEqual({
+      code: CODE,
+      customerKey: 'contoso',
+    });
+  });
+
+  it('keeps every other fragment part exactly as it was', async () => {
+    const { invite } = await load();
+    land(`/?customer=contoso#section&invite=${CODE}&x=a%20b`);
+
+    invite.captureInviteCode();
+
+    expect(window.location.search).toBe('?customer=contoso');
+    expect(window.location.hash).toBe('#section&x=a%20b');
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
+  });
+
+  it('falls back to ?invite= when the fragment has none, keeping the fragment', async () => {
+    const { invite } = await load();
+    land(`/?customer=contoso&invite=${CODE}#section`);
+
+    invite.captureInviteCode();
+
+    expect(window.location.search).toBe('?customer=contoso');
+    expect(window.location.hash).toBe('#section');
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
+  });
+
+  it('with both present the fragment wins, and both are stripped', async () => {
+    const { invite } = await load();
+    land(`/?customer=contoso&invite=${OTHER_CODE}#invite=${CODE}`);
+
+    invite.captureInviteCode();
+
+    expect(invite.inviteCodeFor({ plane: 'ciam', customerKey: 'contoso' })).toBe(CODE);
+    expect(window.location.search).toBe('?customer=contoso');
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain(CODE);
+    expect(window.location.href).not.toContain(OTHER_CODE);
+  });
+
+  it('a malformed fragment code is stripped and never stored', async () => {
+    const { invite } = await load();
+    land(`/?customer=contoso#invite=${CODE}x`);
+
+    invite.captureInviteCode();
+
+    expect(window.location.hash).toBe('');
+    expect(sessionStorage.getItem(invite.INVITE_CODE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("leaves MSAL's redirect response fragment untouched (no invite there: no rewrite at all)", async () => {
+    const { invite } = await load();
+    land('/?customer=contoso#code=auth-code&state=msal-state&invitee=x');
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+
+    invite.captureInviteCode();
+
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#code=auth-code&state=msal-state&invitee=x');
+    expect(sessionStorage.getItem(invite.INVITE_CODE_STORAGE_KEY)).toBeNull();
+    replaceState.mockRestore();
   });
 });
 

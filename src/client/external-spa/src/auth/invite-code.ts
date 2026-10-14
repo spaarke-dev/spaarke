@@ -2,8 +2,10 @@
  * The invite code (unified-access-control-r2 task 185; design note
  * `projects/unified-access-control-r2/notes/185-invite-code-design.md` §4).
  *
- * The invite email's link carries `?invite={code}` next to `?customer={key}`. The code proves to the BFF that the
- * CIAM sign-in came from THIS environment's own invite (the first sign-in's email bind requires it). This module:
+ * The invite email's link carries the code in its fragment, `?customer={key}#invite={code}` (§12 I-12: a fragment is
+ * never sent to the SPA host, so no CDN, WAF or front-door log sees it); `?invite={code}` is still accepted. The code
+ * proves to the BFF that the CIAM sign-in came from THIS environment's own invite (the first sign-in's email bind
+ * requires it). This module:
  *   - captures it on landing, FIRST in `main()` and before MSAL runs: it stores the code in `sessionStorage` (per tab,
  *     like the realm and the MSAL cache: ADR-028 A1/A3, never `localStorage`) and removes `invite` from the address
  *     bar at once with `history.replaceState`, keeping `customer` and every other parameter. The clean-up must come
@@ -20,7 +22,7 @@
 
 import { readCustomerQueryKey } from './backend-selection';
 
-/** The query parameter the invite link carries the code in. */
+/** The parameter the invite link carries the code in: `#invite=` (§12 I-12), or `?invite=` (accepted as a fallback). */
 export const INVITE_QUERY_PARAM = 'invite';
 
 /** Per-tab sessionStorage key for the captured code. */
@@ -44,22 +46,64 @@ export function isWellFormedInviteCode(value: unknown): value is string {
 }
 
 /**
- * Capture `?invite=` from the current URL: store a well-formed code for this tab and strip the parameter from the URL
- * (a malformed one is stripped and dropped). No `invite` parameter → nothing happens. Never throws.
+ * Split `parts` (a query string without `?`, or a fragment without `#`) on `&` and take out every `invite=` segment.
+ * Returns the first `invite` value (decoded; null when there is none) and the remaining segments joined exactly as they
+ * were (never re-encoded), so every other parameter and a plain fragment such as `section` stay untouched.
+ */
+function takeInvite(parts: string): { found: boolean; value: string | null; rest: string } {
+  let found = false;
+  let value: string | null = null;
+  const kept: string[] = [];
+  for (const segment of parts.split('&')) {
+    const eq = segment.indexOf('=');
+    const rawKey = eq < 0 ? segment : segment.slice(0, eq);
+    let key: string;
+    try {
+      key = decodeURIComponent(rawKey.replace(/\+/g, ' '));
+    } catch {
+      key = rawKey;
+    }
+    if (key === INVITE_QUERY_PARAM) {
+      if (!found) {
+        const raw = eq < 0 ? '' : segment.slice(eq + 1);
+        try {
+          value = decodeURIComponent(raw.replace(/\+/g, ' '));
+        } catch {
+          value = null;
+        }
+      }
+      found = true;
+    } else if (segment !== '') {
+      kept.push(segment);
+    }
+  }
+  return { found, value, rest: kept.join('&') };
+}
+
+/**
+ * Capture the invite code from the current URL: `#invite=` (the link's form since §12 I-12: a fragment never reaches
+ * the SPA host, CDN, WAF or front-door logs) and, as a fallback, `?invite=`. When both are present the fragment wins.
+ * Both are stripped from the URL with `history.replaceState` (a malformed code is stripped and dropped), keeping every
+ * other query parameter and fragment part as it was. MSAL's own redirect response (`#code=…&state=…`) carries no
+ * `invite`, so it is never touched: this runs first in `main()`, before MSAL, and only rewrites a URL that carries an
+ * invite. No `invite` anywhere → nothing happens. Never throws.
  */
 export function captureInviteCode(): void {
   try {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has(INVITE_QUERY_PARAM)) return;
+    const search = window.location.search.replace(/^\?/, '');
+    const hash = window.location.hash.replace(/^#/, '');
+    const fromQuery = takeInvite(search);
+    const fromHash = takeInvite(hash);
+    if (!fromQuery.found && !fromHash.found) return;
 
-    const code = params.get(INVITE_QUERY_PARAM);
+    const code = fromHash.found ? fromHash.value : fromQuery.value;
     const customerKey = readCustomerQueryKey(window.location.search);
-    params.delete(INVITE_QUERY_PARAM);
-    const query = params.toString();
+    const query = fromQuery.found ? fromQuery.rest : search;
+    const fragment = fromHash.found ? fromHash.rest : hash;
     window.history.replaceState(
       window.history.state,
       '',
-      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      `${window.location.pathname}${query ? `?${query}` : ''}${fragment ? `#${fragment}` : ''}`
     );
 
     if (isWellFormedInviteCode(code)) {

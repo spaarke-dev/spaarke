@@ -120,7 +120,7 @@ public class ExistingCiamAccountInviteTests
 
     /// <summary>
     /// Task 185 slice D: the code the LAST invite email carried, read from its link. Asserts the link's shape
-    /// (<c>{portal}/?customer={key}&amp;invite={code}</c>) and that the code matches the hash the invite stored.
+    /// (<c>{portal}/?customer={key}#invite={code}</c>, §12 I-12) and that the code matches the hash the invite stored.
     /// </summary>
     private string InviteEmailCode(Guid contact, string? storedHash = null)
     {
@@ -135,7 +135,7 @@ public class ExistingCiamAccountInviteTests
     /// <summary>The code in an invite link, after checking the link is exactly the portal, the customer key and the code.</summary>
     private static string CodeIn(string inviteUrl)
     {
-        const string prefix = PortalUrl + "/?customer=" + CustomerKey + "&invite=";
+        const string prefix = PortalUrl + "/?customer=" + CustomerKey + "#invite=";
         inviteUrl.Should().StartWith(prefix);
         var code = inviteUrl[prefix.Length..];
         InviteCode.IsWellFormed(code).Should().BeTrue("the link carries a 43-character base64url code");
@@ -464,7 +464,7 @@ public class ExistingCiamAccountInviteTests
     // ── Task 185 slice D: the invite emails carry the code ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Both invite emails open the invite link, <c>{portal}/?customer={key}&amp;invite={code}</c>, and its code is the one
+    /// Both invite emails open the invite link, <c>{portal}/?customer={key}#invite={code}</c>, and its code is the one
     /// whose hash the invite stored. The new-account bind clears the hash, so that case reads the hash as it stood when the
     /// CIAM account was created (after the marker write, before the bind).
     /// MUTATION: passing the base portal URL (or no code) into either email fails this test.
@@ -608,12 +608,12 @@ public class ExistingCiamAccountInviteTests
     }
 
     [Theory]
-    [InlineData("https://external.test", "acme", "CODE", "https://external.test/?customer=acme&invite=CODE")]
-    [InlineData("https://external.test/portal/?x=1#f", "acme", "CODE", "https://external.test/portal/?customer=acme&invite=CODE")]
-    [InlineData("https://external.test", null, "CODE", "https://external.test/?invite=CODE")]
+    [InlineData("https://external.test", "acme", "CODE", "https://external.test/?customer=acme#invite=CODE")]
+    [InlineData("https://external.test/portal/?x=1#f", "acme", "CODE", "https://external.test/portal/?customer=acme#invite=CODE")]
+    [InlineData("https://external.test", null, "CODE", "https://external.test/#invite=CODE")]
     [InlineData("https://external.test", "a b", null, "https://external.test/?customer=a%20b")]
     [InlineData("https://external.test", null, null, "https://external.test/")]
-    [InlineData("http://localhost:5173", "acme", "CODE", "http://localhost:5173/?customer=acme&invite=CODE")]
+    [InlineData("http://localhost:5173", "acme", "CODE", "http://localhost:5173/?customer=acme#invite=CODE")]
     [InlineData("http://external.test", "acme", "CODE", null)]
     public void BuildInviteLink_UsesOnlyTrustedConfig_TheKeyAndTheCode(string portal, string? key, string? code, string? expected)
         => InviteExternalUserEndpoint.BuildInviteLink(portal, key, code).Should().Be(expected);

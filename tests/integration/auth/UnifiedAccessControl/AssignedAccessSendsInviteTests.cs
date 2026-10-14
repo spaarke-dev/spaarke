@@ -61,7 +61,7 @@ public class AssignedAccessSendsInviteTests
     private string TheOneInviteCode()
     {
         var url = _h.Emails.InviteUrls.Should().ContainSingle("exactly one invite email").Subject;
-        const string prefix = PortalUrl + "/?customer=" + CustomerKey + "&invite=";
+        const string prefix = PortalUrl + "/?customer=" + CustomerKey + "#invite=";
         url.Should().StartWith(prefix);
         var code = url[prefix.Length..];
         InviteCode.IsWellFormed(code).Should().BeTrue("the link carries a 43-character base64url code");

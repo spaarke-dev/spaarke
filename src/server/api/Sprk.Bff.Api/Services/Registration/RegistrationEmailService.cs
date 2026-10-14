@@ -209,8 +209,8 @@ public class RegistrationEmailService
     /// </summary>
     /// <param name="portalUrl">The portal URL (trusted config), shown as the link's visible text.</param>
     /// <param name="inviteUrl">
-    /// Task 185: the invite link every button and link opens: the portal URL with <c>?customer=</c> and <c>&amp;invite=</c>
-    /// (the one-time code). Built by the caller from trusted config and the code; HTML-attribute-encoded here. Never logged.
+    /// Task 185: the invite link every button and link opens: the portal URL with <c>?customer=</c> and, in the fragment,
+    /// <c>#invite=</c> (the one-time code, §12 I-12). Built by the caller from trusted config and the code; HTML-attribute-encoded here. Never logged.
     /// </param>
     public virtual async Task SendCiamOnboardingEmailAsync(
         string recipientEmail,

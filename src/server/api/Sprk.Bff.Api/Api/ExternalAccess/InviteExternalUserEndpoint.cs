@@ -232,11 +232,12 @@ public static class InviteExternalUserEndpoint
             request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, customerKey, logger, resolution, ct);
 
     /// <summary>
-    /// Task 185 (design note §1.1) — the invite link: <c>{PortalUrl}/?customer={key}&amp;invite={code}</c>. Copies
+    /// Task 185 (design note §1.1, §12 I-12) — the invite link: <c>{PortalUrl}/?customer={key}#invite={code}</c>, the code in
+    /// the fragment so no server or proxy log on the way to the SPA sees it. Copies
     /// <see cref="GrantAccessNotifier.BuildPortalLink"/>: built ONLY from the trusted portal URL (an absolute https URL, http
     /// only on loopback, no credentials; its own query and fragment are dropped), this stamp's customer key and the code,
     /// each URL-encoded. Unlike a record link it is still built when the customer key is not resolved (dev before
-    /// <c>Customer:Id</c>): <c>{PortalUrl}/?invite={code}</c>. With no code, it is the portal link without <c>invite</c>.
+    /// <c>Customer:Id</c>): <c>{PortalUrl}/#invite={code}</c>. With no code, it is the portal link without <c>invite</c>.
     /// <c>null</c> when the portal URL is unusable. The result carries a secret: never log it, never return it in a response.
     /// </summary>
     internal static string? BuildInviteLink(string? portalUrl, string? customerKey, string? inviteCode)
@@ -248,19 +249,14 @@ public static class InviteExternalUserEndpoint
             return null;
         }
 
-        var query = new List<string>(2);
-        if (!string.IsNullOrWhiteSpace(customerKey))
-        {
-            query.Add($"customer={Uri.EscapeDataString(customerKey.Trim())}");
-        }
-
-        if (!string.IsNullOrEmpty(inviteCode))
-        {
-            query.Add($"invite={Uri.EscapeDataString(inviteCode)}");
-        }
-
         var baseUrl = portal.GetLeftPart(UriPartial.Path).TrimEnd('/');
-        return query.Count == 0 ? $"{baseUrl}/" : $"{baseUrl}/?{string.Join('&', query)}";
+        var link = string.IsNullOrWhiteSpace(customerKey)
+            ? $"{baseUrl}/"
+            : $"{baseUrl}/?customer={Uri.EscapeDataString(customerKey.Trim())}";
+
+        // §12 I-12: the code rides in the FRAGMENT, which the browser never sends, so the SPA host, CDN, WAF and front-door
+        // access logs never see it. The SPA reads it (falling back to ?invite=) and strips it before MSAL runs.
+        return string.IsNullOrEmpty(inviteCode) ? link : $"{link}#invite={Uri.EscapeDataString(inviteCode)}";
     }
 
     /// <summary>This stamp's customer key for the invite link, or <c>null</c> when it is not resolved (dev).</summary>
