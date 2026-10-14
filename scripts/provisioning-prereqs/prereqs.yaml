@@ -955,7 +955,7 @@ prereqs:
     related_findings: [T232, D2, G10]
 
   - id: PRQ-C-12
-    name: Guest access is allowed in the customer's Dataverse environment (organization.restrictguestuseraccess = false)
+    name: Guest access is allowed in the customer's Dataverse environment (organization.restrictGuestUserAccess = false)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (new environments default to restricted)
     owner: Spaarke platform admin (System Administrator of the environment)
@@ -964,15 +964,15 @@ prereqs:
       cli: |
         set -o pipefail
         res=$(echo "{dvUrl}" | sed 's#/$##')
-        v=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv | tr -d '\r' | tr 'A-Z' 'a-z') || { echo "cannot read organization.restrictguestuseraccess on $res"; exit 1; }
-        [ "$v" = false ] || { echo "restrictguestuseraccess='$v' on $res (must be false)"; exit 1; }
+        v=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=restrictGuestUserAccess" --query "value[0].restrictGuestUserAccess" -o tsv | tr -d '\r' | tr 'A-Z' 'a-z') || { echo "cannot read organization.restrictGuestUserAccess on $res"; exit 1; }
+        [ "$v" = false ] || { echo "restrictGuestUserAccess='$v' on $res (must be false)"; exit 1; }
         echo ok
       expect: '`false`'
     remediation: |
       As the operator (System Administrator of the environment), PATCH the organization row:
         res=$(echo "{dvUrl}" | sed 's#/$##')
         org=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=organizationid" --query "value[0].organizationid" -o tsv)
-        az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictguestuseraccess": false}' --headers "Content-Type=application/json"
+        az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictGuestUserAccess": false}' --headers "Content-Type=application/json"
       then re-run the check. L2 never changes it (an environment-wide access decision).
     related_findings: [T232, D2, G10]
 

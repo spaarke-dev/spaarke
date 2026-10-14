@@ -5,7 +5,7 @@
 // HttpClient + DefaultAzureCredential, acting as the L2 Worker identity (a System
 // Administrator application user of the environment, PRQ-C-09).
 //
-//   ReadGuestAccessAsync: GET organizations?$select=restrictguestuseraccess
+//   ReadGuestAccessAsync: GET organizations?$select=restrictGuestUserAccess
 //   ResolveRolesAsync:    per name GET roles?$filter=name eq '{n}' and
 //                         _businessunitid_value eq {customer unit} (T259: the unit's
 //                         inherited copy) — exactly ONE match, else RoleNotFound /
@@ -92,13 +92,13 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         try
         {
             var token = await AcquireTokenAsync(envUri, tenantId, cancellationToken).ConfigureAwait(false);
-            using var doc = await GetJsonAsync(envUri, token, "organizations?$select=restrictguestuseraccess", cancellationToken)
+            using var doc = await GetJsonAsync(envUri, token, "organizations?$select=restrictGuestUserAccess", cancellationToken)
                 .ConfigureAwait(false);
             if (!doc.RootElement.TryGetProperty("value", out var values) || values.GetArrayLength() != 1
-                || !values[0].TryGetProperty("restrictguestuseraccess", out var restricted)
+                || !values[0].TryGetProperty("restrictGuestUserAccess", out var restricted)
                 || restricted.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             {
-                return new GuestAccessOutcome.Failure("GET organizations returned no restrictguestuseraccess value.");
+                return new GuestAccessOutcome.Failure("GET organizations returned no restrictGuestUserAccess value.");
             }
             return restricted.ValueKind == JsonValueKind.True ? new GuestAccessOutcome.Restricted() : new GuestAccessOutcome.Allowed();
         }

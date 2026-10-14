@@ -1117,10 +1117,10 @@ if ($identityPreset -ceq 'B2BGuest') {
   }
 
   # PRQ-C-12: guests may use the environment.
-  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv
-  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictguestuseraccess failed (az output above).'; exit 1 }
+  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictGuestUserAccess" --query "value[0].restrictGuestUserAccess" -o tsv
+  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictGuestUserAccess failed (az output above).'; exit 1 }
   if ($restricted -ne 'false') {
-    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictguestuseraccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
+    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictGuestUserAccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
     exit 1
   }
 

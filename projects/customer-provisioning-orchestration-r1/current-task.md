@@ -10,7 +10,7 @@
 |-------|-------|
 | **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO subscription `2ff9ee48-…`, managed SpaarkeMaster 1.2.3.0). Run log: `notes/t186-acme-run-log.md`, kept up to date AS THINGS HAPPEN (owner 2026-10-14: the process must be fully documented and repeatable; each lesson goes into the operator docs before T186 closes). |
 | **Status** | Waiting on the owner's prerequisites (below). My prerequisites done: PRQ-S-04 (L2 Worker UAMI Owner on the DEMO sub) and PRQ-C-10 (group `sprk-acme-users` `7de5a154-2604-438b-b1cd-462406a869a9`). No agents running. |
-| **Next Action** | When the owner says the environment `spaarke-acme` exists: (1) add the L2 Worker as a System Administrator application user (PRQ-C-09); (2) set `restrictguestuseraccess=false` (PRQ-C-12); (3) create the registry placeholder on spaarkedev1 (PRQ-E-13, skill Step 1); (4) create two ACME test users; (5) run `/provision-environment acme`. Each live action needs the owner's OK. |
+| **Next Action** | When the owner says the environment `spaarke-acme` exists: (1) add the L2 Worker as a System Administrator application user (PRQ-C-09); (2) set `restrictGuestUserAccess=false` (PRQ-C-12); (3) create the registry placeholder on spaarkedev1 (PRQ-E-13, skill Step 1); (4) create two ACME test users; (5) run `/provision-environment acme`. Each live action needs the owner's OK. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
 ## 🔔 Waiting on the owner

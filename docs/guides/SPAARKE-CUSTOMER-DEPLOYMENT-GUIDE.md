@@ -1353,7 +1353,7 @@ Model 1 run takes only `B2BGuest`):
 1. **Before inviting anyone** it refuses (Resumable, nothing written) a run whose environment security group
    (`environmentSecurityGroupId`, `PRQ-C-10`) is not named `sprk-{customerId}-users` or not security-enabled
    (`userprov-security-group-rejected`), or whose environment restricts guests
-   (`organization.restrictguestuseraccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
+   (`organization.restrictGuestUserAccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
    isolation boundary between Model 1 environments: all live in Spaarke's tenant, so an environment without it admits
    every user of that tenant, including other customers' guests. H11 checks the group's **name**; that it is the group
    **set on the environment** is checked by the skill (Step 1e-bis, Power Platform admin API) — only a Power Platform
