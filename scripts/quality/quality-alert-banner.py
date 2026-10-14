@@ -24,20 +24,29 @@ import time
 REFRESH_AFTER_SECONDS = 30 * 60
 DEFAULT_CACHE = os.path.join(tempfile.gettempdir(), "spaarke-quality-alerts.json")
 
-# Runs detached. Writes to a temp file and renames it, so a reader never sees a half-written cache,
-# and a failed `gh` call leaves the previous cache in place.
+# Runs detached. Writes to a per-process temp file and renames it, so a reader never sees a half-written
+# cache, concurrent refreshes cannot collide, and a failed `gh` call leaves the previous cache in place.
+# gh emits UTF-8, so decode it explicitly (the console code page would turn emoji into mojibake) and give the
+# gh child CREATE_NO_WINDOW (the detached parent has no console, so Windows would otherwise open one).
 REFRESH_SCRIPT = r"""
-import os, subprocess, sys
+import os, shutil, subprocess, sys
 cache = sys.argv[1]
-tmp = cache + ".tmp"
-r = subprocess.run(
-    ["gh", "issue", "list", "--repo", "spaarke-dev/spaarke", "--label", "quality-alert",
-     "--state", "open", "--json", "number,title,updatedAt"],
-    capture_output=True, text=True, timeout=60)
-if r.returncode == 0:
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(r.stdout)
-    os.replace(tmp, cache)
+tmp = "%s.%d.tmp" % (cache, os.getpid())
+flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+try:
+    r = subprocess.run(
+        [shutil.which("gh") or "gh", "issue", "list", "--repo", "spaarke-dev/spaarke", "--label", "quality-alert",
+         "--state", "open", "--json", "number,title,updatedAt"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, creationflags=flags)
+    if r.returncode == 0:
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(r.stdout)
+        os.replace(tmp, cache)
+finally:
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
 """
 
 
