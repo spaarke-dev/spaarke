@@ -479,6 +479,22 @@ Partner ID). (3) Per customer: an operator step in the hand-off checklist (`POST
 `{"verifiedPublisherId":"7011236"}`), verified with `GET ?$select=verifiedPublisher`. (4) Test whether an unverified
 per-customer API app (a resource, not the client) changes the consent prompt at all. If it does not, step 3 is optional.
 
+### ISS-027 — SpaarkeMaster ships an orphan web resource `sprk_DocumentDelete.js` with hard-coded deleted BFF hosts
+
+| Field | Value |
+|---|---|
+| **Status** | Open — fix in the next SpaarkeMaster release (low: unreachable today) |
+| **Filed** | 2026-10-14 (found during the old-demo retirement, D35) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1866 |
+
+`sprk_DocumentDelete.js` ships in SpaarkeMaster, but no ribbon, form or other web resource references it. It maps org
+URLs to BFF hosts and defaults to the deleted `spe-api-dev-67e2xz`. The non-shipped
+`src/dataverse/webresources/spaarke_documents/DocumentOperations.js` keeps the same stale mapping. The shipped
+`sprk_DocumentOperations.js` is correct, because it reads `sprk_BffApiBaseUrl`. **Fix:**
+1. Run a dependency check in spaarkedev1.
+2. Remove the file from SpaarkeMaster, and list it as a removed component in the release note.
+3. Delete the stale repo copy.
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
