@@ -11,7 +11,7 @@ name: Environment Promotion
 #   4. Environment-specific secrets set (see .github/ENVIRONMENTS.md)
 #
 # Usage:
-#   - Triggered after successful SDAP CI build on master
+#   - Artifacts: `deployment-packages` from ci-standalone-checks.yml (release-build job)
 #   - Manual dispatch to promote a specific artifact version
 #   - Can target a single environment (skip earlier stages)
 
@@ -146,7 +146,7 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
           name: deployment-packages
           path: ./artifacts
@@ -227,7 +227,7 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
           name: deployment-packages
           path: ./artifacts
@@ -342,7 +342,7 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
           name: deployment-packages
           path: ./artifacts
