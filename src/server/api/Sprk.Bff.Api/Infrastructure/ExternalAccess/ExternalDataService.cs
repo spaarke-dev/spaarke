@@ -1782,6 +1782,30 @@ public class ExternalDataService
         ExternalMultiRootRule.ReadLiveParentsAsync(GetLiveParentRootsAsync, rowParents, _logger, ct);
 
     /// <summary>
+    /// The walk's query count above which one request's live-parent read is logged at Information (task 187 fix round 2,
+    /// K1). A usual page costs one query per parent table; a full 5,000-row page of rows each under its own communication and
+    /// thread costs 50; the hard ceiling is 250 (the notes' "Query cost").
+    /// </summary>
+    internal const int WalkQueriesWorthReporting = 50;
+
+    /// <summary>One request's live-parent walk cost: Debug always, Information once it passes
+    /// <see cref="WalkQueriesWorthReporting"/>. Counts only.</summary>
+    private void LogWalkCost(int parents, int queries, int records)
+    {
+        if (queries > WalkQueriesWorthReporting)
+        {
+            _logger.LogInformation(
+                "[EXT-LIVEPARENT] Walk cost: {Queries} filing queries for {Records} records ({Parents} parents) in one request.",
+                queries, records, parents);
+            return;
+        }
+
+        _logger.LogDebug(
+            "[EXT-LIVEPARENT] Walk cost: {Queries} filing queries for {Records} records ({Parents} parents).",
+            queries, records, parents);
+    }
+
+    /// <summary>
     /// Task 187 (owner round 99, D-123; #1857): of <paramref name="parents"/> (child-table records a row is filed under), the
     /// LIVE roots at the top of each one's filing, read APP-ONLY.
     /// </summary>
@@ -1816,6 +1840,7 @@ public class ExternalDataService
         var (tops, faulted) = await walk
             .TopsOfManyAsync(parents, Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot, ExternalMultiRootRule.MaxLiveParentReads, ct)
             .ConfigureAwait(false);
+        LogWalkCost(parents.Count, walk.QueriesSent, walk.RecordsAsked);
 
         var resolved = new Dictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>>();
         var undetermined = 0;

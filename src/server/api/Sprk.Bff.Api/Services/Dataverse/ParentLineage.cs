@@ -164,6 +164,12 @@ internal sealed class ParentLineageWalk
     /// <summary>The filing map this walk follows.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Filing => _filing;
 
+    /// <summary>The filing queries this walk has sent (one per table and chunk of ids). Task 187 fix round 2, K1: logged.</summary>
+    internal int QueriesSent { get; private set; }
+
+    /// <summary>The records this walk has asked Dataverse for (found or not).</summary>
+    internal int RecordsAsked { get; private set; }
+
     /// <summary>
     /// The columns to select for a row of <paramref name="table"/> so that <see cref="Remember"/> can take it: its filing
     /// lookups and the value columns, each only when the table has it. A metadata fault propagates.
@@ -442,6 +448,8 @@ internal sealed class ParentLineageWalk
                 };
                 query.Criteria.AddCondition(table + "id", ConditionOperator.In, chunk.Cast<object>().ToArray());
 
+                QueriesSent++;
+                RecordsAsked += chunk.Length;
                 var found = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
                 foreach (var id in chunk)
                     _rows[(table, id)] = found.FirstOrDefault(e => e.Id == id);
