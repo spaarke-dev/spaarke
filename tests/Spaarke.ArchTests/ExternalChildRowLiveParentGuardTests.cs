@@ -153,10 +153,14 @@ public class ExternalChildRowLiveParentGuardTests
             violations.AddRange(Violations(relative, code));
         }
 
-        Assert.True(sawRuleFile, $"{RuleFile} was not found: the guard would be vacuous.");
-        Assert.True(ofCalls >= 5,
-            $"Only {ofCalls} ChildRowRoots.Of call(s) outside the rule file: the to-do list, events, documents, messages and the "
-            + "documents module each build one. The guard would be vacuous.");
+        if (!sawRuleFile)
+            violations.Add($"{RuleFile} was not found: the guard would be vacuous.");
+        if (ofCalls < 5)
+        {
+            violations.Add($"only {ofCalls} ChildRowRoots.Of call(s) outside the rule file: the to-do list, events, documents, "
+                + "messages and the documents module each build one, so the guard would be vacuous.");
+        }
+
         Assert.True(violations.Count == 0,
             "An external child-row read decides over its stamped roots only. The stamps are a COPY, so a carrier row (a to-do "
             + "filed to an invoice of a secure matter) or a stale one leaks (owner round 99, D-123; #1857). Read the row's "
