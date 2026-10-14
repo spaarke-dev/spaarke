@@ -1,37 +1,44 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–97) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–98) and `notes/decisions.md`. Task 185 decisions: `notes/185-invite-code-design.md` §11–§12 (I-1..I-13). Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-13 (checkpoint #31).
+> **Last Updated**: 2026-10-14 (checkpoint #32, after a session restart).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path; file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
-| **Running** | (a) The 185 fix: `AssignedAccessMaterializer` sends the invite on internal assignments (I-9), in `C:/wt185`. (b) Adversarial pass 1 of 2 on PR #1827 at `df4ce6825`. |
-| **Next Action** | Fold pass 1's F findings and the I-9 fix into one fix round, then run pass 2 on the full diff. Then merge #1827 (merge-tree check, `--match-head-commit`, no `--delete-branch`) once Router is green, deploy to dev, and run the server-side live gate. The dev schema is already applied (VERIFY PASS). Then close 185 and tell provisioning and SPA-r3. |
+| **Running** | Adversarial pass 2 of 2 on PR #1827 (task 185) at `c87ca1fcb`, full diff `67c80623f..c87ca1fcb`, in a scratch worktree `C:/wts-r1827c`. A leftover `C:/wts-r1827b` from the interrupted pass may exist; it isn't ours to delete blindly, so check it first. |
+| **Next Action** | When pass 2 reports: fix any F, then a scoped re-check of the fix diff. Then confirm provisioning (session now `spaarke-wt-customer-provisioning-orchest-f4`) has nothing open on T240d. Then merge #1827: `git merge-tree` check, `gh pr merge --match-head-commit`, no `--delete-branch`, Router green. Deploy master to dev with `scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev` from a clean worktree, and coordinate with word-add-in, who last deployed `3084f0ca1`. Run the server-side live gate (no CIAM sign-in), close 185, and tell provisioning and SPA-r3, who are waiting to rebase. |
 
-## Active lanes
-- **Task 183 (#1797):** merged into `docs/ontology-platform-design` (`4053387fe`). It closes once ontology's 148 live gate on dev shows a stale-ETag 412 → Conflict on both Signal and DR.
-- **Ontology:** #1805 is merged (`d6b952bdf`). #1824 (task 142) re-checked CLEAN at `226003f36`; they merge once all checks are green. Task 143 comes next for UAC review. Filed: #1813, #1817, #1818 and #1825.
-- **#1807 (ontology):** `a4f0b3b07` is CLEAN; D-136 is live. Ontology owns the rest (memory: peer-owned-decisions).
-- **SPA-r3 (ADR-028 A9):** aligned and confirmed. They build on #1801 (now on master). UAC reviews their PRs against the conditions in the project CLAUDE.md §3 "Model 1 sign-in" block: a new binder branch with no E10/E11 change; the stored link in its own field; word-add-in findings (a), (b), (d) and (e).
-- **Task 186 (baseline access only):** pending. It needs SPA-r3's workforce-contact principal (at least its contract). Design draft: `notes/186-model1-workforce-design.md`; it recommends the role-as-ceiling option (a). The owner decision is still to come. Intake 403: reference SPA-r3's I-6 decision; do not ask again.
-- **Task 185:** PR #1827 (slices A, B1, B2, C, D, E, F). Gates are green, publish size +18 KB, and the dev schema is applied. Provisioning is reviewing it as the T240d gate; SPA-r3 rebases after it merges. Decisions: design note §11 and §12 (I-1 to I-9).
+## Task 185 (PR #1827, branch `uac/185-invite-code`, worktree `C:/wt185`)
+- **Slices:** A, B1, B2, C, D, E, F.
+- **Fix rounds:** `5116f9251` (I-9 materializer), `e1f182a64` (sign-in race), `647a2ba67` (I-10), `314fa1b24` (I-11 503), `e4ecd31f1` (I-12 fragment), `955027c1a` (single backend), `cff0fca9b` and `c87ca1fcb` (comments).
+- **Gates:** BFF targeted tests 5412 passed; ArchTests 979/979; SPA 1019/1019; publish +18 KB.
+- **Dev schema:** `Set-ExternalInviteCodeHashSchema.ps1 -Apply` done, and VERIFY PASS (2026-10-13).
+- **Reviews:** adversarial pass 1 gave 1 F (fixed) and 4 K. Provisioning's T240d review: F1 fixed, then the two-call oracle accepted as K (owner 98d); F3 and K1 fixed; F4 comment fixed.
+- **Owner decisions:**
+  - 98: SHA-256; granting sends the invite; system mail.
+  - 98b: partner grants never auto-invite.
+  - 98c: the inviter never sees ExistingAccount.
+  - 98d: the two-call oracle is a known limit.
+- **Release:** `sprk_externalinvitecodehash` must ship in a CI-built SpaarkeMaster release before T240d production. Provisioning owns that gate.
+- **The live E11 sign-in** goes on the owner checklist.
 
-## Done this period
-- Task 184 CLOSED: #1801 `06b3654a0`, deployed; live gate G1/G2 PASS. G3 (ExistingAccount live) and the live E11 bind are on the owner checklist §11.
-- #1746 merged (`376eca286`).
-- The master merge `30f4a6e4e` (932 commits) brought ADR-028 A6–A8; A9 was aligned in `15fb8cf6b`, and 186 was rescoped.
-- Issues filed: #1802, #1803 and #1804.
+## Other lanes
+- **Ontology:** #1805 merged. #1824 (142) is CLEAN at `226003f36`; they merge once all checks pass. #1834 (143) is CLEAN at `4356397a2` (4 K items sent, incl. K4: D-137 Q26 put Spaarke Basic User on BU default teams, which is wide; flagged to the owner as an FYI). Task 183 (#1797) closes after ontology's 148 live gate shows a 412 → Conflict.
+- **SPA-r3 (A9):** 046, 047 and 058 wait for #1827. UAC reviews their binder and WorkforcePrincipalResolver PRs. Issue #1830 (SPE sweep "Invalid hostname") was triaged as not a security gap: one stale pointer; a Warning-level fix plus a data fix, non-urgent.
+- **word-add-in:** task 126 (#1815) changes `Set-ExternalFlagForB2BGuests.ps1` (`-CustomerTenantIds` / `-AllGuestsExternal`). UAC's "no -Apply in Model 1" rule stays until the owner restates it.
+- **Task 186 (baseline access only):** pending SPA-r3's principal contract. The Workforce role is excluded from SpaarkeMaster 1.2.2.0 until 186 makes it final; tell provisioning when it does.
+- **Issues filed this period:** #1813, #1817 (UAC slow test) and #1830 (triaged); ontology filed #1818 and #1825.
 
 ## Open owner items
-- Task 186 ceiling decision, once designed.
-- Owner checklist §11: (b) is owned by provisioning as T240d live acceptance; the live E11 sign-in is still yours.
-- #1747 (word-add-in sign-off) and #1776 (Dev 1 and Test 1 BU team roles).
+- Restate the Model 1 `-Apply` rule once #1815 merges.
+- The live E11 sign-in (checklist §11).
+- Task 186 ceiling decision.
+- #1747 and #1776.
 - F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
-- Optional: file an issue for the legacy `spaarke_core` solution; update `scripts/README.md`.
 
 ## Not started
 178, 136, 036, 037, 039, 099, 090 wrap-up, and 013/058 bookkeeping.
