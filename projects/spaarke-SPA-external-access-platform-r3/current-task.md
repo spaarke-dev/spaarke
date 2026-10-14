@@ -26,9 +26,17 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 ## Open owner questions
 1. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
 2. Owner test for 067: create a service request; expect an RQST number other than RQST-0001 (dev next value read 3).
-5. 065 owner decisions 2026-10-14: (D1) messages inherit the thread's record link: yes. (D2) all filed communications are visible by default, and Internal Only hides them from every non-systemuser, CIAM and workforce alike (already true on the read side). The switch is task 068. (D3) sender name OK. (D4) no dev data fix. (D5) received emails follow the same rule: explicit false, Private/unknown thread or internal parent gives true. Pass 2 found F2 (Private floor via in-reply-to) and F3 (AppendTo on the inherited regarding). Fix round 3 is running (F2, F3, K3 pin, D5 inbound writers, K2 test); then a scoped re-check (auth filter), then merge.
+5. 065 owner decisions 2026-10-14:
+   - (D1) Messages inherit the thread's record link.
+   - (D2) Filed items are visible unless Internal Only. Internal Only hides an item from every non-systemuser, and from systemusers flagged sprk_isexternal (owner confirmed keeping them hidden). The switch is task 068.
+   - (D3) Sender name is OK.
+   - (D4) No dev data fix.
+   - (D5) Received items follow the same rule.
+   - (D6) Outlook add-in saves stay visible until the add-in sends reply headers (068 follow-up).
+   - (D7) Making a thread Private hides its EARLIER messages from partners too: a read-side thread-privacy gate, which closes ISS-009 #1859.
+   Status: fix round 4 is running (re-check findings plus the header-based parent rule). Next: fix round 5 (D7 read gate), then a scoped re-check, then merge.
 4. 065 leftover: (d) the ACS endpoint has a read-only check before deploy.
-6. 044: owner chose option A on 2026-10-14 (mirror key columns, the contact pattern). POML, design §5 and 046/048 updated. Script and XML are being built. The dev dry run, apply and verify are owner-gated.
+6. 044: option A; the owner approved the dev dry run 2026-10-14 and it was clean (it would create 1 option, 5 columns, 1 key and FLS on 3 columns; nothing written). Next: the owner approves -Apply, then -Verify, then notes/task-044-schema-record.md.
 3. Owner decisions 2026-10-13 (resolved, recorded in POMLs): 045 = option A (contact-grants reachable; census pins routes); 065 = explicit false for emails too, fix Message→Email mapping (explain how the Message path works); 062 = createdby only when a person; 067 = run (done).
 
 ## Owner check 3 (CIAM partner, 2026-10-13): findings
