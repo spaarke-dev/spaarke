@@ -265,7 +265,7 @@ No committed ribbon or form references `Sprk.Communication.Send`; `Communication
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (task 065 fix round 5, commit 05e47af14) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-14 |
 | **Source** | Task 065 re-check of fix round 3 (adversarial review), "outside the diff". Both paths existed before 065. |

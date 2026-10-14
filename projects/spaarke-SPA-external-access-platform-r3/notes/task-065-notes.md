@@ -500,7 +500,7 @@ gained the thread column.
 - Filtered run (`Communication|InboundInternalOnly|DataverseRecordCreation|CommunicationServiceMessageSend|CommunicationRecordAuthorization|ExternalAccess|Office|Messaging|ThreadResolver`):
   0 failed / 5181 passed / 9 skipped (the skips are the pre-existing integration-gated tests). `Spaarke.ArchTests`: 0 failed / 983 passed.
   `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
-- New tests: 22 in `CommunicationOpenThreadGateTests`, 2 queue-feed, 2 retry-gap. The first full run (before the fixtures were updated) failed 4 old external cases that had no thread; fixed as described above.
+- New tests: 21 in `CommunicationOpenThreadGateTests`, 2 queue-feed, 2 retry-gap. The first full run (before the fixtures were updated) failed 4 old external cases that had no thread; fixed as described above.
 - **Seeding proof, D7 gate.** With the `FilterExternalMessagesAsync` gate disabled (`if (false && !isInternal ...)`), 10 tests failed (Private thread hidden, no privacy value, no thread, unreadable
   thread, thread switched to Private after the send (D7), mixed page, chunking, query shape, fault, feed). Restored; the same run is 82 / 82 green.
 - **Seeding proof, retry gap.** With the new catch made inert (`when (ex.Message == "never")`), both new `Mailbox_*Cancelled*` tests failed; restored, 49 / 49 green in `InboundInternalOnly`.
