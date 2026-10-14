@@ -1528,6 +1528,28 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task T145_AWitnessFiledUnderSecureXButStillOwnedByAnOrdinaryTeam_IsInXsFamily_AndGivesNoDetail()
+    {
+        // Pass 2 K1: the re-own window. The communication is already filed under secure project X but uac-r2's reconciler has not yet
+        // re-owned it to the Secure team. Its family comes from its ROOTS, not its owner: {X}, never Ordinary and never Undetermined. A
+        // regression to an owner-based check would keep the detail.
+        var s = new Store();
+        var windowed = FiledCommunication(s, MatterId, secureProject: Store.ProjectA, owner: Store.OrdinaryTeam);
+        var hit = MatterHitQuoting(MatterId, windowed);
+
+        var partitions = await s.Service.PartitionsOfHitsAsync(Code, [Hit(MatterId, windowed)], default);
+        var family = partitions![("sprk_communication", windowed)];
+        family.IsUndetermined.Should().BeFalse("its secure root is known");
+        family.Should().Be(SuppressionPartition.Secure([("sprk_project", Store.ProjectA)]), "the family is {X}, read from the roots");
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        var line = evidence[("sprk_matter", MatterId)].Should().ContainSingle().Subject;
+        line.Text.Should().BeNull("an ordinary owner does not make a communication filed under secure X ordinary");
+        line.Source.Should().BeNull();
+    }
+
+    [Fact]
     public async Task T145_APurelyOrdinaryCommunication_StillGivesItsSubjectAndSender()
     {
         // Must-not-fire control for the test above: the same shape with no secure filing keeps its detail.
