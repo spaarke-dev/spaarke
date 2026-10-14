@@ -126,14 +126,29 @@ class History(unittest.TestCase):
         self.commit({idx: index("001", "002", "003", "004")}, "revived")
         self.assertEqual(bf.planned_for(self.repo, idx, bf.first_versions(self.repo)[idx])[0], 2)
 
-    def test_renamed_project_folder_is_seen_at_its_new_path(self):
-        old, new = "projects/old-name/tasks/TASK-INDEX.md", "projects/new-name/tasks/TASK-INDEX.md"
-        self.commit({old: index("001", "002", "003")}, "plan")
-        self.git("mv", "projects/old-name", "projects/new-name")
-        self.git("commit", "-q", "-m", "rename")
+    def test_renamed_project_reports_the_original_planned_size_not_the_archive_size(self):
+        # Archiving renames projects/<slug> to projects/x-<slug>; the new path's own first add is the archive commit.
+        old, new = "projects/demo/tasks/TASK-INDEX.md", "projects/x-demo/tasks/TASK-INDEX.md"
+        planned = {old: index("001", "002", "003")}
+        planned.update({f"projects/demo/tasks/{n:03d}-x.poml": "<task/>" for n in range(1, 4)})
+        self.commit(planned, "plan: 3 tasks")
+        self.commit({old: index("001", "002", "003", "004", "005", "006", "007"),
+                     **{f"projects/demo/tasks/{n:03d}-x.poml": "<task/>" for n in range(4, 8)}}, "grew to 7")
+        self.git("mv", "projects/demo", "projects/x-demo")
+        self.git("commit", "-q", "-m", "archive")
         firsts = bf.first_versions(self.repo)
-        self.assertIn(new, firsts)                                   # without --no-renames: only the old path
-        self.assertEqual(bf.planned_for(self.repo, new, firsts[new])[0], 3)
+        self.assertIn(new, firsts)                                   # --no-renames lists the new path
+        self.assertEqual(bf.planned_for(self.repo, new, firsts[new])[0], 7)      # ...whose own add is the archive
+        commit, orig = bf.original_version(self.repo, new)
+        self.assertEqual(orig, old)
+        self.assertEqual(bf.planned_for(self.repo, orig, commit), (3, 3, 3))
+
+    def test_original_version_of_an_unrenamed_project_is_its_first_add(self):
+        idx = "projects/demo/tasks/TASK-INDEX.md"
+        self.commit({idx: index("001", "002")}, "plan")
+        self.commit({idx: index("001", "002", "003")}, "grew")
+        commit, orig = bf.original_version(self.repo, idx)
+        self.assertEqual((orig, bf.planned_for(self.repo, orig, commit)[0]), (idx, 2))
 
     def test_stash_ref_is_not_history(self):
         # refs/stash (shared across worktrees) must not count as a project's first version.

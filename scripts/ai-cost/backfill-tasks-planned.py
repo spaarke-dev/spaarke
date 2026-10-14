@@ -1,10 +1,12 @@
 """Set the `Tasks Planned` number field on the Spaarke Core portfolio board (Project #2) from git history.
 
 Tasks Planned = how many tasks a project started with, so `Task Count / Tasks Planned` shows scope growth.
-For each board project the planned figure is read from the FIRST committed version of
-`projects/<slug>/tasks/TASK-INDEX.md` (`git log --diff-filter=A`, oldest):
+For each board project the planned figure is read from the FIRST committed version of its
+`projects/<slug>/tasks/TASK-INDEX.md`. Archiving renames `projects/<slug>` to `projects/x-<slug>`, so the oldest
+add of the CURRENT path is the archive commit (the final size); the original add is found by following renames
+(`git log --follow --diff-filter=A`, oldest entry) and the POMLs are counted in the ORIGINAL folder at that commit:
 
-    planned = max(task rows in that version, *.poml files in tasks/ at that commit)
+    planned = max(task rows in that version, *.poml files in the original tasks/ folder at that commit)
 
 A task row is a table row whose first cell is a zero-padded task number (`| 001 |`, `| [001](x.poml) |`, `| **001** |`),
 counted once per distinct number; a bare `| 1 |` (phase, group or serial-number column) is not a task, even
@@ -64,9 +66,10 @@ def git(repo, *args):
 
 
 def first_versions(repo, ref=None):
-    """{TASK-INDEX path: oldest commit that added it}. `ref` limits the history to one ref; the default is every
-    branch and remote branch (not refs/stash), so a project whose branch has not merged yet is counted too.
-    --no-renames keeps a renamed project's file as an add at its new path."""
+    """{current TASK-INDEX path: newest-add commit} - used to ENUMERATE the paths. `ref` limits the history to one
+    ref; the default is every branch and remote branch (not refs/stash), so a project whose branch has not merged
+    yet is counted too. --no-renames lists a renamed folder under its new path; the ORIGINAL version of each path
+    comes from original_version()."""
     refs = [ref] if ref else ["--branches", "--remotes"]
     out = git(repo, "log", *refs, "--no-renames", "--diff-filter=A", "--format=%H", "--name-only", "--", INDEX_GLOB)
     first, cur = {}, None
@@ -81,8 +84,27 @@ def first_versions(repo, ref=None):
     return first
 
 
+def original_version(repo, path, ref=None, fallback=None):
+    """(commit, path at that commit) of the OLDEST add of `path`, following renames (archiving moves
+    projects/<slug> to projects/x-<slug>, whose own first add is the archive commit with the final size).
+    Falls back to (fallback, path) when git reports no add."""
+    refs = [ref] if ref else ["--branches", "--remotes"]
+    out = git(repo, "log", *refs, "--follow", "--diff-filter=A", "--format=%H", "--name-only", "--", path)
+    last, cur = None, None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if SHA.fullmatch(line):
+            cur = line
+        elif cur:
+            last = (cur, line)          # newest first: the last entry is the oldest add
+    return last or ((fallback, path) if fallback else None)
+
+
 def planned_for(repo, path, commit):
-    """(planned, rows, poml) for one project's first TASK-INDEX version."""
+    """(planned, rows, poml) for one project's first TASK-INDEX version: `path` is the path AT `commit`
+    (the original one, before any archive rename)."""
     rows = count_task_rows(git(repo, "show", f"{commit}:{path}"))
     tree = git(repo, "ls-tree", "--name-only", commit, os.path.dirname(path).replace("\\", "/") + "/").split()
     poml = sum(1 for n in tree if n.endswith(".poml"))
@@ -166,7 +188,8 @@ def main():
             stats["skipped"] += 1
             print(f"SKIP {slug}: no projects/<slug>/tasks/TASK-INDEX.md in the history")
             continue
-        planned, rows, poml = planned_for(a.repo, path, firsts[path])
+        commit, orig = original_version(a.repo, path, a.ref, firsts[path])
+        planned, rows, poml = planned_for(a.repo, orig, commit)
         if planned == 0:
             stats["skipped"] += 1
             print(f"SKIP {slug}: first TASK-INDEX version has no task rows and no POMLs")
@@ -179,7 +202,7 @@ def main():
             stats["kept"] += 1
             print(f"KEEP {slug}: already {int(current)} (would be {planned})")
             continue
-        label = f"{slug}: {planned} (index rows {rows}, POMLs {poml}) at {firsts[path][:9]}"
+        label = f"{slug}: {planned} (index rows {rows}, POMLs {poml}) at {commit[:9]}"
         if not a.apply:
             stats["set"] += 1
             print(f"WOULD SET {label}")
