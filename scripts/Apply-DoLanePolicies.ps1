@@ -196,6 +196,9 @@ function Get-VersionDiffs($p, $v, $row) {
     if ($row.sprk_messagetemplate -cne $v.messageTemplate) { $diffs.Add('sprk_messagetemplate') }
     if ($row.sprk_shortheadline -cne $v.shortHeadline) { $diffs.Add('sprk_shortheadline') }
     if ($row.sprk_proposedaction -cne $v.proposedAction) { $diffs.Add('sprk_proposedaction') }
+    # A version the nightly job refuses (deactivated, or ended in force) is not in sync even if its text matches.
+    if ($row.statecode -ne 0) { $diffs.Add('statecode') }
+    if ($null -ne $row.sprk_inforceto) { $diffs.Add('sprk_inforceto') }
     $diffs
 }
 

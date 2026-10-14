@@ -175,6 +175,8 @@ public class NullTestGrammarTests
 
         result.IsValid.Should().BeFalse();
         result.Reason.Should().Be(Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.TemplateTokenOutsideReadSet);
+        // The reason must name the null test, not an 'exists' clause this body does not have (review F3).
+        result.Errors.Should().ContainSingle(e => e.Contains("'when' null test", StringComparison.Ordinal));
     }
 
     [Theory]

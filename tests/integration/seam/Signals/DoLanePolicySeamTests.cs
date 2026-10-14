@@ -21,7 +21,9 @@ namespace Sprk.Bff.Api.Tests.Seam.Signals;
 /// response, so those two are compared with an independent FetchXML written from the POML).
 /// </summary>
 /// <remarks>
-/// <para><b>Read-only.</b> No Signal, no Decision Record and no policy row is written, so there is nothing to clean up: the knob proof
+/// <para><b>Read-only, apart from the <c>zz-061-</c> rows.</b> No Signal, no Decision Record and no policy row is written; the only writes are the
+/// seven test rows of <c>ZzRows_...</c> (events and work assignments), deleted by name prefix in a <c>finally</c> and checked by a zero-count
+/// query. Rows created server-side on their creation, if any, are not tracked. The knob proof
 /// evaluates a body edited IN MEMORY (<c>now-1d</c> to <c>now-5d</c>), which is exactly what publishing a new version does, minus the
 /// write. The policies stay Off (<c>sprk_enabled</c> = No); the nightly job is not run here.</para>
 /// <para><b>What a difference is allowed to be.</b> The collector judges an item against the CALLER's local today; the evaluator judges
@@ -70,7 +72,7 @@ public sealed class DoLanePolicySeamTests : IClassFixture<SignalWriterSeamTests.
     // ---------------------------------------------------------------- the rows are what the definition says
 
     [Fact]
-    public async Task TheFourPolicyRows_AreOnDev_DoLane_Off_AndPointAtTheirVersion()
+    public async Task TheFourPolicyRows_AreOnDev_DoLane_AndPointAtTheirVersion()
     {
         if (!_dv.IsLive) return;
 
@@ -116,7 +118,8 @@ public sealed class DoLanePolicySeamTests : IClassFixture<SignalWriterSeamTests.
         if (!_dv.IsLive) return;
 
         var hits = await EvaluateAsync("POL-TASK-DUESOON");
-        // The collector reads NextXDays(sprk_duedate, 3); the policy states the same window explicitly: today through today + 3.
+        // The collector's Upcoming channel reads NextXDays(sprk_duedate, N) with N the caller's Due-soon setting (default 5); the policy's window is the
+        // POML's three days, stated explicitly: today through today + 3 (the knob is the 'now+3d' in the body).
         var reference = await ReferenceIdsAsync("sprk_event", "sprk_eventid", $@"
             <condition attribute='sprk_eventtype_ref' operator='eq' value='{TaskEventType}' />
             <condition attribute='statuscode' operator='eq' value='{EventOpen}' />
