@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Xunit;
 
 namespace Spaarke.ArchTests;
 
@@ -68,6 +69,20 @@ public sealed class BootedBff : IDisposable
             _production.Value.Dispose();
         }
     }
+}
+
+/// <summary>
+/// The ONE <see cref="BootedBff"/> every test class that reads the booted application shares (task 045, when a second such
+/// class arrived). Shared rather than one per class for two reasons: a boot costs seconds, and two Production boots must
+/// never run at the same time — <see cref="BootedApp"/> sets the process-static
+/// <c>CacheModule.NetworkStepsForBootedHostTests</c> for the length of its boot and clears it after, so a parallel boot
+/// clears the other's hook mid-boot and that boot then tries a real managed-identity Redis connection (measured: three
+/// failures of the new class in a full run). Classes in one xUnit collection run one after another.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class BootedBffCollection : ICollectionFixture<BootedBff>
+{
+    public const string Name = "Booted BFF";
 }
 
 /// <summary>One booted BFF: its environment, its root service provider and a snapshot of its endpoint table.</summary>

@@ -16,6 +16,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///                             Tier-2 record scope. Serves the standalone external SPA (CIAM) AND the
 ///                             Teams workforce host through ONE endpoint set. CIAM behavior is
 ///                             unchanged (FR-15 — the CIAM strategy reproduces the old filter exactly).
+///                             ADR-028 A9 (r3 task 045): the policy also accepts the WorkforceHome scheme (a
+///                             workforce contact's customer home-directory token); every route here is pinned by
+///                             AuthenticationSchemeCensusTests.
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
 ///
 /// The transitional /api/v1/collab workforce group (ADR-028 A2 · teams-app-r1 task 020/030) was
