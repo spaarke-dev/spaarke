@@ -3,7 +3,7 @@
   <metadata>
     <title>Model 1: the external-flag script treats the stamp's licensed core users (B2B guests) as internal (re-scoped 2026-10-13 under ADR-028 A9)</title>
     <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Access-control flag on systemusers (security); script used by the deployment guide.</rigor-reason>
     <model-tier>opus</model-tier>
