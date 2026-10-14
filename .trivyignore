@@ -21,8 +21,9 @@
 #         deployed product code.
 # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key
 # The retired sdap-ci.yml (2026-10-14) also skipped `knowledge/` in its Trivy scan; the nightly
-# `trivy-fs` job (nightly-health.yml) scans `.` with no skip-dirs, so this entry is now what
-# keeps the sample key out of the nightly count (and any local `trivy fs .` run).
+# `trivy-fs` job (nightly-health.yml) scans `.` with no skip-dirs, so this entry is what keeps
+# the sample key out of that scan's report (and any local `trivy fs .` run). The nightly HIGH/CRITICAL
+# count reads only vulnerability findings, so it never counted secret findings.
 azure-storage-account-key
 
 # ---------------------------------------------------------------------------

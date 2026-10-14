@@ -10,6 +10,14 @@ name: Master CI Alert
 #   tier2-master/full-unit-tests    Tier 2 unit tests (advisory, never blocking) did not pass
 #                                   on master: read from the per-shard verdict artifacts the
 #                                   run already uploaded, never by re-running tests
+#   master-ci-alert/evaluation      this workflow itself could not reach a verdict (e.g. the
+#                                   GitHub API kept failing), so the two alerts above are
+#                                   stale; raised instead of failing silently
+#
+# Each check is judged from master's current state, not from the triggering run alone: the
+# newest 25 completed master push runs, each job from the most recent run that executed it.
+# A docs-only push skips Tier 1 and must not close a compile-break alert; path-gated jobs and
+# Tier 2 shards run only when their paths change; runs finish out of order.
 #
 # Each alert is ONE issue, assigned to the owner (GitHub emails them), edited in place while
 # the check keeps failing and closed by the next green master run. The logic lives in
@@ -29,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'CI (Router) run id to evaluate'
+        description: 'Any CI (Router) run id on master. Master''s CURRENT state is evaluated (newest 25 completed master push runs); the id only names the workflow. Replay a past state locally with -AsOf.'
         required: true
         type: string
       dry_run:
@@ -46,8 +54,8 @@ permissions:
 concurrency:
   # Serialize: two master runs finishing close together must not race on the same issue.
   # GitHub keeps only the newest PENDING run per group, so a run can be dropped; that is safe
-  # because the verdict script always evaluates the newest COMPLETED master run, whichever
-  # CI run triggered it.
+  # because every evaluation reads master's current state from the window of completed runs,
+  # whichever CI run triggered it, so the run that does execute covers the dropped one.
   group: master-ci-alert
   cancel-in-progress: false
 
@@ -75,16 +83,22 @@ jobs:
         run: ./scripts/ci/master-ci-verdict.ps1 -RunId $env:RUN_ID -Repo '${{ github.repository }}'
 
       - name: Report
+        if: always()
         shell: bash
         env:
           ROUTER: ${{ steps.read.outputs.router_status }}
           TIER2: ${{ steps.read.outputs.tier2_status }}
           NOTE: ${{ steps.read.outputs.note }}
           RUN_URL: ${{ steps.read.outputs.run_url }}
+          OUTCOME: ${{ steps.read.outcome }}
         run: |
           {
             echo "## Master CI alert decision"
             echo
+            if [ "$OUTCOME" != "success" ]; then
+              echo "**The verdict script did not finish (${OUTCOME}); see its log. The \`master-ci-alert/evaluation\` alert is raised.**"
+              echo
+            fi
             echo "CI run: ${RUN_URL}"
             echo
             echo "| Alert | Status |"
@@ -114,4 +128,17 @@ jobs:
           status: ${{ steps.read.outputs.tier2_status }}
           summary: ${{ steps.read.outputs.tier2_summary }}
           run-url: ${{ steps.read.outputs.run_url }}
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref_name != github.event.repository.default_branch) && 'true' || 'false' }}
+
+      # The verdict step failing (GitHub API errors after retries, a script bug) would otherwise
+      # leave both alerts silently stale. Raise a separate alert for that, clear it on success.
+      - name: Raise or clear master-ci-alert/evaluation
+        if: always() && (steps.read.outcome == 'success' || steps.read.outcome == 'failure')
+        uses: ./.github/actions/quality-alert
+        with:
+          check: master-ci-alert/evaluation
+          status: ${{ steps.read.outcome == 'success' && 'ok' || 'failing' }}
+          summary: >-
+            ${{ steps.read.outcome == 'success' && 'The master CI alert evaluation completed.' || 'The Master CI Alert workflow could not evaluate master CI (the verdict script failed; usually GitHub API errors after retries). router-master and tier2-master/full-unit-tests were NOT updated for this run, so they may be stale. Open the run linked above and read the "Read the CI run" step log.' }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           dry-run: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref_name != github.event.repository.default_branch) && 'true' || 'false' }}

@@ -34,11 +34,12 @@ gh api repos/spaarke-dev/spaarke/rules/branches/master
 gh api repos/spaarke-dev/spaarke/rulesets/21824191
 ```
 
-Ruleset `21824191` ("master: require CI Router") requires exactly **ONE** status check to pass before merge:
+Ruleset `21824191` ("master: require CI Router") requires **two** status checks to pass before merge (re-verified 2026-10-14):
 
-- `Router`
+- `Router` (from `ci-router.yml`)
+- `Client lint (type-aware ratchet)` (from `client-lint.yml`)
 
-It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `pull_request` rule (0 required approving reviews, all merge methods allowed). `current_user_can_bypass: "never"` — no bypass actors configured. The Tier 1/Tier 2 jobs, `ci-standalone-checks.yml`'s jobs and `workflows-validate.yml`'s `actionlint` job are NOT themselves required contexts (the retired `sdap-ci.yml` jobs `Build & Test (Debug)`, `Build & Test (Release)` and `Code Quality` were not either) — `Router` (from `ci-router.yml`) is the single gate; it fans out to the tiered workflows and reports the aggregate result as one check. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for background, noting that document may also predate the ruleset migration.
+It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `pull_request` rule (0 required approving reviews, all merge methods allowed). `current_user_can_bypass: "never"` — no bypass actors configured. The Tier 1/Tier 2 jobs, `ci-standalone-checks.yml`'s jobs and `workflows-validate.yml`'s `actionlint` job are NOT themselves required contexts (the retired `sdap-ci.yml` jobs `Build & Test (Debug)`, `Build & Test (Release)` and `Code Quality` were not either). `Router` is the CI gate: it fans out to the tiered workflows and reports the aggregate result as one check; `Client lint` is the only other required check. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for background, noting that document may also predate the ruleset migration.
 
 ## Per-workflow detail
 
@@ -84,14 +85,14 @@ It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `p
 
 ### ci-standalone-checks.yml
 
-- **Purpose**: Checks the legacy `sdap-ci.yml` ran that have no Router/nightly equivalent: `dependency-audit` (per-push CVE gate), `release-build` (Release build of the solution + BFF publish; uploads `deployment-packages` on master pushes, consumed by `deploy-promote.yml`), `compose-client-gate`, `client-typecheck` (shared-lib `tsc` + `Spaarke.AI.Widgets` `tsc --noEmit`).
+- **Purpose**: Checks the legacy `sdap-ci.yml` ran that have no Router/nightly equivalent: `dependency-audit` (per-push CVE gate), `release-build` (Release build of the solution + BFF publish; uploads `deployment-packages` on master pushes, consumed by `deploy-promote.yml`), `compose-client-gate`, `client-typecheck` (shared-lib `tsc` + `Spaarke.AI.Widgets` `tsc --noEmit`), `pcf-eslint` (PCF ESLint, which Tier 2 runs only on SpaarkeAi/BFF changes).
 - **Triggers**: `pull_request` (docs-only paths ignored), `push` on master, `workflow_dispatch`. NOT a required check; no job uses `continue-on-error`.
 - **Common failures**: a new HIGH CVE outside the accepted-risk list (`dependency-audit`), compile error under Release (`release-build`), TypeScript error in a shared library (`client-typecheck`). On master each failing job raises a `ci-standalone/<job>` quality alert and clears it on the next green run.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### master-ci-alert.yml
 
-- **Purpose**: When the `CI` workflow (Router) completes on a master push, raises or clears the `router-master` alert (Router or a Tier 1 job red/cancelled) and the `tier2-master/full-unit-tests` alert (a Tier 2 shard did not pass). Logic: `scripts/ci/master-ci-verdict.ps1`.
+- **Purpose**: When the `CI` workflow (Router) completes on a master push, raises or clears the `router-master` alert (Router or a Tier 1 job red/cancelled) and the `tier2-master/full-unit-tests` alert (a Tier 2 shard did not pass), each judged from its most recent execution in the newest 25 master runs; raises `master-ci-alert/evaluation` if the evaluation itself fails. Logic: `scripts/ci/master-ci-verdict.ps1`.
 - **Triggers**: `workflow_run` on `CI` (master); `workflow_dispatch` (dry-run unless on the default branch).
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 

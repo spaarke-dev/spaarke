@@ -58,7 +58,7 @@ namespace Sprk.Bff.Api.Tests.Eval.GoldenUtterances;
 /// <b>Merge-gate wiring (NFR-02 — ACTIVE since task 026)</b>: this class
 /// compiles into <c>Sprk.Bff.Api.Tests</c> via the contract-path Compile glob
 /// and runs inside the Tier 2 <c>Full Unit Tests (Debug)</c> shards of
-/// <c>.github/workflows/ci-tier2-advisory.yml</c> (pass 1) on every PR.
+/// <c>.github/workflows/ci-tier2-advisory.yml</c> (pass 1) on every PR that changes BFF paths.
 /// In addition, the dedicated <c>eval-gate</c> job in
 /// <c>.github/workflows/ci-tier1-blocking.yml</c> runs
 /// <c>dotnet test --filter "Category=GoldenUtteranceEval"</c> with NO

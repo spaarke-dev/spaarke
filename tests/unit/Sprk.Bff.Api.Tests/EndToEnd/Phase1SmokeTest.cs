@@ -72,7 +72,7 @@ namespace Sprk.Bff.Api.Tests.EndToEnd;
 ///   <see cref="Smoke_PredictMatterCost_EvidenceMatchesGroundedSet"/></item>
 ///   <item>Eval harness baseline pass — covered by
 ///   <c>Eval/PredictMatterCostEvalHarnessTests.cs</c></item>
-///   <item>CI gate registered — covered by Tier 2 <c>Full Unit Tests (Debug)</c> in <c>.github/workflows/ci-tier2-advisory.yml</c> (sdap-ci.yml retired 2026-10-14)</item>
+///   <item>CI registered — runs in Tier 2 <c>Full Unit Tests (Debug)</c> in <c>.github/workflows/ci-tier2-advisory.yml</c> (advisory, not a merge gate; master failures raise the <c>tier2-master/full-unit-tests</c> quality alert; sdap-ci.yml retired 2026-10-14)</item>
 ///   <item>SPEC §5.1 walkthrough — covered by
 ///   <c>notes/acceptance-criteria-verification.md</c></item>
 ///   <item>SPEC §5.1.1 §3.5 grep clean — run as workflow step + this file imports

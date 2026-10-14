@@ -228,10 +228,12 @@ GitHub Actions secrets are used in CI/CD workflows and cannot be rotated by `Rot
 2. Navigate to the GitHub repository **Settings > Secrets and variables > Actions**.
 3. Click the secret name, then **Update secret**.
 4. Paste the new value and save.
-5. Trigger a test workflow run to verify the new secret works:
+5. Trigger a run of a workflow that uses the rotated secret, to verify it works. Find one with:
    ```bash
-   gh workflow run ci-standalone-checks.yml
+   grep -l "<SECRET_NAME>" .github/workflows/*.yml
+   gh workflow run <that-workflow>.yml
    ```
+   As of 2026-10-14 no workflow references `AZURE_CREDENTIALS` or `PAC_AUTH_PROFILE` (the retired `sdap-ci.yml`, which this step used to name, did not either); if the search finds nothing, the secret is unused and can be deleted rather than rotated.
 6. Monitor the workflow run for success.
 
 <!-- The "Rotate Dataverse S2S Client Secret" procedure was removed 2026-08-14

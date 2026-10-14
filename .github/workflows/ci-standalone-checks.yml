@@ -21,6 +21,13 @@ name: CI Standalone Checks
 #   client-typecheck        Client Quality > shared-lib builds    The only `tsc` check of the shared client
 #                           + Spaarke.AI.Widgets tsc --noEmit     libraries (client-lint is an ESLint
 #                                                                 ratchet, Tier 2 lint is Prettier + ESLint).
+#   pcf-eslint              Client Quality > PCF ESLint           Tier 2 `lint` runs PCF ESLint only when
+#                                                                 SpaarkeAi/BFF paths change and client-lint.yml
+#                                                                 does not cover src/client/pcf, so a PCF-only PR
+#                                                                 would otherwise get no ESLint at all.
+#                                                                 (sdap-ci's Prettier check is NOT carried over:
+#                                                                 it ran after `prettier --write`, so it could
+#                                                                 never fail. Tier 2 `lint` runs the real check.)
 #
 # NOT REQUIRED. The master ruleset requires `Router` and `Client lint (type-aware ratchet)`
 # only; nothing here is added to it. A red job here never blocks a merge. That is why no job
@@ -398,11 +405,38 @@ jobs:
           fi
 
   # --------------------------------------------------------------------------
+  # pcf-eslint: the PCF ESLint step of sdap-ci's Client Quality job, same command.
+  # --------------------------------------------------------------------------
+  pcf-eslint:
+    name: PCF ESLint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install PCF deps (ESLint)
+        working-directory: src/client/pcf
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: ESLint check
+        working-directory: src/client/pcf
+        # No --max-warnings 0: the PCF baseline carries warnings (as in sdap-ci); errors fail.
+        # node_modules/.bin/eslint, not npx: npx silently fetches eslint from the registry when
+        # the local install is missing, which masks install bugs (PR #393).
+        run: node_modules/.bin/eslint .
+
+  # --------------------------------------------------------------------------
   # One table of every job's result, so a PR shows what failed without opening each job.
   # --------------------------------------------------------------------------
   summary:
     name: Summary
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -418,7 +452,7 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            for j in dependency-audit release-build compose-client-gate client-typecheck; do
+            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint; do
               r="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
               case "$r" in success) icon="✅" ;; *) icon="❌" ;; esac
               echo "| \`${j}\` | ${icon} ${r} |"
@@ -436,13 +470,19 @@ jobs:
   # --------------------------------------------------------------------------
   alerts:
     name: Alert ${{ matrix.check }}
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read    # newest-run check below
       issues: write
+    # One alert update per check at a time, so two master runs finishing together cannot race
+    # on the same issue. Dropping a PENDING older run is fine: the newer one carries master's state.
+    concurrency:
+      group: ci-standalone-alert-${{ matrix.job }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -455,6 +495,8 @@ jobs:
             job: compose-client-gate
           - check: ci-standalone/client-typecheck
             job: client-typecheck
+          - check: ci-standalone/pcf-eslint
+            job: pcf-eslint
     steps:
       - name: Checkout (local action only)
         uses: actions/checkout@v6
@@ -468,8 +510,25 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           JOB: ${{ matrix.job }}
           SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          # Master runs can finish out of order. If a NEWER master push run of this workflow has
+          # already completed, it has already posted master's current state (its alerts job is
+          # part of it); posting this older result now would overwrite that, e.g. close an alert
+          # the newer run opened. Every job here runs on every non-docs push, so the newest
+          # completed run is always a full verdict. If the check itself fails, post anyway.
+          if [ "$EVENT" = "push" ]; then
+            newest="$(gh api "repos/${REPO}/actions/workflows/ci-standalone-checks.yml/runs?branch=master&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].run_number // 0' || echo 0)"
+            if [ "${newest:-0}" -gt "$RUN_NUMBER" ]; then
+              echo "status=skip" >> "$GITHUB_OUTPUT"
+              echo "Superseded: newer master run #${newest} has already completed and posted; not posting run #${RUN_NUMBER}." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
           result="$(jq -r --arg j "$JOB" '.[$j].result' <<<"$NEEDS_JSON")"
           if [ "$result" = "success" ]; then
             status=ok
@@ -491,6 +550,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Raise or clear the alert
+        if: steps.decide.outputs.status == 'ok' || steps.decide.outputs.status == 'failing'
         uses: ./.github/actions/quality-alert
         with:
           check: ${{ matrix.check }}

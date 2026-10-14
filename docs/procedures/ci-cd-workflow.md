@@ -33,7 +33,7 @@ A CI problem is either **fixed** or **raised for review**. Nothing that fails is
 |---|---|---|
 | `Router` (`ci-router.yml`: Tier 1 blocking + Tier 2 advisory) | **Yes** | Red required check; the PR cannot merge. Tier 2 never fails the Router; its results are in the "Tier 2 Advisory Report" PR comment |
 | `Client lint (type-aware ratchet)` (`client-lint.yml`) | **Yes** | Red required check |
-| `CI Standalone Checks` (`ci-standalone-checks.yml`): dependency audit, Release build + BFF publish, Compose client gate, client typecheck | No (advisory) | Red check on the PR, plus a results table in the run's `Summary` job summary |
+| `CI Standalone Checks` (`ci-standalone-checks.yml`): dependency audit, Release build + BFF publish, Compose client gate, client typecheck, PCF ESLint | No (advisory) | Red check on the PR, plus a results table in the run's `Summary` job summary |
 | Other path-scoped workflows (actionlint, `office-addins-tests.yml`, `css-reset-gate.yml`, ...) | No | Red check on the PR |
 
 Verify the required list with `gh api repos/spaarke-dev/spaarke/rules/branches/master` before relying on it.
@@ -42,11 +42,12 @@ Verify the required list with `gh api repos/spaarke-dev/spaarke/rules/branches/m
 
 | Alert | Raised by | `failing` when |
 |---|---|---|
-| `router-master` | `master-ci-alert.yml` (`workflow_run` when `CI` completes on a push to master) | the Router or any Tier 1 job is red, cancelled or timed out. Master is red for every branch cut from it |
-| `tier2-master/full-unit-tests` | `master-ci-alert.yml` | a Tier 2 unit-test shard reports a verdict other than `pass`, or none (read from the run's verdict artifacts; nothing is re-run). Not evaluated when no shard ran or master did not compile |
-| `ci-standalone/dependency-audit`, `/release-build`, `/compose-client-gate`, `/client-typecheck` | `ci-standalone-checks.yml` job `alerts` (push to master only) | that job is not `success` |
+| `router-master` | `master-ci-alert.yml` (`workflow_run` when `CI` completes on a push to master) | the Router or any Tier 1 job is red, cancelled or timed out on its most recent master run. Master is red for every branch cut from it |
+| `tier2-master/full-unit-tests` | `master-ci-alert.yml` | a Tier 2 unit-test shard reports a verdict other than `pass`, or none, on its most recent master run in which master compiled (read from the verdict artifacts; nothing is re-run) |
+| `ci-standalone/dependency-audit`, `/release-build`, `/compose-client-gate`, `/client-typecheck`, `/pcf-eslint` | `ci-standalone-checks.yml` job `alerts` (push to master only; skipped when a newer master run already posted) | that job is not `success` |
+| `master-ci-alert/evaluation` | `master-ci-alert.yml` | the verdict script itself failed (GitHub API errors after retries), so the two alerts above were not updated |
 
-The scheduled workflows (`nightly-health.yml`, `client-tests.yml`, `mutation-nightly.yml`) raise their own alerts the same way. The decision logic for `router-master` and `tier2-master/full-unit-tests` is `scripts/ci/master-ci-verdict.ps1`, which can be replayed against any past run: `pwsh scripts/ci/master-ci-verdict.ps1 -RunId <id> -Repo spaarke-dev/spaarke -IgnoreSuperseded`.
+The scheduled workflows (`nightly-health.yml`, `client-tests.yml`, `mutation-nightly.yml`) raise their own alerts the same way. The decision logic for `router-master` and `tier2-master/full-unit-tests` is `scripts/ci/master-ci-verdict.ps1`. It judges master's current state, not one run: the newest 25 completed master push runs, each job and Tier 2 shard from the most recent run that executed it. A docs-only push (Tier 1 skipped, Router green) therefore cannot close a compile-break alert, and a path-gated job keeps its last real result. Replay any past state: `pwsh scripts/ci/master-ci-verdict.ps1 -RunId <id> -Repo spaarke-dev/spaarke -AsOf`.
 
 **Where to look**
 
@@ -189,7 +190,7 @@ Closing an alert by hand does not silence the check: the next failing run reopen
 | `adr-audit.yml` | ADR Architecture Audit | Scheduled / advisory | Full NetArchTest ADR compliance scan; creates/updates a tracking issue |
 | `build-provisioning-sidecar.yml` | Build Provisioning Sidecar | PR/push (scoped) / dispatch | Build, Trivy-scan, and push the Exchange-policy provisioning sidecar image to the platform ACR |
 | `ci-router.yml` | CI (job: `Router`) | **Blocking — required check** | Single-gate router: classifies the diff, dispatches Tier 1 + Tier 2, aggregates into `CI / Router` |
-| `ci-standalone-checks.yml` | CI Standalone Checks | PR/push / advisory | Checks retired from `sdap-ci.yml` with no Router equivalent: dependency audit, Release build + BFF publish (`deployment-packages` artifact for `deploy-promote.yml`), Compose client gate, client typecheck; quality alerts on master |
+| `ci-standalone-checks.yml` | CI Standalone Checks | PR/push / advisory | Checks retired from `sdap-ci.yml` with no Router equivalent: dependency audit, Release build + BFF publish (`deployment-packages` artifact for `deploy-promote.yml`), Compose client gate, client typecheck, PCF ESLint; quality alerts on master |
 | `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate, Xrm capability guard; the DataGrid external-host gate is advisory until its flip |
 | `ci-tier2-advisory.yml` | CI Tier 2 (Advisory) | Advisory (reusable, called by the router) | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size; posts one deduplicated PR comment |
 | `client-tests.yml` | Client Tests | Scheduled / advisory | Nightly test baseline (jest, vitest, node:test) across every client package with a real `test` script (count discovered at runtime; 43 on 2026-10-12) |
@@ -699,6 +700,7 @@ The checks from `sdap-ci.yml` that have no Router or nightly equivalent, run in 
 - `release-build` — Release build of the whole solution (spec FR-B07) and the BFF Release publish. On master pushes it uploads the `deployment-packages` artifact (`api/` layout, 30-day retention) that `deploy-promote.yml` downloads.
 - `compose-client-gate` — the `@spaarke/compose-components` jest save-contract suite (builds its shared-lib `dist/` first).
 - `client-typecheck` — `tsc` builds of six shared client libraries in dependency order, then `Spaarke.AI.Widgets` `tsc --noEmit`.
+- `pcf-eslint` — `eslint .` in `src/client/pcf` (Tier 2 `lint` runs it only on SpaarkeAi/BFF changes and `client-lint.yml` does not cover PCF).
 
 `Summary` writes one results table to the run's summary. On a push to master, `alerts` raises or clears one quality alert per job (`ci-standalone/<job>`). No job uses `continue-on-error`: a failure must show as a failure, and a `continue-on-error` job reads as `success` to the alerts job.
 
@@ -706,7 +708,7 @@ The checks from `sdap-ci.yml` that have no Router or nightly equivalent, run in 
 
 **Triggers**: `workflow_run` (workflow `CI`, completed, branch `master`; push events only), `workflow_dispatch` (inputs `run_id`, `dry_run` default true).
 
-Runs `scripts/ci/master-ci-verdict.ps1` against the newest completed master run of `CI` and raises or clears `router-master` and `tier2-master/full-unit-tests` (see [How CI problems are surfaced](#how-ci-problems-are-surfaced)). It reads the run, its jobs and the Tier 2 shard verdict artifacts; it re-runs nothing and does not touch the tier workflows. `workflow_run` workflows run from the default branch's copy only.
+Runs `scripts/ci/master-ci-verdict.ps1` over the newest 25 completed master runs of `CI` (each job judged from its most recent execution) and raises or clears `router-master` and `tier2-master/full-unit-tests`, plus `master-ci-alert/evaluation` when the script itself fails (see [How CI problems are surfaced](#how-ci-problems-are-surfaced)). It reads the run, its jobs and the Tier 2 shard verdict artifacts; it re-runs nothing and does not touch the tier workflows. `workflow_run` workflows run from the default branch's copy only.
 
 #### Retired: `sdap-ci.yml` and `sdap-ci-docs-only.yml`
 
@@ -891,7 +893,7 @@ gh run rerun {previous-run-id}
 | `format` / `lint` (Tier 2) | `ci-tier2-advisory.yml` | Formatting/lint violation | `dotnet format whitespace`; `npx prettier --write "src/client/**/*.{ts,tsx}"`; `cd src/client/pcf && npx eslint . --fix` |
 | `full-unit-tests` (Tier 2) | `ci-tier2-advisory.yml` | A unit test failed on both pass 1 and the pass-2 retry | Download the `tier2-unit-test-results-Debug-<shard>` artifact of the shard that failed |
 | `dependency-audit` | `ci-standalone-checks.yml` | A package has a known vulnerability (or the scan could not run) | The job summary lists the packages; upgrade, or record an ADR-029 accepted-risk entry |
-| `release-build` / `compose-client-gate` / `client-typecheck` | `ci-standalone-checks.yml` | Release-only compile error; a Compose save-contract test failed; a shared-lib type error | The failing step's log; on master the matching `ci-standalone/<job>` quality alert links the run |
+| `release-build` / `compose-client-gate` / `client-typecheck` / `pcf-eslint` | `ci-standalone-checks.yml` | Release-only compile error; a Compose save-contract test failed; a shared-lib type error; a PCF ESLint error | The failing step's log; on master the matching `ci-standalone/<job>` quality alert links the run |
 
 ### Viewing CI Logs
 

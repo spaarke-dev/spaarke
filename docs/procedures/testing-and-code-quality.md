@@ -19,7 +19,7 @@ This guide explains the complete code quality system in the Spaarke development 
 |-------|------|-------|-----------|
 | **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
 | **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
-| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck (standalone, advisory) | Router + Client lint: Yes |
+| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
 | **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
 | **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
 | **Quarterly** | Manual trigger | Full audit runbook | Advisory |
@@ -724,6 +724,7 @@ The legacy `sdap-ci.yml` pipeline was **retired on 2026-10-14** (archived at `do
 | **Release build + BFF publish** | `ci-standalone-checks.yml` | Release build of the solution (FR-B07); BFF publish + `deployment-packages` artifact | Advisory (alert on master) |
 | **Compose Client Gate** | `ci-standalone-checks.yml` | `@spaarke/compose-components` jest save-contract suite | Advisory (alert on master) |
 | **Client typecheck** | `ci-standalone-checks.yml` | Shared-lib `tsc` builds + `Spaarke.AI.Widgets` `tsc --noEmit` | Advisory (alert on master) |
+| **PCF ESLint** | `ci-standalone-checks.yml` | `eslint .` in `src/client/pcf` on every non-docs PR (Tier 2 `lint` runs only on SpaarkeAi/BFF changes) | Advisory (alert on master) |
 
 Advisory does not mean ignorable. On master every red check raises a **quality alert** assigned to the owner, and a red `Router` on master raises `router-master` (`master-ci-alert.yml`). See [CI/CD Workflow Guide — How CI problems are surfaced](ci-cd-workflow.md#how-ci-problems-are-surfaced).
 

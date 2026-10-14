@@ -20,7 +20,7 @@ The key design decision is separating the PR gate from deployment and from provi
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **CI Router** | `ci-router.yml` | PR → master, push → master, merge_group | The single required status check (`CI / Router`): classifies the diff, dispatches a blocking Tier 1 + an advisory Tier 2, and aggregates the result (Tier 2 is excluded from adjudication by construction, so it can never redden the gate) |
+| **CI Router** | `ci-router.yml` | PR → master, push → master, merge_group | A required status check (`CI / Router`; the ruleset also requires `Client lint (type-aware ratchet)`): classifies the diff, dispatches a blocking Tier 1 + an advisory Tier 2, and aggregates the result (Tier 2 is excluded from adjudication by construction, so it can never redden the gate) |
 | **CI Tier 1 (Blocking)** | `ci-tier1-blocking.yml` | `workflow_call` from the router | Compile (whole solution), full NetArchTest ArchTest suite, changed-surface smoke, auth smoke, golden-utterance eval gate, I1–I5 tenant-isolation invariants, Compose fidelity corpus round-trip |
 | **CI Tier 2 (Advisory)** | `ci-tier2-advisory.yml` | `workflow_call` from the router | Format, lint, full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, plugin size; every job is `continue-on-error: true` |
 | **CI Standalone Checks** | `ci-standalone-checks.yml` | PR → master (`paths-ignore`: docs-only), push → master, `workflow_dispatch` | NOT required. Checks with no Router equivalent: dependency audit, Release build + BFF publish (uploads `deployment-packages` on master pushes), Compose client gate, shared-lib / `Spaarke.AI.Widgets` `tsc`. On master each failing job raises a `ci-standalone/<job>` quality alert |
@@ -134,7 +134,7 @@ Each target is an operationally independent App Service in its own resource grou
 | Compose fidelity corpus round-trip | Yes (Tier 1) | Over every `.docx` under `tests/fixtures/compose-corpus/` |
 | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size | No (Tier 2, advisory) | Every job is `continue-on-error: true`; posted as one deduplicated PR comment |
 
-`CI / Router` is the **only** required status check on `master` (verified 2026-09-30). The legacy `sdap-ci.yml` (Trivy scan, Debug+Release build/test matrix, Prettier/ESLint, `dotnet format`, ADR NetArchTest suite, dependency audit) was retired 2026-10-14 and archived at `docs/archive/workflows/sdap-ci.yml`; `Client lint (type-aware ratchet)` (`client-lint.yml`) is also required. `claude-code-review.yml` (the one AI-review gate this table used to list) was removed 2026-05-26 — see the Workflow Inventory note above.
+`CI / Router` and `Client lint (type-aware ratchet)` are the required status checks on `master` (verified 2026-10-14). The legacy `sdap-ci.yml` (Trivy scan, Debug+Release build/test matrix, Prettier/ESLint, `dotnet format`, ADR NetArchTest suite, dependency audit) was retired 2026-10-14 and archived at `docs/archive/workflows/sdap-ci.yml`; `Client lint (type-aware ratchet)` (`client-lint.yml`) is also required. `claude-code-review.yml` (the one AI-review gate this table used to list) was removed 2026-05-26 — see the Workflow Inventory note above.
 
 ### Nightly (nightly-health.yml)
 

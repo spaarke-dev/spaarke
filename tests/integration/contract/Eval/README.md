@@ -49,7 +49,7 @@ The quality spine of the AI architecture redesign. Every case is a golden uttera
 
 ## CI wiring and the merge gate (ACTIVE since task 026)
 
-**Pass 1 (informational)**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and runs inside the `dotnet test` shards of Tier 2 `Full Unit Tests (Debug)` (`.github/workflows/ci-tier2-advisory.yml`, test pass 1, advisory) on every PR. The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; the CI Router has no `paths:` filter, so BA-only case edits trigger a CI run.
+**Pass 1 (informational)**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and runs inside the `dotnet test` shards of Tier 2 `Full Unit Tests (Debug)` (`.github/workflows/ci-tier2-advisory.yml`, test pass 1, advisory) on every PR that changes BFF paths (the Router dispatches the shards only then). The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; the CI Router has no `paths:` filter, so BA-only case edits trigger a CI run.
 
 **Merge gate (blocking — NFR-02)**: the dedicated `eval-gate` job in `.github/workflows/ci-tier1-blocking.yml` runs
 

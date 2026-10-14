@@ -15,7 +15,8 @@
 | Build & Test: coverage collection + upload | Mapped | `nightly-health.yml` `coverage-observation` (ADR-038: coverage is observation, never a gate). |
 | Build & Test: `Release` matrix entry (removed 2026-06-24; FR-B07 restore) | **Preserved** | `ci-standalone-checks.yml` `release-build`: Release build of the whole solution. Tests stay in Debug (Tier 2). |
 | **Eval Gate (Golden Utterances)** | Mapped | Tier 1 `eval-gate` (same command, blocking). |
-| **Client Quality**: Prettier check, PCF ESLint | Mapped | Tier 2 `lint` (same two commands) and `client-lint.yml` (type-aware ratchet, required). |
+| **Client Quality**: PCF ESLint | **Preserved** | `ci-standalone-checks.yml` `pcf-eslint` (same command). Tier 2 `lint` runs it only when SpaarkeAi/BFF paths change, and `client-lint.yml` does not cover `src/client/pcf/**`, so a PCF-only PR would otherwise get no ESLint. |
+| Client Quality: Prettier check | Mapped (legacy check was vacuous) | It ran **after** `prettier --write`, so it could never fail. Tier 2 `lint` runs a real `prettier --check` on SpaarkeAi/BFF PRs; `.husky/pre-commit` formats staged files. A real check finds **48** unformatted files under `src/client/` today (local run 2026-10-14), which the legacy job hid. |
 | Client Quality: Prettier auto-fix | **Dropped** | Rewrote the workspace and pushed nothing since 2026-08-28; `.husky/pre-commit` formats staged files. |
 | Client Quality: 6 shared-lib `tsc` builds + `Spaarke.AI.Widgets` `tsc --noEmit` | **Preserved** | `ci-standalone-checks.yml` `client-typecheck` (no other workflow runs `tsc` on these libraries per push). |
 | **Code Quality**: `dotnet format whitespace --verify-no-changes` | Mapped | Tier 2 `format`. |
@@ -44,17 +45,25 @@ Both legacy files were **moved** to `docs/archive/workflows/` (GitHub does not e
 | `ci-standalone/release-build` | same | job not success | next green master run |
 | `ci-standalone/compose-client-gate` | same | job not success | next green master run |
 | `ci-standalone/client-typecheck` | same | job not success | next green master run |
+| `ci-standalone/pcf-eslint` | same | job not success | next green master run |
+| `master-ci-alert/evaluation` | `master-ci-alert.yml` | the verdict script failed (GitHub API errors after 3 retries, script bug), so the two alerts above were not updated | next successful evaluation |
 
 All use `.github/actions/quality-alert` (PR #1837): one issue per check, label `quality-alert`, assigned to the
 owner, edited in place, closed with "Recovered". Decision logic for the first two is
-`scripts/ci/master-ci-verdict.ps1`, replayable against any past run:
+`scripts/ci/master-ci-verdict.ps1`. It judges master's **current state**, not the triggering run alone: the newest
+25 completed master push runs, each job (and each Tier 2 shard) from the most recent run that executed it. So a
+docs-only push (Tier 1 skipped, Router green) cannot close a compile-break alert, a path-gated job keeps its last
+real result, and runs finishing out of order cannot hide an older run's failure. Known limit: a job not executed
+in the last 25 master runs drops out of the evaluation. The standalone alerts skip posting when a newer master
+run of that workflow has already completed. Replay any past state with `-AsOf`:
 
 | Replayed run | router-master | tier2 | |
 |---|---|---|---|
-| 37775675230 (2026-10-08, CS0411) | failing (Compile) | skip (master did not compile) | ✅ the alert that was missing |
-| 38069733811 (2026-10-10, IMDS flake) | failing (Arch Tests) | skip (no shard ran) | ✅ |
+| 37775675230 (2026-10-08, CS0411) | failing (Compile, Router) | ok (shards judged from the last compiling run) | ✅ the alert that was missing |
+| 38069733811 (2026-10-10, IMDS flake) | failing (Arch Tests, Router) | ok (from earlier runs) | ✅ |
 | 37856261377 (2026-10-09, shard crash) | ok | failing (`rest`) | ✅ |
-| 37370930255 (2026-10-05, cancelled) | failing (3 cancelled Tier 1 jobs) | failing (4 shards without verdict) | ✅ |
+| 37370930255 (2026-10-05, cancelled) | failing (3 cancelled Tier 1 jobs, Router) | failing (4 shards without verdict) | ✅ |
+| 38324167927 (2026-10-11, docs-only, Tier 1 skipped) | ok (Tier 1 jobs judged from earlier runs, all green) | ok | ✅ no false close possible |
 | 38576680033 (2026-10-14, green) | ok | ok | ✅ |
 
 ## deploy-promote.yml (spec MUST: "functionally untouched")
