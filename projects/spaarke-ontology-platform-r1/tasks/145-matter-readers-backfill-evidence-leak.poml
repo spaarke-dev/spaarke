@@ -32,6 +32,7 @@
   </context>
 
   <constraints>
+    <constraint source="144 review K1 (2026-10-14)">The stamp follows the SUBJECT, not the core: sprk_signal has no typed sprk_project/sprk_workassignment lookup, so after a subject re-file P→Q the live sprk_regarding* stamp says Q while sprk_corerecordid stays P (CoreAncestorResolver.cs:255-263, SecureChildLineage.cs:97-98, DecisionRecordWriter.cs:296). Do NOT retire a typed core lookup from lineage on a "stamp equals core" or "backfill verified" premise; that would drop the core (including a matter core) from lineage. Step 4's retirement by uac-r2 needs that premise re-proved per column, or the column kept as context.</constraint>
     <constraint source="D-34">Context readers use sprk_corerecordid/sprk_corerecordtype; filing readers use the live sprk_regarding* stamp. Record each reader's classification in notes/145-matter-readers.md.</constraint>
     <constraint source="D-123">Evidence for a Signal must not carry detail (subject, sender, body excerpts) of a record whose secure-root set differs from the Signal's own partition; Undetermined counts as secure. Test with a communication filed to ordinary M and to secure X.</constraint>
     <constraint source="project">The backfill is a dev data change: write it as a re-runnable, report-first script; run the report; STOP for owner approval before writing. Do not edit SecureChildLineage (uac-r2's). Never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
