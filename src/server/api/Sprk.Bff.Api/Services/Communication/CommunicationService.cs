@@ -1428,7 +1428,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // acknowledge a post nobody can see. The best-effort thread step failed, so retire the row and tell the caller to retry.
         if (threadId is null)
         {
-            await RetirePostWithoutThreadAsync(communicationId, correlationId, ct);
+            // CancellationToken.None: the thread step swallows a client abort and returns null; the retire must still land, or an
+            // active threadless row is left behind (task 065 final re-check K2).
+            await RetirePostWithoutThreadAsync(communicationId, correlationId, CancellationToken.None);
             throw new SdapProblemException(
                 code: ThreadUnavailableCode,
                 title: "Service Unavailable",

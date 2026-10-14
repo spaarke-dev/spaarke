@@ -277,6 +277,10 @@ public sealed class EmailDraftToolHandlerPerItemToolsTests : TypedToolHandlerTes
     public Task SummarizeThread_NoPrincipal_IsDenied() =>
         AssertDeniedAsync("summarize_thread", new CommunicationVisibilityFixtures { HasPrincipal = false });
 
+    [Fact(DisplayName = "F1: an unresolvable caller gets the same not-found answer, not an unexpected failure")]
+    public Task SummarizeThread_UnresolvableCaller_IsDeniedAsNotFound() =>
+        AssertDeniedAsync("summarize_thread", new CommunicationVisibilityFixtures { CallerResolvable = false });
+
     [Theory(DisplayName = "F1: draft_reply and draft_forward share the same fetch, so they are denied alike")]
     [InlineData("reply")]
     [InlineData("forward")]

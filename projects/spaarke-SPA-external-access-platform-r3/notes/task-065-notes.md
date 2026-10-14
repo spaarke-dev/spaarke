@@ -563,3 +563,17 @@ New fixture `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/CommunicationVisib
 
 - No race guard on the default-thread find-or-create (see item 4).
 - The ArchTests ledger reason text for `attachments/text` (`RouteAuthorizationGuardTests.Ledger.cs`, near line 1463) does not yet mention the new visibility check (text only; tests pass).
+
+## Final re-check of fix round 6 (2026-10-14, opus adversarial-reviewer)
+
+No F-class finding (558 filtered tests passed). Main session fixed three K2 items in the closing commit:
+
+- `CommunicationService` retires a threadless partner post with `CancellationToken.None`. A client abort no longer leaves an active threadless row.
+- `EmailDraftToolHandler.FetchThreadAsync` turns the visibility read's 403 (an unresolvable caller) into the same not-found answer. Test `SummarizeThread_UnresolvableCaller_IsDeniedAsNotFound`; seeding proof: with the catch disabled 1 failed, restored 47/47.
+- `EmailUploadCaptureService` truncates `sprk_inreplyto` to its 1000-character column.
+
+Known limits:
+
+- **K, filed as ISS-010:** the generic `dataverse.read_query` chat tool (`DataverseReadQueryHandler`), the `DELETE /api/communications/{id}` route, and direct Dataverse or model-driven reads apply Dataverse security only. A licensed user flagged `sprk_isexternal` who has Dataverse read on a record's communications can read internal-only and Private-thread bodies that way. Internal Only is enforced by the BFF's reads, not by Dataverse security. Contacts (CIAM and workforce) have no Dataverse access and are not affected.
+- **K4 (D8):** concurrent first partner posts can create two Open default threads. Both stay visible, so nothing is hidden or leaked. Ordering the default-thread lookup by `createdon` does not change which thread internal sends land in.
+- **D8 scope:** `RequireOpenDefaultThread` is set only on the external post route. That includes systemuser authors on the external plane, whose posts are written `false`, so an Open thread fits.

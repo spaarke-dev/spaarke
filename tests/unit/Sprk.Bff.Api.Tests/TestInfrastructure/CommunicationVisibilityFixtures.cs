@@ -42,6 +42,9 @@ internal sealed class CommunicationVisibilityFixtures
     /// <summary>False = the request carries no principal at all.</summary>
     public bool HasPrincipal { get; init; } = true;
 
+    /// <summary>False = the principal cannot be resolved to a systemuser (the visibility read refuses with a 403).</summary>
+    public bool CallerResolvable { get; init; } = true;
+
     /// <summary>The communication ids the service was asked about, in call order.</summary>
     public List<string> CommunicationQueries { get; } = new();
 
@@ -85,7 +88,9 @@ internal sealed class CommunicationVisibilityFixtures
         var resolver = new Mock<ICallerSystemUserResolver>();
         resolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
+            .ReturnsAsync(() => CallerResolvable
+                ? CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D"))
+                : CallerSystemUserResolution.Unresolved("test: no systemuser for this principal"));
         var identity = new Mock<ISystemUserIdentityResolver>();
         identity
             .Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

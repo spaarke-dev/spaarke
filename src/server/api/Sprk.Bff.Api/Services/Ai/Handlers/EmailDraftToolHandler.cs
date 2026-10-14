@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -796,9 +797,19 @@ public sealed class EmailDraftToolHandler : IToolHandler
         // row the caller may not see answers exactly like one the user client cannot find. No request principal, or a
         // visibility fault, never reads the content (fail closed).
         var principal = _httpContextAccessor.HttpContext?.User;
-        if (principal is null
-            || await _communicationVisibility.ReadVisibleCommunicationAsync(communicationId, principal, null, cancellationToken)
-                .ConfigureAwait(false) is null)
+        bool visible;
+        try
+        {
+            visible = principal is not null
+                && await _communicationVisibility.ReadVisibleCommunicationAsync(communicationId, principal, null, cancellationToken)
+                    .ConfigureAwait(false) is not null;
+        }
+        catch (SdapProblemException ex) when (ex.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            // An unresolvable caller is refused by the visibility read; answer exactly as for a missing or hidden row.
+            visible = false;
+        }
+        if (!visible)
         {
             return (null, ToolResult.Error(
                 HandlerId, tool.Id, tool.Name,

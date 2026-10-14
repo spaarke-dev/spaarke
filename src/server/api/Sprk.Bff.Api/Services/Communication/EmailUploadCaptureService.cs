@@ -433,7 +433,8 @@ public sealed class EmailUploadCaptureService
             ? envelope.InReplyTo
             : envelope.References.LastOrDefault(r => !string.IsNullOrWhiteSpace(r));
         if (!string.IsNullOrWhiteSpace(parentReference))
-            communication["sprk_inreplyto"] = parentReference;
+            // sprk_inreplyto holds at most 1000 characters; the filing sweep only tests it for non-blank.
+            communication["sprk_inreplyto"] = TruncateTo(parentReference, 1000);
 
         // Stamp the internet-message-id when present (it is ALSO the race-proof create's dedup key). A
         // null/blank id leaves the attribute unset — the alternate key excludes nulls (unguarded create).
