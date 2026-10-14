@@ -650,6 +650,73 @@ public sealed class SecureRecordSetupProcedureTests
             { "Core User still reads entries (task 154 not applied)", dv =>
                     dv.RolePrivileges[dv.CoreUserRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Global"),
                 SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+
+            // ---- S22: the external-invite columns' locks (ISS-025 / #1803) ----
+            { "contact.sprk_externalinvitedon not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitedon")] = false,
+                SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable },
+            { "contact.sprk_externalinvitedon absent (it ships in 1.2.2.0)", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitedon")),
+                SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update contact.sprk_externalinvitedon", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_externalinvitedon");
+                    permissions.RemoveAll(p => p.ProfileId == dv.WriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, "contact", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable },
+            { "Writers have no row on contact.sprk_externalinvitedon", dv =>
+                    dv.ColumnPermissions("sprk_externalinvitedon").RemoveAll(p => p.ProfileId == dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read contact.sprk_externalinvitedon", dv =>
+                    dv.ColumnPermissions("sprk_externalinvitedon").RemoveAll(p => p.ProfileId == dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable },
+            { "Readers may update contact.sprk_externalinvitedon", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_externalinvitedon");
+                    permissions.RemoveAll(p => p.ProfileId == dv.ReaderProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, "contact", 4, 0, 4));
+                },
+                SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create contact.sprk_externalinvitedon", dv =>
+                    dv.ColumnPermissions("sprk_externalinvitedon")
+                        .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter, FailureClass.QuarantineRequired },
+            { "contact.sprk_externalinvitecodehash present but not secured", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] = false;
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update contact.sprk_externalinvitecodehash", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    var permissions = dv.ColumnPermissions("sprk_externalinvitecodehash");
+                    permissions.RemoveAll(p => p.ProfileId == dv.WriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, "contact", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashLockIncomplete, FailureClass.Resumable },
+            { "Readers can READ contact.sprk_externalinvitecodehash", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnPermissions("sprk_externalinvitecodehash")
+                        .Add(new SecureSetupFieldPermission(dv.ReaderProfileId, "contact", 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
+            { "Readers can update contact.sprk_externalinvitecodehash (0/0/4)", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnPermissions("sprk_externalinvitecodehash")
+                        .Add(new SecureSetupFieldPermission(dv.ReaderProfileId, "contact", 0, 0, 4));
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
+            { "another profile can read contact.sprk_externalinvitecodehash", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnPermissions("sprk_externalinvitecodehash")
+                        .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
         };
         return data;
     }
@@ -700,6 +767,68 @@ public sealed class SecureRecordSetupProcedureTests
         var dv = NewEnv();   // NewEnvironment grants the System Administrator profile read/create/update
 
         (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+    }
+
+    // ------------------------------------------------------------ S22: the external-invite columns (ISS-025 / #1803)
+
+    private const string CodeHashAbsentNote = "absent — ships in a later SpaarkeMaster release";
+
+    [Fact]
+    public async Task InviteColumns_CodeHashAbsent_Passes_AndRecordsTheAbsentOutcome_WithoutWriting()
+    {
+        var dv = NewEnv();   // SpaarkeMaster 1.2.2.0: sprk_externalinvitedon shipped and locked, the code hash not there yet
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().ContainSingle(n => n.Contains("sprk_externalinvitecodehash", StringComparison.Ordinal)
+                                                       && n.Contains(CodeHashAbsentNote, StringComparison.Ordinal));
+        dv.Writes.Should().NotContain(w => w.Contains("invite", StringComparison.OrdinalIgnoreCase), "S22 verifies, never writes");
+    }
+
+    [Fact]
+    public async Task InviteColumns_BothCorrect_Pass_WithNoReadersRowOnTheCodeHash()
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();   // the platform System Administrator profile also holds 4/4/4 (exempt)
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().ContainSingle().Which.Should().Contain("present, secured");
+        applied.State.Notes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InviteCodeHash_WithAZeroZeroZeroReadersRow_Passes()
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        dv.ColumnPermissions("sprk_externalinvitecodehash")
+            .Add(new SecureSetupFieldPermission(dv.ReaderProfileId, "contact", 0, 0, 0));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>("0/0/0 grants nothing, the same as no row");
+    }
+
+    [Fact]
+    public async Task SecondRun_WithBothInviteColumns_WritesNothing()
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Clear();
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Which.Actions.Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InviteMarkerRefusal_NamesTheColumn_AndTheRemedy()
+    {
+        var dv = NewEnv();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitedon")] = false;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_externalinvitedon").And.Contain("IsSecured=False").And.Contain("1.2.2.0");
     }
 
     [Fact]

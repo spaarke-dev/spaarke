@@ -421,7 +421,7 @@ Until then, merge T263 only together with the approval, or accept that T186 stop
 
 | Field | Value |
 |---|---|
-| **Status** | Open — before T240d production (the column lands with UAC-r2 PR #1801 / owner round 97) |
+| **Status** | Code complete 2026-10-14 (worktree commit COMMIT_SHA); live proof at T186 H7b (invitedon); codehash proof after the SpaarkeMaster release that carries it |
 | **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
 
