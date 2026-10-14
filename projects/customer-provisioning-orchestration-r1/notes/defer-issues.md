@@ -434,7 +434,8 @@ checks); H7b never secures a column itself. If a check ever writes field-securit
 (MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
 **Widened 2026-10-13 (UAC task 185 design):** UAC task 185 adds `contact.sprk_externalinvitecodehash`, the invite-code
 hash, through `scripts/Set-ExternalInviteCodeHashSchema.ps1`. H7b must verify it too, with different grants: Readers
-read 0, create 0, update 0, and Writers 4/4/4. Any Readers read is a FAIL.
+have **no** permission row for it (UAC's script, `48db7adb3`, never creates one; a missing row and a 0/0/0 row both
+mean no access), and Writers 4/4/4. Any Readers access is a FAIL. The script refuses to run without 184's marker column.
 
 ### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
 
