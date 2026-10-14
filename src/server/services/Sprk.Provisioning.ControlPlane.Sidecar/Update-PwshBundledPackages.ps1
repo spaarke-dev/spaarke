@@ -28,7 +28,8 @@ $target = [version]$Version
 # `pwsh -File` passes 'A,B' as ONE string: accept both a list and a comma-separated value.
 $Packages = @($Packages | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
-$depsFiles = @(Get-ChildItem -Path $ToolRoot -Recurse -Filter 'pwsh.deps.json' -File)
+# -Force: on Linux the tool's .store/ directory is HIDDEN (leading dot), and -Recurse skips hidden items without it.
+$depsFiles = @(Get-ChildItem -Path $ToolRoot -Recurse -Force -Filter 'pwsh.deps.json' -File)
 if ($depsFiles.Count -eq 0) { throw "No pwsh.deps.json under $ToolRoot." }
 
 # One download per package; every manifest (the tool ships unix/ and win/ layouts) and every copy is patched from it.
@@ -66,7 +67,7 @@ foreach ($depsFile in $depsFiles) {
         $patched = Get-PatchedPackage $package
         # Each copy is replaced by the build at the SAME relative path in the package: runtimes/<rid>/lib/net10.0/ for a
         # platform-specific copy, lib/net10.0/ for the portable one.
-        $copies = @(Get-ChildItem -Path $appDir -Recurse -Filter "$package.dll" -File)
+        $copies = @(Get-ChildItem -Path $appDir -Recurse -Force -Filter "$package.dll" -File)
         if ($copies.Count -eq 0) { throw "No $package.dll under $appDir." }
         foreach ($copy in $copies) {
             $relative = [IO.Path]::GetRelativePath($appDir, $copy.FullName).Replace('\', '/')
