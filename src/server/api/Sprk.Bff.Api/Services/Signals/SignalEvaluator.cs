@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -39,15 +40,23 @@ public sealed record SignalHit(
     IReadOnlyDictionary<string, object?> FactValues,
     IReadOnlyList<SignalEvidenceRef> Evidence);
 
+/// <summary>A subject a rule could not judge for want of an input (task 025b). <see cref="Reason"/> is a bounded sentence with no
+/// record values beyond the figures the rule reads.</summary>
+public sealed record SignalMissingInput(string SubjectEntity, Guid SubjectId, string Field, string Reason);
+
 /// <summary>The result of <see cref="SignalEvaluator.EvaluateAsync"/>. <see cref="PolicyValid"/> false means the version
 /// failed the evaluation-time gate (already logged and metered by <see cref="PolicyVersionValidator"/>): no hits, and the
 /// caller must not close anything on the strength of it.</summary>
+/// <param name="MissingInputs">Subjects the rule could not judge because an input it needs was absent (task 025b: a utilization
+/// rule over a subject with no budget above zero). They are not hits, and each is named here with the reason, never silently
+/// dropped. Empty for every rule that has no such input.</param>
 public sealed record SignalEvaluation(
     bool PolicyValid,
     string? SubjectEntity,
     DateTimeOffset WindowAnchorUtc,
     int QuietWindowDays,
-    IReadOnlyList<SignalHit> Hits)
+    IReadOnlyList<SignalHit> Hits,
+    IReadOnlyList<SignalMissingInput>? MissingInputs = null)
 {
     internal static SignalEvaluation Invalid { get; } =
         new(false, null, default, PredicateCompiler.DefaultQuietWindowDays, Array.Empty<SignalHit>());
@@ -66,7 +75,7 @@ public sealed record SignalEvaluation(
 /// cloned (<c>PredicateCompilerCallerGuardTests</c>).</para>
 /// <para><b>Per-item today (D-25, FR-47).</b> For a <c>when</c> field that is a Date Only column
 /// (<see cref="CompiledPredicate.DateOnlyWhenFields"/>), a relative bound (<c>now</c>, <c>now-Nd</c>) means a calendar day in
-/// the item's own zone: the assignee's, else the owner's, else UTC, through the shared <see cref="DataverseRecipientDays"/>
+/// the item's own zone: the assignee's, else UTC (D-129: never the owner's, records are owned by teams), through the shared <see cref="DataverseRecipientDays"/>
 /// (task 098). The compiled bound is instant-anchored, so it can both include and exclude an item near midnight; the query
 /// is therefore WIDENED by two days on each such bound and every returned row is re-judged against its own today. A row
 /// whose judgement is the same for every possible today needs no time-zone lookup.</para>
@@ -162,18 +171,28 @@ public sealed class SignalEvaluator
         SignalWriter.DueDateColumnBySubject.TryGetValue(subject, out var dueColumn);
         var assigneeColumn = dateBounds.Count > 0 && AssigneeColumnBySubject.TryGetValue(subject, out var a) ? a : null;
 
+        // Task 025b (D-122): a Threshold on a matter's or project's spend, budget or utilization is judged from the invoice and
+        // budget rows, never from the stored copy (a plain column that only a form edit refreshes, so it can be arbitrarily stale).
+        var derived = compiled.Threshold is { BaseDerived: true } comparison ? comparison : null;
+
         var columns = new List<string>(whenFields);
+        if (derived is not null) columns.RemoveAll(c => c == derived.Field);
         if (dueColumn is not null) columns.Add(dueColumn);
         if (catalog.DisplayField is not null) columns.Add(catalog.DisplayField);
         if (catalog.NumberField is not null) columns.Add(catalog.NumberField);
-        if (dateBounds.Count > 0)
+        if (dateBounds.Count > 0 && assigneeColumn is not null)
         {
-            columns.Add("ownerid");
-            if (assigneeColumn is not null) columns.Add(assigneeColumn);
+            // D-25 as amended by D-129: "today" is the assignee's alone. ownerid is never read as a person (records are owned by teams).
+            columns.Add(assigneeColumn);
         }
 
         var fetch = XDocument.Parse(compiled.FetchXml);
         var entity = fetch.Root!.Element("entity")!;
+        if (derived is not null)
+        {
+            RemoveThresholdCondition(entity, derived);
+        }
+
         WidenDateOnlyBounds(entity, dateBounds, anchor);
         foreach (var column in columns.Distinct(StringComparer.Ordinal).Where(c => c != compiled.SubjectIdAttribute))
         {
@@ -197,6 +216,42 @@ public sealed class SignalEvaluator
             if (recipientDays is null || await HoldsForRecipientAsync(row, dateBounds, assigneeColumn, recipientDays, ct).ConfigureAwait(false))
             {
                 candidates.Add(row);
+            }
+        }
+
+        // The candidates are the subjects the rule's scope selects (its 'when' and, for a triggered run, the one subject). Now the
+        // comparison: spend and budget per candidate from GROUPED aggregates (one query per base table per chunk of candidates,
+        // not one per subject), utilization in C#, then the operator and number the author declared.
+        var computed = new Dictionary<Guid, decimal>();
+        var missing = new List<SignalMissingInput>();
+        if (derived is not null)
+        {
+            var (needSpend, needBudget) = FinanceBaseValues.Needs(derived.Field);
+            var bases = await FinanceBaseValues.ReadAsync(
+                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, ct).ConfigureAwait(false);
+            var judged = new List<Entity>(candidates.Count);
+            foreach (var row in candidates)
+            {
+                var (spend, budget) = bases[row.Id];
+                if (FinanceBaseValues.ValueOf(derived.Field, spend, budget, out var reason) is not { } value)
+                {
+                    missing.Add(new SignalMissingInput(subject, row.Id, derived.Field, reason!));
+                    continue;
+                }
+
+                if (ThresholdHolds(value, derived.FetchOperator, derived.Value))
+                {
+                    computed[row.Id] = value;
+                    judged.Add(row);
+                }
+            }
+
+            candidates = judged;
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Policy {PolicyCode}: {Count} {SubjectEntity} subject(s) could not be judged on {Field} (missing input, first: {Reason}); " +
+                    "they do not fire.", policy.PolicyCode, missing.Count, subject, derived.Field, missing[0].Reason);
             }
         }
 
@@ -227,6 +282,12 @@ public sealed class SignalEvaluator
                 facts[field] = NormalizeValue(row.Attributes.TryGetValue(field, out var v) ? v : null);
             }
 
+            if (derived is not null)
+            {
+                // §0.3: the sentence states the value the rule read, which is the computed one (never the stored copy).
+                facts[derived.Field] = computed[row.Id];
+            }
+
             foreach (var (field, value) in pinnedFacts)
             {
                 facts.TryAdd(field, value);
@@ -244,8 +305,44 @@ public sealed class SignalEvaluator
                 Evidence: witnesses.TryGetValue(row.Id, out var lines) ? lines : Array.Empty<SignalEvidenceRef>()));
         }
 
-        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits);
+        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing);
     }
+
+    // ── Base-derived Threshold (task 025b, D-122) ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Removes the Threshold's own condition (the FIRST root-filter condition on its column with its operator and operand; the
+    /// compiler adds it before any 'when' condition) so the query returns the rule's scope, not the subjects whose STORED value
+    /// passes. An emptied root filter is dropped. Throws when the condition is not there: evaluating on a stored value would
+    /// silently reintroduce the staleness this exists to remove.
+    /// </summary>
+    internal static void RemoveThresholdCondition(XElement entity, ThresholdComparison comparison)
+    {
+        var rootFilter = entity.Elements("filter").FirstOrDefault();
+        var condition = rootFilter?.Elements("condition").FirstOrDefault(c =>
+            c.Attribute("entityname") is null
+            && (string?)c.Attribute("attribute") == comparison.Field
+            && (string?)c.Attribute("operator") == comparison.FetchOperator
+            && (string?)c.Attribute("value") == comparison.Operand)
+            ?? throw new InvalidOperationException(
+                $"The compiled predicate has no '{comparison.FetchOperator}' condition on '{comparison.Field}' to take out, so it cannot " +
+                "be judged from the base rows. Refusing to evaluate on the stored value.");
+        condition.Remove();
+        if (!rootFilter!.HasElements)
+        {
+            rootFilter.Remove();
+        }
+    }
+
+    /// <summary>The Threshold operator (<c>ge/gt/le/lt</c>) applied to a computed value.</summary>
+    internal static bool ThresholdHolds(decimal actual, string fetchOperator, decimal declared) => fetchOperator switch
+    {
+        "ge" => actual >= declared,
+        "gt" => actual > declared,
+        "le" => actual <= declared,
+        "lt" => actual < declared,
+        _ => throw new InvalidOperationException($"'{fetchOperator}' is not a Threshold operator."),
+    };
 
     // ── Date Only bounds (D-25) ───────────────────────────────────────────────────────────────────────────────────
 
@@ -372,7 +469,9 @@ public sealed class SignalEvaluator
         }
 
         var assignee = assigneeColumn is null ? null : row.GetAttributeValue<EntityReference>(assigneeColumn)?.Id;
-        var recipient = await days.ForAsync(assignee, row.GetAttributeValue<EntityReference>("ownerid"), ct).ConfigureAwait(false);
+        // D-129: no owner fallback. The assignee contact's linked user gives the zone (DataverseRecipientDays); no assignee, or an
+        // assignee who is not a user, is the UTC date.
+        var recipient = await days.ForAsync(assignee, owner: null, ct).ConfigureAwait(false);
         return Holds(row, bounds, recipient.Today);
     }
 

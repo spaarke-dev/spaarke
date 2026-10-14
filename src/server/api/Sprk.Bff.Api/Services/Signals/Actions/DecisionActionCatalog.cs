@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -74,7 +75,22 @@ public sealed record DecisionActionDefinition(
     IReadOnlyList<DecisionActionParameter> Parameters,
     IReadOnlyList<string> EffectLines,
     IReadOnlyList<string> Excludes,
-    DecisionRecordClass RecordClass);
+    DecisionRecordClass RecordClass)
+{
+    /// <summary>The declared risk the commit route turns into the record's gate tier (task 043, D-52), through the AI
+    /// PublicContracts pure function <see cref="DecisionGateTier"/>. Every catalog action declares one; the commit route refuses
+    /// an action that does not rather than defaulting it.</summary>
+    public DecisionGateFactors? Gate { get; init; }
+
+    /// <summary>False for an intermediate step that leaves the Work Item open when it is the only thing taken (D-119: the budget
+    /// inquiry; D-128 Q18: the Do-lane reminder). The Signal becomes Acknowledged and linked to the record, and the nightly
+    /// ConditionCleared closes it. Every other action resolves the Signal when taken.</summary>
+    public bool ResolvesSignal { get; init; } = true;
+
+    /// <summary>True for an action that sends a message: the commit route runs those after every Dataverse write and Next step
+    /// (D-17, email last), the inquiry last of all.</summary>
+    public bool SendsMessage { get; init; }
+}
 
 /// <summary>One closed dismissal reason. The stored form on a Signal is <c>"code - detail"</c>.</summary>
 /// <param name="Code">Stable code stored with the dismissal.</param>
@@ -118,13 +134,21 @@ public static class DecisionActionCatalog
     [
         // ---- Decide lane ----------------------------------------------------------------------------------
         new("send-budget-inquiry", "Send budget inquiry", DecisionLane.Decide, IsNextStep: false, WorkType: "ask",
-            MessageParameters,
+            [
+                .. MessageParameters,
+                // Task 043 / 070: which of the matter's outside firms the inquiry is to (sprk_regardingorganization).
+                new("outsideFirm", "Outside firm", DecisionParameterKind.Lookup, Required: false,
+                    Hint: "The outside firm the inquiry is to; recorded on the inquiry so replies are tracked per firm",
+                    LookupEntity: "sprk_organization"),
+            ],
             [
                 "Sends the message above to the recipient",
                 "Records the inquiry against the matter",
+                "The item stays open until the budget is revised or the variance approved",
             ],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
 
         new("revise-budget", "Revise budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
@@ -139,7 +163,8 @@ public static class DecisionActionCatalog
                 "Updates the amount of the budget you picked",
             ],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         new("approve-variance", "Approve variance", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
@@ -148,14 +173,16 @@ public static class DecisionActionCatalog
             ],
             [ApproveVarianceEffect],
             Excludes: ["revise-budget"],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         // ---- Do lane --------------------------------------------------------------------------------------
         new("mark-complete", "Mark complete", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [new("note", "Completion note", DecisionParameterKind.TextArea, Required: false)],
             ["Sets the item to Completed"],
             Excludes: ["reschedule", "reassign"],
-            DecisionRecordClass.Routine),
+            DecisionRecordClass.Routine)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         new("reschedule", "Reschedule", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -164,7 +191,8 @@ public static class DecisionActionCatalog
             ],
             ["Moves the due date of the item"],
             Excludes: [],
-            DecisionRecordClass.Routine),
+            DecisionRecordClass.Routine)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, DeadlineImpact: true, RecordOfTruthImpact: true) },
 
         new("reassign", "Reassign", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -173,13 +201,15 @@ public static class DecisionActionCatalog
             ],
             ["Assigns the item to the person above"],
             Excludes: [],
-            DecisionRecordClass.Routine),
+            DecisionRecordClass.Routine)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
 
         new("send-reminder", "Send a reminder", DecisionLane.Do, IsNextStep: false, WorkType: null,
             MessageParameters,
-            ["Sends the message above to the recipient", "The response date is unchanged"],
+            ["Sends the message above to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
 
         new("extend-response-date", "Extend response date", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -188,7 +218,8 @@ public static class DecisionActionCatalog
             ],
             ["Moves the response date of the work assignment"],
             Excludes: [],
-            DecisionRecordClass.Routine),
+            DecisionRecordClass.Routine)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, DeadlineImpact: true, RecordOfTruthImpact: true) },
 
         new("record-the-response", "Record the response", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -203,7 +234,8 @@ public static class DecisionActionCatalog
             ],
             ["Records the response on the work assignment"],
             Excludes: ["send-reminder", "extend-response-date"],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         // ---- Next-step creators (any Next step makes the record Judgement, R-2) ---------------------------
         new("add-todo", "Add To Do", PlanLane: null, IsNextStep: true, WorkType: null,
@@ -214,7 +246,8 @@ public static class DecisionActionCatalog
             ],
             ["Creates a To Do linked to the record, created when the decision is recorded"],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, DeadlineImpact: true, RecordOfTruthImpact: true) },
 
         new("create-event", "Create Event", PlanLane: null, IsNextStep: true, WorkType: null,
             [
@@ -224,13 +257,15 @@ public static class DecisionActionCatalog
             ],
             ["Creates an event linked to the record, created when the decision is recorded"],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, DeadlineImpact: true, RecordOfTruthImpact: true) },
 
         new("send-email", "Send Notification Email", PlanLane: null, IsNextStep: true, WorkType: null,
             MessageParameters,
             ["Sends the message above when the decision is recorded"],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true },
 
         // assign-work is both: a Next step on any plan, and a Decide-lane plan action the Know-promotion rule offers (D-51).
         new("assign-work", "Assign Work", DecisionLane.Decide, IsNextStep: true, WorkType: null,
@@ -240,7 +275,8 @@ public static class DecisionActionCatalog
             ],
             ["Creates a work assignment linked to the record, created when the decision is recorded"],
             Excludes: [],
-            DecisionRecordClass.Judgement),
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The catalog proper: <see cref="Declared"/> with every exclusion made mutual.</summary>

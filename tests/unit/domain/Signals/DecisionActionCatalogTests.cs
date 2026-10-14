@@ -61,7 +61,9 @@ public class DecisionActionCatalogTests
     {
         DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
 
-        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body");
+        // Task 043 added the optional outside firm (sprk_regardingorganization); still no reply-due parameter (D-56/D-20).
+        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "outsideFirm");
+        inquiry.Parameters.Single(p => p.Code == "outsideFirm").Required.Should().BeFalse();
     }
 
     [Fact]
@@ -480,33 +482,173 @@ public class DecisionActionCatalogTests
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
     }
 
-    [Fact]
-    public async Task ANoCoreDoItem_IsAllowedToItsOwnerOnly_D35()
-    {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do);
-        var owner = Access(Users(signal: row, who: Ok(new { UserId = OwnerId })));
-        var other = Access(Users(signal: row, who: Ok(new { UserId = Guid.NewGuid() })));
+    // ---- No-core Do item (D-35 as amended by D-129): visible to whoever can read the SUBJECT row as themselves ------------------
 
-        (await owner.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Allowed);
-        (await other.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    private static readonly Guid SubjectId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private static DataverseUserResponse NoCoreDoRow(string? subjectType = "sprk_todo", Guid? subjectId = null) =>
+        SignalRow(withType: false, withId: false, lane: DecisionLane.Do, subjectType: subjectType, subjectId: subjectId ?? SubjectId);
+
+    [Fact]
+    public async Task ANoCoreDoItem_IsAllowed_WhenTheCallerCanReadItsSubject_EvenWhenNobodyIsItsOwner_D129()
+    {
+        // The team-owned item: the caller is a team member, not the Signal's "owner" (the old equality test matched nobody).
+        var users = Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = Guid.NewGuid() }));
+
+        var decision = await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        decision.Lane.Should().Be(DecisionLane.Do);
+        decision.CoreId.Should().BeNull("a no-core Signal has no core pair");
+        Mock.Get(users).Verify(u => u.GetAsync($"sprk_todos({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once,
+            "the subject row is read AS THE CALLER");
+        Mock.Get(users).Verify(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>()), Times.Never, "owner equality is gone");
+    }
+
+    [Theory]
+    [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
+    public async Task ANoCoreDoItem_IsTheUniformNotFound_WhenTheCallerCannotReadItsSubject_EvenForTheSignalsOwner_D123(int status, string code)
+    {
+        // Includes a subject in a secure record family: a non-member's read of it is denied, so the Signal and its Decision Record
+        // are part of that family's access and invisible to everyone else.
+        var users = Users(signal: NoCoreDoRow(), core: Fail(status, code), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome
+            .Should().Be(SignalAccessOutcome.NotFound, "the caller IS the Signal's ownerid, which no longer decides anything");
     }
 
     [Fact]
-    public async Task ANoCoreDecideItem_IsDeniedEvenToItsOwner_D35()
+    public async Task ANoCoreDoItem_WhoseSignalTheCallerCannotRead_IsTheUniformNotFound_AndTheSubjectIsNeverAsked()
     {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Decide);
-        var access = Access(Users(signal: row, who: Ok(new { UserId = OwnerId })));
+        var users = Users(signal: Fail(404, DataverseUserClientErrorCodes.NotFound), core: Ok(new { createdon = "x" }));
 
-        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never,
+            "BOTH reads must succeed: the Signal is read first");
+    }
+
+    [Fact]
+    public async Task ANoCoreDecideItem_IsDenied_EvenWhenTheCallerCanReadItsSubject_D35()
+    {
+        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Decide, subjectType: "sprk_todo", subjectId: SubjectId);
+        var users = Users(signal: row, core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // Task 141 (review F2): since the subject comes from the lookup that carries the pair id, all three cases take the SAME path:
+    // a pair id with no subject lookup carrying it. sprk_signal and systemuser have no sprk_signal subject lookup, so the row
+    // cannot express them; they no longer reach the ownership-parent (K2) check.
+    [Theory]
+    [InlineData(null)]               // no subject type written
+    [InlineData("sprk_signal")]      // a table with no sprk_signal subject lookup: not expressible on the row
+    [InlineData("systemuser")]       // likewise
+    public async Task ANoCoreDoItem_WhosePairIdNoSubjectLookupCarries_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
+    {
+        var users = Users(signal: NoCoreDoRow(subjectType), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    public static IEnumerable<object[]> EverySignalSubjectTable() =>
+        SignalWriter.RegardingLookupByEntity.Keys.Select(k => new object[] { k });
+
+    // Task 141 fix round 2 (K4b-a). The three theory cases above converged on "no subject lookup carries the pair id", so none of
+    // them reaches the ownership-parent test in AuthorizeNoCoreRecordAsync with a REAL, derivable subject any more. This one does:
+    // every table a Signal can name as its subject is derivable, passes that test, and goes on to the caller's own read.
+    [Theory]
+    [MemberData(nameof(EverySignalSubjectTable))]
+    public async Task ANoCoreDoItem_WithAnyDerivableSubject_ReachesTheCallersOwnRead(string subjectTable)
+    {
+        var users = Users(signal: NoCoreDoRow(subjectTable), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        var decision = await Access(users, coreSet: "subject_set").AuthorizeAsync(SignalId, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        Mock.Get(users).Verify(u => u.GetAsync($"subject_set({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void EveryTableASignalCanNameAsItsSubject_IsAnOwnershipParent_SoTheK2SubjectTestHasNoLiveFalseBranchYet()
+    {
+        // SignalCoreRecordAccess' `!IsOwnershipParent(subjectType)` refusal is defence in depth: the 9 subject lookups on
+        // sprk_signal are all ownership parents today, so no derivable subject can reach it. If a lookup is added for a table that
+        // is not a parent, this fails: add the case that reaches that refusal (a derivable non-parent subject is the uniform
+        // NotFound and nothing is read) and keep this test honest.
+        SignalWriter.RegardingLookupByEntity.Keys
+            .Where(k => !RecordOwnershipResolver.IsOwnershipParent(k))
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WithNoSubjectId_IsTheUniformNotFound()
+    {
+        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do, subjectType: "sprk_todo", subjectId: null);
+
+        (await Access(Users(signal: row, core: Ok(new { createdon = "x" })), coreSet: "sprk_todos")
+            .AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Theory]
+    [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
+    [InlineData(500, DataverseUserClientErrorCodes.ServiceError)]
+    public async Task ANoCoreDoItem_WhoseSubjectReadFaults_IsUnavailable_NotTheUniformNotFound_F4b(int status, string code)
+    {
+        var users = Users(signal: NoCoreDoRow(), core: Fail(status, code));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectEntitySetLookupFaults_IsUnavailable_F4b()
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("no answer"));
+        var access = new SignalCoreRecordAccess(Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" })), entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+
+        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectReadThrows_IsUnavailable_NotTheUniformNotFound_F4b()
+    {
+        var users = Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" }));
+        Mock.Get(users).Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
     }
 
     [Fact]
     public async Task ANoCoreDoItem_WhoseCallerCannotBeResolved_IsCallerUnresolved()
     {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do);
-        var access = Access(Users(signal: row, who: Fail(0, DataverseUserClientErrorCodes.UserContextRequired)));
+        var users = Users(signal: NoCoreDoRow(), core: Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
 
-        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectIsDeniedToAValidTokenWithNoDataverseUser_IsCallerUnresolved_AndAKnownCallerIsNot()
+    {
+        var unknown = Users(signal: NoCoreDoRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+        var known = Users(signal: NoCoreDoRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(unknown, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+        (await Access(known, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Fact]
+    public async Task TheRoute_Returns503_WhenANoCoreSubjectReadFaults_Not404()
+    {
+        var access = Access(Users(signal: NoCoreDoRow(), core: Fail(500, DataverseUserClientErrorCodes.ServiceError)), coreSet: "sprk_todos");
+        var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), NullLogger<DecisionPlanService>.Instance);
+
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
     }
 
     // =================================================================================================
@@ -631,14 +773,27 @@ public class DecisionActionCatalogTests
         DataverseUserResponse.Fail(status, code, "test");
 
     private static DataverseUserResponse SignalRow(
-        bool withType = true, bool withId = true, DecisionLane lane = DecisionLane.Decide)
+        bool withType = true, bool withId = true, DecisionLane lane = DecisionLane.Decide,
+        string? subjectType = null, Guid? subjectId = null)
     {
         var row = new Dictionary<string, object?>
         {
             ["sprk_lane"] = (int)lane,
             ["_sprk_policyversion_value"] = VersionId,
-            ["_ownerid_value"] = OwnerId,
         };
+        // Task 141: the subject is the typed subject lookup that carries the pair id. A table a Signal has no lookup for (a forged
+        // or unknown pointer) cannot be expressed on the row at all, so it is simply absent.
+        if (subjectType is not null && subjectId is { } subjectRow
+            && SignalWriter.RegardingLookupByEntity.TryGetValue(subjectType, out var subjectLookup))
+        {
+            row[$"_{subjectLookup}_value"] = subjectRow.ToString();
+        }
+
+        if (subjectId is { } subject)
+        {
+            row["sprk_regardingrecordid"] = subject.ToString();
+        }
+
         if (withType)
         {
             row["_sprk_corerecordtype_value"] = CoreTypeId;

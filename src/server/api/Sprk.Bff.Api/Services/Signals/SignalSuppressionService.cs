@@ -4,19 +4,24 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
 /// <summary>
-/// What suppression is for one grain at one moment: the counted dismissals in the trailing window, every recorded dismissal in it,
-/// and the denormalized <c>sprk_suppresseduntil</c> that is still in the future (null when none).
+/// What suppression is for one grain's partition at one moment: the counted dismissals in the trailing window, every recorded
+/// dismissal in it, and the date the partition's OWN counted dismissals justify (null below the threshold or once lapsed).
 /// </summary>
 /// <param name="DismissalsCounted">Dismissals that count toward the threshold (a reason that does not count, and a policy whose
 /// <c>sprk_countstowardsuppression</c> is No, contribute none).</param>
 /// <param name="DismissalsRecorded">Every human dismissal in the window, counted or not: recorded, queryable, clusterable.</param>
-/// <param name="SuppressedUntil">The latest <c>sprk_suppresseduntil</c> among the grain's Signals that is still in the future.</param>
+/// <param name="SuppressedUntil">The date the partition's own counted dismissals justify: the latest counted dismissal + 30 days that has
+/// at least the threshold of counted dismissals within 30 days of each other ending at it, while that date is in the future; otherwise
+/// null (#1661 round 2 F1: a suppression lasts its full 30 days, so this can be set while <paramref name="DismissalsCounted"/>, a trailing
+/// count, has already fallen below the threshold). A stored <c>sprk_suppresseduntil</c> is never reported for its own sake (#1661 F1): a
+/// stamp the partition's own dismissals do not justify is withdrawn, not shown.</param>
 /// <param name="PolicyCountsTowardSuppression"><c>sprk_policy.sprk_countstowardsuppression</c> (default Yes).</param>
 public sealed record SuppressionStatus(
     int DismissalsCounted, int DismissalsRecorded, DateTime? SuppressedUntil, bool PolicyCountsTowardSuppression)
@@ -39,6 +44,42 @@ public readonly record struct SuppressionGrain(Guid? CoreTypeRefId, Guid? CoreRe
     public static SuppressionGrain ForItem(string subjectEntity, Guid subjectId) => new(null, null, subjectEntity, subjectId);
 }
 
+/// <summary>
+/// The secure-family partition of a grain (#1661, owner decision D-123; uac-r2 secure-schema audit F6): <see cref="Ordinary"/>,
+/// one partition per SET of secure roots a Signal sits under (two families under one readable core record never share a count or a
+/// stamp), or <see cref="Undetermined"/> when the set cannot be known. The undetermined bucket is fail closed: it is never stamped,
+/// its stored stamps are withdrawn, and it never mutes or is muted by another partition.
+/// </summary>
+public readonly record struct SuppressionPartition
+{
+    private const string UndeterminedKey = "?";
+
+    private SuppressionPartition(string? key) => Key = key;
+
+    /// <summary>Null for the ordinary partition, "?" for the undetermined bucket, else the sorted "table:id" roots joined by ",".</summary>
+    public string? Key { get; }
+
+    public static SuppressionPartition Ordinary => default;
+
+    public static SuppressionPartition Undetermined => new(UndeterminedKey);
+
+    /// <summary>The partition of a Signal under exactly <paramref name="roots"/> (none: <see cref="Ordinary"/>).</summary>
+    public static SuppressionPartition Secure(IEnumerable<(string Table, Guid Id)> roots)
+    {
+        var key = string.Join(",", roots
+            .Select(r => r.Table.ToLowerInvariant() + ":" + r.Id.ToString("D", CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal));
+        return key.Length == 0 ? Ordinary : new SuppressionPartition(key);
+    }
+
+    public bool IsOrdinary => Key is null;
+
+    public bool IsUndetermined => Key == UndeterminedKey;
+
+    public override string ToString() => Key switch { null => "ordinary", UndeterminedKey => "undetermined", var k => "secure[" + k + "]" };
+}
+
 /// <summary>Stable EventIds for suppression (the 5030x range is the Signal side's; 5031x the Decision Record's).</summary>
 public static class SuppressionEvents
 {
@@ -47,6 +88,39 @@ public static class SuppressionEvents
 
     /// <summary>Error: counting or stamping a grain failed; the next evaluation retries. Properties: policy code, exception type.</summary>
     public static readonly EventId Failed = new(50351, nameof(Failed));
+
+    /// <summary>Information: stamps a partition's own dismissals no longer justify were lowered or cleared (#1661 F1).</summary>
+    public static readonly EventId Withdrawn = new(50352, nameof(Withdrawn));
+}
+
+/// <summary>What the nightly suppression pass hands the planner (#1661 round 2 F3).</summary>
+/// <param name="Signals">The policy's Signals, placed in their partitions, with the stamps as corrected this pass.</param>
+/// <param name="Failures">Failures to count against the run.</param>
+/// <param name="PartitionsUnavailable">The partitions, the dismissal facts or a grain's count could not be read: nothing was written, and
+/// the caller must plan NOTHING for the policy this pass (never a re-raise of every suppressed subject on one timeout).</param>
+internal sealed record SuppressionReconciliation(IReadOnlyList<ExistingSignal> Signals, int Failures, bool PartitionsUnavailable)
+{
+    public void Deconstruct(out IReadOnlyList<ExistingSignal> signals, out int failures)
+    {
+        signals = Signals;
+        failures = Failures;
+    }
+}
+
+/// <summary>
+/// The Signal a suppression count was asked for sits in the undetermined bucket (#1661 round 2 K5): which secure family it belongs to
+/// cannot be known (for example a Secure-team-owned Signal with no secure root above it), so its count is never answered. Not a transient
+/// fault: retrying does not change it until the record's placement is repaired.
+/// </summary>
+/// <remarks>§11: <i>Existing</i> — the route maps every other fault to one 503; <i>Extension</i> — a reason code on that 503 needs the
+/// route to tell this case apart, which an exception type does without a second result channel; <i>Cost of doing nothing</i> — the user is
+/// told to retry something a retry never fixes, and the log raises an Error for a data condition.</remarks>
+public sealed class SuppressionPartitionUndeterminedException : InvalidOperationException
+{
+    public SuppressionPartitionUndeterminedException()
+        : base("The Signal's secure-family partition cannot be determined, so its suppression count cannot be read.")
+    {
+    }
 }
 
 /// <summary>
@@ -63,15 +137,31 @@ public static class SuppressionEvents
 /// counted in <see cref="SuppressionStatus.DismissalsRecorded"/> but never in <see cref="SuppressionStatus.DismissalsCounted"/>.
 /// A code the catalog does not know counts (the switch is "declared non-counting", never "undeclared"). A policy whose
 /// <c>sprk_countstowardsuppression</c> is No counts nothing.</para>
-/// <para><b>The stamp.</b> At the threshold, <c>sprk_suppresseduntil</c> = the most recent counted dismissal + 30 days is written on
-/// the grain's open Signals and on its dismissed Signals in the window (denormalized so the worklist query does not count Decision
-/// Records per load; task 031's planner reads it for the re-raise rule, D-13). Only rows whose stamp would change are written, so
-/// nothing is stamped nightly (D-61). The stamp lapses on its own: the dismissals that made it are then older than the window, so the
-/// next dismissal counts as the first again. This service does not implement the 14-day quiet window after a 1st or 2nd dismissal
-/// (FR-17a): that is task 031's re-raise rule.</para>
-/// <para><b>Who calls it.</b> The nightly job (<see cref="ReconcileAsync"/>, a backstop that stamps a grain it finds at the threshold
-/// with no live stamp) and the decision commit route (task 043) right after it closes the dismissed Signals
-/// (<see cref="ApplyAsync"/>), so the effect is immediate rather than next night.</para>
+/// <para><b>The secure-family partition (#1661, owner decision D-123; uac-r2 audit F6).</b> A secure subject can be filed under a
+/// core record a non-member reads, and two secure families can share one core record. Every grain is therefore split by
+/// <see cref="SuppressionPartition"/>: the Signals under no secure root, and one partition per SET of secure roots. A partition's
+/// dismissals count toward, and stamp, only that partition's Signals, so a stamp or a count on a row never reflects a dismissal its
+/// readers cannot see. The truth is the union uac-r2 asked for (F2): a Signal is secure when its owner is the Secure Record owner team
+/// (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>) OR uac-r2's own upward walk
+/// (<see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>) puts it, or its subject, under a secure root. The walk starts from
+/// the Signal row AND from its subject row (uac-r2's answer on the walk stop: the walk ignores the owners of the rows it is given, so a
+/// subject still owned by an ordinary team while it waits to be re-owned is placed under its root); intermediate rows owned by an
+/// ordinary team still stop it (the resolver's own rule). A walk that is undetermined, or a Secure-team-owned Signal (for a hit not yet
+/// written, a Secure-team-owned subject) with no root found, is <see cref="SuppressionPartition.Undetermined"/>; an ambiguous team or a
+/// fault throws (fail closed). The same helper is used
+/// by <see cref="ApplyAsync"/>, <see cref="ReconcileAsync"/>, the count read and the planner's hit partitions
+/// (<see cref="PartitionsOfHitsAsync"/>).</para>
+/// <para><b>The stamp, both ways.</b> At the threshold, <c>sprk_suppresseduntil</c> = the most recent counted dismissal + 30 days is
+/// written on the partition's open Signals and on its dismissed Signals in the window (denormalized so the worklist query does not
+/// count Decision Records per load; task 031's planner reads it for the re-raise rule, D-13). A stamp S is justified while at least
+/// three counted dismissals within 30 days of each other end at S − 30 days (read over the last 60 days, #1661 round 2 F1), so it lasts
+/// its full 30 days even after its oldest dismissal leaves the trailing count. A live stamp the partition's own counted dismissals do
+/// not justify (a partition move, a stamp written before #1661, a policy switched to No) is lowered to the justified date or cleared, on
+/// rows of any status (#1661 F1), and only while the row is as it was counted (round 2 K6). Only rows whose stamp would change are
+/// written (D-61). This service does not implement the 14-day quiet window after a 1st or 2nd dismissal (FR-17a): that is task 031's
+/// re-raise rule.</para>
+/// <para><b>Who calls it.</b> The nightly job (<see cref="ReconcileAsync"/>) and the decision commit route (task 043) right after it
+/// closes the dismissed Signals (<see cref="ApplyAsync"/>), so the effect is immediate rather than next night.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="SignalEpisodePlanner"/> already READS the stamp;
 /// <see cref="PolicyActionRateService"/> counts acted vs dismissed per policy for a different question (rate, not a per-record
 /// threshold). Extension: neither can host the per-record count and the stamp write; this one service owns both and the read route.
@@ -100,18 +190,272 @@ public sealed class SignalSuppressionService
     private readonly IGenericEntityService _entities;
     private readonly OntologyWriterDataverseClient _writer;
     private readonly TimeProvider _timeProvider;
+    private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<SignalSuppressionService> _logger;
 
     public SignalSuppressionService(
         IGenericEntityService entities,
         OntologyWriterDataverseClient writer,
         TimeProvider timeProvider,
+        IConfiguration configuration,
+        IServiceScopeFactory scopes,
         ILogger<SignalSuppressionService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // ── The secure-family partition (#1661, owner decision D-123; audit F6) ──────────────────────────────────────
+
+    /// <summary>The <c>logical name</c> of an owner that is a team: only a team can be the Secure Record owner team.</summary>
+    private const string TeamLogicalName = "team";
+
+    /// <summary>uac-r2's lineage of <c>sprk_signal</c> (the matter, the Decision Record and the subject's regarding lookups).</summary>
+    private static readonly SecureChildLineage.Table SignalLineage = SecureChildLineage.Children["sprk_signal"];
+
+    /// <summary>The <c>sprk_signal</c> lookup columns the walk follows: every read that partitions a Signal selects them.</summary>
+    internal static IReadOnlyCollection<string> SignalLineageColumns => SignalLineage.Lookups.Keys.ToArray();
+
+    /// <summary>True when <paramref name="owner"/> is the Secure Record owner team (and that team exists: <paramref name="secureTeamId"/>).</summary>
+    private static bool IsSecureOwned(EntityReference? owner, Guid? secureTeamId) =>
+        secureTeamId is { } team && team != Guid.Empty && owner is { LogicalName: TeamLogicalName } && owner.Id == team;
+
+    /// <summary>
+    /// The Secure Record owner team's id, identified by uac-r2's one rule (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>:
+    /// the configured business unit and its NAMED, non-default Owner team, TOP 2 each); null when this environment has no such team,
+    /// so no Signal can be secure. An ambiguous answer throws: a count that cannot be partitioned is never a guess (fail closed).
+    /// </summary>
+    private async Task<Guid?> ResolveSecureTeamAsync(CancellationToken ct)
+    {
+        var (teamId, refusal) = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_entities, _configuration, ct).ConfigureAwait(false);
+        return refusal is null
+            ? teamId
+            : throw new InvalidOperationException($"The Secure Record owner team cannot be identified, so suppression cannot be partitioned ({refusal}).");
+    }
+
+    /// <summary>One Signal to place in a partition: the Signal row as read (or as the writer would write it, for a hit) with its
+    /// lineage lookups, its owner as read (null for a hit: not written yet), and its subject. <paramref name="OwnerFromSubject"/> (a
+    /// hit, #1661 round 2 N2): the Signal has no owner yet, so the SUBJECT's owner stands in for it in the "Secure-owned with no root
+    /// found is undetermined" rule.</summary>
+    private readonly record struct PartitionItem(Entity Signal, EntityReference? Owner, string? SubjectEntity, Guid SubjectId, bool OwnerFromSubject = false);
+
+    private static PartitionItem ItemOf(Entity signal) =>
+        SignalWriter.TryParseDedupeKey(signal.GetAttributeValue<string>("sprk_dedupekey"), out _, out var entity, out var subjectId, out _)
+            ? new PartitionItem(signal, signal.GetAttributeValue<EntityReference>("ownerid"), entity, subjectId)
+            : new PartitionItem(signal, signal.GetAttributeValue<EntityReference>("ownerid"), null, Guid.Empty);
+
+    private static PartitionItem ItemOf(ExistingSignal signal)
+    {
+        var row = new Entity("sprk_signal", signal.Id);
+        if (signal.LineageRow is { } read)
+        {
+            foreach (var column in SignalLineage.Lookups.Keys)
+            {
+                if (read.GetAttributeValue<EntityReference>(column) is { } parent) row[column] = parent;
+            }
+        }
+
+        return new PartitionItem(row, signal.Owner, signal.SubjectEntity, signal.SubjectId);
+    }
+
+    /// <summary>A hit's Signal row as <see cref="SignalWriter"/> would write it: the subject's regarding lookup, and <c>sprk_matter</c>
+    /// when the core record is a matter (no owner yet: the writer's resolver decides it from the same truth, so the subject's owner stands
+    /// in for it).</summary>
+    private static PartitionItem ItemOf(string policyCode, SignalHit hit)
+    {
+        // partition probe, never created; id is the hit's identity (182 census: not a create site)
+        var row = new Entity("sprk_signal", ProbeId(policyCode, hit));
+        if (SignalWriter.RegardingLookupByEntity.TryGetValue(hit.SubjectEntity, out var column))
+        {
+            row[column] = new EntityReference(hit.SubjectEntity, hit.SubjectId);
+        }
+
+        if (hit.Core is { Entity: "sprk_matter" } core) row["sprk_matter"] = new EntityReference("sprk_matter", core.Id);
+        return new PartitionItem(row, null, hit.SubjectEntity, hit.SubjectId, OwnerFromSubject: true);
+    }
+
+    /// <summary>Fixed namespace of <see cref="ProbeId"/> (random v4 Guid, generated once; never change it: ids derive from it).</summary>
+    private static readonly Guid ProbeNamespace = new("5c1f6a52-3b0e-4f0b-9d2a-7e4a1c8b6d30");
+
+    /// <summary>
+    /// The probe row's id: a name-based (RFC 4122 version 5, SHA-1) Guid over <see cref="ProbeNamespace"/> and the hit's dedupe key
+    /// (<see cref="SignalWriter.BuildDedupeKey"/>, episode 0: a probe belongs to no episode, only to the policy and subject). The walk de-duplicates
+    /// rows by (table, id) (<see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>), so every hit needs an id of its own,
+    /// and the same hit gets the same id on every call.
+    /// </summary>
+    internal static Guid ProbeId(string policyCode, SignalHit hit)
+    {
+        var name = SignalWriter.BuildDedupeKey(
+            policyCode, hit.SubjectEntity, hit.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant(), 0);
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+        var input = new byte[16 + nameBytes.Length];
+        ProbeNamespace.TryWriteBytes(input, bigEndian: true, out _);
+        nameBytes.CopyTo(input, 16);
+        var hash = System.Security.Cryptography.SHA1.HashData(input);
+        var id = hash.AsSpan(0, 16).ToArray();
+        id[6] = (byte)((id[6] & 0x0F) | 0x50); // version 5
+        id[8] = (byte)((id[8] & 0x3F) | 0x80); // RFC 4122 variant
+        return new Guid(id, bigEndian: true);
+    }
+
+    /// <summary>
+    /// THE partition truth (#1661 R3/R4), one helper for the count, the stamps and the planner. Per item: the secure roots above the
+    /// Signal row and its subject row (uac-r2's <see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>, never re-implemented);
+    /// undetermined, or a Secure-team-owned Signal with no root found (for a hit, a Secure-team-owned SUBJECT, round 2 N2):
+    /// <see cref="SuppressionPartition.Undetermined"/>. No Secure team in this environment: every item is ordinary. An ambiguous team, a
+    /// walk that does not complete or a fault throws: the caller never places part of a set (round 2 F2/F3).
+    /// </summary>
+    private async Task<SuppressionPartition[]> PartitionsAsync(IReadOnlyList<PartitionItem> items, CancellationToken ct)
+    {
+        var result = new SuppressionPartition[items.Count];
+        if (items.Count == 0) return result;
+
+        var secureTeamId = await ResolveSecureTeamAsync(ct).ConfigureAwait(false);
+        if (secureTeamId is null)
+        {
+            Array.Fill(result, SuppressionPartition.Ordinary);
+            return result;
+        }
+
+        var subjects = await ReadSubjectRowsAsync(items, ct).ConfigureAwait(false);
+        var lineages = items.Select(item =>
+                (IReadOnlyList<Entity>)(item.SubjectEntity is { } entity && subjects.TryGetValue((entity.ToLowerInvariant(), item.SubjectId), out var subject)
+                    ? [item.Signal, subject]
+                    : [item.Signal]))
+            .ToList();
+        bool SecureOwned(int i) => IsSecureOwned(items[i].Owner, secureTeamId)
+            || (items[i].OwnerFromSubject && items[i].SubjectEntity is { } entity
+                && subjects.TryGetValue((entity.ToLowerInvariant(), items[i].SubjectId), out var subject)
+                && IsSecureOwned(subject.GetAttributeValue<EntityReference>("owningteam"), secureTeamId));
+
+        using var scope = _scopes.CreateScope();
+        var walker = scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>();
+
+        // One walk over every row first: most pairings have no secure root anywhere, and then no Signal needs a walk of its own.
+        var everything = RequireAnswer(await walker.SecureRootsAboveAsync(lineages.SelectMany(l => l).ToList(), ct).ConfigureAwait(false));
+        if (everything.Roots.Count == 0 && everything.Undetermined.Count == 0)
+        {
+            for (var i = 0; i < items.Count; i++) result[i] = SecureOwned(i) ? SuppressionPartition.Undetermined : SuppressionPartition.Ordinary;
+            return result;
+        }
+
+        // Rows with the same lookups sit under the same roots (the walk ignores the owners of the rows it is given).
+        var byLineage = new Dictionary<string, SuppressionPartition>(StringComparer.Ordinal);
+        for (var i = 0; i < items.Count; i++)
+        {
+            var key = LineageKey(lineages[i]);
+            if (!byLineage.TryGetValue(key, out var found))
+            {
+                var above = RequireAnswer(await walker.SecureRootsAboveAsync(lineages[i], ct).ConfigureAwait(false));
+                found = above.Undetermined.Count > 0 ? SuppressionPartition.Undetermined : SuppressionPartition.Secure(above.Roots);
+                byLineage[key] = found;
+            }
+
+            result[i] = found.IsOrdinary && SecureOwned(i) ? SuppressionPartition.Undetermined : found;
+        }
+
+        return result;
+    }
+
+    private static SecureRootsAbove RequireAnswer(SecureRootsAbove above) =>
+        above.Status == SecureChildShareSyncStatus.Completed
+            ? above
+            : throw new InvalidOperationException($"The secure roots above the Signals could not be determined ({above.Status}: {above.Detail}).");
+
+    private static string LineageKey(IReadOnlyList<Entity> rows) =>
+        string.Join("|", rows.Select(r => r.LogicalName + ":" + string.Join(",",
+            SecureChildLineage.Children[r.LogicalName].Lookups.Keys.Order(StringComparer.Ordinal)
+                .Select(k => r.GetAttributeValue<EntityReference>(k)?.Id.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty))));
+
+    /// <summary>The subjects that are lineage children (a To Do, a communication, a document, an event, an invoice), read with their
+    /// lineage lookups and owner columns, so the walk can start from them. A root-table subject is reached through the Signal's own
+    /// regarding lookup. A subject that no longer exists is absent (the Signal's walk then reports its missing parent). A fault throws.</summary>
+    private async Task<Dictionary<(string Entity, Guid Id), Entity>> ReadSubjectRowsAsync(IReadOnlyList<PartitionItem> items, CancellationToken ct)
+    {
+        var found = new Dictionary<(string, Guid), Entity>();
+        var wanted = items
+            .Where(i => i.SubjectEntity is { } e && i.SubjectId != Guid.Empty && SecureChildLineage.IsChild(e)
+                && !string.Equals(e, SignalLineage.LogicalName, StringComparison.OrdinalIgnoreCase))
+            .Select(i => (Entity: i.SubjectEntity!.ToLowerInvariant(), i.SubjectId))
+            .Distinct()
+            .GroupBy(s => s.Entity, StringComparer.Ordinal);
+        foreach (var group in wanted)
+        {
+            var table = SecureChildLineage.Children[group.Key];
+            foreach (var chunk in group.Select(s => s.SubjectId).Chunk(InChunk))
+            {
+                var query = new QueryExpression(table.LogicalName)
+                {
+                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(table.IdColumn, ConditionOperator.In, chunk.Cast<object>().ToArray());
+                var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var row in rows.Entities) found[(table.LogicalName, row.Id)] = row;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// #1661 R1: the partition each hit's NEW episode will belong to, from the same truth as the rows (the hit's Signal as the writer
+    /// would write it, plus its subject). Every hit is returned, an undetermined one as <see cref="SuppressionPartition.Undetermined"/>:
+    /// the undetermined bucket never mutes and is never muted, so the planner raises it and the writer's resolver decides its owner
+    /// (round 2 F2: its outcome never depends on whether another family's stamp is on the record). Null when the partitions cannot be
+    /// computed at all (an ambiguous Secure team, a walk that does not complete, a fault): the caller then plans NOTHING for the policy
+    /// this pass (round 2 F2/F3), so the outcome is the same for every hit whatever its record carries.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionPartition>?> PartitionsOfHitsAsync(
+        string policyCode, IReadOnlyList<SignalHit> hits, CancellationToken ct)
+    {
+        var placed = new Dictionary<(string, Guid), SuppressionPartition>();
+        if (hits.Count == 0) return placed;
+
+        SuppressionPartition[] partitions;
+        try
+        {
+            partitions = await PartitionsAsync(hits.Select(h => ItemOf(policyCode, h)).ToList(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogFailure(policyCode, ex);
+            return null;
+        }
+
+        for (var i = 0; i < hits.Count; i++) placed[(hits[i].SubjectEntity, hits[i].SubjectId)] = partitions[i];
+        return placed;
+    }
+
+    /// <summary>
+    /// Ontology task 142 (child-record contract C9, acceptance 7; uac-r2 #1665 N1 / #1778): the secure family of each of
+    /// <paramref name="signalIds"/>, in order, from THE partition truth (<see cref="PartitionsAsync"/>: the secure roots above the Signal
+    /// row and its subject, uac-r2's own walk). The decision commit route refuses a Decision Record whose Signals are not all in one
+    /// family. Each Signal is read app-only with its lineage lookups, owner and dedupe key (the subject). Never a partial answer: a read
+    /// fault, a missing Signal, an ambiguous Secure team or a walk that does not complete throws, and the caller refuses (fail closed);
+    /// an undetermined Signal is <see cref="SuppressionPartition.Undetermined"/>.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> is the one partition truth;
+    /// this only reads the rows it is given. Extension: the existing entry points take hits or a grain, not a set of Signal ids.
+    /// Cost of doing nothing: one Decision Record could resolve Signals of two secure families, filing one family's decision where
+    /// the other's members read it.</remarks>
+    internal async Task<IReadOnlyList<SuppressionPartition>> PartitionsOfSignalsAsync(IReadOnlyList<Guid> signalIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(signalIds);
+        var items = new List<PartitionItem>(signalIds.Count);
+        foreach (var id in signalIds)
+        {
+            var signal = await _entities.RetrieveAsync("sprk_signal", id, ["sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"Signal {id} could not be read, so its secure family is unknown.");
+            items.Add(ItemOf(signal));
+        }
+
+        return await PartitionsAsync(items, ct).ConfigureAwait(false);
     }
 
     /// <summary>True when <paramref name="reason"/> ("code - detail") names a catalog code that never counts toward suppression.</summary>
@@ -128,13 +472,14 @@ public sealed class SignalSuppressionService
     /// <summary>
     /// The read the wizard's dismissal step and the admin screen use, keyed by a Signal the caller is ALREADY authorized for
     /// (the route calls <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> first); <paramref name="caller"/> is that same caller's
-    /// Dataverse client. A fault (including a caller read that is not a success) throws: it is never an empty or a partial count. Null when the Signal does not carry what the grain
-    /// needs (no policy, or an unparseable key on a no-core Signal): the route answers the uniform 404, never a guess.
+    /// Dataverse client. A fault (including a caller read that is not a success, an ambiguous Secure team, or an anchor whose partition
+    /// is undetermined) throws: it is never an empty or a partial count. Null when the Signal does not carry what the grain needs (no
+    /// policy, or an unparseable key on a no-core Signal): the route answers the uniform 404, never a guess.
     /// </summary>
     public async Task<SuppressionStatus?> GetStatusForSignalAsync(Guid signalId, IDataverseUserClient caller, CancellationToken ct)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
-            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey"], ct).ConfigureAwait(false);
+            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false);
 
         if (signal.GetAttributeValue<EntityReference>("sprk_policy") is not { Id: var policyId } || policyId == Guid.Empty)
         {
@@ -163,74 +508,134 @@ public sealed class SignalSuppressionService
             return null; // a no-core grain is keyed by the policy code: without it the count would be silently zero
         }
 
-        // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns (a Signal owned by a Secure
-        // team under a readable core record is not theirs to count), then Decision-Record facts are read app-only for those rows only.
-        var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, _timeProvider.GetUtcNow().UtcDateTime.AddDays(-WindowDays - 1), ct).ConfigureAwait(false);
-        return (await AssessAsync(policyId, code, grain, policyCounts: null, visible, ct).ConfigureAwait(false)).Status;
-    }
+        // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns, then Decision-Record facts
+        // are read app-only for those rows only. And it is the anchor Signal's PARTITION's (#1661): the anchor is placed by the same truth
+        // as every row, and only rows of that partition are counted, so the answer never carries a number or a date from across the wall.
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, ReadSince(now), now, ct).ConfigureAwait(false);
+        var assessed = await AssessAsync(policyId, code, grain, policyCounts: null, visible, known: null, anchor: signal, ct).ConfigureAwait(false);
+        if (assessed.Anchor is not { IsUndetermined: false } anchor)
+        {
+            throw new SuppressionPartitionUndeterminedException();
+        }
 
-    /// <summary>Counts the grain and, at the threshold, stamps <c>sprk_suppresseduntil</c>. Idempotent: a second call writes nothing.</summary>
-    public async Task<SuppressionStatus> ApplyAsync(Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
-    {
-        var assessment = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, ct).ConfigureAwait(false);
-        await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
-        return assessment.Status with { SuppressedUntil = assessment.StampUntil ?? assessment.Status.SuppressedUntil };
+        return assessed.Partitions.FirstOrDefault(p => p.Partition == anchor).Assessment?.Status
+            ?? new SuppressionStatus(0, 0, null, assessed.PolicyCounts);
     }
 
     /// <summary>
-    /// The nightly backstop (task 031 calls it once per policy with the Signals it already read and the policy's
-    /// <c>sprk_countstowardsuppression</c>, read once with the policies). A policy that does not count is skipped outright. Otherwise a
-    /// grain is counted exactly and stamped when it has at least the threshold of DISTINCT dismissals (one per Decision Record) in the
-    /// window AND either no live stamp, or an open / in-window dismissed Signal whose stamp is missing or older than the grain's latest
-    /// live one (a partly written stamp is repaired). Only rows that change are written (D-61). Returns the Signals with the stamps
-    /// applied so the planner that runs next sees them even if a write failed, and the number of grains that failed (the run is then not
-    /// successful, and the next run retries).
+    /// Counts the pairing and brings its stamps into line, in every partition (#1661, D-123): at the threshold the partition's open and
+    /// in-window dismissed Signals are stamped, and any live stamp the partition's own dismissals do not justify is lowered or cleared
+    /// (F1, on rows of any status). Idempotent: a second call writes nothing. Returns the status of <paramref name="report"/> (default the
+    /// ordinary partition: the only one a non-member may be told about; an empty status when it has no Signal).
     /// </summary>
-    internal async Task<(IReadOnlyList<ExistingSignal> Signals, int Failures)> ReconcileAsync(
+    public async Task<SuppressionStatus> ApplyAsync(
+        Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct, SuppressionPartition? report = null)
+    {
+        var assessed = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, known: null, anchor: null, ct).ConfigureAwait(false);
+        foreach (var (_, assessment) in assessed.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
+
+        var wanted = report ?? SuppressionPartition.Ordinary;
+        return assessed.Partitions.FirstOrDefault(p => p.Partition == wanted).Assessment?.Status
+            ?? new SuppressionStatus(0, 0, null, assessed.PolicyCounts);
+    }
+
+    /// <summary>
+    /// The nightly pass (task 031 calls it once per policy with the Signals it already read and the policy's
+    /// <c>sprk_countstowardsuppression</c>). First every Signal of a grain that has a live stamp, or enough dismissals in the read window
+    /// for some partition to reach the threshold, is placed in its partition (<see cref="ExistingSignal.Partition"/>, which the planner
+    /// reads), and the Decision-Record facts of their dismissals are read in one batch. Then, in memory and with the SAME rule as the exact
+    /// count (<see cref="Assess"/>, round 2 N1/F4), a (grain, partition) is worked only when that rule would change one of its stamps.
+    /// Every worked grain is then counted exactly from a fresh read BEFORE anything is written; its stamps are raised, lowered or cleared
+    /// and only rows that change are written (D-61). Returns the Signals with the corrected stamps, so the planner that runs next sees them
+    /// even if a write failed, and the number of failures (the run is then not successful, and the next run retries).
+    /// </summary>
+    /// <remarks>Fail closed, the same way for every partition (#1661 round 2 F3, K1): when the partitions, the Decision-Record facts or
+    /// ANY worked grain's count cannot be read, <see cref="SuppressionReconciliation.PartitionsUnavailable"/> is set, NOTHING is written
+    /// (no stamp is raised, lowered or cleared), and the caller must plan nothing for the policy this pass. Withholding the stamps instead
+    /// would let the planner re-raise every suppressed subject of the policy on one timeout.</remarks>
+    internal async Task<SuppressionReconciliation> ReconcileAsync(
         Guid policyId, string policyCode, bool policyCountsTowardSuppression, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
     {
-        if (!policyCountsTowardSuppression) return (existing, 0);
-
         var now = _timeProvider.GetUtcNow().UtcDateTime;
-        var windowStart = now.AddDays(-WindowDays);
-        static (Guid?, Guid?, string?, Guid?) Key(ExistingSignal s) =>
-            s.CoreRecordId is { } core ? (s.CoreTypeRefId, core, null, null) : (null, null, s.SubjectEntity, s.SubjectId);
+        var readSince = ReadSince(now);
+        var trailingSince = now.AddDays(-WindowDays - 1);
 
-        bool NeedsWork(IGrouping<(Guid?, Guid?, string?, Guid?), ExistingSignal> g)
+        bool Live(ExistingSignal s) => s.SuppressedUntil is { } u && u > now;
+        static bool DismissedSince(ExistingSignal s, DateTime since) =>
+            s.Resolution == SignalWriter.ResolutionDismissed && s.ResolvedOn is { } on && on >= since;
+
+        // Partitioning only splits a count, so a grain that cannot reach the threshold in total (three distinct dismissals in the read
+        // window, the latest in the trailing window), with no live stamp, needs nothing at all.
+        var grains = existing.GroupBy(GrainKeyOf)
+            .Where(g => g.Any(Live)
+                || (policyCountsTowardSuppression && g.Any(s => DismissedSince(s, trailingSince))
+                    && g.Where(s => DismissedSince(s, readSince)).Select(s => s.DecisionRecordId ?? s.Id).Distinct().Count() >= ThresholdDismissals))
+            .ToList();
+        if (grains.Count == 0) return new SuppressionReconciliation(existing, 0, PartitionsUnavailable: false);
+
+        var rows = grains.SelectMany(g => g).ToList();
+        var partitionOf = new Dictionary<Guid, SuppressionPartition>();
+        IReadOnlyDictionary<Guid, DecisionRecordFacts> records;
+        try
         {
-            var dismissed = g.Where(s => s.Resolution == SignalWriter.ResolutionDismissed && s.ResolvedOn is { } on && on >= windowStart.AddDays(-1)).ToList();
-            if (dismissed.Select(s => s.DecisionRecordId ?? s.Id).Distinct().Count() < ThresholdDismissals) return false;
+            var partitions = await PartitionsAsync(rows.Select(ItemOf).ToList(), ct).ConfigureAwait(false);
+            for (var i = 0; i < rows.Count; i++) partitionOf[rows[i].Id] = partitions[i];
 
-            DateTime? live = null;
-            foreach (var s in g)
-            {
-                if (s.SuppressedUntil is { } u && u > now && (live is null || u > live)) live = u;
-            }
-
-            if (live is null) return true;
-            var dismissedIds = dismissed.Select(s => s.Id).ToHashSet();
-            return g.Any(s => (s.IsOpen || dismissedIds.Contains(s.Id)) && (s.SuppressedUntil is null || s.SuppressedUntil < live));
+            // The facts the exact rule needs (class, reason, decided-on), for the dismissals of the partitions that may carry a stamp.
+            records = policyCountsTowardSuppression
+                ? await ReadDecisionRecordsAsync(rows
+                    .Where(s => !partitionOf[s.Id].IsUndetermined && DismissedSince(s, readSince) && s.DecisionRecordId is not null)
+                    .Select(s => s.DecisionRecordId!.Value).Distinct().ToList(), ct).ConfigureAwait(false)
+                : new Dictionary<Guid, DecisionRecordFacts>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogFailure(policyCode, ex);
+            return new SuppressionReconciliation(existing, 1, PartitionsUnavailable: true);
         }
 
-        var candidates = existing.GroupBy(Key).Where(NeedsWork).ToList();
-        if (candidates.Count == 0) return (existing, 0);
+        existing = existing.Select(s => partitionOf.TryGetValue(s.Id, out var p) ? s with { Partition = p } : s).ToList();
 
-        var stamped = new Dictionary<Guid, DateTime>();
-        var failures = 0;
-        foreach (var group in candidates)
+        var candidates = existing
+            .Where(s => s.Partition is not null)
+            .GroupBy(s => (Grain: GrainKeyOf(s), Partition: s.Partition!.Value))
+            .Where(g => Assess(g.Select(RowOf).ToList(), records, policyCountsTowardSuppression,
+                stampable: policyCountsTowardSuppression && !g.Key.Partition.IsUndetermined, now).Changes.Any())
+            .Select(g => g.Key.Grain)
+            .Distinct()
+            .ToList();
+        if (candidates.Count == 0) return new SuppressionReconciliation(existing, 0, PartitionsUnavailable: false);
+
+        // Every worked grain is counted before anything is written: a count that fails leaves the policy as it was, whole.
+        var assessed = new List<GrainAssessment>();
+        foreach (var (type, core, entity, subject) in candidates)
         {
-            var (type, core, entity, subject) = group.Key;
-            var grain = new SuppressionGrain(type, core, entity, subject);
             try
             {
-                var assessment = await AssessAsync(policyId, policyCode, grain, policyCountsTowardSuppression, visibleSignalIds: null, ct).ConfigureAwait(false);
-                if (assessment.StampUntil is { } until)
-                {
-                    // In memory first: the planner must see the suppression this pass even when the write below fails.
-                    var targetIds = assessment.StampTargets;
-                    foreach (var signal in group.Where(s => targetIds.Contains(s.Id))) stamped[signal.Id] = until;
-                    await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
-                }
+                assessed.Add(await AssessAsync(policyId, policyCode, new SuppressionGrain(type, core, entity, subject), policyCountsTowardSuppression,
+                    visibleSignalIds: null, partitionOf, anchor: null, ct).ConfigureAwait(false));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                LogFailure(policyCode, ex);
+                return new SuppressionReconciliation(existing, 1, PartitionsUnavailable: true);
+            }
+        }
+
+        // In memory first: the planner must see the corrected stamps this pass even when a write below fails.
+        var changed = new Dictionary<Guid, DateTime?>();
+        foreach (var (_, assessment) in assessed.SelectMany(a => a.Partitions))
+        {
+            foreach (var (id, to) in assessment.Changes) changed[id] = to;
+        }
+
+        var failures = 0;
+        foreach (var grainAssessment in assessed)
+        {
+            try
+            {
+                foreach (var (_, assessment) in grainAssessment.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -239,26 +644,67 @@ public sealed class SignalSuppressionService
             }
         }
 
-        return stamped.Count == 0
-            ? (existing, failures)
-            : (existing.Select(s => stamped.TryGetValue(s.Id, out var until) ? s with { SuppressedUntil = until } : s).ToList(), failures);
+        return new SuppressionReconciliation(
+            changed.Count == 0 ? existing : existing.Select(s => changed.TryGetValue(s.Id, out var to) ? s with { SuppressedUntil = to } : s).ToList(),
+            failures,
+            PartitionsUnavailable: false);
     }
+
+    /// <summary>The earliest <c>sprk_resolvedon</c> a dismissal can have and still justify a live stamp (#1661 round 2 F1): a stamp lives
+    /// 30 days after its latest dismissal, which is 30 days after the earliest of its three, plus a day's slack for the Decision Record's
+    /// <c>sprk_decidedon</c> following the Signal's close.</summary>
+    private static DateTime ReadSince(DateTime now) => now.AddDays(-2 * WindowDays - 1);
+
+    private static (Guid?, Guid?, string?, Guid?) GrainKeyOf(ExistingSignal s) =>
+        s.CoreRecordId is { } core ? (s.CoreTypeRefId, core, null, null) : (null, null, s.SubjectEntity, s.SubjectId);
 
     // ── Counting ────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <param name="StampUntil">The date the partition's own counted dismissals justify (null below the threshold, once lapsed, or in the
+    /// undetermined bucket).</param>
+    /// <param name="Targets">Rows to RAISE to <paramref name="StampUntil"/>: open, or dismissed in the window, with no or an older stamp.</param>
+    /// <param name="Lowers">Rows of any status whose live stamp is later than <paramref name="StampUntil"/> (or live with none justified): lowered
+    /// to it, or cleared (#1661 F1), each with the row version it was read at (round 2 K6).</param>
     private sealed record Assessment(
-        SuppressionStatus Status, DateTime? StampUntil, IReadOnlyList<(Guid Id, DateTime? Current)> Targets)
+        SuppressionStatus Status, DateTime? StampUntil, IReadOnlyList<(Guid Id, DateTime? Current)> Targets, IReadOnlyList<(Guid Id, string? RowVersion)> Lowers)
     {
-        public HashSet<Guid> StampTargets => Targets.Select(t => t.Id).ToHashSet();
+        public IEnumerable<(Guid Id, DateTime? To)> Changes =>
+            (StampUntil is { } until ? Targets.Select(t => (t.Id, (DateTime?)until)) : [])
+                .Concat(Lowers.Select(l => (l.Id, StampUntil)));
     }
 
-    private sealed record DismissedSignal(Guid SignalId, DateTime ResolvedOn, Guid? DecisionRecordId);
+    private sealed record GrainAssessment(
+        IReadOnlyList<(SuppressionPartition Partition, Assessment Assessment)> Partitions, SuppressionPartition? Anchor, bool PolicyCounts);
 
-    private async Task<Assessment> AssessAsync(
-        Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds, CancellationToken ct)
+    /// <summary>One Signal as the counting rule needs it, whether read by the grain query or handed over by the nightly job: the SAME rule
+    /// (<see cref="Assess"/>) decides both whether a grain needs work and what is written (#1661 round 2 N1/F4).</summary>
+    private readonly record struct StampRow(
+        Guid Id, bool IsOpen, int? Resolution, DateTime? ResolvedOn, DateTime? SuppressedUntil, Guid? DecisionRecordId, string? RowVersion);
+
+    private static StampRow RowOf(ExistingSignal s) =>
+        new(s.Id, s.IsOpen, s.Resolution, Utc(s.ResolvedOn), Utc(s.SuppressedUntil), s.DecisionRecordId, s.RowVersion);
+
+    private static StampRow RowOf(Entity s) => new(
+        s.Id,
+        s.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged,
+        s.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
+        Utc(s.GetAttributeValue<DateTime?>("sprk_resolvedon")),
+        Utc(s.GetAttributeValue<DateTime?>("sprk_suppresseduntil")),
+        s.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id,
+        s.RowVersion ?? (s.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null));
+
+    private static DateTime? Utc(DateTime? value) => value is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null;
+
+    /// <summary>
+    /// Counts one pairing in every partition it has (#1661, D-123): the grain's Signals are read once, each is placed in its partition
+    /// (<paramref name="known"/> placements are reused; the rest, and <paramref name="anchor"/>, are placed by <see cref="PartitionsAsync"/>),
+    /// and each partition is counted from its own rows only. The ordinary partition comes first.
+    /// </summary>
+    private async Task<GrainAssessment> AssessAsync(
+        Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds,
+        IReadOnlyDictionary<Guid, SuppressionPartition>? known, Entity? anchor, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
-        var windowStart = now.AddDays(-WindowDays);
 
         if (policyCounts is null)
         {
@@ -266,19 +712,56 @@ public sealed class SignalSuppressionService
             policyCounts = policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
         }
 
-        var signals = await ReadGrainSignalsAsync(policyId, policyCode, grain, windowStart.AddDays(-1), ct).ConfigureAwait(false);
-        if (visibleSignalIds is not null) signals = signals.Where(s => visibleSignalIds.Contains(s.Id)).ToList();
-        var dismissed = signals
-            .Where(s => s.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value == SignalWriter.ResolutionDismissed
-                && s.GetAttributeValue<DateTime?>("sprk_resolvedon") is not null)
-            .Select(s => new DismissedSignal(
-                s.Id,
-                DateTime.SpecifyKind(s.GetAttributeValue<DateTime>("sprk_resolvedon"), DateTimeKind.Utc),
-                s.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id))
-            .ToList();
+        var all = await ReadGrainSignalsAsync(policyId, policyCode, grain, ReadSince(now), now, ct).ConfigureAwait(false);
+        if (visibleSignalIds is not null) all = all.Where(s => visibleSignalIds.Contains(s.Id)).ToList();
 
-        var records = await ReadDecisionRecordsAsync(dismissed.Where(d => d.DecisionRecordId is not null).Select(d => d.DecisionRecordId!.Value).Distinct().ToList(), ct)
-            .ConfigureAwait(false);
+        var toPlace = all.Where(s => known is null || !known.ContainsKey(s.Id)).ToList();
+        var items = toPlace.Select(ItemOf).ToList();
+        if (anchor is not null) items.Add(ItemOf(anchor));
+        var placed = await PartitionsAsync(items, ct).ConfigureAwait(false);
+
+        var partitionOf = new Dictionary<Guid, SuppressionPartition>();
+        for (var i = 0; i < toPlace.Count; i++) partitionOf[toPlace[i].Id] = placed[i];
+        SuppressionPartition PartitionOf(Entity s) => known is not null && known.TryGetValue(s.Id, out var p) ? p : partitionOf[s.Id];
+
+        var rows = all.Select(RowOf).ToList();
+        var records = await ReadDecisionRecordsAsync(rows
+            .Where(r => r.Resolution == SignalWriter.ResolutionDismissed && r.DecisionRecordId is not null)
+            .Select(r => r.DecisionRecordId!.Value).Distinct().ToList(), ct).ConfigureAwait(false);
+
+        var results = new List<(SuppressionPartition, Assessment)>();
+        foreach (var group in all.GroupBy(PartitionOf).OrderBy(g => g.Key.IsOrdinary ? 0 : 1).ThenBy(g => g.Key.Key, StringComparer.Ordinal))
+        {
+            var stampable = policyCounts.Value && !group.Key.IsUndetermined;
+            results.Add((group.Key, Assess(group.Select(RowOf).ToList(), records, policyCounts.Value, stampable, now)));
+        }
+
+        return new GrainAssessment(results, anchor is null ? null : placed[^1], policyCounts.Value);
+    }
+
+    /// <summary>
+    /// THE counting rule for one partition, pure (#1661 round 2): both the nightly "does this grain need work" and the exact count use it,
+    /// with the same date source on both sides (a dismissal's date is its Decision Record's <c>sprk_decidedon</c>, else the Signal's
+    /// <c>sprk_resolvedon</c>), so a stamp it wrote is the stamp it justifies (F4: no nightly re-read of every stamped grain).
+    /// <list type="bullet">
+    /// <item>One dismissal per Decision Record of class Dismissal (a review may resolve several Signals); a Signal with no record is its
+    /// own. A non-counting reason, or a policy that does not count, contributes to the recorded number only.</item>
+    /// <item>The status reports the counted and recorded dismissals of the trailing <see cref="WindowDays"/> days.</item>
+    /// <item>The justified date (<see cref="JustifiedUntil"/>) is the latest S such that at least three counted dismissals within
+    /// <see cref="WindowDays"/> days of each other end at S − 30 days, while S is in the future (F1): a stamp lives its full 30 days
+    /// although its oldest dismissal ages out of the trailing count first (spec FR-17).</item>
+    /// <item>A live stamp later than the justified date (or live with none justified) is lowered or cleared; open rows, and rows
+    /// dismissed in the trailing window, with no or an earlier stamp are raised to it. A stamp at or below it is never lowered.</item>
+    /// </list>
+    /// </summary>
+    private static Assessment Assess(
+        IReadOnlyList<StampRow> rows, IReadOnlyDictionary<Guid, DecisionRecordFacts> records, bool policyCounts, bool stampable, DateTime now)
+    {
+        var windowStart = now.AddDays(-WindowDays);
+        var readSince = ReadSince(now);
+        var dismissed = rows
+            .Where(r => r.Resolution == SignalWriter.ResolutionDismissed && r.ResolvedOn is { } on && on >= readSince)
+            .ToList();
 
         // One dismissal per Decision Record (a review may resolve several Signals); a Signal with no record is its own dismissal.
         var events = new Dictionary<Guid, (DateTime On, bool Counts)>();
@@ -291,57 +774,97 @@ public sealed class SignalSuppressionService
             {
                 if (record.Class != (int)RecordedDecisionClass.Dismissal) continue; // an action was taken: not a dismissal
                 key = recordId;
-                on = record.DecidedOn ?? d.ResolvedOn;
+                on = record.DecidedOn ?? d.ResolvedOn!.Value;
                 counts = !IsNonCountingReason(record.Reason);
             }
             else
             {
-                key = d.DecisionRecordId ?? d.SignalId;
-                on = d.ResolvedOn;
+                key = d.DecisionRecordId ?? d.Id;
+                on = d.ResolvedOn!.Value;
             }
 
-            if (on < windowStart) continue;
             events[key] = (on, counts);
         }
 
-        var counted = policyCounts.Value ? events.Values.Where(e => e.Counts).ToList() : new List<(DateTime On, bool Counts)>();
-        DateTime? liveStamp = null;
-        foreach (var signal in signals)
-        {
-            if (signal.GetAttributeValue<DateTime?>("sprk_suppresseduntil") is { } stored)
-            {
-                var stamp = DateTime.SpecifyKind(stored, DateTimeKind.Utc);
-                if (stamp > now && (liveStamp is null || stamp > liveStamp)) liveStamp = stamp;
-            }
-        }
+        var counted = policyCounts ? events.Values.Where(e => e.Counts).Select(e => e.On).ToList() : new List<DateTime>();
 
-        DateTime? stampUntil = null;
+        // The partition's OWN justified date: the only date it may carry or report (#1661 F1).
+        var justified = stampable ? JustifiedUntil(counted, now) : null;
+
         var targets = new List<(Guid, DateTime?)>();
-        if (counted.Count >= ThresholdDismissals)
+        var lowers = new List<(Guid, string?)>();
+        var trailing = dismissed.Where(d => d.ResolvedOn >= windowStart.AddDays(-1)).Select(d => d.Id).ToHashSet();
+        foreach (var s in rows)
         {
-            var newUntil = counted.Max(e => e.On).AddDays(WindowDays);
-            if (newUntil > now)
+            if (s.SuppressedUntil is { } live && live > now && (justified is null || live > justified))
             {
-                stampUntil = newUntil;
-                var inWindow = dismissed.Where(d => d.ResolvedOn >= windowStart.AddDays(-1)).Select(d => d.SignalId).ToHashSet();
-                foreach (var s in signals)
-                {
-                    var status = s.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value;
-                    var open = status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
-                    if (!open && !inWindow.Contains(s.Id)) continue;
-                    var current = s.GetAttributeValue<DateTime?>("sprk_suppresseduntil");
-                    if (current is { } c && DateTime.SpecifyKind(c, DateTimeKind.Utc) >= newUntil) continue;
-                    targets.Add((s.Id, current));
-                }
+                lowers.Add((s.Id, s.RowVersion));
+                continue;
             }
+
+            if (justified is not { } raiseTo) continue;
+            if (!s.IsOpen && !trailing.Contains(s.Id)) continue;
+            if (s.SuppressedUntil is { } current && current >= raiseTo) continue;
+            targets.Add((s.Id, s.SuppressedUntil));
         }
 
-        var until = stampUntil is { } fresh && (liveStamp is null || fresh > liveStamp) ? fresh : liveStamp;
-        return new Assessment(new SuppressionStatus(counted.Count, events.Count, until, policyCounts.Value), stampUntil, targets);
+        var status = new SuppressionStatus(
+            counted.Count(on => on >= windowStart), events.Values.Count(e => e.On >= windowStart), justified, policyCounts);
+        return new Assessment(status, justified, targets, lowers);
+    }
+
+    /// <summary>The latest date the <paramref name="counted"/> dismissal dates justify (#1661 round 2 F1): S = d + 30 days for the latest
+    /// counted dismissal d that has at least <see cref="ThresholdDismissals"/> − 1 others no more than <see cref="WindowDays"/> days before
+    /// it, while S is after <paramref name="now"/>; null otherwise.</summary>
+    internal static DateTime? JustifiedUntil(IReadOnlyCollection<DateTime> counted, DateTime now)
+    {
+        var dates = counted.Order().ToList();
+        for (var i = dates.Count - 1; i >= ThresholdDismissals - 1; i--)
+        {
+            if (dates[i] - dates[i - (ThresholdDismissals - 1)] > TimeSpan.FromDays(WindowDays)) continue;
+            var until = dates[i].AddDays(WindowDays);
+            return until > now ? until : null; // every earlier one ends earlier still
+        }
+
+        return null;
     }
 
     private async Task StampAsync(string policyCode, Assessment assessment, CancellationToken ct)
     {
+        if (assessment.Lowers.Count > 0)
+        {
+            var lowered = 0;
+            foreach (var (id, rowVersion) in assessment.Lowers)
+            {
+                var fields = new Dictionary<string, object> { ["sprk_suppresseduntil"] = assessment.StampUntil! };
+                if (rowVersion is null)
+                {
+                    // Every row Dataverse returns carries its version; a row read without one is lowered unconditionally.
+                    await _writer.UpdateAsync("sprk_signal", id, fields, ct).ConfigureAwait(false);
+                    lowered++;
+                    continue;
+                }
+
+                try
+                {
+                    // Round 2 K6: only while the row is as it was counted. A row re-stamped since (the decision route's immediate apply)
+                    // is not lowered from a stale count; the next pass counts it again.
+                    await _writer.UpdateIfRowVersionMatchesAsync("sprk_signal", id, rowVersion, fields, ct).ConfigureAwait(false);
+                    lowered++;
+                }
+                catch (Exception ex) when (SignalWriter.IsConcurrencyVersionMismatch(ex))
+                {
+                    _logger.LogWarning(SuppressionEvents.Withdrawn,
+                        "Suppression: policy {PolicyCode}: Signal {SignalId} changed since it was counted; its stamp was NOT lowered. The next pass counts it again.",
+                        policyCode, id);
+                }
+            }
+
+            _logger.LogInformation(SuppressionEvents.Withdrawn,
+                "Suppression: policy {PolicyCode}: {Signals} Signal(s) carried a stamp their partition's {Counted} counted dismissal(s) do not justify; " +
+                "lowered to {Until:o} (empty: cleared).", policyCode, lowered, assessment.Status.DismissalsCounted, assessment.StampUntil);
+        }
+
         if (assessment.StampUntil is not { } until || assessment.Targets.Count == 0) return;
 
         foreach (var (id, _) in assessment.Targets)
@@ -364,14 +887,15 @@ public sealed class SignalSuppressionService
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The ids of the grain's Signals the CALLER can read: the same filter (grain, open or dismissed in the window) as the app-only read, asked through the caller's own
-    /// Dataverse client, which trims the result to rows that caller may see. A read that is not a success, or a result as large as the page
-    /// cap, throws: a partial answer would be a wrong count.</summary>
+    /// <summary>The ids of the grain's Signals the CALLER can read: the same filter (grain; open, dismissed in the window, or carrying a live
+    /// stamp) as the app-only read, asked through the caller's own Dataverse client, which trims the result to rows that caller may see. A
+    /// read that is not a success, or a result as large as the page cap, throws: a partial answer would be a wrong count.</summary>
     private static async Task<IReadOnlySet<Guid>> ReadVisibleSignalIdsAsync(
-        IDataverseUserClient caller, Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, CancellationToken ct)
+        IDataverseUserClient caller, Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, DateTime now, CancellationToken ct)
     {
         const int cap = 4999;
         static string Quote(string s) => "'" + s.Replace("'", "''", StringComparison.Ordinal) + "'";
+        static string Utc(DateTime d) => d.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
         var filter = $"_sprk_policy_value eq {policyId:D}";
         if (grain.CoreRecordId is { } coreId)
         {
@@ -386,7 +910,8 @@ public sealed class SignalSuppressionService
 
         // The same status/window clause as the app-only read: without it the page cap would count every Signal of the policy on the record, of any age.
         filter += $" and (sprk_signalstatus eq {SignalWriter.SignalStatusOpen} or sprk_signalstatus eq {SignalWriter.SignalStatusAcknowledged}"
-            + $" or (sprk_resolutiontype eq {SignalWriter.ResolutionDismissed} and sprk_resolvedon ge {resolvedSince.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)}))";
+            + $" or (sprk_resolutiontype eq {SignalWriter.ResolutionDismissed} and sprk_resolvedon ge {Utc(resolvedSince)})"
+            + $" or sprk_suppresseduntil gt {Utc(now)})";
 
         var response = await caller.GetAsync(
             $"sprk_signals?$select=sprk_signalid&$top={cap}&$filter={Uri.EscapeDataString(filter)}", ct).ConfigureAwait(false);
@@ -410,13 +935,17 @@ public sealed class SignalSuppressionService
         return ids;
     }
 
-    /// <summary>The grain's Signals (any status) of one policy: by the generic core pair, or by the subject's dedupe-key prefix.</summary>
+    /// <summary>The grain's Signals of one policy: by the generic core pair, or by the subject's dedupe-key prefix. Open ones, dismissed ones
+    /// since <paramref name="resolvedSince"/> (<see cref="ReadSince"/>: every dismissal that can still justify a live stamp, #1661 round 2
+    /// F1), and any row still carrying a live stamp (so a stamp the partition no longer justifies can be withdrawn, #1661 F1), with their
+    /// lineage lookups, owner and dedupe key (the partition) and row version (a lower is conditional on it, round 2 K6).</summary>
     private async Task<IReadOnlyList<Entity>> ReadGrainSignalsAsync(
-        Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, CancellationToken ct)
+        Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, DateTime now, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_suppresseduntil", "sprk_decisionrecord"),
+            ColumnSet = new ColumnSet(new[] { "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_suppresseduntil", "sprk_decisionrecord", "ownerid", "sprk_dedupekey", "versionnumber" }
+                .Concat(SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
@@ -433,12 +962,13 @@ public sealed class SignalSuppressionService
                 SignalWriter.DedupeKeySubjectPrefix(policyCode, grain.SubjectEntity!, grain.SubjectId!.Value.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant()));
         }
 
-        // Open ones (to hide) and the dismissed ones in the window (to count): everything else of the grain is irrelevant.
+        // Open ones (to hide), the dismissed ones in the window (to count) and the stamped ones (to keep honest): nothing else matters.
         var statusFilter = query.Criteria.AddFilter(LogicalOperator.Or);
         statusFilter.AddCondition("sprk_signalstatus", ConditionOperator.In, SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged);
         var dismissedFilter = statusFilter.AddFilter(LogicalOperator.And);
         dismissedFilter.AddCondition("sprk_resolutiontype", ConditionOperator.Equal, SignalWriter.ResolutionDismissed);
         dismissedFilter.AddCondition("sprk_resolvedon", ConditionOperator.GreaterEqual, resolvedSince);
+        statusFilter.AddCondition("sprk_suppresseduntil", ConditionOperator.GreaterThan, now);
 
         var rows = new List<Entity>();
         for (var page = 1; ; page++)

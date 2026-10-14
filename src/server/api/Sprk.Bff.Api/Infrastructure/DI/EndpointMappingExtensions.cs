@@ -230,6 +230,8 @@ public static class EndpointMappingExtensions
         app.MapEventEndpoints();
         // Ontology platform R1 task 036: a Signal's decision plan resolved against the closed action catalog.
         app.MapDecisionPlanEndpoints();
+        // Ontology platform R1 task 043: the decision commit route (one review, record last, idempotent per review id).
+        app.MapDecisionCommitEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
         // owner round 10 item 1). Api/WorkAssignmentEndpoints.cs is DELETED. Its one route, POST
         // /api/v1/work-assignments, created a sprk_workassignment APP-ONLY with ownerid = a caller-chosen user (records

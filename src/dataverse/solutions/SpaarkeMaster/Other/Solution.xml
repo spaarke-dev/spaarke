@@ -485,6 +485,7 @@
       <RootComponent type="70" id="{5d02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
       <RootComponent type="70" id="{5f02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
       <RootComponent type="70" id="{917b64c5-47bf-f111-a05b-3833c5e9614d}" behavior="0" />
+      <RootComponent type="70" id="{b710d90c-0f27-4d6a-a146-2769c8aa921f}" behavior="0" />
       <RootComponent type="70" id="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}" behavior="0" />
       <RootComponent type="80" schemaName="sprk_MatterManagement" behavior="0" />
       <RootComponent type="80" schemaName="sprk_SpaarkeAISetup" behavior="0" />

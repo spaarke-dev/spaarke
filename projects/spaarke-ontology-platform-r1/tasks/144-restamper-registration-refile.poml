@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="144" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract T4: register sprk_signal and sprk_decisionrecord with CoreAncestorRestamper / StampSourceColumns so every re-file re-stamps and re-owns them (audit F5)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 142 and 143 done; uac-r2 lineage + census PR (C4/C7) merged; #1747 merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits UAC-owned stamping code; secure-family reach on re-file.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive change to shared access infrastructure owned by another project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 142/143 and on uac-r2's lineage PR.</parallel-reason>
+    <deps>142,143</deps>
+    <tags>bff-api,security,dataverse,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Join Signals and Decision Records to the existing core-ancestor stamp machinery, so a subject re-filed through any path re-stamps and re-owns them in the same operation — without a parallel restamper.</prompt>
+  <role>SPAARKE BFF engineer working in unified-access-control-r2's stamping code under their review.</role>
+  <goal>Contract §4 ontology item 4 and acceptance items 4, 5, 6 hold in tests; the report-only reconciliation run on dev is sent to uac-r2.</goal>
+
+  <context>
+    <background>D-131. uac-r2's binding conditions (2026-10-12). Re-file paths: the BFF re-file route, ReconciledEmailFiling (Office save), the AI tool dataverse.update_record → OwnedChildWrite.RefileAsync (#1747 F1).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (StampSourceColumns :212, IntermediateRootColumns :169, ClassifyStampSource)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorRestamper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/OwnedChildWrite.cs (RefileAsync)</file>
+      <file>tests for CoreAncestorResolver (CoreAncestorResolverTests pins IntermediateRootColumns to the TypeScript side)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2">The StampSourceColumns + restamper registration is a separate small commit, reviewed by uac-r2 in isolation.</constraint>
+    <constraint source="uac-r2">Signal and DR are stamped children; neither goes into IntermediateRootColumns.</constraint>
+    <constraint source="uac-r2">ClassifyStampSource treats sprk_regarding{matter,project,workassignment} on Signal and DR as the ROOT (subject = core, the To Do convention), not as a stamp source; add a test.</constraint>
+    <constraint source="uac-r2">Before any write-enabled run, run CoreAncestorStampReconciliationJob report-only on dev (CoreAncestor:StampReconciliation:WritesEnabled=false) and hand the stale-row report to the main session for uac-r2. Turning writes on is a dev data change: the owner decides.</constraint>
+    <constraint source="contract">No parallel restamper. Re-file re-resolves the owner through the single write path (D-130). D-34 context fields are never touched by a re-file.</constraint>
+    <constraint source="project">Never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Commit 1: registration only, with the root-classification test.</step>
+    <step order="2">Commit 2: re-file paths re-stamp and re-own Signals/DRs of the moved subject; tests per path.</step>
+    <step order="3">Report-only reconciliation run on dev; save the report under notes/.</step>
+    <step order="4">Build, suites, ArchTests; draft PR; send to uac-r2.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Re-filing a communication M → secure X through the BFF route re-owns its Signals and DRs to SRO and re-stamps them to X in the same operation.</criterion>
+    <criterion testable="true">The same holds for ReconciledEmailFiling and dataverse.update_record.</criterion>
+    <criterion testable="true">Moving back to M gives M's BU default team ownership.</criterion>
+    <criterion testable="true">sprk_corerecordid/type, policy version and snapshot are byte-identical before and after each re-file.</criterion>
+    <criterion testable="true">CoreAncestorResolverTests pass unchanged (IntermediateRootColumns unchanged).</criterion>
+    <criterion testable="true">The report-only stale-row report exists in notes/.</criterion>
+    <criterion testable="true">uac-r2 K4 condition (from #1746): a Secure-owned Signal whose core is a project or work assignment and whose subject does not reach the root leaves #1746's undetermined suppression bucket once its sprk_regarding{project,workassignment} stamp exists (test).</criterion>
+    <criterion testable="true">uac-r2 K7 (from #1746): a hit on a secure project/work-assignment core is placed in its secure partition (not Ordinary) once the stamp exists, so no ordinary stamp mutes it (test).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131); conditions from uac-r2 messages of 2026-10-12.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

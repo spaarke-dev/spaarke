@@ -556,13 +556,14 @@ public sealed class CoreAncestorResolver
             _logger.LogError(ex,
                 "Core-ancestor read failed for {Entity}({Id}); failing closed per NFR-01.",
                 targetEntityLogicalName, targetRecordId);
-            return CoreAncestorResult.Failed(
-                $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}");
+            var failure = $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}";
+            // Ontology task 142: a target that does not exist is a data condition, not a fault (still Error, still no write).
+            return IsRecordNotFound(ex) ? CoreAncestorResult.Refused(failure) : CoreAncestorResult.Failed(failure);
         }
 
         if (row is null)
         {
-            return CoreAncestorResult.Failed(
+            return CoreAncestorResult.Refused(
                 $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).");
         }
 
@@ -586,7 +587,7 @@ public sealed class CoreAncestorResolver
                     _logger.LogError(
                         "{Entity}({Id}) names two different {Root} records ({First}, {Second}); refusing to derive a stamp.",
                         targetEntityLogicalName, targetRecordId, rootEntity, already.RecordId, reference.Id);
-                    return CoreAncestorResult.Failed(
+                    return CoreAncestorResult.Refused(
                         $"{targetEntityLogicalName}({targetRecordId}) names two different {rootEntity} records, so its "
                         + "root cannot be determined.");
                 }
@@ -606,6 +607,18 @@ public sealed class CoreAncestorResolver
         }
 
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
+    }
+
+    /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1051,7 +1064,10 @@ public sealed class CoreAncestorResolver
         var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed."));
+            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
+            {
+                IsPermanent = result.IsPermanent,
+            });
         }
 
         if (result.Stamps.Count == 0)
@@ -1153,8 +1169,21 @@ public sealed record CoreAncestorResult(
     /// <summary>True when the caller may proceed with the write.</summary>
     public bool Succeeded => Status != CoreAncestorStatus.Error;
 
+    /// <summary>
+    /// Ontology task 142: on an <see cref="CoreAncestorStatus.Error"/>, true when the failure is a DATA condition a retry does not
+    /// change (the target names two different records of one root table, or the target row does not exist), false for a fault (a
+    /// timeout, a throttle, a metadata read). Either way the caller does not write; a caller that reports the failure may say
+    /// "cannot" rather than "try again". Additive: <see cref="Status"/> stays <see cref="CoreAncestorStatus.Error"/>, so every
+    /// caller that checks <see cref="Succeeded"/> is unchanged.
+    /// </summary>
+    public bool IsPermanent { get; init; }
+
     internal static CoreAncestorResult Failed(string error) =>
         new(CoreAncestorStatus.Error, [], error);
+
+    internal static CoreAncestorResult Refused(string error) =>
+        Failed(error) with { IsPermanent = true };
+
 }
 
 /// <summary>
@@ -1184,6 +1213,9 @@ public sealed record CoreAncestorStampOutcome(
     /// nothing then.
     /// </summary>
     public int? InheritedAccessPermission { get; init; }
+
+    /// <summary>On a failure, true when it is a data condition, not a fault (<see cref="CoreAncestorResult.IsPermanent"/>).</summary>
+    public bool IsPermanent { get; init; }
 
     internal static CoreAncestorStampOutcome Failed(string error) =>
         new(CoreAncestorStatus.Error, [], [], error);

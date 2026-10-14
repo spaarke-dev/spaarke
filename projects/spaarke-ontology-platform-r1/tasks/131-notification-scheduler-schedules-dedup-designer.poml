@@ -31,6 +31,10 @@
     <constraint source="project">Do not touch the two non-playbook appnotification writers (task 132) or the Designer protection (task 133). Own worktree off origin/master, own PR, do not merge. Never use --no-verify or bare git stash. You cannot write .claude/; report any skill or ADR text to change, for example ADR-034's notification references. The Azure alert deletion needs the owner's approval: STOP and report the exact az command first.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step order="1">Not executed: this task was deferred under D-106 (ontology critical path only); the self-contained pickup context is the ontology-deferred GitHub issue for this task. Steps are written when the task is picked up.</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">All seven notification playbooks are inactive in spaarkedev1 and a scheduler tick runs none of them (evidence recorded).</criterion>
     <criterion testable="true">No script or workflow in the repo can redeploy them; git grep evidence in the PR body.</criterion>

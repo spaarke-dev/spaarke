@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -218,6 +219,81 @@ public class DecisionActionExecutorsTests
         outcome.Written.Should().Equal(
             new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId),
             new DecisionRecordRef("sprk_budget", BudgetId));
+    }
+
+    /// <summary>An ownership resolver that records the context it was asked about and answers as the real one does for a
+    /// requester given by systemuserid: the owner team, with <c>CreatedByPerson</c> = that user (ontology task 147).</summary>
+    private static Mock<IRecordOwnershipResolver> OwnerThatRecordsTheRequester(Action<RecordOwnershipContext> capture)
+    {
+        var owner = new Mock<IRecordOwnershipResolver>();
+        owner.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RecordOwnershipContext context, CancellationToken _) =>
+            {
+                capture(context);
+                return new RecordOwnerResolution(RecordOwnerOutcome.Owned, MatterTeam, null, null)
+                {
+                    CreatedByPerson = context.RequestedBy?.SystemUserId,
+                };
+            });
+        return owner;
+    }
+
+    [Fact]
+    public async Task ReviseBudget_RecordsTheActingUserAsTheCreatorPerson_D135()
+    {
+        RecordOwnershipContext? asked = null;
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(),
+            OwnerThatRecordsTheRequester(c => asked = c).Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        asked.Should().NotBeNull();
+        asked!.RequestedBy.Should().NotBeNull("the person whose decision commit caused the revision is the requester");
+        asked.RequestedBy!.SystemUserId.Should().Be(CallerUserId);
+
+        var revision = writer.Created.Should().ContainSingle().Which;
+        revision.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(MatterTeam, "the person decides nothing about the owner");
+        var person = revision.GetAttributeValue<EntityReference>("sprk_createdbyperson");
+        person.Should().NotBeNull("sprk_budgetrevision is a stamped child table, so ApplyTo writes the creator person");
+        person.LogicalName.Should().Be("systemuser");
+        person.Id.Should().Be(CallerUserId);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_WhenTheOwnerDecisionNamesNoPerson_RecordsNoPerson_AndStillCreatesOwnedByTheTeam()
+    {
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var revision = writer.Created.Should().ContainSingle().Which;
+        revision.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(MatterTeam);
+        revision.Contains("sprk_createdbyperson").Should().BeFalse("a requester the resolver could not name records nobody (no throw)");
+    }
+
+    [Fact]
+    public async Task ReviseBudget_WhenTheCallerHasNoDataverseUser_RefusesBeforeAnyWrite_AndAsksNoOwner()
+    {
+        var probe = Probe(CanWrite);
+        probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+        var user = BudgetUser(MatterId);
+        var writer = new WriterHarness();
+        var owner = Owner();
+        var executor = new ReviseBudgetExecutor(probe.Object, user, writer.Build(), owner.Object, new FakeTimeProvider(Now),
+            NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.CallerUnresolved);
+        writer.Created.Should().BeEmpty();
+        user.Patches.Should().BeEmpty();
+        owner.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -848,18 +924,184 @@ public class DecisionActionExecutorsTests
             new AddTodoExecutor(probe, cores, entities),
             new CreateEventExecutor(probe, cores, entities),
             new SendEmailExecutor(probe, user, cores),
+            new AssignWorkExecutor(probe, cores, entities),
+            new BudgetInquiryActionExecutor(Inquiry()),
         ];
     }
 
+    /// <summary>070's executor, built only so the adapter can be constructed; these tests never run it.</summary>
+    private static BudgetInquiryExecutor Inquiry() =>
+        new(new FakeUserClient(), Owner().Object, new Mock<IFieldMappingDataverseService>().Object,
+            new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
+
     [Fact]
-    public void Registry_EveryCatalogActionHasAnExecutor_ExceptTheTwoOwnedByOtherTasks()
+    public void Registry_EveryCatalogActionHasAnExecutor()
     {
         var registry = new DecisionActionExecutors(AllExecutors());
 
-        registry.MissingCodes().Should().BeEmpty("a catalog action without an executor cannot be committed");
-        DecisionActionExecutors.OwnedElsewhere.Should().BeEquivalentTo("send-budget-inquiry", "assign-work");
-        foreach (var owned in DecisionActionExecutors.OwnedElsewhere)
-            registry.TryGet(owned, out _).Should().BeFalse($"{owned} belongs to another task");
+        registry.MissingCodes().Should().BeEmpty("task 043 registered the inquiry adapter and Assign Work, the last two");
+        foreach (var action in DecisionActionCatalog.All)
+            registry.TryGet(action.Code, out _).Should().BeTrue($"{action.Code} must be executable by the commit route");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // assign-work (task 043; D-113, uac-r2 pair rule on sprk_workassignment)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task AssignWork_BindsTheTypedRegardingLookupAndTheTypedPair_AndTheInternalAssignee()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000a1");
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new AssignWorkExecutor(probe.Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "Review the revised budget\nwith the firm" }, null, MatterCore),
+            CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_workassignment", created));
+        table.Should().Be("sprk_workassignment");
+        var body = sent!.Value;
+        body.GetProperty("sprk_name").GetString().Should().Be("Review the revised budget");
+        body.GetProperty("sprk_description").GetString().Should().Be("Review the revised budget\nwith the firm");
+        body.GetProperty("sprk_assignedtointernal@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
+        body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})",
+            "uac-r2: on a work assignment the typed pair counts only when the typed regarding lookup repeats it");
+        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), "prvCreatesprk_WorkAssignment", It.IsAny<CancellationToken>()), Times.Once,
+            "the live privilege name (spaarkedev1 2026-10-11)");
+    }
+
+    [Theory]
+    [InlineData("sprk_workassignment")]
+    [InlineData("sprk_servicerequest")]
+    [InlineData(null)]
+    public async Task AssignWork_UnderACoreThatIsNotAMatterOrProject_IsRefusedBeforeAnyWrite(string? coreEntity)
+    {
+        var cores = Cores();
+        var core = coreEntity is null ? null : new DecisionCoreRecord(coreEntity, Guid.NewGuid(), Guid.NewGuid());
+
+        var outcome = await new AssignWorkExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "x" }, null, core), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
+        cores.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // send-budget-inquiry adapter (task 043 over 070; the #1512/#1515 mapping)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void InquiryAdapter_MapsEveryOutcome_AsTheReviewsFixedIt()
+    {
+        var sr = Guid.NewGuid();
+        var comm = Guid.NewGuid();
+
+        var sent = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm));
+        sent.Status.Should().Be(DecisionActionStatus.Done);
+        sent.Written.Should().Equal(new DecisionRecordRef("sprk_servicerequest", sr), new DecisionRecordRef("sprk_communication", comm));
+
+        foreach (var refused in new[] { BudgetInquiryOutcome.NotConfirmed, BudgetInquiryOutcome.Invalid, BudgetInquiryOutcome.Refused })
+        {
+            var outcome = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(refused, Error: "no"));
+            outcome.Status.Should().Be(DecisionActionStatus.Refused, refused.ToString());
+            outcome.Written.Should().BeEmpty();
+        }
+
+        var createFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.CreateFailed));
+        createFailed.Status.Should().Be(DecisionActionStatus.Failed);
+        createFailed.Written.Should().BeEmpty();
+
+        var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
+        sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
+        sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+    }
+
+    /// <summary>Captures what is logged, to show where the inquiry's raw error text goes.</summary>
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<string> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add(formatter(state, exception));
+    }
+
+    [Theory]
+    [InlineData(BudgetInquiryOutcome.Refused, DecisionActionReasons.InvalidState)]
+    [InlineData(BudgetInquiryOutcome.Invalid, DecisionActionReasons.InvalidParameter)]
+    [InlineData(BudgetInquiryOutcome.CreateFailed, DecisionActionReasons.WriteFailed)]
+    [InlineData(BudgetInquiryOutcome.SendFailed, DecisionActionReasons.WriteFailed)]
+    public void InquiryAdapter_NeverPassesTheRawErrorText_ToTheCaller_OnlyAFixedMessageAndTheCode_UacK4(BudgetInquiryOutcome outcome, string reason)
+    {
+        const string raw = "0x80040220 SecLib::AccessCheckEx failed. Returned hr = -2147187962, ObjectID: 1a2b..., OwnerId: 3c4d...";
+        var logger = new CapturingLogger();
+
+        var mapped = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(outcome, Error: raw), logger);
+
+        mapped.ReasonCode.Should().Be(reason);
+        mapped.Detail.Should().NotContain("0x80040220").And.NotContain("SecLib").And.EndWith($"({reason})");
+        logger.Lines.Should().ContainSingle(l => l.Contains(raw), "the raw text is logged server-side only");
+    }
+
+    [Fact]
+    public void InquiryAdapter_PassesTheOutsideFirmAndConfirmation_AndSplitsRecipients()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "a@firm.example; b@firm.example",
+            ["subject"] = "Budget",
+            ["body"] = "Please revise",
+            ["outsideFirm"] = FirmId.ToString("D"),
+        }));
+
+        refusal.Should().BeNull();
+        request!.MatterId.Should().Be(MatterId);
+        request.To.Should().Equal("a@firm.example", "b@firm.example");
+        request.OutsideFirmId.Should().Be(FirmId);
+        request.Confirmed.Should().BeTrue("the commit route runs executors only for a confirmed review (D-52)");
+    }
+
+    [Theory]
+    [InlineData(null, "s", "b", null)]
+    [InlineData("a@x.example", null, "b", null)]
+    [InlineData("a@x.example", "s", null, null)]
+    [InlineData("a@x.example", "s", "b", "not-a-guid")]
+    public void InquiryAdapter_RefusesAnIncompleteInquiry_WithoutCallingTheInquiry(string? to, string? subject, string? body, string? firm)
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = to,
+            ["subject"] = subject,
+            ["body"] = body,
+            ["outsideFirm"] = firm,
+        }));
+
+        request.Should().BeNull();
+        refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+    }
+
+    [Fact]
+    public void InquiryAdapter_WithoutAMatter_IsRefused()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(
+            new DecisionActionRequest(new DefaultHttpContext(), SignalId, null, null, null,
+                new Dictionary<string, string?> { ["to"] = "a@x.example", ["subject"] = "s", ["body"] = "b" }));
+
+        request.Should().BeNull();
+        refusal!.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
     }
 
     [Fact]

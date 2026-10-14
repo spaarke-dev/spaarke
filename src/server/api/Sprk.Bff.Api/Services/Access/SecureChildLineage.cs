@@ -89,11 +89,18 @@ internal static class SecureChildLineage
             ("sprk_communication", "sprk_communication")),
         T("sprk_communicationthread", "sprk_communicationthreads",
             Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, WorkAssignment)),
-        // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
-        // read live, spaarkedev1 2026-10-07. Typed core lookups only: sprk_corerecordtype (a catalog row) and
-        // sprk_corerecordid (a string) are not lookups to a parent; sprk_action and sprk_policyversion are not filing.
+        // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Typed core
+        // lookups read live, spaarkedev1 2026-10-07: sprk_corerecordtype (a catalog row) and sprk_corerecordid (a string) are
+        // not lookups to a parent; sprk_action and sprk_policyversion are not filing.
+        // unified-access-control-r2 task 182 (child-record contract C4): the subject's regarding lookups, the same eight as
+        // the Signal row, live on spaarkedev1 2026-10-12 (ontology task 140, #1763). sprk_regardingservicerequest is left
+        // out, as on the Signal row (see the remarks). The typed core lookups stay until ontology task 145's backfill into
+        // the stamp columns is verified (contract C2).
         T("sprk_decisionrecord", "sprk_decisionrecords",
-            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
+            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment) }
+                .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
+                    "sprk_todo", WorkAssignment))
+                .ToArray()),
         // A document's record links come from the ONE declaration of that vocabulary (DocumentLinkFields — a second copy
         // drifts silently; DocumentLinkVocabularyGuardTests), minus the links that are relationships rather than filing
         // (contact, organization, vendor organization, email) and the service request (see the remarks); plus the three

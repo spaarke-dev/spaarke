@@ -92,6 +92,14 @@ public static class RecordCreatorPerson
         // forms) and "New Billing Event" (invoice form) create through the same route, so they record the person too
         // (same script, gate G147-5).
         "sprk_kpiassessment", "sprk_billingevent",
+        // Ontology task 147 (D-135 Q27, #1777): a budget revision records the person whose decision commit caused it
+        // (ReviseBudgetExecutor passes RequestedBy). The owner created the column on dev; the same script lists it, and
+        // its relationship carries the maker's name form (`sprk_budgetrevision_CreatedByPerson_systemuser`).
+        "sprk_budgetrevision",
+        // Ontology task 142 (#1783 / D-135): a Decision Record records the deciding user (DecisionRecordWriter passes RequestedBy =
+        // the confirming systemuser). The owner created the column on dev (field-secured; D-136's narrow profile lets the ontology
+        // writer stamp it); the same script lists it, with SpaarkeMaster / OntologyPlatformSolution as its solution homes.
+        "sprk_decisionrecord",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

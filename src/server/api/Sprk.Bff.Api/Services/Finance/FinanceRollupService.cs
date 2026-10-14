@@ -38,21 +38,19 @@ public class FinanceRollupService
     private readonly ILogger<FinanceRollupService> _logger;
 
     // Entity constants (same as FinancialCalculationToolHandler)
-    private const string InvoiceEntity = "sprk_invoice";
-    private const string Invoice_Matter = "sprk_matter";
-    private const string Invoice_Project = "sprk_project";
-    private const string Invoice_TotalAmount = "sprk_totalamount";
-    private const string Invoice_InvoiceStatus = "sprk_invoicestatus";
+    // The spend/budget/utilization rules themselves (status set, sums, formula) live in FinanceBaseValues, which the Signal
+    // evaluator also uses (task 025b, D-122): there is one formula, here and there.
+    private const string InvoiceEntity = FinanceBaseValues.InvoiceEntity;
+    private const string Invoice_Matter = FinanceBaseValues.MatterEntity;
+    private const string Invoice_Project = FinanceBaseValues.ProjectEntity;
+    private const string Invoice_TotalAmount = FinanceBaseValues.InvoiceTotalAmount;
+    private const string Invoice_InvoiceStatus = FinanceBaseValues.InvoiceStatus;
     private const string Invoice_InvoiceDate = "sprk_invoicedate";
 
-    private const string BudgetEntity = "sprk_budget";
-    private const string Budget_Matter = "sprk_matter";
-    private const string Budget_Project = "sprk_project";
-    private const string Budget_TotalBudget = "sprk_totalbudget";
-
-    private const int InvoiceStatus_Confirmed = 100000001;
-    private const int InvoiceStatus_Extracted = 100000002;
-    private const int InvoiceStatus_Processed = 100000003;
+    private const string BudgetEntity = FinanceBaseValues.BudgetEntity;
+    private const string Budget_Matter = FinanceBaseValues.MatterEntity;
+    private const string Budget_Project = FinanceBaseValues.ProjectEntity;
+    private const string Budget_TotalBudget = FinanceBaseValues.BudgetTotalBudget;
 
     // Target field names on sprk_matter / sprk_project (from Dataverse schema)
     private const string Field_TotalSpendToDate = "sprk_totalspendtodate";
@@ -149,7 +147,7 @@ public class FinanceRollupService
         var currentMonthKey = now.ToString("yyyy-MM", CultureInfo.InvariantCulture);
         var priorMonthKey = now.AddMonths(-1).ToString("yyyy-MM", CultureInfo.InvariantCulture);
 
-        decimal totalSpend = 0m;
+        decimal totalSpend = FinanceBaseValues.SumMoney(invoices, Invoice_TotalAmount);
         decimal currentMonthSpend = 0m;
         decimal priorMonthSpend = 0m;
         int invoiceCount = invoices.Count;
@@ -165,7 +163,6 @@ public class FinanceRollupService
         foreach (var invoice in invoices)
         {
             var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount)?.Value ?? 0m;
-            totalSpend += amount;
 
             var invoiceDate = invoice.GetAttributeValue<DateTime?>(Invoice_InvoiceDate);
             if (invoiceDate.HasValue)
@@ -183,7 +180,7 @@ public class FinanceRollupService
         }
 
         var remainingBudget = totalBudget - totalSpend;
-        var utilization = totalBudget > 0 ? (totalSpend / totalBudget) * 100m : 0m;
+        var utilization = FinanceBaseValues.UtilizationPercent(totalSpend, totalBudget) ?? 0m;
         var velocity = SpendSnapshotService.ComputeVelocityPct(currentMonthSpend, priorMonthSpend);
         var averageInvoice = invoiceCount > 0 ? totalSpend / invoiceCount : 0m;
 
@@ -229,6 +226,16 @@ public class FinanceRollupService
         string lookupField,
         CancellationToken ct)
     {
+        var query = BuildInvoiceQuery(parentId, lookupField);
+
+        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
+        return results.Entities.ToList();
+    }
+
+    /// <summary>The invoice query: the parent's invoices whose status is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>.
+    /// Internal so a test can pin it against the grouped query the Signal evaluator sends (same lookups, same status set).</summary>
+    internal static QueryExpression BuildInvoiceQuery(Guid parentId, string lookupField)
+    {
         var query = new QueryExpression(InvoiceEntity)
         {
             ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_InvoiceStatus),
@@ -238,12 +245,8 @@ public class FinanceRollupService
         query.Criteria.AddCondition(
             Invoice_InvoiceStatus,
             ConditionOperator.In,
-            InvoiceStatus_Confirmed,
-            InvoiceStatus_Extracted,
-            InvoiceStatus_Processed);
-
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
-        return results.Entities.ToList();
+            FinanceBaseValues.CountedInvoiceStatuses.Cast<object>().ToArray());
+        return query;
     }
 
     /// <summary>
@@ -263,6 +266,6 @@ public class FinanceRollupService
         query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
-        return results.Entities.Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
+        return FinanceBaseValues.SumMoney(results.Entities, Budget_TotalBudget);
     }
 }

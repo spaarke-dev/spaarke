@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Signals;
@@ -45,11 +46,35 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         var client = new OntologyWriterDataverseClient(() => _dv.WriterClient, NullLogger<OntologyWriterDataverseClient>.Instance);
         var sysadmin = new OperatorAdapter(_dv.OperatorClient);
         var ownership = new RecordOwnershipResolver(sysadmin, new ConfigurationBuilder().Build(), NullLogger<RecordOwnershipResolver>.Instance);
-        return new DecisionRecordWriter(client, ownership, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
+        // Task 142: uac-r2's REAL core-ancestor resolver (every stamp column exists on sprk_decisionrecord live, task 140) and the
+        // shared regarding builder typing the pair from the LIVE sprk_recordtype_ref catalog (the production query's filter).
+        var coreAncestors = new CoreAncestorResolver(
+            sysadmin,
+            (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+            NullLogger<CoreAncestorResolver>.Instance);
+        var recordTypes = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(async (name, ct) =>
+        {
+            var query = new QueryExpression("sprk_recordtype_ref")
+            {
+                ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, name);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
+        });
+        return new DecisionRecordWriter(
+            client, ownership, coreAncestors, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
     }
 
-    private static DecisionRecordRequest Request(DecisionRecordCore? core, Guid? itemOwner) => new(
-        Guid.NewGuid(), PolicyVersionId, core, itemOwner, TestUser1, null,
+    /// <summary>Name prefix of the To Do the no-core test creates as its subject; <see cref="DisposeAsync"/> sweeps by it.</summary>
+    private const string TodoMarker = "zz-043-nocore-subject";
+
+    private readonly List<Guid> _todos = [];
+
+    private static DecisionRecordRequest Request(DecisionRecordCore? core, DecisionRecordRef? subject) => new(
+        Guid.NewGuid(), PolicyVersionId, core, subject, TestUser1, null,
         [
             new("send-budget-inquiry", true, new Dictionary<string, object?> { ["to"] = "zz-040@example.invalid" }, "Sent"),
             new("revise-budget", false, null, null),
@@ -73,7 +98,6 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         if (!_dv.IsLive) return;
 
         var result = await BuildWriter().WriteAsync(Request(new DecisionRecordCore("sprk_matter", PositiveMatter, MatterTypeRef), null));
-
         var row = await _dv.OperatorClient.RetrieveAsync("sprk_decisionrecord", result.RecordId, new ColumnSet(Columns));
         result.RecordClass.Should().Be(RecordedDecisionClass.Judgement);
         row.GetAttributeValue<OptionSetValue>("sprk_recordclass").Value.Should().Be(100000000);
@@ -93,7 +117,8 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(MatterTypeRef);
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(PositiveMatter.ToString("D"));
         row.GetAttributeValue<bool>("sprk_privilegeflagged").Should().BeFalse();
-        row.GetAttributeValue<EntityReference>("owningteam").Should().BeNull("an ordinary matter keeps the writer's ownership, not a team");
+        row.GetAttributeValue<EntityReference>("owningteam").Should().NotBeNull("D-129: the record is owned by the team the resolver names for the matter, set in the create");
+        row.GetAttributeValue<EntityReference>("owninguser").Should().BeNull("records are owned by teams, never a person");
 
         // Append-only by privilege: the writer principal has no Write on the table.
         var update = async () => await _dv.WriterClient.UpdateAsync(
@@ -102,11 +127,20 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
     }
 
     [Fact]
-    public async Task WriteAsync_NoCore_AsTheWriter_IsOwnedByTheItemOwner_WithNullCoreColumns()
+    public async Task WriteAsync_NoCore_AsTheWriter_IsOwnedByTheResolversTeam_WithNullCoreColumns()
     {
         if (!_dv.IsLive) return;
 
-        var req = Request(null, TestUser1) with
+        // The subject is created here, with the operator client, so the test always runs when the fixture is live: it is the
+        // no-core item's To Do, attached to the positive matter so the resolver has a parent to answer for. Swept in DisposeAsync.
+        var todo = await _dv.OperatorClient.CreateAsync(new Entity("sprk_todo")
+        {
+            ["sprk_name"] = $"{TodoMarker} {Guid.NewGuid():N}",
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", PositiveMatter),
+        });
+        _todos.Add(todo);
+
+        var req = Request(null, new DecisionRecordRef("sprk_todo", todo)) with
         {
             Steps = [new("mark-complete", true, new Dictionary<string, object?>(), "Done")],
             FollowOns = [],
@@ -116,7 +150,8 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         var row = await _dv.OperatorClient.RetrieveAsync("sprk_decisionrecord", result.RecordId, new ColumnSet(Columns));
         result.RecordClass.Should().Be(RecordedDecisionClass.Routine);
         row.GetAttributeValue<OptionSetValue>("sprk_recordclass").Value.Should().Be(100000001);
-        row.GetAttributeValue<EntityReference>("owninguser").Id.Should().Be(TestUser1, "D-39: owned by the item's owner, set in the create");
+        row.GetAttributeValue<EntityReference>("owningteam").Should().NotBeNull("D-39 / D-129: owned by the team the resolver names for the subject, set in the create");
+        row.GetAttributeValue<EntityReference>("owninguser").Should().BeNull("records are owned by teams, never a person");
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Should().BeNull();
         row.GetAttributeValue<string>("sprk_corerecordid").Should().BeNull();
         row.GetAttributeValue<EntityReference>("sprk_matter").Should().BeNull();
@@ -127,7 +162,7 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
     {
         if (!_dv.IsLive) return;
 
-        var req = Request(null, TestUser1) with
+        var req = Request(new DecisionRecordCore("sprk_matter", PositiveMatter, MatterTypeRef), null) with
         {
             Steps = [new("mark-complete", false, null, null)],
             FollowOns = [],
@@ -158,6 +193,28 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
             {
                 try { await _dv.OperatorClient.DeleteAsync("sprk_decisionrecord", row.Id); }
                 catch { /* best effort: must not mask the assertion failure */ }
+            }
+        }
+        catch
+        {
+            // best effort
+        }
+
+        // The no-core test's To Do subjects (created by id above; the name prefix catches any that an aborted run left).
+        foreach (var id in _todos)
+        {
+            try { await _dv.OperatorClient.DeleteAsync("sprk_todo", id); }
+            catch { /* best effort */ }
+        }
+
+        try
+        {
+            var todos = new QueryExpression("sprk_todo") { ColumnSet = new ColumnSet("sprk_todoid") };
+            todos.Criteria.AddCondition("sprk_name", ConditionOperator.BeginsWith, TodoMarker);
+            foreach (var row in (await _dv.OperatorClient.RetrieveMultipleAsync(todos)).Entities)
+            {
+                try { await _dv.OperatorClient.DeleteAsync("sprk_todo", row.Id); }
+                catch { /* best effort */ }
             }
         }
         catch

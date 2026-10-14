@@ -60,7 +60,9 @@ public static class SignalsModule
         services.AddSingleton<SignalWriter>();
 
         // DecisionRecordWriter (task 040, FR-18..FR-22): the one append-only Decision Record per review, created through the same
-        // dedicated writer client and uac-r2's IRecordOwnershipResolver. Called last by the commit route (task 043).
+        // dedicated writer client and uac-r2's IRecordOwnershipResolver. Called last by the commit route (task 043). Task 142: also
+        // the CoreAncestorResolver and ICommunicationDataverseService SignalWriter already takes (filing under the subject through the
+        // shared regarding builder, then the core-ancestor stamp) -- no new registration.
         services.AddSingleton<DecisionRecordWriter>();
 
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the
@@ -85,7 +87,15 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, AddTodoExecutor>();
         services.AddScoped<IDecisionActionExecutor, CreateEventExecutor>();
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
+        // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
+        services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
+        // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
+        services.AddScoped<DecisionCommitFollowUps>();
+        services.AddScoped<DecisionCommitService>();
+        // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
+        services.AddSingleton<DecisionPlanReadStamp>();
 
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.

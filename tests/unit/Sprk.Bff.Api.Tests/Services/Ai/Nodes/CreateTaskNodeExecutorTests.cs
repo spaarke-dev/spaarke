@@ -164,6 +164,31 @@ public class CreateTaskNodeExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenTheCoreCreatedNothing_ReturnsAnErrorNotTaskCreated()
+    {
+        // Task 141 fix round 2: an owner refusal makes TaskActionCore answer Guid.Empty (nothing is created). The node
+        // must not report "Task created: ..." with an empty id.
+        var ownership = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble { TeamId = null };
+        var executor = new CreateTaskNodeExecutor(
+            _templateEngineMock.Object,
+            _entityServiceMock.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            ownership,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
+            _loggerMock.Object);
+        SetupMockPassThrough();
+
+        var result = await executor.ExecuteAsync(CreateValidContext(@"{""subject"":""Review document""}"), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.InternalError);
+        result.ErrorMessage.Should().Contain("Task was not created");
+        result.TextContent.Should().BeNull();
+        _entityServiceMock.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WithTemplateVariables_SubstitutesCorrectly()
     {
         // Arrange
