@@ -156,6 +156,11 @@ public static class DecisionRecordRefusalReason
     /// out of <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/>). The writer's own refusals keep their reasons.</summary>
     public const string GateRecordFailed = "decision_gate_record_failed";
 
+    /// <summary>Task 042 (K1a): a gate decision about an UNFILED communication is not recorded BY DESIGN (E1: it keeps its creator and its
+    /// privacy rests on per-participant shares, so no team may own a record about it; DI-84). Not a failure: logged at Information
+    /// (<see cref="DecisionRecordEvents.GateDecisionSkippedUnfiled"/>) and counted under this tag so alerts on real refusals stay quiet.</summary>
+    public const string GateSkippedUnfiled = "gate_dr_skipped_unfiled";
+
     public const string ReviewInvalid = "decision_review_invalid";
     public const string FactSnapshotMissing = "decision_fact_snapshot_missing";
     public const string RecordClassUnderivable = "decision_record_class_underivable";
@@ -239,6 +244,10 @@ public static class DecisionRecordEvents
     /// <summary>Error (task 042): the communications gate decided but its Decision Record was NOT written (a refusal or a fault). The
     /// gate's outcome and the consumer's behaviour are unchanged. Properties: ids and the refusal reason only, never fact values.</summary>
     public static readonly EventId GateDecisionNotRecorded = new(50312, nameof(GateDecisionNotRecorded));
+
+    /// <summary>Information (task 042, K1a): a gate decision about an unfiled communication is not recorded by design
+    /// (<see cref="DecisionRecordRefusalReason.GateSkippedUnfiled"/>). Ids only.</summary>
+    public static readonly EventId GateDecisionSkippedUnfiled = new(50313, nameof(GateDecisionSkippedUnfiled));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -353,7 +362,9 @@ public sealed class DecisionRecordWriter
     private readonly OntologyWriterDataverseClient _writerClient;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly CoreAncestorResolver _coreAncestors;
-    private readonly ICommunicationDataverseService _recordTypes;
+    /// <summary>The shared regarding builder (D-133), ONE for the writer's life so its <c>sprk_recordtype_ref</c> cache (answers only; a faulting
+    /// read is never cached) is paid once per type across every record (ontology task 042, K2).</summary>
+    private readonly TodoRegardingBuilder _regarding;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DecisionRecordWriter> _logger;
 
@@ -374,7 +385,8 @@ public sealed class DecisionRecordWriter
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
-        _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
+        _regarding = new TodoRegardingBuilder(
+            recordTypes ?? throw new ArgumentNullException(nameof(recordTypes)), _coreAncestors, logger ?? throw new ArgumentNullException(nameof(logger)));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -440,7 +452,7 @@ public sealed class DecisionRecordWriter
         try
         {
             var plan = ValidateGate(request);
-            var core = await ResolveGateCoreAsync(request, ct).ConfigureAwait(false);
+            var (core, derived) = await ResolveGateCoreAsync(request, ct).ConfigureAwait(false);
             // The review shape the shared builders read: no confirmer, no policy version, no Signal (Guid.Empty and [] mean "none").
             var review = new DecisionRecordRequest(
                 ReviewId: request.EvaluationId,
@@ -459,7 +471,7 @@ public sealed class DecisionRecordWriter
                 Reason: request.Reason,
                 Denied: !request.Authorize,
                 PrivilegeFlagged: request.PrivilegeFlagged);
-            return await CreateAsync(review, plan, resolvedOwner: null, ct).ConfigureAwait(false);
+            return await CreateAsync(review, plan with { AlreadyDerived = derived }, resolvedOwner: null, ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -523,12 +535,17 @@ public sealed class DecisionRecordWriter
     /// FAILS returns null here: the filing step (<see cref="FileUnderSubjectAsync"/>) derives it again and gives the classified refusal.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the catalog read faulted.</exception>
-    private async Task<DecisionRecordCore?> ResolveGateCoreAsync(GateDecisionRecordRequest g, CancellationToken ct)
+    private async Task<(DecisionRecordCore? Core, CoreAncestorResult? Derived)> ResolveGateCoreAsync(GateDecisionRecordRequest g, CancellationToken ct)
     {
         var derived = await _coreAncestors.ResolveStampsAsync(GateSubjectEntity, g.CommunicationId, ct).ConfigureAwait(false);
-        if (!derived.Succeeded || derived.Stamps.Count == 0)
+        if (!derived.Succeeded)
         {
-            return null;
+            return (null, null); // the filing step derives again and classifies the failure
+        }
+
+        if (derived.Stamps.Count == 0)
+        {
+            return (null, derived);
         }
 
         var stamps = derived.Stamps;
@@ -561,13 +578,15 @@ public sealed class DecisionRecordWriter
                 "Gate decision {EvaluationId}: the communication names {Count} core records and neither its direct filed-under record nor " +
                 "matter-over-project decides between them (D-37); the Decision Record is written without a core pair and stays queryable " +
                 "by every stamp.", g.EvaluationId, stamps.Count);
-            return null;
+            return (null, derived);
         }
 
-        Entity? typeRow;
+        // The shared regarding builder's record-type cache (one builder for the writer's life): the catalog is read once per type,
+        // not once per decision. A read that FAULTS is not cached (the builder's contract) and is a refusal here.
+        (Guid Id, string DisplayName)? typeRow;
         try
         {
-            typeRow = await _recordTypes.QueryRecordTypeRefAsync(core.EntityType, ct).ConfigureAwait(false);
+            typeRow = await _regarding.ResolveRecordTypeRefAsync(core.EntityType, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -575,20 +594,29 @@ public sealed class DecisionRecordWriter
                 $"the record-type catalog could not be read ({ex.GetType().Name})", ex);
         }
 
-        if (typeRow is null || typeRow.Id == Guid.Empty)
+        if (typeRow is not { } type || type.Id == Guid.Empty)
         {
             _logger.LogWarning(
                 "Gate decision {EvaluationId}: the record-type catalog has no row for {CoreEntity}; the Decision Record is written " +
                 "without a core pair.", g.EvaluationId, core.EntityType);
-            return null;
+            return (null, derived);
         }
 
-        return new DecisionRecordCore(core.EntityType, core.RecordId, typeRow.Id);
+        return (new DecisionRecordCore(core.EntityType, core.RecordId, type.Id), derived);
     }
 
     /// <summary>One logging/metering point for every refusal: reason only, never fact values, values or reasons text.</summary>
     private void LogRefusal(Guid reviewId, DecisionRecordRefusedException ex)
     {
+        if (ex.Reason == DecisionRecordRefusalReason.GateSkippedUnfiled)
+        {
+            // By design, not a failure (K1a): Information, ids only, and counted under its own tag.
+            _logger.LogInformation(DecisionRecordEvents.GateDecisionSkippedUnfiled,
+                "Gate decision {EvaluationId} not recorded: its communication is unfiled (E1), so no team may own a record about it.", reviewId);
+            OntologyWriterTelemetry.RecordFailure(ex.Reason);
+            return;
+        }
+
         _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
             "Decision Record writer refused review {ReviewId} (reason={Reason}, ownerRefusal={OwnerRefusalCode}).",
             reviewId, ex.Reason, ex.OwnerRefusalCode);
@@ -606,7 +634,7 @@ public sealed class DecisionRecordWriter
     {
         var content = Content(request, plan);
         // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
-        var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct).ConfigureAwait(false);
+        var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct, plan.AlreadyDerived).ConfigureAwait(false);
         var owner = recordOwner.Resolution;
         foreach (var (column, value) in content)
         {
@@ -777,7 +805,7 @@ public sealed class DecisionRecordWriter
     /// assignee; otherwise it is asked again.
     /// </summary>
     private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
-        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct)
+        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null)
     {
         var subject = SubjectOf(request);
         var entity = new Entity(Table);
@@ -801,7 +829,7 @@ public sealed class DecisionRecordWriter
         }
         else
         {
-            var derivedCores = await FileUnderSubjectAsync(entity, subject, ct).ConfigureAwait(false);
+            var derivedCores = await FileUnderSubjectAsync(entity, subject, alreadyDerived, ct).ConfigureAwait(false);
             filing = new DecisionRecordFiling(
                 subject, entity.Attributes.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), derivedCores);
         }
@@ -812,11 +840,14 @@ public sealed class DecisionRecordWriter
         var context = OwnershipContextOf(request, filing.DerivedCores);
         if (IsGateDecision(request))
         {
-            // Task 042 (security fails closed): a gate record is CONTENT of the communication it is about (uac-r2's ContentOf shape). When the
-            // communication is not team-owned the resolver reads ITS OWN filing: filed -> secure-if-any over what it is filed under; unfiled
-            // (E1, owner round 10 item 8: an unfiled communication keeps its creator and its privacy rests on per-participant shares) ->
-            // Unchanged, which this writer refuses (requireTeam). A business-unit default team must never be handed a decision about a
-            // communication that is private to its participants. The review route never sets this.
+            // Task 042 (security fails closed): the gate asks as the CONTENT of a communication (uac-r2's ContentOf shape). The resolver
+            // applies KeepCreatorUnlessTargetIsTeamOwned to the FIRST parent it is asked about, which is the core when the communication has
+            // one: then the check is made against the CORE (team-owned, so the record resolves record-first over every parent, secure-if-any),
+            // not against the communication. With no core the first parent is the communication itself: if it is not team-owned the resolver
+            // reads ITS OWN filing (filed -> secure-if-any over what it is filed under; UNFILED -> E1, owner round 10 item 8: it keeps its
+            // creator and its privacy rests on per-participant shares -> Unchanged, which this writer refuses as GateSkippedUnfiled). A
+            // business-unit default team must never be handed a decision about a communication private to its participants. The review
+            // route never sets this.
             context = context with { KeepCreatorUnlessTargetIsTeamOwned = true };
         }
 
@@ -865,11 +896,12 @@ public sealed class DecisionRecordWriter
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the catalog read or the
     /// stamp derivation failed (fail closed, nothing written).</exception>
-    private async Task<IReadOnlyList<CoreAncestorStamp>> FileUnderSubjectAsync(Entity entity, DecisionRecordRef subject, CancellationToken ct)
+    private async Task<IReadOnlyList<CoreAncestorStamp>> FileUnderSubjectAsync(
+        Entity entity, DecisionRecordRef subject, CoreAncestorResult? alreadyDerived, CancellationToken ct)
     {
         try
         {
-            await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+            await _regarding
                 .ApplySubjectLookupAndPairAsync(entity, subject.Entity, subject.Id, regardingDisplayName: null, ct)
                 .ConfigureAwait(false);
         }
@@ -878,7 +910,7 @@ public sealed class DecisionRecordWriter
             throw FilingFailed(subject, $"the subject lookup and pair could not be built ({ex.GetType().Name})", ex);
         }
 
-        var stamp = await _coreAncestors.StampAsync(entity, subject.Entity, subject.Id, ct).ConfigureAwait(false);
+        var stamp = await _coreAncestors.StampAsync(entity, subject.Entity, subject.Id, ct, alreadyDerived).ConfigureAwait(false);
         if (!stamp.Succeeded)
         {
             // A data condition (two different roots of one table, or a subject that no longer exists) is a refusal a retry does not
@@ -950,6 +982,16 @@ public sealed class DecisionRecordWriter
 
         if (requireTeam && !owner.IsOwned)
         {
+            // Only the gate path asks as the content of a communication (KeepCreatorUnlessTargetIsTeamOwned): its Unchanged answer is an
+            // UNFILED communication (E1), a by-design skip with its own reason, not a refusal that needs attention (task 042, K1a).
+            if (context.KeepCreatorUnlessTargetIsTeamOwned && owner.Outcome == RecordOwnerOutcome.Unchanged)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.GateSkippedUnfiled,
+                    "The communication is not filed under any record, so it keeps its creator and no team may own a record about it; nothing was written.",
+                    owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
+            }
+
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.OwnerRefused,
                 "The ownership resolver named no owner team for the Decision Record; nothing was written.",
@@ -1037,13 +1079,16 @@ public sealed class DecisionRecordWriter
     /// <param name="Name">Task 042: the record's name when the gate path sets it; null derives it from the class and the taken labels.</param>
     /// <param name="SkippedOutcome">Task 042: the outcome <c>sprk_steps</c> shows for a step that was not taken ("Skipped" for a review;
     /// "Denied" for a gate deny).</param>
+    /// <param name="AlreadyDerived">Task 042 (K2): the subject's stamps the gate path already derived to find the core, handed to the filing
+    /// step so the derivation is not paid for twice; null derives there.</param>
     private sealed record Plan(
         RecordedDecisionClass Class,
         int Outcome,
         IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Steps,
         IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Taken,
         string? Name = null,
-        string SkippedOutcome = "Skipped");
+        string SkippedOutcome = "Skipped",
+        CoreAncestorResult? AlreadyDerived = null);
 
     private static Plan Validate(DecisionRecordRequest r)
     {

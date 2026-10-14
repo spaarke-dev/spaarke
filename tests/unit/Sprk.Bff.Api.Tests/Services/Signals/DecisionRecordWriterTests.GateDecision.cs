@@ -206,8 +206,23 @@ public sealed partial class DecisionRecordWriterTests
 
         var act = () => h.Writer.WriteGateDecisionAsync(Gate());
 
-        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        // K3: this is the REAL RecordOwnershipResolver (over an in-memory directory), not a mock. K1a: a by-design skip with its own reason.
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.GateSkippedUnfiled);
         h.Created.Should().BeEmpty();
+        h.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0, "an unfiled communication is by design, not an alert (the harness catalog stub's own untyped-pair warning has no event id)");
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled).Which.Level.Should().Be(LogLevel.Information);
+    }
+
+    [Fact]
+    public async Task Gate_AnOwnerRefusal_IsStillARealRefusal_LoggedAtError_NotTheUnfiledSkip()
+    {
+        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "no business unit"));
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.WriteRefused).Which.Level.Should().Be(LogLevel.Error);
+        h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled);
     }
 
     [Fact]
@@ -245,6 +260,31 @@ public sealed partial class DecisionRecordWriterTests
         asked.Parents.Should().Equal(Parent("sprk_matter", MatterId), Parent("sprk_communication", CommunicationId));
         asked.RequestedBy.Should().BeNull("no person asked: a system decision");
         asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeTrue("a gate record is content of the communication: an unfiled one keeps its creator and is refused, never given to a business-unit team");
+    }
+
+    [Fact]
+    public async Task Gate_OneDecision_DerivesTheStampsOnce_AndTheCatalogIsReadOncePerType_AcrossDecisions()
+    {
+        // K2 (throughput, task 042 follow-up): the gate's DR write is awaited inline in enrichment on the shared app identity, so every
+        // Dataverse request counts. BEFORE: 2 stamp derivations per decision (ResolveGateCoreAsync, then StampAsync) = 2 reads of the
+        // communication's root columns and 3 column probes; 2 sprk_recordtype_ref queries per decision (the core's type, then the
+        // communication's type through a builder created per call) = 4 over two decisions.
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId));
+        var rootReads = 0;
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback(() => Interlocked.Increment(ref rootReads))
+            .ReturnsAsync(h.Rows[("sprk_communication", CommunicationId)]);
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+        var afterFirst = (RootReads: rootReads, Probes: h.ProbeCalls, Types: h.RecordTypes.Queried.Count);
+        await h.Writer.WriteGateDecisionAsync(Gate() with { EvaluationId = Guid.NewGuid() });
+
+        afterFirst.RootReads.Should().Be(1, "the stamps are derived once and reused by the filing step");
+        rootReads.Should().Be(2, "one derivation per decision");
+        afterFirst.Probes.Should().Be(2, "the communication's root columns and the host table's columns, each once");
+        afterFirst.Types.Should().Be(2, "the core's type (sprk_matter) and the communication's type, one query each");
+        h.RecordTypes.Queried.Count.Should().Be(2, "the second decision reads the record-type catalog from the cache, not Dataverse");
+        h.Created.Should().HaveCount(2);
     }
 
     [Fact]

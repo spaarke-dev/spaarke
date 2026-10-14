@@ -378,6 +378,11 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
                     DirectFiledUnderId: directFiledUnderId),
                 ct).ConfigureAwait(false);
         }
+        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.GateSkippedUnfiled)
+        {
+            // By design (K1a, DI-84): an unfiled communication keeps its creator, so no record is written. The writer has already logged it
+            // at Information (GateDecisionSkippedUnfiled) and counted it under its own tag; not an error and not a refusal to alert on.
+        }
         catch (DecisionRecordRefusedException ex)
         {
             // The writer has already logged (WriteRefused) and metered this refusal under its own reason.

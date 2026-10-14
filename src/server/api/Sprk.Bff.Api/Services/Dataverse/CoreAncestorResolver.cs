@@ -799,12 +799,13 @@ public sealed class CoreAncestorResolver
         Entity child,
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        CoreAncestorResult? alreadyDerived = null)
     {
         ArgumentNullException.ThrowIfNull(child);
 
         var (result, hostColumns, failure) =
-            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct)
+            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct, alreadyDerived)
                 .ConfigureAwait(false);
         if (failure is not null)
         {
@@ -1118,9 +1119,14 @@ public sealed class CoreAncestorResolver
             string hostEntityLogicalName,
             string targetEntityLogicalName,
             Guid targetRecordId,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAncestorResult? alreadyDerived = null)
     {
-        var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        // Ontology task 042 (K2): a caller that has ALREADY derived this target's stamps (a writer that needed the core before it could
+        // build its payload) hands the successful result in, so the derivation is not paid for twice. A failed or absent result derives here.
+        var result = alreadyDerived is { Succeeded: true }
+            ? alreadyDerived
+            : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
             return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with

@@ -118,12 +118,28 @@ The review found that a gate record about an UNFILED communication was owned by 
 `sprk_decisionrecord`), so every member of that business unit could read a decision about a communication whose privacy rests on
 per-participant shares (E1, owner round 10 item 8). **Fixed** in `FiledAndOwnedAsync`: the gate asks as the content of the communication
 (`KeepCreatorUnlessTargetIsTeamOwned = true`; the review route does not, pinned by an assertion in `A142_…`). An unfiled communication now
-answers Unchanged, which the writer refuses: nothing is written, the refusal is logged (50312) and metered, and the gate outcome and the RI
+answers Unchanged, which the writer refuses: nothing is written, it is logged at Information (50313) and counted under `gate_dr_skipped_unfiled`, and the gate outcome and the RI
 action are unchanged. A filed communication that is user-owned is now judged by its own filing (secure-if-any), which is also stricter.
-Cost: no Decision Record for an unfiled communication (it has no matter, so criterion 3 is unaffected). **Owner decision DI-84
+Logging (K1a, below): this is a by-design skip, so it is Information with its own tag `gate_dr_skipped_unfiled`, not an Error. Cost: no Decision Record for an unfiled communication (it has no matter, so criterion 3 is unaffected). **Owner decision DI-84
 ([#1876](https://github.com/spaarke-dev/spaarke/issues/1876))**: keep this, give such records a writer-only owner, or accept
 business-unit visibility. The other review findings: F3 (a test name claimed the owner is not asked) renamed; K2 filed as DI-85
 ([#1877](https://github.com/spaarke-dev/spaarke/issues/1877)).
+
+## Follow-up round (coordinator, after uac-r2 approved 932fcfe03)
+
+**K2 (throughput).** The DR write is awaited inline in enrichment, on the shared app identity. Measured with `Gate_OneDecision_DerivesTheStampsOnce_...` (a filed communication, two decisions on one writer):
+
+| Per run | Before | After |
+|---|---|---|
+| root-column reads of the communication (stamp derivation) | 2 per decision (4 over two) | 1 per decision (2 over two) |
+| column probes in the first decision | 3 | 2 |
+| `sprk_recordtype_ref` queries | 2 per decision (4 over two) | 2 for the first decision, 0 after (2 over two) |
+
+How: the first derivation (`ResolveGateCoreAsync`) is handed to the filing step (`CoreAncestorResolver.StampAsync(..., alreadyDerived)`, an optional trailing parameter; a failed or absent result derives as before, so the failure is still classified there). The catalog reads reuse the existing cache pattern, `TodoRegardingBuilder._recordTypeRefCache` ("answers only; a faulting read is never cached"): the writer now keeps ONE builder for its life instead of one per record, the cache is a `ConcurrentDictionary` (the writer is a singleton called from many runs) and `ResolveRecordTypeRefAsync` is `internal` so the core-type lookup shares it. No new cache abstraction. Touched shared files: `CoreAncestorResolver.cs` (uac-r2) and `TodoRegardingBuilder.cs`; both changes are additive. Cached negatives (a catalog row that is absent) live for the process, as they already do in `TodoGenerationService`; the catalog is seeded at deploy. The matched rule's priority read (one `sprk_communicationrule` retrieve per decision, authorize and deny) and the parent/team reads of the owner resolver are not cached here. The write is NOT moved to a queue (OWNER QUESTION Q2).
+
+**K1a (alert flood).** An unfiled communication used to log two Errors and meter `decision_owner_refused`. It now throws `DecisionRecordRefusalReason.GateSkippedUnfiled` (`gate_dr_skipped_unfiled`) from the owner step (only the gate asks with `KeepCreatorUnlessTargetIsTeamOwned`, so an Unchanged answer there can only mean an unfiled communication), is logged once at Information (`DecisionRecordEvents.GateDecisionSkippedUnfiled`, 50313, id only) and counted in `ontology.writer.failures{reason=gate_dr_skipped_unfiled}`. The consumer logs nothing more for it. Real refusals and faults are unchanged (Error + their own reason): tests `Gate_AnOwnerRefusal_IsStillARealRefusal_...`, the consumer's refusal test and the unclassified-failure test.
+
+**K3.** `Gate_AnUnfiledCommunication_IsRefused_...` uses the REAL `RecordOwnershipResolver` (over `OwnershipDirectory`, not a mock) and so does the consumer-level test `AnUnfiledCommunication_IsSkippedByDesign_...`: refused, nothing written. The comment in `FiledAndOwnedAsync` is corrected: with a core, the "keep creator unless the target is team-owned" check is made against the CORE (the first parent asked), not the communication.
 
 ## Known limits
 
@@ -131,13 +147,26 @@ business-unit visibility. The other review findings: F3 (a test name claimed the
    matter-over-project decides: the record is written with no core pair (and a D-37 warning) rather than refused. It is still stamped with
    every core the communication names and owned secure-if-any over all of them, so no row is under-protected and the per-matter query
    still finds it through the stamp. `SignalWriter` refuses in that case; the two picks are duplicated (DI-85).
-2. **No record for an unfiled communication** (finding 1, DI-84).
+2. **No record for an unfiled communication** (finding 1, DI-84), by design and quiet (K1a).
 3. **A missing/unreadable core record type** gives a warning and no core pair (missing row), or a refusal `FilingFailed` (faulting read).
 4. **`sprk_factsnapshot` carries rule id(s), priority, confidence/threshold and the correlation id; never message content.** The priority
    read is best effort: on failure it is omitted and the record is still written.
-5. **The record is written before the gate outcome is acted on** (FR-23), so the RI action starts after about 8-12 sequential Dataverse
-   calls on authorize, and a hung call delays it until the client timeout. A writer failure is logged and metered and never blocks the action.
-6. **Live schema write path unproven here** (see Verification: the live seam test was not run).
+5. **The record is written before the gate outcome is acted on** (FR-23), so the RI action starts after the write (about 5-8 uncached
+   Dataverse requests after the K2 round, down from 8-11). A writer failure is logged and metered and never blocks the action.
+6. **K1b: a caller cancellation during the DR write skips the RI action.** Cancellation is not swallowed (so shutdown is honest) and the
+   enrichment caller swallows it; the RI action for that communication does not run. Shutdown only; accepted.
+7. **Live schema write path unproven here** (see Verification: the live seam test was not run).
+
+## Owner questions (pending; nothing below is decided)
+
+- **Q1 / K4: a retry writes a duplicate Decision Record.** `EvaluationId` is a new `Guid` per `PublishAsync` run, so if enrichment re-runs for
+  a communication (a retry after a fault, a re-delivery) a second record is written for the same decision. `sprk_decisionrecord` is
+  append-only, so duplicates cannot be removed later. Options: key the record by communication + assessed-signal version (an alternate key
+  / existence check before create, which costs one more read), or accept duplicates as an audit trail of each evaluation.
+- **Q2: queue the write (K2 option).** Moving the DR write off the enrichment path (a Service Bus `IJobHandler`, ADR-004/ADR-052) removes its
+  latency from enrichment and the RI action entirely, at the price of a record that can lag or be lost on a queue fault and a second
+  delivery path to test. Not done: an owner decision.
+- **Q3: DI-84** (records for unfiled communications), as above.
 
 ## adr-check
 

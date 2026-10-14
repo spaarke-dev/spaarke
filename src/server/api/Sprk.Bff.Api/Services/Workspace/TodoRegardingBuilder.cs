@@ -141,9 +141,11 @@ internal sealed class TodoRegardingBuilder
     private readonly ILogger _logger;
 
     /// <summary>
-    /// Lazy cache for <c>sprk_recordtype_ref</c> lookups (entity logical name → GUID + display name).
+    /// Lazy cache for <c>sprk_recordtype_ref</c> lookups (entity logical name → GUID + display name). Concurrent since ontology
+    /// task 042 (K2): the Decision Record writer, a singleton called from many enrichment runs, keeps ONE builder so its catalog reads
+    /// are paid once per type, not once per record.
     /// </summary>
-    private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
 
     /// <param name="communicationService">The <c>sprk_recordtype_ref</c> lookup (<c>QueryRecordTypeRefAsync</c>).</param>
     /// <param name="coreAncestors">The FR-26 core-ancestor stamp (step 3 of <see cref="ApplyResolverFieldsAsync"/>).</param>
@@ -379,7 +381,7 @@ internal sealed class TodoRegardingBuilder
     /// <c>TodoGenerationService</c> builder lives as long as its singleton job). Caller cancellation propagates as itself.
     /// Every caller treats a throw from the builder as "do not create".
     /// </remarks>
-    private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
+    internal async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
         string entityLogicalName, CancellationToken ct)
     {
         if (_recordTypeRefCache.TryGetValue(entityLogicalName, out var cached))

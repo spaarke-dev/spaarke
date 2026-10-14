@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Signals;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -36,14 +37,17 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
 
     private sealed class Rig
     {
-        public DecisionRecordWriterTests.Harness Writer { get; } = new();
+        public DecisionRecordWriterTests.Harness Writer { get; }
         public CapturingLogger<RuleGatedAssessedConsumer> Log { get; } = new();
         public RuleGatedAssessedConsumer Consumer { get; }
 
         /// <param name="rulePriority">The matched rule's priority; null: no rule matches the communication.</param>
         /// <param name="withWriter">False builds the consumer as the existing tests do (no Decision Record writer).</param>
-        public Rig(Guid? matter = null, Guid? project = null, Guid? directPair = null, bool withRule = false, bool withWriter = true)
+        /// <param name="realResolver">The REAL ownership resolver over an in-memory directory (null: the mocked resolver).</param>
+        public Rig(Guid? matter = null, Guid? project = null, Guid? directPair = null, bool withRule = false, bool withWriter = true,
+            IRecordOwnershipResolver? realResolver = null)
         {
+            Writer = new DecisionRecordWriterTests.Harness(realResolver: realResolver);
             var communication = new Entity("sprk_communication", CommunicationId);
             if (matter is { } m) communication["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
             if (project is { } p) communication["sprk_regardingproject"] = new EntityReference("sprk_project", p);
@@ -157,7 +161,30 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
         var entry = rig.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionNotRecorded).Subject;
         entry.Level.Should().Be(LogLevel.Error);
         entry.Message.Should().Contain(CommunicationId.ToString()).And.Contain(DecisionRecordRefusalReason.OwnerRefused);
-        rig.Writer.Log.Entries.Should().Contain(e => e.EventId == DecisionRecordEvents.WriteRefused, "the writer logged and metered the refusal itself");
+        rig.Writer.Log.Entries.Should().Contain(e => e.EventId == DecisionRecordEvents.WriteRefused && e.Level == LogLevel.Error, "the writer logged and metered the refusal itself");
+        rig.Writer.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled, "a real refusal is not the by-design skip");
+    }
+
+    [Fact]
+    public async Task AnUnfiledCommunication_IsSkippedByDesign_LoggedAtInformation_OwnTag_NoErrorNoFailureMetric_AndTheRealResolverRefusesIt()
+    {
+        // K1a + K3: REAL RecordOwnershipResolver. An unfiled communication keeps its creator (E1), so no record is written; that is not an
+        // alert: no Error, no decision_owner_refused metric, one Information entry and the tag gate_dr_skipped_unfiled.
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
+        var directory = OwnershipDirectory.Standard().WithRecord("sprk_communication", CommunicationId, OwnershipDirectory.ChildBu);
+        var rig = new Rig(realResolver: directory.Resolver());
+
+        var act = () => rig.PublishAsync();
+
+        await act.Should().NotThrowAsync();
+        rig.Writer.Created.Should().BeEmpty();
+        rig.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "the consumer logs nothing for a by-design skip");
+        rig.Writer.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0);
+        rig.Writer.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled).Which.Level.Should().Be(LogLevel.Information);
+        reasons.Should().Equal(DecisionRecordRefusalReason.GateSkippedUnfiled);
     }
 
     [Fact]
