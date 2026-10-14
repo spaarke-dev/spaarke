@@ -67,3 +67,15 @@ application id be named).
 3. `sprk_createdbyperson` (RecordCreatorPerson / RecordCreatorPersonColumn) exists for other entities as "who created it" when the BFF
    creates as the app; not examined for sprk_communication here (CommunicationService.cs is task 065's) - a candidate better source if it is, or becomes, stamped.
 4. Publish-size delta: not measured (no new package/DI/endpoint; string constants and one private helper). Reaches dev with the next BFF deploy.
+
+## Review (adversarial pass, 2026-10-14; main session)
+
+No F-class finding. External plane clean (the app-only query passes `$expand` through unchanged), disclosure clean (only the display name reaches a DTO), tests prove the contract.
+
+| Finding | Class | Action |
+|---|---|---|
+| Rule needs an expanded `applicationid` present and null; no live capture yet | K1 | Live check after the BFF deploy: read one MDA-created row from the dev Web API |
+| Internal reads now join `systemuser`; a caller with NO User read at any depth might get an error instead of a null expand (unverified; the claim above that it nulls is unverified) | K2 | Accepted: every standard role, including Spaarke Basic User, carries User read. Verify with a least-privileged role at the live check |
+| SYSTEM / INTEGRATION users would be classified as people | K3 | Accepted: no current path creates `sprk_communication` as them |
+| Comment named `ClassifyCreatedBy` | K4 | Fixed (`CreatedByIsAPerson`) |
+| "MDA send never stamps `sprk_sentby`" to be filed | process | Not filed: task 065 stamps `sprk_sentby` on every BFF send (messages and shared-mailbox emails) |

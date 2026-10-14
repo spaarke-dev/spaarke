@@ -144,7 +144,7 @@ public sealed class CommunicationThreadReadService
     // Person-only (owner decision 2026-10-13): the BFF creates communication rows through the APP identity, so for a BFF-sent
     // message createdby is the BFF's application user and its name must never be shown as the sender. The createdby name is
     // used only when createdby is a real person: the same read expands createdby to its applicationid + accessmode (no extra
-    // round trip) and ClassifyCreatedBy requires no applicationid and an interactive access mode. Anything that cannot be
+    // round trip) and CreatedByIsAPerson requires no applicationid and an interactive access mode. Anything that cannot be
     // classified is NOT a person (null name). Same rule as RecordContainerResolver.ReadRowCreatorAsync (person = no
     // applicationid) and SecureBuRoleDepthCensusBuilder.IsHumanPrincipal (access mode 3/4 are not people).
     private const string CreatedByValue = "_createdby_value";
