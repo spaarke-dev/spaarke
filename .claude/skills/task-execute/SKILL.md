@@ -850,8 +850,11 @@ UPDATE current-task.md:
 
 ```
 UPDATE task file <metadata><status> to "completed"
-ADD <notes> section with completion summary. End it with ONE rework line (format and use: scripts/ai-cost/README.md "Rework signal"):
-    rework: none | fix-round-<N> | escalated-to-<model>      e.g. `rework: fix-round-1 task 042`
+ADD <notes> section with completion summary. End it with ONE rework line (format and use: scripts/ai-cost/README.md "Rework signal"),
+  exactly one of these three forms, with the placeholders filled in:
+    rework: none task 042
+    rework: fix-round-2 task 042
+    rework: escalated-to-opus task 042
   none = the first attempt passed review and verification; fix-round-<N> = N rounds of fixes after review or a failed check;
   escalated-to-<model> = the work was re-run on a higher tier. Put `task <NNN>` on the line (or keep NNN in the notes file name).
   When launching agents for the task, put `task <NNN>` in the Agent `description` so the launch can be tied to this line.

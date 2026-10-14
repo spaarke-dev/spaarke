@@ -90,4 +90,4 @@ Not changed:
 - `python scripts/ai-cost/get-project-cost.py <slug>` gives a project's all-time total.
 - `/project-spend-update` refreshes the board fields.
 - `python scripts/ai-cost/spend-report.py --days 14` splits spend by day, project, model, and main vs sub-agent.
-- `python scripts/ai-cost/spend-report.py --days 7 --model-fit` joins each sub-agent run to the model and effort the launch hook logged, with the task's rework line, to show whether the chosen model fit the work (`scripts/ai-cost/README.md`).
+- `python scripts/ai-cost/spend-report.py --days 7 --model-fit` joins each sub-agent run to the launch the hook logged (agent type, description, task number) and to the task's rework line, to show whether the chosen model fit the work (`scripts/ai-cost/README.md`).
