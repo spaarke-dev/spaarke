@@ -98,7 +98,7 @@ public class DecisionRecordContextImmutabilityTests
         Assert.Contains("CreateAsync", calls);
         var others = calls.Where(c => !AllowedWriterClientCalls.Contains(c)).Distinct().ToList();
         Assert.True(others.Count == 0,
-            "D-34: DecisionRecordWriter is create-only (append-only); it calls its Dataverse client for: " + string.Join(", ", others));
+            "D-34: DecisionRecordWriter is create-only (a Decision Record is append-only except the live stamp columns, task 144 C2); it calls its Dataverse client for: " + string.Join(", ", others));
     }
 
     [Fact(DisplayName = "Task 142 / D-34: no server code addresses a Decision Record row for an update through a string literal")]
@@ -109,7 +109,7 @@ public class DecisionRecordContextImmutabilityTests
             .ToList();
 
         Assert.True(problems.Count == 0,
-            "D-34: a Decision Record is append-only; its context is never updated. Update paths found:\n  " + string.Join("\n  ", problems));
+            "D-34: a Decision Record is append-only except the live stamp columns (task 144, C2); its context is never updated. Update paths found:\n  " + string.Join("\n  ", problems));
     }
 
     [Fact(DisplayName = "Task 142 / D-34: negative and positive controls — the detectors fire on seeded writes and not on reads")]

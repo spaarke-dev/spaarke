@@ -493,9 +493,13 @@ public class CoreAncestorResolverTests
     [Fact(DisplayName = "Task 156: the stamp-source topology names only tables that carry the stamp, and only intermediates with known root columns")]
     public void StampSourceTopology_IsClosed()
     {
+        // Ontology task 144 (uac-r2 option A): the one named exemption, pinned both ways.
+        Sprk.Bff.Api.Tests.AccessControl.StampedOutsideAccessTaxonomyPin.AssertPinned();
+
         foreach (var (table, sources) in CoreAncestorResolver.StampSourceColumns)
         {
-            CoreAncestorResolver.IsChildRecordEntity(table).Should().BeTrue($"{table} carries a stamp, so it is a child");
+            CoreAncestorResolver.IsChildRecordEntity(table).Should().Be(!CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(table),
+                $"{table} carries a stamp, so it is a child — unless CoreAncestorResolver.StampedOutsideAccessTaxonomy names it");
             sources.Select(s => s.Intermediate).Should().OnlyContain(i => CoreAncestorResolver.IsStampSourceEntity(i),
                 $"every record {table} can be filed under must have known root columns, or its copy cannot be checked");
         }

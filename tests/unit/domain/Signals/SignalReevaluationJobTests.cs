@@ -513,11 +513,12 @@ public partial class SignalReevaluationJobTests
     [Fact]
     public async Task Run_NoCoreReown_DataverseRefusesTheTeamsRead_IsMeteredAsAnAccessDenial()
     {
-        // Review F1: F2's 0x80040299 on the re-own comes back from the reconciler as text (Failed); it is metered and logged as
-        // the access denial it is, not only as a generic re-own failure.
+        // Review F1 + K1 (re-own): in production the shared Web API client throws a bare HttpRequestException carrying only the
+        // status for a 403 (it maps 412 and 404 only), so the denial is read from the status, not from any Dataverse code in the text.
         var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
         await h.RunAsync();
-        h.ReownApi.WriteFault = new HttpRequestException("Read Privilege Check For Owner failed (0x80040299).");
+        h.ReownApi.WriteFault = new HttpRequestException(
+            "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
         h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
         h.Org.ResetCounts();
 
@@ -525,10 +526,13 @@ public partial class SignalReevaluationJobTests
         var second = await h.RunAsync();
 
         second.Success.Should().BeFalse();
-        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1");
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1").And.Contain("\"accessDenied\":1");
         h.Org.Rows.Values.Single().GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(DefaultTeamId, "nothing was re-owned");
         h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Error
-            && e.Message.Contains(OntologyWriterFailureReason.DataverseAccessDenied) && e.Message.Contains("0x80040299"));
+            && e.Message.Contains(OntologyWriterFailureReason.DataverseAccessDenied) && e.Message.Contains("403 (Forbidden)")
+            && e.Message.Contains(OtherTeamId.ToString()));
+        h.Log.Should().NotContain(e => e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id && e.Level == LogLevel.Error,
+            "a counted privilege refusal adds a Warning, not a second Error");
         metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DataverseAccessDenied).Should().BeGreaterThanOrEqualTo(1);
     }
 
@@ -2770,6 +2774,18 @@ public partial class SignalReevaluationJobTests
         public bool FailConditionalUpdates { get; set; }
         public bool FailCreates { get; set; }
 
+        /// <summary>K1: when set, every create throws exactly this (a typed Dataverse fault, say), instead of the plain failure.</summary>
+        public Exception? CreateFault { get; set; }
+
+        /// <summary>K1: like <see cref="CreateFault"/>, but chosen per create by its payload (null: the create succeeds).</summary>
+        public Func<Entity, Exception?>? CreateFaultFor { get; set; }
+
+        /// <summary>K1: when set, every conditional update (a close, a stamp) throws exactly this.</summary>
+        public Exception? ConditionalUpdateFault { get; set; }
+
+        /// <summary>K1: when set, every row read through the writer's client throws exactly this (the owner read-back after a create).</summary>
+        public Exception? RetrieveFault { get; set; }
+
         public void ResetCounts()
         {
             CreateCalls = 0;
@@ -2829,6 +2845,16 @@ public partial class SignalReevaluationJobTests
         public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken)
         {
             CreateCalls++;
+            if (CreateFault is not null)
+            {
+                throw CreateFault;
+            }
+
+            if (CreateFaultFor?.Invoke(entity) is { } createFault)
+            {
+                throw createFault;
+            }
+
             if (FailCreates)
             {
                 throw new InvalidOperationException("Simulated Dataverse failure on the create.");
@@ -2862,7 +2888,7 @@ public partial class SignalReevaluationJobTests
         }
 
         public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken) =>
-            Task.FromResult(Rows[id]);
+            RetrieveFault is not null ? throw RetrieveFault : Task.FromResult(Rows[id]);
 
         public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken)
         {
@@ -2874,6 +2900,11 @@ public partial class SignalReevaluationJobTests
                     return Task.FromResult<OrganizationResponse>(response);
                 case UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } update:
                     var target = update.Target;
+                    if (ConditionalUpdateFault is not null)
+                    {
+                        throw ConditionalUpdateFault;
+                    }
+
                     if (FailConditionalUpdates)
                     {
                         throw new InvalidOperationException("Simulated Dataverse failure on the conditional update.");
