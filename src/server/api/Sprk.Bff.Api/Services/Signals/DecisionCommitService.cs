@@ -299,7 +299,7 @@ public sealed class DecisionCommitService
     private static readonly string[] SignalColumns =
     [
         "sprk_lane", "sprk_policy", "sprk_policyversion", "sprk_corerecordtype", "sprk_corerecordid", "sprk_signalstatus",
-        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordid", "sprk_matter",
+        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordid",
         "sprk_factsnapshot", "sprk_privilegeflagged", "sprk_dedupekey", "sprk_decisionrecord", "versionnumber",
         .. SignalWriter.RegardingLookupByEntity.Values,
     ];
@@ -376,7 +376,6 @@ public sealed class DecisionCommitService
         DateTime? ResolvedOn,
         string? SubjectEntity,
         Guid? SubjectId,
-        Guid? MatterId,
         string? FactSnapshot,
         bool PrivilegeFlagged,
         string? DedupeKey,
@@ -418,7 +417,13 @@ public sealed class DecisionCommitService
         DecisionRecordCore? RecordCore,
         string? GateTier,
         string? DismissalText,
-        Resolution Resolution);
+        Resolution Resolution)
+    {
+        /// <summary>Task 145 (D-34): the matter the decision is about, for the executors and the budget-revision trigger: the
+        /// decision CONTEXT, so it comes from the Signal's core pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>), never
+        /// from the typed <c>sprk_matter</c> lookup. Null when the core is not a matter (a project, a work assignment) or there is none.</summary>
+        public Guid? MatterId => Core is { Entity: "sprk_matter" } core ? core.Id : null;
+    }
 
     /// <summary>Commits one review on <paramref name="signalId"/>. Never throws for a failed write: every outcome is a result.</summary>
     public async Task<DecisionCommitResult> CommitAsync(Guid signalId, DecisionReview review, HttpContext http, CancellationToken ct)
@@ -730,7 +735,7 @@ public sealed class DecisionCommitService
         var closed = await CloseAllAsync(open, resolution, dismissalText, recordId, by, reviewStart).ConfigureAwait(false);
         var signals = first.Signals.Where(s => closedAlready.Contains(s.SignalId)).Concat(closed).ToList();
         var warnings = signals.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList();
-        warnings.AddRange(await SuppressAfterRepairAsync(resolution, primary!.MatterId, rows, closed).ConfigureAwait(false));
+        warnings.AddRange(await SuppressAfterRepairAsync(resolution, rows, closed).ConfigureAwait(false));
         var updated = first with { Signals = signals, Warnings = warnings };
         await TrySetLedgerAsync(tenantId, ledgerKey, prior with { ReviewStart = reviewStart, Outcome = updated }, OutcomeTtl, CancellationToken.None).ConfigureAwait(false);
         return updated with { Replayed = true };
@@ -750,7 +755,7 @@ public sealed class DecisionCommitService
     /// <summary>K6: a repair (replay or stored-record) that dismissed Signals applies suppression for them, as a first run does
     /// (034 hand-off; the service's answer is discarded inside the follow-ups and never reaches the caller).</summary>
     private async Task<IReadOnlyList<string>> SuppressAfterRepairAsync(
-        Resolution resolution, Guid? matterId, IReadOnlyList<SignalRow> rows, IReadOnlyList<DecisionCommitSignal> closed)
+        Resolution resolution, IReadOnlyList<SignalRow> rows, IReadOnlyList<DecisionCommitSignal> closed)
     {
         if (resolution != Resolution.Dismissed)
             return [];
@@ -758,7 +763,8 @@ public sealed class DecisionCommitService
         var dismissed = rows.Where(r => dismissedNow.Contains(r.Id)).ToList();
         if (dismissed.Count == 0)
             return [];
-        return await _followUps.AfterRecordedAsync(matterId, [], dismissed, CancellationToken.None).ConfigureAwait(false);
+        // A repair runs no step, so no budget-revision trigger needs the matter (task 145: it is never read from typed sprk_matter).
+        return await _followUps.AfterRecordedAsync(null, [], dismissed, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>The resolution a (previously validated) review gives its Signals, and its dismissal text.</summary>
@@ -881,7 +887,7 @@ public sealed class DecisionCommitService
             var (resolution, dismissalText) = existingRecord!.RecordedResolution();
             var closedNow = await CloseAllAsync(ids, resolution, dismissalText, existingRecord.Id, confirmedBy, reviewStart).ConfigureAwait(false);
             var finishWarnings = closedNow.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList();
-            finishWarnings.AddRange(await SuppressAfterRepairAsync(resolution, p.Primary.MatterId, p.Resolved, closedNow).ConfigureAwait(false));
+            finishWarnings.AddRange(await SuppressAfterRepairAsync(resolution, p.Resolved, closedNow).ConfigureAwait(false));
             return new DecisionCommitResult
             {
                 Status = DecisionCommitStatus.Recorded,
@@ -907,7 +913,7 @@ public sealed class DecisionCommitService
         if (!p.Primary.HasCore && SubjectOf(p.Primary) is null)
             return Refused(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, ItemOwnerUnsupportedDetail);
 
-        progress.MatterId = p.Primary.MatterId;
+        progress.MatterId = p.MatterId;
 
         // D-129: the deciding individual is the caller's linked internal contact (Assigned To Internal), never an owner. Resolved
         // once, after FR-51. A user with no linked contact leaves the column empty (warning); a user whose contact could not be READ
@@ -1030,7 +1036,7 @@ public sealed class DecisionCommitService
                     "Decision commit: step {Phase} ({Code}) {Status} for review {ReviewId}: {ReasonCode}. No record written; {Landed} write(s) landed.",
                     step.Phase, step.Def.Code, outcome.Status, reviewId, outcome.ReasonCode, failed.Landed.Count);
                 OntologyWriterTelemetry.RecordFailure("decision_commit_step_failed");
-                await _followUps.AfterFailedCommitAsync(p.Primary.MatterId, executed, writeCt).ConfigureAwait(false);
+                await _followUps.AfterFailedCommitAsync(p.MatterId, executed, writeCt).ConfigureAwait(false);
                 progress.FollowUpsRan = true;
                 return failed;
             }
@@ -1063,7 +1069,7 @@ public sealed class DecisionCommitService
                     "The Decision Record create did not answer; it may have been written.", innerException: ex);
                 var failed = RecordFailed(reviewId, refusedRecord, executed, p);
                 // F4: the steps landed and the Signal was not closed, so a landed revision still gets its trigger now.
-                await _followUps.AfterFailedCommitAsync(p.Primary.MatterId, executed, writeCt).ConfigureAwait(false);
+                await _followUps.AfterFailedCommitAsync(p.MatterId, executed, writeCt).ConfigureAwait(false);
                 progress.FollowUpsRan = true;
                 return failed;
             }
@@ -1080,7 +1086,7 @@ public sealed class DecisionCommitService
                 warnings.Add(warning);
         }
 
-        warnings.AddRange(await _followUps.AfterRecordedAsync(p.Primary.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
+        warnings.AddRange(await _followUps.AfterRecordedAsync(p.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
         progress.FollowUpsRan = true;
 
         _logger.LogInformation(DecisionCommitEvents.Recorded,
@@ -1441,7 +1447,6 @@ public sealed class DecisionCommitService
             resolvedOn,
             subjectId is { } pairId ? SignalWriter.SubjectEntityOf(pairId, lookup => e.GetAttributeValue<EntityReference>(lookup)?.Id) : null,
             subjectId,
-            e.GetAttributeValue<EntityReference>("sprk_matter")?.Id,
             e.GetAttributeValue<string>("sprk_factsnapshot"),
             e.GetAttributeValue<bool>("sprk_privilegeflagged"),
             e.GetAttributeValue<string>("sprk_dedupekey"),
@@ -1658,7 +1663,7 @@ public sealed class DecisionCommitService
             p.Primary.Id,
             p.Primary.SubjectEntity is { Length: > 0 } entity && p.Primary.SubjectId is { } id ? new DecisionRecordRef(entity, id) : null,
             p.Core,
-            p.Primary.MatterId,
+            p.MatterId,
             step.Values);
 
     private static DecisionCommitStep ToStep(ExecStep step, DecisionActionOutcome outcome) =>

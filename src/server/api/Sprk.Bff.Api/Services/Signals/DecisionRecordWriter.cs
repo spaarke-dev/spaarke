@@ -296,9 +296,13 @@ public sealed class DecisionRecordWriter
     /// <c>sprk_workassignment</c> → <c>sprk_workassignment</c>): that is the typed core column. The <c>sprk_regarding{core}</c>
     /// lookups the same entry lists (key ≠ value) are the filing and stamp columns: the shared regarding builder and
     /// <see cref="CoreAncestorResolver"/> write them (task 142, contract C1/C2), never this map.</para>
-    /// <para><b>Never empty (#1780 K3).</b> The typed columns stay populated for new rows until task 145 decides their
-    /// retirement; a change that moves filing off them replaces this map in the same change. Pinned by
-    /// <c>DecisionRecordWriterTests</c> (a missing root fails there with <c>KeyNotFoundException</c>).</para>
+    /// <para><b>Never empty (#1780 K3).</b> The typed columns stay populated for new rows. <b>Task 145 decided: they are decision
+    /// CONTEXT, not filing</b> (D-34): the core the decision was about, frozen with <c>sprk_corerecordid</c>, and kept as a lineage
+    /// row because that core is one of the record's owner parents (the writer asks with it) and a record about a secure core belongs
+    /// to that family (D-123). The filing is the subject lookup plus the live <c>sprk_regarding{core}</c> stamp, which follows the
+    /// SUBJECT, so after a re-file it can name another core (144 review K1): a stamp never stands in for this column. No reader
+    /// treats it as filing (<c>notes/task-145-matter-readers.md</c>). Pinned by <c>DecisionRecordWriterTests</c> (a missing root
+    /// fails there with <c>KeyNotFoundException</c>).</para>
     /// </remarks>
     internal static readonly FrozenDictionary<string, string> LineageColumnByCoreEntity =
         SecureChildLineage.Children[Table].Lookups
