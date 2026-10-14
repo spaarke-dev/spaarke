@@ -118,23 +118,96 @@ public sealed class ExternalLiveParentDocumentTests : IClassFixture<ExternalMult
         (await Summarise(response)).Should().Be(reference);
     }
 
-    [Fact]
-    public async Task OnAnInvoiceRoute_TheRouteInvoiceIsNotWalkedAgain_OptionAKept()
+    // ---- Task 187, fix round 1, owner decision D4: the invoice document routes ----
+    //
+    // An invoice is reached through the union of its parents (owner decision 2026-10-11, option A). But the route invoice's
+    // own LIVE roots join each document's rule: when they include a SECURE root the caller cannot read, the invoice's
+    // documents are withheld from the list and refused on download and versions, as the invoices list withholds the
+    // invoice itself (D2). A caller who reaches an invoice whose other parents are ordinary keeps today's behaviour.
+
+    /// <summary>Invoice <see cref="I"/> under project <see cref="P"/> and a matter that is secure X or ordinary O.</summary>
+    private Guid SeedInvoiceUnderPAnd(bool secureMatter)
     {
-        // Owner decision 2026-10-11 (option A): an invoice is reached through the union of its parents. A document filed to the
-        // route invoice only is not withheld for the invoice's OTHER (secure) parent; its other related links still count.
+        var matter = secureMatter ? X : O;
+        _fixture.Data.AddInvoice(I, matter: matter, project: P);
+        if (secureMatter) _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, X);
+        else _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        return matter;
+    }
+
+    [Fact]
+    public async Task OnAnInvoiceRoute_AnInvoiceAlsoUnderSecureX_WithholdsItsDocuments_FromAPOnlyReader_D4()
+    {
         _fixture.Principal = Reader(P);
-        _fixture.Data.AddInvoice(I, matter: X, project: P);
-        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, X);
-        _fixture.Data.AddFilingRow("sprk_invoice", I, ("sprk_matter", "sprk_matter", X), ("sprk_project", "sprk_project", P));
+        SeedInvoiceUnderPAnd(secureMatter: true);
+        _fixture.Data.AddDocument("invoices", I, "Filed to the invoice");
+
+        (await InvoiceDocuments()).Value.Should().BeEmpty("the invoice is behind secure X's wall");
+    }
+
+    [Fact]
+    public async Task OnAnInvoiceRoute_AnInvoiceAlsoUnderAnOrdinaryRoot_ListsItsDocuments_OptionA()
+    {
+        _fixture.Principal = Reader(P);
+        SeedInvoiceUnderPAnd(secureMatter: false);
         SeedParentUnder("sprk_event", E, X, secure: true);
         var onlyInvoice = _fixture.Data.AddDocument("invoices", I, "Filed to the invoice");
         _fixture.Data.AddDocument("invoices", I, "And to an event of secure X", ("_sprk_relatedevent_value", E));
 
-        using var client = _fixture.CreateAuthenticatedClient();
-        var body = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{I}/documents");
+        (await InvoiceDocuments()).Value.Select(d => d.SprkDocumentid).Should().Equal(new[] { onlyInvoice },
+            "option A for the ordinary invoice; the document's other parent still counts");
+    }
 
-        body!.Value.Select(d => d.SprkDocumentid).Should().Equal(onlyInvoice);
+    [Theory]
+    [InlineData("content")]
+    [InlineData("versions")]
+    public async Task OnAnInvoiceRoute_ADocumentOfAnInvoiceAlsoUnderSecureX_IsRefused_AsNotUnderTheParent_D4(string route)
+    {
+        _fixture.Principal = Reader(P);
+        SeedInvoiceUnderPAnd(secureMatter: true);
+        var reference = await InvoiceRefusalOf(route);
+        var id = _fixture.Data.AddDocument("invoices", I, "Filed to the invoice");
+        _fixture.ResetCalls();
+
+        using var response = await GetOnInvoice(id, route);
+
+        (await Summarise(response)).Should().Be(reference, "the same refusal as a document not under the invoice");
+        _fixture.PointerResolutions.Should().Be(0, "nothing is read from SPE");
+    }
+
+    [Theory]
+    [InlineData("content")]
+    [InlineData("versions")]
+    public async Task OnAnInvoiceRoute_ADocumentOfAnInvoiceAlsoUnderAnOrdinaryRoot_IsServed_OptionA(string route)
+    {
+        _fixture.Principal = Reader(P);
+        SeedInvoiceUnderPAnd(secureMatter: false);
+        var id = _fixture.Data.AddDocument("invoices", I, "Filed to the invoice");
+
+        using var response = await GetOnInvoice(id, route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private async Task<ExternalDocumentListResponse> InvoiceDocuments()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        return (await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{I}/documents"))!;
+    }
+
+    private async Task<HttpResponseMessage> GetOnInvoice(string documentId, string route)
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        return await client.GetAsync($"/api/v1/external/invoices/{I}/documents/{documentId}/{route}");
+    }
+
+    /// <summary>The invoice route's response for a document that is not under <see cref="I"/> at all.</summary>
+    private async Task<string> InvoiceRefusalOf(string route)
+    {
+        var elsewhere = _fixture.Data.AddDocument("invoices", Guid.NewGuid(), "Another invoice's");
+        using var response = await GetOnInvoice(elsewhere, route);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        return await Summarise(response);
     }
 
     // ---- helpers ----

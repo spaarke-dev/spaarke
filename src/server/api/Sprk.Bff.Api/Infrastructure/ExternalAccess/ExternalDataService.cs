@@ -450,7 +450,7 @@ public class ExternalDataService
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
         // Task 187: the document's own root links stay the primary input; its other parents (the related event,
         // communication, to-do, invoice ...) are read too, and their LIVE roots join the rule.
-        var links = read.Rows.Select(r => DocumentLinksOf(r).ForRoute(parentKind, parentId)).ToList();
+        var links = read.Rows.Select(DocumentLinksOf).ToList();
         var live = await ReadLiveParentRootsAsync(links.Select(l => l.LiveParents), ct);
         var roots = links.Select(l => l.RuleInput(live)).ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
@@ -542,29 +542,21 @@ public class ExternalDataService
         /// </summary>
         public IReadOnlyDictionary<string, JsonElement>? Row { get; init; }
 
-        /// <summary>The one parent the route already decided for the caller (see <see cref="ForRoute"/>); not walked again.</summary>
-        internal (string Table, Guid Id)? AuthorizedParent { get; init; }
-
         /// <summary>The parents as live-parent read input (empty when none).</summary>
-        internal IReadOnlyList<LiveParentLookup> LiveParents =>
-            ExternalMultiRootRule.Except(ExternalMultiRootRule.LiveParentsOf(DocumentTable, Row), AuthorizedParent);
+        internal IReadOnlyList<LiveParentLookup> LiveParents => ExternalMultiRootRule.LiveParentsOf(DocumentTable, Row);
 
         /// <summary>
         /// The rule input: the six root links ∪ the live roots of the row's parents. <paramref name="live"/> <c>null</c>
         /// resolves nothing, so a document naming a parent is withheld (fail closed).
         /// </summary>
+        /// <remarks>
+        /// Task 187, fix round 1, owner decision D4: on an INVOICE route the route invoice is walked like every other parent.
+        /// The caller was authorized for the invoice through the union of its parents (option A), so an invoice whose other
+        /// parents are ordinary changes nothing; one whose live roots include a SECURE root the caller cannot read withholds
+        /// its documents, as the invoices list withholds the invoice (D2).
+        /// </remarks>
         public ChildRowRoots RuleInput(LiveParentRoots? live) =>
-            ChildRowRoots.Of(DocumentTable, Row, Links, live ?? LiveParentRoots.Empty, AuthorizedParent);
-
-        /// <summary>
-        /// Task 187, owner decision 2026-10-11 (option A) kept: on an INVOICE route the caller was authorized for the invoice
-        /// through the union of its parents, so that invoice is not walked again as one of the document's parents (it would
-        /// put every parent of the invoice in the rule). Every other parent still is. A root route changes nothing.
-        /// </summary>
-        internal DocumentRootLinks ForRoute(DocumentParentKind parentKind, Guid routeParentId) =>
-            parentKind != DocumentParentKind.Invoice
-                ? this
-                : this with { AuthorizedParent = ("sprk_invoice", routeParentId) };
+            ChildRowRoots.Of(DocumentTable, Row, Links, live ?? LiveParentRoots.Empty);
 
         /// <summary>
         /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to, and (task 187) on every
@@ -908,8 +900,7 @@ public class ExternalDataService
         var name = row.TryGetValue("sprk_documentname", out var n) && n.ValueKind == JsonValueKind.String
             ? n.GetString()
             : null;
-        return new DocumentScopeRead(
-            GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row).ForRoute(parentKind, GuidValue(row, binding.LookupValueAttribute) ?? Guid.Empty));
+        return new DocumentScopeRead(GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row));
     }
 
     /// <summary>
