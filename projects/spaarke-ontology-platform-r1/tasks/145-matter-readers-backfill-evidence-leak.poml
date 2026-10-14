@@ -4,7 +4,7 @@
     <title>Child-record contract T5: classify every reader of typed sprk_matter (context vs filing), backfill typed core columns into sprk_regarding*, and stop secure communication detail leaking into matter-Signal evidence</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 141, 142, 144 done; backfill run needs the owner's dev-data approval</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>D-123 secure-family leak fix plus a data backfill.</rigor-reason>
     <model-tier>opus</model-tier>
