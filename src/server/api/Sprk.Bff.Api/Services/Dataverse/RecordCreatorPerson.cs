@@ -100,6 +100,10 @@ public static class RecordCreatorPerson
         // the confirming systemuser). The owner created the column on dev (field-secured; D-136's narrow profile lets the ontology
         // writer stamp it); the same script lists it, with SpaarkeMaster / OntologyPlatformSolution as its solution homes.
         "sprk_decisionrecord",
+        // Ontology task 143 (#1783 / D-135): a Signal records the person who asked for it (SignalWriter passes
+        // SignalWriteRequest.RequestedBy; every Signal raised today is job-raised and names nobody). The owner created the column
+        // on dev (field-secured, D-136); the same script lists it, with SpaarkeMaster / OntologyPlatformSolution as its homes.
+        "sprk_signal",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

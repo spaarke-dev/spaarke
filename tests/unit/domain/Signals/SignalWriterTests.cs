@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -10,8 +11,10 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals;
 using Ownership = Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Communication; // reuse CapturingLogger<T>/LogEntry (internal, same assembly)
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -78,7 +81,7 @@ public class SignalWriterTests
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -101,7 +104,7 @@ public class SignalWriterTests
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -126,7 +129,7 @@ public class SignalWriterTests
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(resolved),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -186,22 +189,26 @@ public class SignalWriterTests
     }
 
     // =====================================================================================
-    // FR-14 (F3/F22): owningbusinessunit, never ownerid=team
+    // Task 143 (D-129/D-130): the owner is the resolver's team, in the create; owningbusinessunit is never written
     // =====================================================================================
 
     [Fact]
-    public async Task WriteAsync_SetsOwningBusinessUnitFromGroupingMatter_OwnerLeftDefault()
+    public async Task WriteAsync_OrdinaryCoreRecord_IsOwnedByTheResolversTeam_InTheCreate_NoOwningBusinessUnit_D130()
     {
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun));
 
         var result = await writer.WriteAsync(MatterSubjectRequest());
-        var row = writerOrg.Rows[result.SignalId];
 
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(BusinessUnitId);
-        row.Attributes.Keys.Should().NotContain("ownerid", "team ownership is CONFIRMED unworkable live (403 0x80040299); owner stays the writer (the default)");
-        result.OwningBusinessUnitId.Should().Be(BusinessUnitId);
+        var created = writerOrg.CreatedPayloads.Should().ContainSingle().Subject;
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId),
+            "D-130: the matter's business-unit default team the resolver answered, set IN the create");
+        created.Attributes.Keys.Should().NotContain("owningbusinessunit", "C3: it derives from the owner team, never written");
+        writerOrg.RetrievedColumns.Should().Contain(c => c.Entity == "sprk_signal" && c.Columns.Contains("ownerid"),
+            "the owner is verified by reading ownerid back");
+        result.OwningBusinessUnitId.Should().Be(BusinessUnitId, "reported from the read-back (the team's unit), not computed");
+        result.SecureOwnerTeamId.Should().BeNull();
     }
 
     [Fact]
@@ -211,13 +218,12 @@ public class SignalWriterTests
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
         var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
-        // R1: the reconcile path now re-checks owningbusinessunit, so the seeded row must carry the CORRECT
-        // BU for this test's premise (ownership is not TOUCHED on reconcile, but it IS still verified) — a
-        // row with no BU at all would (correctly) escalate under the test right below this one.
+        // The reconcile path re-checks the owner, so the seeded row carries the resolver's team (ownership is not TOUCHED on
+        // reconcile, but it IS still verified).
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -225,23 +231,24 @@ public class SignalWriterTests
         var result = await writer.WriteAsync(request);
 
         result.OwningBusinessUnitId.Should().Be(Guid.Empty, "ownership is not RE-ASSIGNED on reconcile, even though it was just verified");
+        writerOrg.UpdateCalls.Should().ContainSingle().Which.Fields.Keys.Should().NotContain(new[] { "ownerid", "owningbusinessunit" });
     }
 
-    [Fact]
-    public async Task WriteAsync_ReconcileFindsWrongBusinessUnit_Escalates_NotSuccess()
+    [Theory]
+    [InlineData("team")]
+    [InlineData("systemuser")] // a row written before task 143 (owned by the writer identity): known limit, refused loudly
+    public async Task WriteAsync_ReconcileFindsAnotherOwner_Escalates_OwnerMismatch_NotSuccess(string ownerKind)
     {
-        // R1 (second independent review): the wrong-BU row was never re-checked on reconcile in the first
-        // rework -- only on the original create. This proves the fix: a Signal whose stored BU has drifted
-        // (e.g. its matter was reassigned) since its first create is caught on the NEXT re-evaluation too.
+        // R1 (second independent review), task 143: a Signal whose owner is not the resolver's answer now (its matter moved
+        // business unit, or it predates task 143) is caught on every re-evaluation, not only on the original create.
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
         var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
-        var wrongBusinessUnitId = Guid.NewGuid();
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
-            ["owningbusinessunit"] = new EntityReference("businessunit", wrongBusinessUnitId),
+            ["ownerid"] = new EntityReference(ownerKind, Guid.NewGuid()),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -254,41 +261,73 @@ public class SignalWriterTests
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun), logger);
         var act = async () => await writer.WriteAsync(request);
 
-        await act.Should().ThrowAsync<SignalWriterEscalationException>("a wrong-BU row must escalate, not report a quiet success");
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>("a mis-owned row must escalate, not report a quiet success"))
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.OwnerMismatch);
         failureCount().Should().Be(1);
-        writerOrg.UpdateCalls.Should().BeEmpty("lastevaluated must not be touched when the BU check fails -- the row is wrong, not merely stale");
+        writerOrg.UpdateCalls.Should().BeEmpty("lastevaluated must not be touched when the owner check fails -- the row is wrong, not merely stale");
 
         var errorEntry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
         errorEntry.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
-        errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.OwningBusinessUnitMismatch);
+        errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.OwnerMismatch);
     }
 
     [Fact]
-    public async Task WriteAsync_CreatedRowOwningBusinessUnitMismatch_Escalates()
+    public async Task WriteAsync_CreatedRowReadsBackWithAnotherOwner_Escalates_OwnerMismatch()
     {
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
-        var writerOrg = new FakeOrganizationService
-        {
-            ForcedOwningBusinessUnitOnVerifyRetrieve = Guid.NewGuid(), // simulates RecordOwnershipAcrossBusinessUnits disabled
-        };
+        var writerOrg = new FakeOrganizationService { ForcedOwnerOnVerifyRetrieve = new EntityReference("team", Guid.NewGuid()) };
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun));
 
         var act = async () => await writer.WriteAsync(MatterSubjectRequest());
 
-        await act.Should().ThrowAsync<SignalWriterEscalationException>();
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.OwnerMismatch);
     }
 
     [Fact]
-    public async Task WriteAsync_MatterWithNoOwningBusinessUnit_Escalates()
+    public async Task WriteAsync_CreatedRowOwnerReadBackFaults_Escalates_OwnerReadBackFailed()
     {
-        var sysadmin = new FakeSysadminClient(); // no BU stubbed for MatterId
-        var writerOrg = new FakeOrganizationService();
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
+        var writerOrg = new FakeOrganizationService { ThrowOnVerifyRetrieve = true };
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun));
 
         var act = async () => await writer.WriteAsync(MatterSubjectRequest());
 
-        await act.Should().ThrowAsync<SignalWriterEscalationException>();
-        writerOrg.Rows.Should().BeEmpty();
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.OwnerReadBackFailed);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AnswerThatNamesNoTeam_IsARefusal_WritesNothing_MetersOwnerRefused_D130()
+    {
+        // "Unchanged" is not an owner for a new row: the writer identity never keeps it (the pre-143 FR-14 shape).
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver { Answer = Ownership.RecordOwnerResolution.Unchanged("names no team") };
+
+        var result = await Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), ownership: ownership).WriteAsync(MatterSubjectRequest());
+
+        result.IsSkipped.Should().BeTrue();
+        result.SkippedRefusalCode.Should().Be(Ownership.RecordOwnerRefusal.NoOwnerSource);
+        writerOrg.CreateCallCount.Should().Be(0);
+        reasons().Should().Equal(OntologyWriterFailureReason.OwnerRefused);
+    }
+
+    [Fact]
+    public async Task WriteAsync_CoreResolverFault_PropagatesAndWritesNothing()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver { FaultFor = _ => new TimeoutException("resolver read timed out") };
+
+        var act = async () => await Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), ownership: ownership).WriteAsync(MatterSubjectRequest());
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0);
     }
 
     // =====================================================================================
@@ -325,7 +364,7 @@ public class SignalWriterTests
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_project"));
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ProjectId));
         row.Attributes.Keys.Should().NotContain("sprk_matter");
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(ProjectBusinessUnitId);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
         ownership.Contexts.Should().ContainSingle().Which.TargetEntityLogicalName.Should().Be("sprk_project");
     }
 
@@ -530,7 +569,8 @@ public class SignalWriterTests
         var context = ownership.Contexts.Should().ContainSingle().Subject;
         context.TargetEntityLogicalName.Should().Be("sprk_matter");
         context.TargetRecordId.Should().Be(MatterId);
-        context.Parents.Should().Equal(new Ownership.RecordOwnershipParent("sprk_communication", CommunicationId));
+        context.Parents.Should().Equal(
+            new Ownership.RecordOwnershipParent("sprk_matter", MatterId), new Ownership.RecordOwnershipParent("sprk_communication", CommunicationId));
 
         writerOrg.CreateCallCount.Should().Be(1);
         var created = writerOrg.CreatedPayloads.Should().ContainSingle().Subject;
@@ -610,20 +650,22 @@ public class SignalWriterTests
     }
 
     [Fact]
-    public async Task WriteAsync_NotSecure_KeepsTheFr14Path_OwnerLeftAsWriter_BusinessUnitFromTheMatter()
+    public async Task WriteAsync_NotSecure_AppliesTheOrdinaryAnswer_TheBusinessUnitsTeam_D130()
     {
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
-        // An ordinary answer (the BU's default team): the writer must NOT adopt it (F3: 0x80040299 on most BUs).
+        // Task 143 (D-130): an ordinary answer (the parent's business-unit default team) IS the owner; before 143 the writer
+        // kept itself as owner and set owningbusinessunit (FR-14, F3).
         var ownership = new FakeOwnershipResolver { Answer = Ownership.RecordOwnerResolution.Owned(DefaultTeamId) };
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: ownership);
 
         var result = await writer.WriteAsync(MatterSubjectRequest());
 
-        ownership.Contexts.Should().ContainSingle().Which.Parents.Should().BeEmpty("the subject IS the matter");
-        var row = writerOrg.Rows[result.SignalId];
-        row.Attributes.Keys.Should().NotContain("ownerid");
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(BusinessUnitId);
+        ownership.Contexts.Should().ContainSingle().Which.Parents.Should().Equal(
+            new[] { new Ownership.RecordOwnershipParent("sprk_matter", MatterId) }, "the subject IS the matter: one parent");
+        var created = writerOrg.CreatedPayloads.Should().ContainSingle().Subject;
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
+        created.Attributes.Keys.Should().NotContain("owningbusinessunit");
         result.Created.Should().BeTrue();
         result.SecureOwnerTeamId.Should().BeNull();
         result.IsSkipped.Should().BeFalse();
@@ -756,8 +798,10 @@ public class SignalWriterTests
         using var _ = listener;
 
         var logger = new CapturingLogger<SignalWriter>();
-        var sysadmin = new FakeSysadminClient(); // no BU stubbed -> OwningBusinessUnitNotFound escalation
-        var writer = Build(new FakeOrganizationService(), sysadmin, new FakeTimeProvider(FirstRun), logger);
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
+        // The created row reads back with another owner -> OwnerMismatch escalation (task 143; was OwningBusinessUnitNotFound).
+        var writer = Build(new FakeOrganizationService { ForcedOwnerOnVerifyRetrieve = new EntityReference("systemuser", Guid.NewGuid()) },
+            sysadmin, new FakeTimeProvider(FirstRun), logger);
 
         var act = async () => await writer.WriteAsync(MatterSubjectRequest());
 
@@ -766,7 +810,7 @@ public class SignalWriterTests
 
         var errorEntry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
         errorEntry.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
-        errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.OwningBusinessUnitNotFound);
+        errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.OwnerMismatch);
         errorEntry.Field("PolicyCode").Should().Be("POL-COMMIT-BUDGET");
 
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Information,
@@ -920,7 +964,7 @@ public class SignalWriterTests
         row.GetAttributeValue<EntityReference>(typedLookup).Id.Should().Be(subjectId);
         row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeCatalogStub.SpaarkeDev1[subjectEntity]);
         row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Lower(subjectId));
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(BusinessUnitId);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
         result.GroupingMatterId.Should().Be(MatterId);
         result.CoreRecordEntity.Should().Be("sprk_matter");
     }
@@ -984,7 +1028,7 @@ public class SignalWriterTests
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(status),
             ["sprk_duedate"] = new DateTime(2026, 10, 10),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1011,7 +1055,7 @@ public class SignalWriterTests
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_duedate"] = new DateTime(2026, 10, 10),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1035,11 +1079,12 @@ public class SignalWriterTests
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_project"));
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ProjectId));
         row.Attributes.Keys.Should().NotContain("sprk_matter");
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(ProjectBusinessUnitId);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
         result.GroupingMatterId.Should().Be(Guid.Empty);
         var context = ownership.Contexts.Should().ContainSingle().Subject;
         context.TargetEntityLogicalName.Should().Be("sprk_project");
-        context.Parents.Should().Equal(new Ownership.RecordOwnershipParent("sprk_todo", TodoId));
+        context.Parents.Should().Equal(
+            new Ownership.RecordOwnershipParent("sprk_project", ProjectId), new Ownership.RecordOwnershipParent("sprk_todo", TodoId));
     }
 
     [Fact]
@@ -1054,7 +1099,8 @@ public class SignalWriterTests
 
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_servicerequest"));
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ServiceRequestId));
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(ServiceRequestBusinessUnitId);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.Attributes.Keys.Should().NotContain("owningbusinessunit", "C3: never sent");
         row.Attributes.Keys.Should().NotContain("sprk_matter");
     }
 
@@ -1074,15 +1120,18 @@ public class SignalWriterTests
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(WorkAssignmentId));
         row.Attributes.Keys.Should().NotContain("sprk_matter");
         row.GetAttributeValue<EntityReference>("sprk_regardingworkassignment").Id.Should().Be(WorkAssignmentId);
-        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(WorkAssignmentBusinessUnitId);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
         var context = ownership.Contexts.Should().ContainSingle().Subject;
         context.TargetEntityLogicalName.Should().Be("sprk_workassignment");
-        context.Parents.Should().BeEmpty("the subject IS the core record");
+        context.Parents.Should().Equal(new[] { new Ownership.RecordOwnershipParent("sprk_workassignment", WorkAssignmentId) },
+            "the subject IS the core record: one parent");
     }
 
     [Fact]
-    public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByTheTodosOwner()
+    public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByTheResolversTeam_NeverAUser_D130()
     {
+        // The To Do is user-owned; its Signal is NOT (D-129: a person is never read from ownerid). The resolver answers for the
+        // subject itself, its only parent.
         var sysadmin = new FakeSysadminClient()
             .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
         var writerOrg = new FakeOrganizationService();
@@ -1090,20 +1139,25 @@ public class SignalWriterTests
 
         var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: ownership)
             .WriteAsync(DoRequest("sprk_todo", TodoId));
-        var row = writerOrg.Rows[result.SignalId];
 
-        row.Attributes.Keys.Should().NotContain(new[] { "sprk_corerecordtype", "sprk_corerecordid", "sprk_matter", "owningbusinessunit" });
-        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", TodoOwnerUserId));
+        var created = writerOrg.CreatedPayloads.Should().ContainSingle().Subject;
+        created.Attributes.Keys.Should().NotContain(new[] { "sprk_corerecordtype", "sprk_corerecordid", "sprk_matter", "owningbusinessunit" });
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
         writerOrg.RetrievedColumns.Should().Contain(c => c.Entity == "sprk_signal" && c.Columns.Contains("ownerid"), "ownerid is read back");
-        ownership.Contexts.Should().BeEmpty("there is no core record to ask about");
+        var context = ownership.Contexts.Should().ContainSingle("no assignee: the To Do's own answer stands").Subject;
+        context.TargetEntityLogicalName.Should().Be("sprk_todo");
+        context.TargetRecordId.Should().Be(TodoId);
+        context.Parents.Should().Equal(new[] { new Ownership.RecordOwnershipParent("sprk_todo", TodoId) });
+        context.RequestedBy.Should().BeNull("a job-raised Signal names nobody");
+        sysadmin.Retrieved.Should().NotContain(r => r.Entity == "sprk_todo" && r.Columns.Contains("ownerid"),
+            "D-129: the item's owner is never read as the Signal's owner");
         result.CoreRecordEntity.Should().BeNull();
     }
 
     [Fact]
     public async Task WriteAsync_NoCore_OwnerReadsBackAsSomeoneElse_Escalates()
     {
-        var sysadmin = new FakeSysadminClient()
-            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
+        var sysadmin = new FakeSysadminClient().Stub(new Entity("sprk_todo", TodoId));
         var writerOrg = new FakeOrganizationService { ForcedOwnerOnVerifyRetrieve = new EntityReference("systemuser", Guid.NewGuid()) };
 
         var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_todo", TodoId));
@@ -1113,29 +1167,429 @@ public class SignalWriterTests
     }
 
     [Fact]
-    public async Task WriteAsync_NoCore_TeamOwnedTodo_IsOwnedByThatTeam()
+    public async Task WriteAsync_NoCore_ResolverRefuses_WritesNothing_MetersOwnerRefused()
     {
-        var sysadmin = new FakeSysadminClient()
-            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("team", DefaultTeamId) });
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
         var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver
+        {
+            Answer = Ownership.RecordOwnerResolution.Refused(Ownership.RecordOwnerRefusal.NoOwnerSource, "no business-unit team"),
+        };
 
-        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_todo", TodoId));
+        var result = await Build(writerOrg, new FakeSysadminClient().Stub(new Entity("sprk_event", EventId)),
+            new FakeTimeProvider(FirstRun), ownership: ownership).WriteAsync(DoRequest("sprk_event", EventId));
 
-        writerOrg.Rows[result.SignalId].GetAttributeValue<EntityReference>("ownerid")
-            .Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
+        result.IsSkipped.Should().BeTrue();
+        result.SkippedRefusalCode.Should().Be(Ownership.RecordOwnerRefusal.NoOwnerSource);
+        writerOrg.CreateCallCount.Should().Be(0);
+        reasons().Should().Equal(OntologyWriterFailureReason.OwnerRefused);
     }
 
     [Fact]
-    public async Task WriteAsync_NoCore_SubjectHasNoOwner_RefusesAndWritesNothing()
+    public async Task WriteAsync_NoCore_ResolverFaults_RefusesAsNoCoreOwnerUnresolved_WritesNothing()
     {
-        var sysadmin = new FakeSysadminClient().Stub(new Entity("sprk_todo", TodoId));
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver { FaultFor = _ => new TimeoutException("resolver read timed out") };
+
+        var act = async () => await Build(writerOrg, new FakeSysadminClient().Stub(new Entity("sprk_todo", TodoId)),
+            new FakeTimeProvider(FirstRun), ownership: ownership).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>();
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    // ── D-134 / D-135: a personal To Do's Signal is owned by its Assigned To user's business-unit team ─────────────────
+
+    private static readonly Guid AssigneeContactId = Guid.Parse("55555555-0000-4000-8000-0000000000c1");
+    private static readonly Guid AssigneeUserId = Guid.Parse("55555555-0000-4000-8000-0000000000a1");
+    private static readonly Guid AssigneeTeamId = Guid.Parse("55555555-0000-4000-8000-0000000000b1");
+
+    private static FakeSysadminClient PersonalTodo(Guid? assignedTo = null, bool filedUnderMatter = false)
+    {
+        var todo = new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) };
+        if (assignedTo is { } contact) todo["sprk_assignedto"] = new EntityReference("contact", contact);
+        if (filedUnderMatter) todo["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+        return new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId).Stub(todo);
+    }
+
+    private static AssignedAccessTestDoubles.FakeAssignedAccessStore LinkedAssignee()
+    {
+        var links = new AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        links.UsersByLink[AssigneeContactId] =
+            [new AssignedLinkCandidate(AssigneeUserId, AssigneeContactId, Guid.NewGuid(), IsDisabled: false, AccessMode: 0, ApplicationId: null, IsExternal: false)];
+        return links;
+    }
+
+    /// <summary>The To Do's own answer is <paramref name="parentsAnswer"/>; the assignee's team question (ForUserTeam) answers
+    /// <see cref="AssigneeTeamId"/>.</summary>
+    private static FakeOwnershipResolver AssigneeAware(Ownership.RecordOwnerResolution? parentsAnswer = null) => new()
+    {
+        AnswerFor = context => context.CallerSystemUserId == AssigneeUserId && context.Parents.Count == 0
+            ? Ownership.RecordOwnerResolution.Owned(AssigneeTeamId)
+            : parentsAnswer ?? Ownership.RecordOwnerResolution.Owned(DefaultTeamId),
+    };
+
+    [Fact]
+    public async Task D134_PersonalTodo_WithOneEnabledAssignee_IsOwnedByTheAssigneesBusinessUnitTeam()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+
+        var result = await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        result.Created.Should().BeTrue();
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", AssigneeTeamId), "D-134: the Assigned To user's team, not the To Do's own");
+        ownership.Contexts.Should().HaveCount(2);
+        ownership.Contexts[0].Parents.Should().Equal(new[] { new Ownership.RecordOwnershipParent("sprk_todo", TodoId) },
+            "the parents are asked first (D-135 item 7)");
+        ownership.Contexts[1].Parents.Should().BeEmpty();
+        ownership.Contexts[1].CallerSystemUserId.Should().Be(AssigneeUserId, "then the assignee's team, through ForUserTeam");
+    }
+
+    [Fact]
+    public async Task D134_ASecureParent_Wins_TheAssigneeIsNeverRead()
+    {
+        var links = LinkedAssignee();
+        links.FailLinkRead = true; // a read would fault: proves it is never made
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware(SecureAnswer());
+
+        var result = await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: links).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        result.SecureOwnerTeamId.Should().Be(SecureTeamId);
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", SecureTeamId));
+        ownership.Contexts.Should().ContainSingle("a secure answer stands; the assignee is not consulted");
+    }
+
+    [Fact]
+    public async Task D134_AssigneeReadFaults_WhileTheAnswerIsOrdinary_FailsClosed_NoCoreOwnerUnresolved_WritesNothing()
+    {
+        var links = LinkedAssignee();
+        links.FailLinkRead = true;
+        var writerOrg = new FakeOrganizationService();
+        var logger = new CapturingLogger<SignalWriter>();
+
+        var act = async () => await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), logger,
+            ownership: AssigneeAware(), links: links).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>("unknown whether a user exists: never fall back");
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
+        writerOrg.CreateCallCount.Should().Be(0);
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
+        SignalWriter.IsMeteredByWriter(thrown.Which).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task D134_TodoReadFaults_WhileTheAnswerIsOrdinary_FailsClosed()
+    {
+        var sysadmin = PersonalTodo(AssigneeContactId);
+        var writerOrg = new FakeOrganizationService();
+        // The first To Do reads (core ancestors, due date) succeed; the assignee read of the To Do then faults.
+        var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: AssigneeAware(), links: LinkedAssignee());
+        sysadmin.ThrowOnRetrieveWithColumn = "sprk_assignedto";
+
+        var act = async () => await writer.WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).Which.Reason
+            .Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("no-assigned-to")]
+    [InlineData("no-linked-user")]
+    [InlineData("disabled-only")]
+    [InlineData("two-users")]
+    public async Task D134_NoSingleEnabledAssignee_FallsBackToTheTodosOwnAnswer(string shape)
+    {
+        var links = new AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        AssignedLinkCandidate Linked(Guid user, bool disabled = false) =>
+            new(user, AssigneeContactId, Guid.NewGuid(), IsDisabled: disabled, AccessMode: 0, ApplicationId: null, IsExternal: false);
+        if (shape == "disabled-only") links.UsersByLink[AssigneeContactId] = [Linked(AssigneeUserId, disabled: true)];
+        if (shape == "two-users") links.UsersByLink[AssigneeContactId] = [Linked(AssigneeUserId), Linked(Guid.NewGuid())];
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+
+        await Build(writerOrg, PersonalTodo(shape == "no-assigned-to" ? null : AssigneeContactId), new FakeTimeProvider(FirstRun),
+            ownership: ownership, links: links).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId), "no single user: the To Do's own answer");
+        ownership.Contexts.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task D134_ATodoFiledUnderAMatter_IsNotPersonal_TheCoreAnswerStands_AssigneeNeverAsked()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+
+        await Build(writerOrg, PersonalTodo(AssigneeContactId, filedUnderMatter: true), new FakeTimeProvider(FirstRun),
+            ownership: ownership, links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
+        ownership.Contexts.Should().ContainSingle().Which.TargetEntityLogicalName.Should().Be("sprk_matter", "a core filing takes precedence");
+    }
+
+    [Fact]
+    public async Task D134_ANoCoreEvent_HasNoAssignee_ItsOwnAnswerStands()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+
+        await Build(writerOrg, new FakeSysadminClient().Stub(new Entity("sprk_event", EventId)), new FakeTimeProvider(FirstRun),
+            ownership: ownership, links: LinkedAssignee()).WriteAsync(DoRequest("sprk_event", EventId));
+
+        ownership.Contexts.Should().ContainSingle().Which.Parents.Should().Equal(new[] { new Ownership.RecordOwnershipParent("sprk_event", EventId) });
+    }
+
+    [Fact]
+    public async Task D134_DeriveCoreRecord_NamesTheSameTeamTheWriteWould_ForTheJobsCompare()
+    {
+        var writer = Build(new FakeOrganizationService(), PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun),
+            ownership: AssigneeAware(), links: LinkedAssignee());
+
+        var core = await writer.DeriveCoreRecordAsync("sprk_todo", TodoId, SignalWriter.LaneDo);
+
+        core.IsNoCore.Should().BeTrue();
+        core.NoCoreOwner.Should().BeEquivalentTo(new EntityReference("team", AssigneeTeamId), "a team, never a user");
+    }
+
+    [Fact]
+    public async Task D134_TheAssigneesTeamIsRefused_WritesNothing_NeverFallsBackToTheTodosOwnTeam()
+    {
+        // Review F3: the second question (the assignee's team, ForUserTeam) is refused — e.g. the assignee's unit has no default
+        // team. The Decision Record refuses here (requireTeam); so does the Signal: nothing is written, the To Do's team is not used.
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver
+        {
+            AnswerFor = context => context.CallerSystemUserId == AssigneeUserId && context.Parents.Count == 0
+                ? Ownership.RecordOwnerResolution.Refused(Ownership.RecordOwnerRefusal.NoOwnerSource, "the assignee's unit has no default team")
+                : Ownership.RecordOwnerResolution.Owned(DefaultTeamId),
+        };
+
+        var result = await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        result.IsSkipped.Should().BeTrue();
+        writerOrg.CreateCallCount.Should().Be(0);
+        ownership.Contexts.Should().HaveCount(2, "the assignee's team was asked, and its refusal stands");
+    }
+
+    [Fact]
+    public async Task D134_TheAssigneesTeamQuestionFaults_FailsClosed_NoCoreOwnerUnresolved()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+        ownership.FaultFor = context => context.CallerSystemUserId == AssigneeUserId && context.Parents.Count == 0
+            ? new TimeoutException("the resolver's read of the assignee's unit timed out")
+            : null;
+
+        var act = async () => await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>();
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("systemuser")]
+    [InlineData("team-empty")]
+    public async Task ReassignNoCoreOwner_NeverTakesAUserOrAnEmptyTeam_D130(string shape)
+    {
+        var writer = Build(new FakeOrganizationService(), new FakeSysadminClient(), new FakeTimeProvider(FirstRun));
+        var owner = shape == "systemuser" ? new EntityReference("systemuser", TodoOwnerUserId) : new EntityReference("team", Guid.Empty);
+
+        var act = async () => await writer.ReassignNoCoreOwnerAsync(Guid.NewGuid(), owner, "POL-DO-ITEM");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task DeriveCoreRecord_NoCoreOwnerRefused_IsTheWritersEscalation()
+    {
+        var writer = Build(new FakeOrganizationService(), new FakeSysadminClient().Stub(new Entity("sprk_todo", TodoId)),
+            new FakeTimeProvider(FirstRun), ownership: new FakeOwnershipResolver
+            {
+                Answer = Ownership.RecordOwnerResolution.Refused(Ownership.RecordOwnerRefusal.NoOwnerSource, "none"),
+            });
+
+        var act = async () => await writer.DeriveCoreRecordAsync("sprk_todo", TodoId, SignalWriter.LaneDo);
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).Which.Reason.Should().Be(OntologyWriterFailureReason.OwnerRefused);
+    }
+
+    // ── #1783 / D-135: the person who asked is stamped with the owner; a job-raised Signal names nobody ─────────────────
+
+    [Fact]
+    public async Task WriteAsync_RequestedBy_IsStampedAsTheCreatorPerson_ByTheRealResolver_AndDecidesNothingAboutTheOwner()
+    {
+        var directory = TestInfrastructure.OwnershipDirectory.Standard().WithOrdinaryRoot("sprk_matter", MatterId);
+        var writerOrg = new FakeOrganizationService();
+        var requester = Ownership.RecordRequester.Of(TestInfrastructure.OwnershipDirectory.CallerUserId);
+
+        await Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(FirstRun), ownership: directory.Resolver())
+            .WriteAsync(MatterSubjectRequest() with { RequestedBy = requester });
+
+        var created = writerOrg.CreatedPayloads.Should().ContainSingle().Subject;
+        created.GetAttributeValue<EntityReference>(Ownership.RecordCreatorPerson.Column)
+            .Should().BeEquivalentTo(new EntityReference("systemuser", TestInfrastructure.OwnershipDirectory.CallerUserId));
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(
+            new EntityReference("team", TestInfrastructure.OwnershipDirectory.ChildTeam), "the matter's unit's team, not the requester's");
+    }
+
+    [Fact]
+    public async Task WriteAsync_JobRaised_NoRequestedBy_StampsNoCreatorPerson()
+    {
+        var directory = TestInfrastructure.OwnershipDirectory.Standard().WithOrdinaryRoot("sprk_matter", MatterId);
         var writerOrg = new FakeOrganizationService();
 
-        var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_todo", TodoId));
+        await Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(FirstRun), ownership: directory.Resolver())
+            .WriteAsync(MatterSubjectRequest());
 
-        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
-            .Which.Reason.Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
-        writerOrg.CreateCallCount.Should().Be(0);
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.Attributes.Should().NotContainKey(Ownership.RecordCreatorPerson.Column);
+    }
+
+    [Fact]
+    public async Task WriteAsync_TheRealResolver_ASecureMatter_OwnsTheSignalBySecureRecordOwners_AnOrdinaryOne_ByItsUnitsTeam()
+    {
+        var secureMatter = Guid.NewGuid();
+        var directory = TestInfrastructure.OwnershipDirectory.Standard()
+            .WithOrdinaryRoot("sprk_matter", MatterId).WithSecureRoot("sprk_matter", secureMatter);
+        var writerOrg = new FakeOrganizationService
+        {
+            TeamBusinessUnits =
+            {
+                [TestInfrastructure.OwnershipDirectory.SecureNamedTeam] = TestInfrastructure.OwnershipDirectory.SecureBu,
+                [TestInfrastructure.OwnershipDirectory.ChildTeam] = TestInfrastructure.OwnershipDirectory.ChildBu,
+            },
+        };
+        var writer = Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(FirstRun), ownership: directory.Resolver());
+
+        var ordinary = await writer.WriteAsync(MatterSubjectRequest());
+        var secure = await writer.WriteAsync(MatterSubjectRequest() with { SubjectId = secureMatter, PolicyCode = "POL-SECURE" });
+
+        writerOrg.Rows[ordinary.SignalId].GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", TestInfrastructure.OwnershipDirectory.ChildTeam));
+        ordinary.OwningBusinessUnitId.Should().Be(TestInfrastructure.OwnershipDirectory.ChildBu);
+        ordinary.SecureOwnerTeamId.Should().BeNull();
+        writerOrg.Rows[secure.SignalId].GetAttributeValue<EntityReference>("ownerid")
+            .Should().BeEquivalentTo(new EntityReference("team", TestInfrastructure.OwnershipDirectory.SecureNamedTeam));
+        secure.SecureOwnerTeamId.Should().Be(TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+    }
+
+    // ── Parity with the Decision Record (task 142): the same parents, in the same order, the same requester ─────────────
+
+    public static TheoryData<string?, Guid, string, Guid, string[]> ParityShapes() => new()
+    {
+        // core record, its id, the subject, its id, the stamps (entity:id)
+        { "sprk_matter", MatterId, "sprk_communication", CommunicationId, new[] { "sprk_matter:" + MatterId } },
+        { "sprk_matter", MatterId, "sprk_matter", MatterId, new[] { "sprk_matter:" + MatterId } },
+        { "sprk_project", ProjectId, "sprk_todo", TodoId, new[] { "sprk_project:" + ProjectId, "sprk_matter:" + MatterId } },
+        { null, Guid.Empty, "sprk_todo", TodoId, Array.Empty<string>() },
+    };
+
+    [Theory]
+    [MemberData(nameof(ParityShapes))]
+    public void OwnershipContextOf_AsksTheSameQuestionAsTheDecisionRecordWriter_ForTheSameItem(
+        string? coreEntity, Guid coreId, string subjectEntity, Guid subjectId, string[] stampText)
+    {
+        var stamps = stampText.Select(t => t.Split(':'))
+            .Select(p => new Ownership.CoreAncestorStamp(p[0], "sprk_regarding" + p[0]["sprk_".Length..], Guid.Parse(p[1]))).ToList();
+        var user = Guid.NewGuid();
+        var dr = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
+            coreEntity is null ? null : new DecisionRecordCore(coreEntity, coreId, Guid.NewGuid()),
+            new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef(subjectEntity, subjectId), user, null, [], [], null, [], new Dictionary<string, object?>(), null, null, null);
+
+        var signal = SignalWriter.OwnershipContextOf(coreEntity, coreId, stamps, subjectEntity, subjectId, Ownership.RecordRequester.Of(user));
+        var record = DecisionRecordWriter.OwnershipContextOf(dr, stamps);
+
+        signal.Parents.Should().Equal(record.Parents);
+        signal.TargetEntityLogicalName.Should().Be(record.TargetEntityLogicalName);
+        signal.TargetRecordId.Should().Be(record.TargetRecordId);
+        signal.RequestedBy.Should().Be(record.RequestedBy);
+        signal.WhenUnfiled.Should().Be(record.WhenUnfiled);
+    }
+
+    public static TheoryData<string> OwnerParityShapes() => new()
+    {
+        "one-assignee", "no-assigned-to", "filed-under-matter", "assignee-unit-has-no-team",
+    };
+
+    [Theory]
+    [MemberData(nameof(OwnerParityShapes))]
+    public async Task D134_TheSignalAndItsDecisionRecord_AboutTheSameToDo_GetTheSameOwner_FromTheRealResolver(string shape)
+    {
+        // Review F3 (criterion "the Signal and its DR agree"): ONE world, uac-r2's REAL resolver, BOTH writers. The Decision
+        // Record's assignee is read as DecisionCommitService reads it (PersonalToDoAssignee, only when the review has no core).
+        // The To Do sits in the child unit, its Assigned To user in the general unit, a filed To Do's matter in the child unit.
+        var filed = shape == "filed-under-matter";
+        var lonelyBu = Guid.Parse("55555555-0000-4000-8000-0000000000e1");
+        var directory = TestInfrastructure.OwnershipDirectory.Standard()
+            .WithOrdinaryRoot("sprk_matter", MatterId)
+            .WithBusinessUnit(lonelyBu, "A unit with no default team")
+            .WithUser(AssigneeUserId, Guid.NewGuid(),
+                shape == "assignee-unit-has-no-team" ? lonelyBu : TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithRecord("sprk_todo", TodoId,
+                filed ? TestInfrastructure.OwnershipDirectory.GeneralBu : TestInfrastructure.OwnershipDirectory.ChildBu,
+                extra: filed ? new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) } : null);
+        var resolver = directory.Resolver();
+        var sysadmin = PersonalTodo(shape == "no-assigned-to" ? null : AssigneeContactId, filedUnderMatter: filed);
+        var links = LinkedAssignee();
+
+        var writerOrg = new FakeOrganizationService
+        {
+            TeamBusinessUnits =
+            {
+                [TestInfrastructure.OwnershipDirectory.GeneralTeam] = TestInfrastructure.OwnershipDirectory.GeneralBu,
+                [TestInfrastructure.OwnershipDirectory.ChildTeam] = TestInfrastructure.OwnershipDirectory.ChildBu,
+            },
+        };
+        var signal = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: resolver, links: links)
+            .WriteAsync(DoRequest("sprk_todo", TodoId));
+        Guid? signalOwner = signal.IsSkipped ? null : writerOrg.Rows[signal.SignalId].GetAttributeValue<EntityReference>("ownerid").Id;
+
+        var assignee = filed ? null : await PersonalToDoAssignee.ResolveAsync(sysadmin, links, TodoId, CancellationToken.None);
+        var recordWriter = new DecisionRecordWriter(
+            new OntologyWriterDataverseClient(() => new FakeOrganizationService(), NullLogger<OntologyWriterDataverseClient>.Instance),
+            resolver,
+            new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
+            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance);
+        var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
+            filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
+            new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,
+            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with { AssigneeSystemUserId = assignee };
+        Guid? recordOwner;
+        try
+        {
+            recordOwner = (await recordWriter.ResolveOwnerAsync(review)).Resolution.OwningTeamId;
+        }
+        catch (DecisionRecordRefusedException)
+        {
+            recordOwner = null;
+        }
+
+        Guid? expected = shape switch
+        {
+            "one-assignee" => TestInfrastructure.OwnershipDirectory.GeneralTeam,   // the Assigned To user's unit's team
+            "no-assigned-to" => TestInfrastructure.OwnershipDirectory.ChildTeam,   // the To Do's own unit's team
+            "filed-under-matter" => TestInfrastructure.OwnershipDirectory.ChildTeam, // the matter's team: a core filing wins
+            _ => null,                                                             // both refuse; neither falls back
+        };
+        signalOwner.Should().Be(expected, "the Signal's owner");
+        recordOwner.Should().Be(expected, "the Decision Record's owner");
     }
 
     [Fact]
@@ -1259,7 +1713,7 @@ public class SignalWriterTests
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = Lower(MatterId),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1281,7 +1735,7 @@ public class SignalWriterTests
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = Lower(MatterId),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1290,17 +1744,18 @@ public class SignalWriterTests
         result.SkippedRefusalCode.Should().Be(OntologyWriterFailureReason.CoreRecordChanged);
     }
 
-    [Fact]
-    public async Task WriteAsync_ReEvaluation_NoCoreSignalWhoseTodoWasReassigned_IsRefusedLoudly()
+    [Theory]
+    [InlineData("team")]       // the item's owner answer changed since the Signal was written (the job re-owns it, task 031)
+    [InlineData("systemuser")] // a no-core Signal written before task 143 (owned by the item's user): known limit, refused loudly
+    public async Task WriteAsync_ReEvaluation_NoCoreSignalWhoseOwnerAnswerChanged_IsRefusedLoudly(string ownerKind)
     {
-        var sysadmin = new FakeSysadminClient()
-            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()) });
+        var sysadmin = new FakeSysadminClient().Stub(new Entity("sprk_todo", TodoId));
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
         writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
-            ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
+            ["ownerid"] = new EntityReference(ownerKind, Guid.NewGuid()),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1320,7 +1775,7 @@ public class SignalWriterTests
         writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
-            ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1342,7 +1797,7 @@ public class SignalWriterTests
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_duedate"] = new DateTime(2026, 10, 10),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1516,7 +1971,7 @@ public class SignalWriterTests
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusOpen),
-            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+            ["ownerid"] = new EntityReference("team", DefaultTeamId),
         });
         existingOrg.ThrowDuplicateOnNextCreate = true;
 
@@ -1569,12 +2024,25 @@ public class SignalWriterTests
 
     internal static SignalWriter Build(
         FakeOrganizationService writerOrg, FakeSysadminClient sysadmin, FakeTimeProvider clock, ILogger<SignalWriter>? logger = null,
-        FakeOwnershipResolver? ownership = null, RecordTypeCatalogStub? recordTypes = null) =>
+        Ownership.IRecordOwnershipResolver? ownership = null, RecordTypeCatalogStub? recordTypes = null,
+        AssignedAccessTestDoubles.FakeAssignedAccessStore? links = null) =>
         new(new OntologyWriterDataverseClient(() => writerOrg, NullLogger<OntologyWriterDataverseClient>.Instance),
             sysadmin,
             new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
             recordTypes ?? new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1),
-            ownership ?? new FakeOwnershipResolver(), clock, logger ?? NullLogger<SignalWriter>.Instance);
+            ownership ?? new FakeOwnershipResolver(), Scopes(links), clock, logger ?? NullLogger<SignalWriter>.Instance);
+
+    /// <summary>Task 143: the scope the writer resolves its two SCOPED services from, as the host registers them — the D-134
+    /// link read (<see cref="AssignedAccessStore"/>; default: nobody linked) and, when a test re-owns, uac-r2's reconciler.</summary>
+    internal static IServiceScopeFactory Scopes(
+        AssignedAccessTestDoubles.FakeAssignedAccessStore? links = null, Func<IServiceProvider, Sprk.Bff.Api.Services.Access.SecureChildReconciler>? reconciler = null)
+    {
+        var services = new ServiceCollection();
+        var store = links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        services.AddScoped<AssignedAccessStore>(_ => store);
+        if (reconciler is not null) services.AddScoped(reconciler);
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
 
     private static Task<IReadOnlySet<string>> StampColumnProbe(string entityLogicalName, CancellationToken ct) =>
         Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
@@ -1622,12 +2090,20 @@ public class SignalWriterTests
     internal sealed class FakeOwnershipResolver : Ownership.IRecordOwnershipResolver
     {
         public Ownership.RecordOwnerResolution Answer { get; set; } = Ownership.RecordOwnerResolution.Owned(DefaultTeamId);
+
+        /// <summary>Task 143: an answer per question (null: <see cref="Answer"/>).</summary>
+        public Func<Ownership.RecordOwnershipContext, Ownership.RecordOwnerResolution>? AnswerFor { get; set; }
+
+        /// <summary>Task 143: a resolver fault per question (a Dataverse read failure inside the resolver).</summary>
+        public Func<Ownership.RecordOwnershipContext, Exception?>? FaultFor { get; set; }
+
         public List<Ownership.RecordOwnershipContext> Contexts { get; } = new();
 
         public Task<Ownership.RecordOwnerResolution> ResolveOwnerAsync(Ownership.RecordOwnershipContext context, CancellationToken ct)
         {
             Contexts.Add(context);
-            return Task.FromResult(Answer);
+            if (FaultFor?.Invoke(context) is { } fault) return Task.FromException<Ownership.RecordOwnerResolution>(fault);
+            return Task.FromResult(AnswerFor?.Invoke(context) ?? Answer);
         }
 
         public Task<Guid?> ResolveOwningTeamAsync(Ownership.RecordOwnershipContext context, CancellationToken ct) => throw new NotImplementedException();
@@ -1655,6 +2131,9 @@ public class SignalWriterTests
         /// <summary>A retrieve of this table faults (a Dataverse read failure).</summary>
         public string? ThrowOnRetrieveOf { get; set; }
 
+        /// <summary>Task 143: a retrieve that asks for this column faults (the D-134 Assigned To read of the To Do).</summary>
+        public string? ThrowOnRetrieveWithColumn { get; set; }
+
         public Guid CatalogId(string coreEntity) => _catalog[coreEntity];
 
         public FakeSysadminClient Stub(Entity row)
@@ -1680,7 +2159,7 @@ public class SignalWriterTests
         public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
         {
             Retrieved.Add((entityLogicalName, columns));
-            if (ThrowOnRetrieveOf == entityLogicalName)
+            if (ThrowOnRetrieveOf == entityLogicalName || (ThrowOnRetrieveWithColumn is { } column && columns.Contains(column)))
             {
                 throw new InvalidOperationException("simulated Dataverse read failure");
             }
@@ -1736,9 +2215,19 @@ public class SignalWriterTests
         public bool ThrowDuplicateOnNextCreate { get; set; }
         public bool ThrowAccessDeniedOnNextCreate { get; set; }
         public int CreateCallCount { get; private set; }
-        public Guid? ForcedOwningBusinessUnitOnVerifyRetrieve { get; set; }
         public Guid? ForcedOwningTeamOnVerifyRetrieve { get; set; }
         public EntityReference? ForcedOwnerOnVerifyRetrieve { get; set; }
+
+        /// <summary>Task 143: the post-create owner read faults.</summary>
+        public bool ThrowOnVerifyRetrieve { get; set; }
+
+        /// <summary>Task 143: the business unit Dataverse derives for a team owner (default: the Secure team's unit for
+        /// <see cref="SecureTeamId"/>, the general unit for <see cref="DefaultTeamId"/>, none for any other team).</summary>
+        public Dictionary<Guid, Guid> TeamBusinessUnits { get; } = new()
+        {
+            [SecureTeamId] = SecureBusinessUnitId,
+            [DefaultTeamId] = BusinessUnitId,
+        };
 
         /// <summary>Every create payload exactly as the writer sent it (before this fake derives owner columns).</summary>
         public readonly List<Entity> CreatedPayloads = new();
@@ -1800,9 +2289,10 @@ public class SignalWriterTests
             entity.Id = id;
             if (entity.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "team" } teamOwner)
             {
-                // Dataverse derives these from a team owner (task 039's secure path).
+                // Dataverse derives these from a team owner: owningteam, and the team's own business unit.
                 entity["owningteam"] = new EntityReference("team", teamOwner.Id);
-                entity["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId);
+                if (TeamBusinessUnits.TryGetValue(teamOwner.Id, out var teamUnit))
+                    entity["owningbusinessunit"] = new EntityReference("businessunit", teamUnit);
             }
 
             Rows[id] = entity;
@@ -1819,6 +2309,11 @@ public class SignalWriterTests
             RetrievedColumns.Add((entityName, columnSet.Columns.ToArray()));
             if (entityName == "sprk_signal" && Rows.TryGetValue(id, out var signalRow))
             {
+                if (ThrowOnVerifyRetrieve)
+                {
+                    throw new InvalidOperationException("simulated owner read-back failure");
+                }
+
                 if (ForcedOwnerOnVerifyRetrieve is { } forcedOwner)
                 {
                     var ownerClone = new Entity(signalRow.LogicalName, signalRow.Id);
@@ -1833,14 +2328,6 @@ public class SignalWriterTests
                     foreach (var attribute in signalRow.Attributes) teamClone[attribute.Key] = attribute.Value;
                     teamClone["owningteam"] = new EntityReference("team", forcedTeam);
                     return Task.FromResult(teamClone);
-                }
-
-                if (ForcedOwningBusinessUnitOnVerifyRetrieve is { } forcedBu)
-                {
-                    var clone = new Entity(signalRow.LogicalName, signalRow.Id);
-                    foreach (var attribute in signalRow.Attributes) clone[attribute.Key] = attribute.Value;
-                    clone["owningbusinessunit"] = new EntityReference("businessunit", forcedBu);
-                    return Task.FromResult(clone);
                 }
 
                 return Task.FromResult(signalRow);

@@ -27,7 +27,7 @@ after independent review.
 2. **Reading enabled policies directly** (`sprk_enabled = true`, `statecode = 0`: the same filter as `PolicyScopeResolver`)
    rather than through `PolicyScopeResolver.ResolveAsync`, which matches one tenant/matter request. The nightly pass needs
    every enabled policy and its lane, severity and headline in one read. **A tenant- or matter-scoped policy is NOT evaluated
-   nightly**: it is counted (`scopedNotEvaluated`) and logged at Warning (50307) every run. Dev has none. Defer row F-62.
+   nightly**: it is counted (`scopedNotEvaluated`) and logged at Warning (50307) every run. Dev has none. Defer row DI-62.
 3. **Episode rules** (`SignalEpisodePlanner`, pure):
    - Suppression grain: (policy, `sprk_corerecordtype`, `sprk_corerecordid`) for every core type; (policy, item) with no
      core record. Suppression blocks a FIRST episode too (FR-17 "no new Signal for that pairing surfaces").
@@ -84,7 +84,7 @@ after independent review.
 - `sprk_privilegeflagged` (spec ADR-015 row, "copied forward; nothing branches on it"): **nothing to copy.** No verified
   subject table (matter, communication, To Do, event, work assignment) has the column (live metadata, 2026-10-10), so no
   task can copy it today; the Signal column stays empty. Owner: whichever task first adds a privilege flag to a subject
-  table. Defer row F-64 so it is not lost.
+  table. Defer row DI-64 so it is not lost.
 
 ## uac-r2 files relied on (re-read 2026-10-10, origin/master and origin/docs/ontology-platform-design)
 

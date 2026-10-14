@@ -29,6 +29,8 @@ public sealed record SignalEvaluationPolicy(
 /// <param name="DueDate">The subject's date the Signal carries (D-27), or null for a subject without one.</param>
 /// <param name="FactValues">The detection-time facts the predicate read for this subject (FR-03 snapshot, §0.3).</param>
 /// <param name="Evidence">One witness line per <c>exists</c> clause (D-23, FR-48), when a witness row was found.</param>
+/// <param name="CoreRefusalCause">Task 143 (review F1): the writer's escalation behind <see cref="CoreRefusalReason"/> (its
+/// message and inner fault), so the job's Error log names the cause, not only the reason tag.</param>
 public sealed record SignalHit(
     string SubjectEntity,
     Guid SubjectId,
@@ -38,7 +40,8 @@ public sealed record SignalHit(
     string? CoreRefusalReason,
     DateTime? DueDate,
     IReadOnlyDictionary<string, object?> FactValues,
-    IReadOnlyList<SignalEvidenceRef> Evidence);
+    IReadOnlyList<SignalEvidenceRef> Evidence,
+    Exception? CoreRefusalCause = null);
 
 /// <summary>A subject a rule could not judge for want of an input (task 025b). <see cref="Reason"/> is a bounded sentence with no
 /// record values beyond the figures the rule reads.</summary>
@@ -264,15 +267,18 @@ public sealed class SignalEvaluator
         {
             SignalCoreRecord? core = null;
             string? refusal = null;
+            SignalWriterEscalationException? refusalCause = null;
             try
             {
                 core = await _writer.DeriveCoreRecordAsync(subject, row.Id, policy.Lane, ct).ConfigureAwait(false);
             }
             catch (SignalWriterEscalationException ex)
             {
+                // Its core record, or (task 143) a no-core item's owner, cannot be derived. The job logs it at Error with this cause.
                 refusal = ex.Reason;
+                refusalCause = ex;
                 _logger.LogDebug(
-                    "Policy {PolicyCode}: the core record of {SubjectEntity} {SubjectId} could not be derived (reason={Reason}).",
+                    "Policy {PolicyCode}: {SubjectEntity} {SubjectId} cannot be planned (reason={Reason}).",
                     policy.PolicyCode, subject, row.Id, ex.Reason);
             }
 
@@ -302,7 +308,8 @@ public sealed class SignalEvaluator
                 CoreRefusalReason: refusal,
                 DueDate: dueColumn is null ? null : row.GetAttributeValue<DateTime?>(dueColumn)?.Date,
                 FactValues: facts,
-                Evidence: witnesses.TryGetValue(row.Id, out var lines) ? lines : Array.Empty<SignalEvidenceRef>()));
+                Evidence: witnesses.TryGetValue(row.Id, out var lines) ? lines : Array.Empty<SignalEvidenceRef>(),
+                CoreRefusalCause: refusalCause));
         }
 
         return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing);
