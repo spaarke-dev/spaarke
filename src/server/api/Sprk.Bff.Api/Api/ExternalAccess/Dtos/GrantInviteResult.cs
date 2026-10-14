@@ -16,11 +16,14 @@ public sealed record GrantInviteResult(string Status, string? ErrorCode = null);
 /// <summary>Task 185 slice E — the values of <see cref="GrantInviteResult.Status"/> (§12 I-1 and I-4).</summary>
 public static class GrantInviteStatus
 {
-    /// <summary>The grantee was unbound: a CIAM account was created and the onboarding email, with the code, was sent.</summary>
+    /// <summary>
+    /// The grantee was unbound and the invite email, with the code, was sent: the onboarding email (a CIAM account was
+    /// created) OR the "sign in with your existing account" email. §12 I-10 (owner round 98c): the inviter is never told
+    /// which. A distinct "ExistingAccount" answer would tell any inviter that an email already has a CIAM account (a
+    /// cross-customer enumeration oracle), so that branch is recorded in the operator log only. Enforced by type: there is
+    /// no ExistingAccount value to return.
+    /// </summary>
     public const string Sent = "Sent";
-
-    /// <summary>The grantee was unbound and already had a CIAM account: the "sign in with your existing account" email, with the code, was sent.</summary>
-    public const string ExistingAccount = "ExistingAccount";
 
     /// <summary>The grantee holds a current (under 30 days) invite: no new code was made (§12 I-2).</summary>
     public const string AlreadyPending = "AlreadyPending";

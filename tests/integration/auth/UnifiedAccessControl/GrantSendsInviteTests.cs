@@ -107,21 +107,32 @@ public class GrantSendsInviteTests
         _h.Emails.Sent.Should().BeEmpty("I-3: the invite replaces the \"you were given access\" email — one email per person");
     }
 
+    /// <summary>
+    /// §12 I-10 (owner round 98c): the grant response answers <c>Sent</c>, exactly as for a new account, so the inviter cannot
+    /// learn that the email already has a CIAM account. The operator log still records the ExistingAccount branch, without
+    /// the code or its hash. MUTATION: answering the branch in <c>invite.status</c> fails this test.
+    /// </summary>
     [Fact]
     public async Task Grant_ToAnUnboundContactWithAnExistingCiamAccount_SendsTheExistingAccountEmail_CodeMatchesTheStoredHash()
     {
         var contact = UnboundContact();
+        var log = new BindingLogCapture<ExternalInviteService>();
+        _h.InviteLogger = log;
         _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
 
         var body = OkBody(await Grant(contact));
 
-        body.Invite!.Status.Should().Be(GrantInviteStatus.ExistingAccount);
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent), "the inviter sees the new-account answer");
+        log.Messages.Should().Contain(m => m.Contains("ExistingAccount") && m.Contains(contact.ToString()),
+            "the operator log keeps the branch");
         _h.Emails.ExistingAccount.Should().ContainSingle().Which.Should().Be(Email);
         _h.Emails.Onboarding.Should().BeEmpty();
         var code = TheOneInviteCode();
         var stored = _h.Identities.Contacts[contact].InviteCodeHash;
         stored.Should().NotBeNull().And.HaveLength(InviteCode.StoredValueLength);
         InviteCode.Matches(stored, code, contact).Should().BeTrue("the emailed code is the one whose hash was stored");
+        log.Messages.Should().NotContain(m => m.Contains(code, StringComparison.Ordinal) || m.Contains(stored!, StringComparison.Ordinal),
+            "never log a code or a hash");
         _h.Identities.Contacts[contact].Oid.Should().BeNull("the contact stays pending until its first sign-in");
         _h.Emails.Sent.Should().BeEmpty("one email per person");
 
@@ -206,7 +217,7 @@ public class GrantSendsInviteTests
 
         var body = OkBody(await Grant(contact));
 
-        body.Invite!.Status.Should().Be(GrantInviteStatus.ExistingAccount);
+        body.Invite!.Status.Should().Be(GrantInviteStatus.Sent, "I-10: the inviter is never told the account existed");
         _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBe("v1.expired");
         TheOneInviteCode();
     }
@@ -217,7 +228,7 @@ public class GrantSendsInviteTests
         var contact = UnboundContact();
         _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
 
-        OkBody(await Grant(contact, ExternalAccessLevel.ViewOnly)).Invite!.Status.Should().Be(GrantInviteStatus.ExistingAccount);
+        OkBody(await Grant(contact, ExternalAccessLevel.ViewOnly)).Invite!.Status.Should().Be(GrantInviteStatus.Sent);
         OkBody(await Grant(contact, ExternalAccessLevel.Collaborate)).Invite!.Status.Should().Be(GrantInviteStatus.AlreadyPending);
 
         _h.Emails.InviteUrls.Should().ContainSingle();

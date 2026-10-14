@@ -104,7 +104,7 @@ public class ExistingCiamAccountInviteTests
     /// The /invite ROUTE handler itself (private; reached by reflection so the test reads the response the route returns,
     /// not one it rebuilt).
     /// </summary>
-    private async Task<IResult> InviteRoute()
+    private async Task<IResult> InviteRoute(ILogger<Program>? logger = null)
     {
         var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("The /invite handler was not found.");
@@ -113,7 +113,7 @@ public class ExistingCiamAccountInviteTests
             Request() with { RecordId = _matter }, _h.Grants, _h.Participations, _ciam, _h.Emails,
             IdentityBindingTestKit.Binder(_h.Identities), PortalConfig(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
-            NullLogger<Program>.Instance, CancellationToken.None,
+            logger ?? NullLogger<Program>.Instance, CancellationToken.None,
         })!;
         return await task;
     }
@@ -155,15 +155,23 @@ public class ExistingCiamAccountInviteTests
 
     // ── The ExistingAccount branch ──────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// §12 I-10 (owner round 98c): the inviter is answered "Provisioned", the new-account status, so the response never tells
+    /// an inviter that the email already has a CIAM account. The operator log records ExistingAccount. MUTATION: answering
+    /// the branch in <c>onboardStatus</c> fails this test.
+    /// </summary>
     [Fact]
     public async Task InviteAndGrant_OfAPersonWithACiamAccount_SucceedsAsExistingAccount_PendingContact_SignInEmailOnly()
     {
         var contact = UnboundContact();
         _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var log = new BindingLogCapture<Program>();
 
-        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        var body = (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
-        body.OnboardStatus.Should().Be("ExistingAccount");
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus, "the inviter sees the new-account answer");
+        log.Messages.Should().Contain(m => m.Contains(InviteExternalUserEndpoint.ExistingAccountStatus),
+            "the operator log keeps the branch");
         body.ContactId.Should().Be(contact);
         _h.Identities.Contacts[contact].Oid.Should().BeNull("the existing account's oid is never looked up at invite time");
         _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull("the contact stays pending: marker set, no oid");
@@ -196,6 +204,28 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].Oid.Should().BeNull();
         _h.Emails.ExistingAccount.Should().ContainSingle();
         _h.Emails.Onboarding.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// §12 I-10 (owner round 98c), the /invite ROUTE: a person who already has a CIAM account is answered "Provisioned", the
+    /// same as a new account, while the existing-account email is sent and the operator log names ExistingAccount (never the
+    /// code or its hash). MUTATION: returning the branch in the response's <c>status</c> fails this test.
+    /// </summary>
+    [Fact]
+    public async Task InviteRoute_OfAPersonWithACiamAccount_AnswersLikeANewAccount_OnlyTheLogSaysExistingAccount()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteRoute(log)).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus, "the inviter is never told the account existed");
+        _h.Emails.ExistingAccount.Should().ContainSingle("the person still gets the existing-account email");
+        log.Messages.Should().Contain(m => m.Contains(InviteExternalUserEndpoint.ExistingAccountStatus));
+        var code = InviteEmailCode(contact);
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash!;
+        log.Messages.Should().NotContain(m => m.Contains(code, StringComparison.Ordinal) || m.Contains(stored, StringComparison.Ordinal));
     }
 
     [Theory]

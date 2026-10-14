@@ -20,8 +20,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      email account (task 022 cross-tenant Graph client), persist the returned oid (plane External) and send the
 ///      onboarding email.
 ///   5. If the person ALREADY has a CIAM account (Graph 400 ObjectConflict on proxyAddresses — task 184), the invite
-///      succeeds as "ExistingAccount": the contact stays pending (marker, no oid), the "sign in with your existing
-///      account" email is sent instead, and the first CIAM sign-in binds the contact (E11's intent gate).
+///      succeeds as "ExistingAccount" internally: the contact stays pending (marker, no oid), the "sign in with your
+///      existing account" email is sent instead, and the first CIAM sign-in binds the contact (E11's intent gate). Task
+///      185 §12 I-10: the response answers "Provisioned", as for a new account; only the operator log names the branch.
 ///
 /// The caller then calls POST /grant to create the sprk_externalrecordaccess record.
 ///
@@ -46,8 +47,9 @@ public static class InviteExternalUserEndpoint
             .WithDescription(
                 "Resolves an ACTIVE Dataverse Contact by email (or creates one), then — if not already provisioned — " +
                 "creates a CIAM local account, persists the oid to sprk_externalobjectid, and sends the " +
-                "onboarding email. A person who already has a CIAM account is answered \"ExistingAccount\": the contact " +
-                "stays pending and is bound at their first sign-in. Idempotent: re-invoking a Contact already bound on the CIAM plane creates no " +
+                "onboarding email. A person who already has a CIAM account gets the existing-account email instead and is " +
+                "answered \"Provisioned\", like a new account (the inviter is never told which): the contact stays pending " +
+                "and is bound at their first sign-in. Idempotent: re-invoking a Contact already bound on the CIAM plane creates no " +
                 "second account. Refuses (409) an email whose contact belongs to an employee's work identity or " +
                 "an internal user, and an email carried by more than one active contact. Call POST /grant " +
                 "separately to create the access record.")
@@ -142,7 +144,8 @@ public static class InviteExternalUserEndpoint
             }
 
             // Task 185: the response carries the BASE portal URL. The invite link and its code go only into the email.
-            return TypedResults.Ok(new InviteExternalUserResponse(outcome.ContactId, portalUrl, outcome.Status));
+            // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference).
+            return TypedResults.Ok(new InviteExternalUserResponse(outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status)));
         }
         catch (Exception ex)
         {
@@ -182,6 +185,16 @@ public static class InviteExternalUserEndpoint
 
     /// <summary>The <see cref="ProvisionOutcome.Status"/> of an invite that created the CIAM account and bound its oid.</summary>
     internal const string ProvisionedStatus = "Provisioned";
+
+    /// <summary>
+    /// Task 185 §12 I-10 (owner round 98c): the onboarding status the INVITER sees on <c>/invite</c> and
+    /// <c>/invite-and-grant</c>. <see cref="ExistingAccountStatus"/> is answered as <see cref="ProvisionedStatus"/>, the
+    /// new-account answer, so the response never tells an inviter that an email already has a CIAM account (a
+    /// cross-customer enumeration oracle). The branch stays in the operator log; the person still gets the existing-account
+    /// email. Every other status is unchanged.
+    /// </summary>
+    internal static string InviterVisibleStatus(string status)
+        => string.Equals(status, ExistingAccountStatus, StringComparison.Ordinal) ? ProvisionedStatus : status;
 
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     /// <param name="EmailFailed">

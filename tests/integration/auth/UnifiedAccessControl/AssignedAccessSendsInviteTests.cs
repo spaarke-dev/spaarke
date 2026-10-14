@@ -83,7 +83,8 @@ public class AssignedAccessSendsInviteTests
         var outcome = await Pass(trigger, _internalOid);
 
         outcome.Complete.Should().BeTrue();
-        EntryOf(outcome, contact).Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.ExistingAccount));
+        EntryOf(outcome, contact).Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent),
+            "§12 I-10: the materializer's invite field never says the account existed");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant is written first");
         _h.Emails.ExistingAccount.Should().ContainSingle().Which.Should().Be(Email);
         var code = TheOneInviteCode();

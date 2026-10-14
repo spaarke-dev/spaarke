@@ -190,9 +190,18 @@ public sealed class ExternalInviteService
             if (outcome.EmailFailed)
                 return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
 
+            if (outcome.Status == ExistingAccountStatus)
+            {
+                // §12 I-10: the operator log keeps the branch; the inviter is answered Sent, as for a new account.
+                _logger.LogInformation(
+                    "[EXT-INVITE] Grant to contact {ContactId}: the person already has a CIAM account ({InviteOutcome}); " +
+                    "the existing-account email was sent. Operator log only: the grant response says {InviteStatus}.",
+                    contactId, ExistingAccountStatus, GrantInviteStatus.Sent);
+            }
+
             return Logged(contactId, outcome.Status switch
             {
-                ExistingAccountStatus => new GrantInviteResult(GrantInviteStatus.ExistingAccount),
+                ExistingAccountStatus => new GrantInviteResult(GrantInviteStatus.Sent),
                 AlreadyProvisionedStatus => new GrantInviteResult(GrantInviteStatus.NotNeeded),
                 ProvisionedStatus => new GrantInviteResult(GrantInviteStatus.Sent),
                 _ => Failed(GrantInviteStatus.InviteFailedReasonCode),
@@ -386,9 +395,11 @@ public sealed class ExternalInviteService
                 return MarkerNotWritten(contactId);
             }
 
+            // §12 I-10: this operator log line is the ONLY place the branch is named; the inviter's response never says it.
             logger.LogInformation(
-                "[EXT-INVITE] {Email} already has a CIAM account — contact {ContactId} kept pending; the first sign-in binds it.",
-                request.Email, contactId);
+                "[EXT-INVITE] {Email} already has a CIAM account ({InviteOutcome}) — contact {ContactId} kept pending; the first "
+                + "sign-in binds it.",
+                request.Email, ExistingAccountStatus, contactId);
             var existingAccountEmailFailed = false;
             try
             {

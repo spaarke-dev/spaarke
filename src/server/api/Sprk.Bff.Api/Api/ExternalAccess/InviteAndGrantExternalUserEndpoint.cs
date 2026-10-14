@@ -377,8 +377,9 @@ public static class InviteAndGrantExternalUserEndpoint
                 == GrantNotificationOutcome.Failed;
         }
 
+        // Task 185 §12 I-10: the inviter is never told that the email already had a CIAM account (the log above keeps it).
         return TypedResults.Ok(new InviteAndGrantResponse(
-            contactId, onboardStatus, accessRecordId, portalUrl,
+            contactId, InviteExternalUserEndpoint.InviterVisibleStatus(onboardStatus), accessRecordId, portalUrl,
             GrantedAccessLevel: grantOutcome.GrantedLevel,
             Narrowed: grantOutcome.Narrowed,
             NotificationFailed: notificationFailed));

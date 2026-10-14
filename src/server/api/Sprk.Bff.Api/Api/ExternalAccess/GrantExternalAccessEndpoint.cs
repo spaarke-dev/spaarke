@@ -212,7 +212,7 @@ public static class GrantExternalAccessEndpoint
         var invite = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } inviteeId
             ? await invites.InviteOnGrantAsync(inviteeId)
             : null;
-        var justInvited = invite?.Status is GrantInviteStatus.Sent or GrantInviteStatus.ExistingAccount;
+        var justInvited = invite?.Status is GrantInviteStatus.Sent; // both invite emails (§12 I-10)
 
         var notification = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } grantedContactId && outcome.AccessGained
                            && !justInvited
