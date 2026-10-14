@@ -137,6 +137,7 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         RecordService recordService,
         CommunicationService communicationService,
+        ExternalDataService dataService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -148,8 +149,10 @@ public static class ExternalMessageEndpoints
                 detail: "Authentication context not available — ensure AddCallerPrincipalAuthorizationFilter is applied"));
         }
 
+        // Task 187 D4: the post gate is the read gate, so it takes the same secure-flag and live-parent readers.
         return PostMessageCoreAsync(
-            root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct);
+            root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct,
+            dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync);
     }
 
     /// <summary>
@@ -168,7 +171,9 @@ public static class ExternalMessageEndpoints
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         CommunicationService communicationService,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        NonSecureRootReader? readNonSecureRoots = null,
+        LiveParentRootReader? readLiveParents = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -208,7 +213,8 @@ public static class ExternalMessageEndpoints
 
         try
         {
-            var rights = await GetRecordRightsAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
+            var rights = await GetRecordRightsAsync(
+                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
                 .ConfigureAwait(false);
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
@@ -302,7 +308,7 @@ public static class ExternalMessageEndpoints
 
         return GetMessagesCoreAsync(
             root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
-            logger, ct);
+            logger, ct, dataService.GetLiveParentRootsAsync);
     }
 
     /// <summary>
@@ -320,7 +326,8 @@ public static class ExternalMessageEndpoints
         CommunicationThreadReadService threadReadService,
         NonSecureRootReader readNonSecureRoots,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        LiveParentRootReader? readLiveParents = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
@@ -336,7 +343,8 @@ public static class ExternalMessageEndpoints
             // The gate is INSIDE the try: a Dataverse fault on its app-only record read (invoices / service requests) is
             // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
             // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
-            if (!await IsRootRecordReadableAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
+            if (!await IsRootRecordReadableAsync(
+                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
                     .ConfigureAwait(false))
             {
                 logger.LogWarning(
@@ -351,7 +359,7 @@ public static class ExternalMessageEndpoints
             var read = await threadReadService
                 .ReadRegardingAppOnlyAsync(
                     messageRoot.EntityLogicalName, id, principal.SystemUserId,
-                    RootsReadableFor(messageRoot, principal, readNonSecureRoots, logger), ct)
+                    RootsReadableFor(messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -382,18 +390,24 @@ public static class ExternalMessageEndpoints
     /// withheld, so a secure matter's message does not show on a project thread. The secure flags are read once per thread.
     /// </summary>
     /// <remarks>
-    /// <b>Invoice threads are exempt, by the owner's decision (2026-10-11, option A "inherit").</b> An invoice is not a root;
-    /// its thread is reached through the UNION of the caller's rights on its parents (the gate above), and every message
-    /// filed under it is stamped with exactly those parents. Applying the multi-root rule there could empty the thread for
-    /// a caller who reaches the invoice through only one of its parents, which is the case the owner chose to allow. The
-    /// exposure is the invoice's own, not a second lookup. No flag is read for it. Service-request threads are NOT exempt
-    /// (requester scope).
+    /// <para><b>Invoice threads match the secure-family rule</b> (unified-access-control-r2 task 187, fix round 1, owner
+    /// round 100 decisions D1 and D4). An invoice is not a root: its thread is reached through the UNION of the caller's
+    /// rights on its parents (owner decision 2026-10-11, option A "inherit"), and the gate
+    /// (<see cref="IsRootRecordReadableAsync"/>) refuses an invoice whose LIVE roots include a SECURE root the caller cannot
+    /// read (D4, as the invoices list withholds it, D2). Each message is then decided like any other thread's: its stamps
+    /// and the live roots of its OTHER parents (a related event, document, budget ...; the route invoice is the gate's
+    /// decision and is not walked again, D1). So a message also filed under secure X is withheld from a caller who cannot
+    /// read X, and an ordinary message stays readable to a caller who reaches the invoice through one parent.</para>
+    /// <para>Service-request threads take the same rule (requester scope).</para>
     /// </remarks>
     internal static MessageRootsFilter RootsReadableFor(
-        MessageRoot root, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
-        string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
-            ? (_, _) => Task.FromResult<Func<MessageRootLookups, bool>>(_ => true)
-            : SecureRootsFilter(principal, readNonSecureRoots, logger);
+        MessageRoot root, Guid id, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
+        LiveParentRootReader? readLiveParents = null) =>
+        SecureRootsFilter(
+            principal, readNonSecureRoots, logger, readLiveParents,
+            string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+                ? (root.EntityLogicalName, id)
+                : null);
 
     /// <summary>
     /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
@@ -401,16 +415,37 @@ public static class ExternalMessageEndpoints
     /// <see cref="ExternalMultiRootRule.SecureRootsReadable(CallerPrincipal, SecureRootFlags, string?, string?, string?)"/>.
     /// Shared by the thread read and the notification feed.
     /// </summary>
+    /// <remarks>Task 187 (owner round 99, D-123; #1857): the stamps are a COPY, so the live roots of each row's other
+    /// parents (derived from <see cref="MessageRootLookups.Row"/>) are resolved in one bounded batch first
+    /// (<paramref name="readLiveParents"/>; none given resolves nothing, so a row naming a parent is withheld) and the rule
+    /// decides over the union (<see cref="ExternalMultiRootRule.ChildRowReadable"/>). <paramref name="authorizedParent"/>
+    /// is the one parent the route has already decided (an invoice thread's own invoice, fix round 1 D1): not walked
+    /// again.</remarks>
     internal static MessageRootsFilter SecureRootsFilter(
-        CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
+        CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
+        LiveParentRootReader? readLiveParents = null, (string Table, Guid Id)? authorizedParent = null) =>
         async (candidates, ct) =>
         {
+            var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
+                readLiveParents,
+                candidates.Select(r => ExternalMultiRootRule.Except(
+                    ExternalMultiRootRule.LiveParentsOf(CommunicationTable, r.Row), authorizedParent)),
+                logger, ct).ConfigureAwait(false);
             var flags = await ExternalMultiRootRule.ReadFlagsAsync(
                 readNonSecureRoots, principal,
-                candidates.Select(r => ExternalMultiRootRule.Stamps(r.Project, r.Matter, r.WorkAssignment)),
+                candidates.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)RuleInput(r, live, authorizedParent)),
                 logger, ct).ConfigureAwait(false);
-            return r => ExternalMultiRootRule.SecureRootsReadable(principal, flags, r.Project, r.Matter, r.WorkAssignment);
+            return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live, authorizedParent));
         };
+
+    /// <summary>The table every message row is read from.</summary>
+    private const string CommunicationTable = "sprk_communication";
+
+    /// <summary>Task 187: one message row's rule input, its stamps and its parents' live roots.</summary>
+    private static ChildRowRoots RuleInput(MessageRootLookups row, LiveParentRoots live, (string Table, Guid Id)? authorizedParent) =>
+        ChildRowRoots.Of(
+            CommunicationTable, row.Row, ExternalMultiRootRule.Stamps(row.Project, row.Matter, row.WorkAssignment), live,
+            authorizedParent);
 
     /// <summary>
     /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside
@@ -423,6 +458,13 @@ public static class ExternalMessageEndpoints
     /// then the module's own <see cref="ExternalModuleDescriptor.ScopeRows"/> — the same predicate the module grid applies.
     /// The read happens only when the caller has SOME accessible id in that module, so a caller with none never causes a
     /// Dataverse read.
+    /// <para>Task 187, fix round 1, owner decision D4: for a module with
+    /// <see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/> (the invoices module, D2) the gate reads every
+    /// attribute the rule needs (<see cref="ExternalModuleDescriptor.RootRuleAttributes"/>: the invoice's matter, project and
+    /// agreement), resolves the live roots of its parents (<paramref name="readLiveParents"/>) and the secure flags
+    /// (<paramref name="readNonSecureRoots"/>), and applies the predicate the module grid applies. So an invoice whose live
+    /// roots include a SECURE root the caller cannot read is refused, as the list withholds it. A reader not given, or a
+    /// read that could not decide, refuses (fail closed).</para>
     /// </remarks>
     internal static async Task<bool> IsRootRecordReadableAsync(
         MessageRoot root,
@@ -431,8 +473,11 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         ILogger logger,
-        CancellationToken ct) =>
-        (await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct).ConfigureAwait(false))
+        CancellationToken ct,
+        NonSecureRootReader? readNonSecureRoots = null,
+        LiveParentRootReader? readLiveParents = null) =>
+        (await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+            .ConfigureAwait(false))
             .Readable;
 
     /// <summary>
@@ -454,16 +499,54 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        NonSecureRootReader? readNonSecureRoots = null,
+        LiveParentRootReader? readLiveParents = null)
     {
-        var (readable, scopeRow) = await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct)
+        var gate = await EvaluateRecordGateAsync(
+                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
             .ConfigureAwait(false);
-        if (!readable)
+        return RightsFromGate(root, id, principal, gate).Rights;
+    }
+
+    /// <summary>
+    /// <see cref="GetRecordRightsAsync"/> that also says whether a refusal was UNDECIDED: the gate refused only because a read
+    /// it needed failed (the live-parent walk faulted, or the secure-flag read failed or was cut short), so the record may be
+    /// readable. A caller with a "could not check" answer (the invoice document routes' 503, task 187 fix round 2 F1) uses it;
+    /// the thread routes keep failing closed to 403. <c>Undecided</c> is <c>false</c> whenever the gate admits.
+    /// </summary>
+    internal static async Task<(Spaarke.Dataverse.AccessRights Rights, bool Undecided)> GetRecordRightsDecisionAsync(
+        MessageRoot root,
+        Guid id,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
+        ILogger logger,
+        CancellationToken ct,
+        NonSecureRootReader? readNonSecureRoots = null,
+        LiveParentRootReader? readLiveParents = null)
+    {
+        var gate = await EvaluateRecordGateAsync(
+                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+            .ConfigureAwait(false);
+        return RightsFromGate(root, id, principal, gate);
+    }
+
+    /// <summary>The rights a record-gate evaluation grants (see <see cref="GetRecordRightsAsync"/>), and whether a refusal
+    /// was undecided.</summary>
+    private static (Spaarke.Dataverse.AccessRights Rights, bool Undecided) RightsFromGate(
+        MessageRoot root,
+        Guid id,
+        CallerPrincipal principal,
+        (bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow, bool Undecided) gate)
+    {
+        if (!gate.Readable)
         {
-            return Spaarke.Dataverse.AccessRights.None;
+            return (Spaarke.Dataverse.AccessRights.None, gate.Undecided);
         }
 
-        return root.EntityLogicalName switch
+        var scopeRow = gate.ScopeRow;
+        return (root.EntityLogicalName switch
         {
             "sprk_project" => principal.RightsOn(ExternalGrantRootType.Project, id),
             "sprk_matter" => principal.RightsOn(ExternalGrantRootType.Matter, id),
@@ -471,7 +554,7 @@ public static class ExternalMessageEndpoints
             "sprk_invoice" => RightsThroughParents(principal, scopeRow),
             "sprk_servicerequest" => Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create,
             _ => Spaarke.Dataverse.AccessRights.None,
-        };
+        }, false);
     }
 
     /// <summary>The caller's rights on an invoice: the union over its parent roots (<c>sprk_matter</c>,
@@ -501,66 +584,90 @@ public static class ExternalMessageEndpoints
     /// <summary>
     /// The one record-gate evaluation behind <see cref="IsRootRecordReadableAsync"/> and <see cref="GetRecordRightsAsync"/>:
     /// whether the record is readable, and — for a child or requester-scoped root — the scope row the module predicate was
-    /// applied to (the record's scope attributes, read app-only). <c>ScopeRow</c> is null for a root module.
+    /// applied to (the record's scope attributes, read app-only). <c>ScopeRow</c> is null for a root module. For a module
+    /// with <see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/> the rule's attributes, live parents and secure
+    /// flags are read too (task 187 D4, see <see cref="IsRootRecordReadableAsync"/>).
     /// </summary>
-    private static async Task<(bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow)> EvaluateRecordGateAsync(
+    private static async Task<(bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow, bool Undecided)> EvaluateRecordGateAsync(
         MessageRoot root,
         Guid id,
         CallerPrincipal principal,
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        NonSecureRootReader? readNonSecureRoots,
+        LiveParentRootReader? readLiveParents)
     {
         if (id == Guid.Empty)
         {
-            return (false, null);
+            return (false, null, false);
         }
 
         var module = registry.FindByEntity(root.EntityLogicalName);
         if (module is null)
         {
             logger.LogWarning("[EXT-MESSAGES] No external module is registered for {Entity}; refusing.", root.EntityLogicalName);
-            return (false, null);
+            return (false, null, false);
         }
 
         var dimensions = module.EffectiveDimensions;
         var primaryIdAttribute = root.EntityLogicalName + "id";
         if (dimensions.All(d => string.Equals(d.Attribute, primaryIdAttribute, StringComparison.OrdinalIgnoreCase)))
         {
-            return (module.IsRecordAccessible(principal, id), null);
+            return (module.IsRecordAccessible(principal, id), null, false);
         }
 
         if (dimensions.All(d => d.AccessibleIds(principal).Count == 0))
         {
-            return (false, null);
+            return (false, null, false);
         }
+
+        // Task 187 D4: a module with the secure-roots rule reads every attribute the rule reads, not only the dimensions.
+        var attributes = (module.RequireReadOnSecureRoots
+                ? dimensions.Select(d => d.Attribute).Concat(module.RootRuleAttributes)
+                : dimensions.Select(d => d.Attribute))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         IReadOnlyDictionary<string, object?> record;
         try
         {
-            record = await readRecord(
-                    root.EntityLogicalName, id, dimensions.Select(d => d.Attribute).Distinct().ToArray(), ct)
-                .ConfigureAwait(false);
+            record = await readRecord(root.EntityLogicalName, id, attributes, ct).ConfigureAwait(false);
         }
         catch (RecordNotFoundException)
         {
-            return (false, null);
+            return (false, null, false);
         }
 
         var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["@logicalName"] = root.EntityLogicalName,
         };
-        foreach (var dimension in dimensions)
+        foreach (var attribute in attributes)
         {
-            if (record.TryGetValue(dimension.Attribute, out var value) && LookupId(value) is { } parentId)
-            {
-                row[dimension.Attribute] = parentId;
-            }
+            if (!record.TryGetValue(attribute, out var value) || value is null)
+                continue;
+            if (LookupId(value) is { } parentId)
+                row[attribute] = parentId;
+            else if (module.RequireReadOnSecureRoots)
+                row[attribute] = value; // present but not a lookup id: the rule reads it as malformed (fail closed)
         }
 
-        return (module.ScopeRows(principal, new[] { row }).Count > 0, row);
+        if (!module.RequireReadOnSecureRoots)
+            return (module.ScopeRows(principal, new[] { row }).Count > 0, row, false);
+
+        var live = await ExternalMultiRootRule.ReadLiveParentsAsync(readLiveParents, new[] { module.LiveParents(row) }, logger, ct)
+            .ConfigureAwait(false);
+        var flags = readNonSecureRoots is null
+            ? SecureRootFlags.None
+            : await ExternalMultiRootRule.ReadFlagsAsync(
+                readNonSecureRoots, principal,
+                new[] { (IEnumerable<(ExternalGrantRootType, string?)>)module.RuleInput(row, live) }, logger, ct)
+                .ConfigureAwait(false);
+        var readable = module.ScopeRows(principal, new[] { row }, flags, live).Count > 0;
+        // Fix round 2 (F1): a refusal that rests on a read that failed is UNDECIDED, not "behind the wall".
+        return (readable, row, !readable && (live.Faulted || !flags.IsComplete));
     }
 
     /// <summary>
