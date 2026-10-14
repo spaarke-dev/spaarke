@@ -62,7 +62,7 @@
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Load knowledge; check whether UAC task 185 has merged (rebase if so); run /conflict-check; declare rigor/tier.</step>
     <step order="1">Write the tests in acceptance criteria first; confirm they fail.</step>
-    <step order="2">Add the store reads: link lookup by (sprk_hometenantid, sprk_homeobjectid) via the alternate key; contact lookup by plane + tid + oid.</step>
+    <step order="2">Add the store reads: link lookup by a filter on the SECURED pair (sprk_hometenantid, sprk_homeobjectid), never by the unsecured key mirrors or the alternate key (a mirror edit must not be able to redirect a sign-in; design §5, owner 2026-10-14); contact lookup by plane + tid + oid.</step>
     <step order="3">Add the home branch to the resolver and the registration_required problem details; add the (d) and (e) guards.</step>
     <step order="4">Seeding proofs (one each): let the home branch fall through to ResolveSystemUserAsync → the (d) test fails; drop the tid predicate from the contact lookup → the cross-tenant test fails. Restore; record.</step>
     <step order="5">dotnet build + test; publish-size delta; notes/task-046-notes.md.</step>

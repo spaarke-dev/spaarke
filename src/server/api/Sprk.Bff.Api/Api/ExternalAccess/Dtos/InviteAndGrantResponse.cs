@@ -23,6 +23,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// (task 036, FR-07). The grant stands. Additive; <c>false</c> for a contact onboarded by this request (its CIAM
 /// onboarding email is the notice) and for a grant that gave no new access.
 /// </param>
+/// <param name="EmailSent">
+/// Task 185 (adversarial pass 2, F2): whether the invite email carrying the code was sent — <c>true</c> sent, <c>false</c>
+/// attempted and not sent (the grant stands, but nobody holds the code: a re-invite sends a new one), <c>null</c> when no
+/// invite email was due ("AlreadyProvisioned"; its grant email is <paramref name="NotificationFailed"/>). §12 I-10: the same on
+/// the new-account and the existing-account branch. Additive.
+/// </param>
+/// <param name="EmailErrorCode">
+/// <see cref="GrantInviteStatus.EmailNotSentReasonCode"/> when <paramref name="EmailSent"/> is <c>false</c>; otherwise
+/// <c>null</c>. Additive.
+/// </param>
 public record InviteAndGrantResponse(
     Guid ContactId,
     string OnboardStatus,
@@ -30,4 +40,6 @@ public record InviteAndGrantResponse(
     string PortalUrl,
     ExternalAccessLevel? GrantedAccessLevel = null,
     bool Narrowed = false,
-    bool NotificationFailed = false);
+    bool NotificationFailed = false,
+    bool? EmailSent = null,
+    string? EmailErrorCode = null);

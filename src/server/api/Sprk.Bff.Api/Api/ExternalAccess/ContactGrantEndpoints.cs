@@ -27,9 +27,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// these routes: its scheme is workforce-only and its <see cref="DelegationRuleFilter"/> asks Dataverse, OBO, a question a
 /// contact can never answer. Every write goes through the ONE grant core
 /// (<see cref="GrantExternalAccessEndpoint.CreateGrantAsync"/>, WP-1) with the contact's level as the REQUIRED ceiling.
-/// The handlers inject only services the group's existing routes already resolve — no new registration.</para>
+/// The handlers inject only services the group's existing routes already resolve, plus (task 185 slice E) the shared invite
+/// service — registered in <c>ExternalAccessModule</c>; only its read-only assessment is called here — and the existing
+/// grant notifier.</para>
 /// <para><b>Nothing here writes <c>sprk_contactorganization</c></b> (owner G1 (a) / escalation trigger 6), creates a
-/// contact, or onboards a CIAM identity: the grantee must already be an active colleague.</para>
+/// contact, or onboards a CIAM identity: the grantee must already be an active colleague. Task 185 (§12 I-4): it never sends
+/// an invite either — an unbound colleague is answered <c>invite.status = NeedsInternalInvite</c> and the record's owner is
+/// told.</para>
 /// </remarks>
 public static class ContactGrantEndpoints
 {
@@ -96,6 +100,8 @@ public static class ContactGrantEndpoints
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         IContactIdentityStore identities,
+        ExternalInviteService invites,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<ContactGrantorAuthorizationFilter> logger,
         TimeProvider timeProvider,
@@ -207,9 +213,35 @@ public static class ContactGrantEndpoints
             g.ContactId, grantee, g.RootType, g.RootId, request.AccessLevel, outcome.GrantedLevel, outcome.Narrowed,
             outcome.GrantedExpiry, outcome.ExpiryNarrowed, cap.Cap?.ToString("yyyy-MM-dd") ?? "none", outcome.AccessRecordId);
 
+        // ── Task 185 slice E (§12 I-4, owner round 98b): a contact NEVER invites ──
+        // Task 140's rule stands: the grant is saved, and an unbound colleague with an email (no current invite) is matched
+        // only once an INTERNAL user sends the invite. The record's internal owner is told so, through the grant notifier's
+        // appnotification path. Read only: the assessment writes nothing and creates no CIAM account (ContactGrantGuardTests
+        // pins that this file never reaches the invite core). Best effort, after the write: never undoes the grant.
+        GrantInviteResult invite;
+        try
+        {
+            var assessment = await invites.AssessAsync(grantee, CancellationToken.None);
+            invite = assessment.Final ?? new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-CONTACT-GRANT] Whether contact {GranteeContactId} needs an invite could not be read; the grant stands.", grantee);
+            invite = new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode);
+        }
+
+        // Only a write that GAVE access tells anyone (as /grant gates its notifier), so a re-posted grant does not repeat the
+        // internal user's notice. The response still says NeedsInternalInvite.
+        if (invite.Status == GrantInviteStatus.NeedsInternalInvite && outcome.AccessGained)
+        {
+            await accessNotifier.NotifyInviteNeededAsync(
+                g.RootType, g.RootId, grantee, httpContext.User, cap.Granters ?? Array.Empty<Guid>());
+        }
+
         return TypedResults.Ok(new ContactGrantResponse(
             outcome.AccessRecordId, grantee, outcome.GrantedLevel, outcome.Narrowed, outcome.GrantedExpiry,
-            outcome.ExpiryNarrowed));
+            outcome.ExpiryNarrowed, invite));
     }
 
     /// <summary>
@@ -374,7 +406,11 @@ public static class ContactGrantEndpoints
         Fault,
     }
 
-    internal readonly record struct GrantorExpiryCap(GrantorExpiryCapKind Kind, DateOnly? Cap);
+    /// <param name="Granters">
+    /// Task 185 slice F (§12 I-4): the internal users (<c>sprk_grantedby</c>) who issued the grantor's OWN qualifying rows —
+    /// its direct rows first, then its organizations', each latest-expiring first; distinct. Empty when no row records one.
+    /// </param>
+    internal readonly record struct GrantorExpiryCap(GrantorExpiryCapKind Kind, DateOnly? Cap, IReadOnlyList<Guid>? Granters = null);
 
     /// <summary>
     /// The latest date until which the grantor holds at least <paramref name="grantedLevel"/> through a DATED grant on
@@ -422,7 +458,8 @@ public static class ContactGrantEndpoints
         }
 
         if (held.Rows.Count > 0)
-            return new GrantorExpiryCap(GrantorExpiryCapKind.Cap, held.Rows.Max(r => r.ExpiresDate!.Value));
+            return new GrantorExpiryCap(
+                GrantorExpiryCapKind.Cap, held.Rows.Max(r => r.ExpiresDate!.Value), GrantersOf(held.Rows, grantor.ContactId));
 
         if (!held.DirectOnly && grantor.Principal.UndatedAccessTermEntityTypes.Contains(logicalName))
             return new GrantorExpiryCap(GrantorExpiryCapKind.NoCap, null);
@@ -433,6 +470,19 @@ public static class ContactGrantEndpoints
             grantor.ContactId, grantor.Level, grantor.RootType, grantor.RootId, grantedLevel);
         return new GrantorExpiryCap(GrantorExpiryCapKind.Refuse, null);
     }
+
+    /// <summary>
+    /// Task 185 slice F (§12 I-4): who issued the grantor's own rows (<c>sprk_grantedby</c>) — the contact's direct rows
+    /// before its organizations', each latest-expiring first; distinct, empties dropped. Pure.
+    /// </summary>
+    internal static IReadOnlyList<Guid> GrantersOf(IEnumerable<ExternalGrantRow> rows, Guid grantorContactId)
+        => rows
+            .Where(r => r.GrantedBySystemUserId is { } id && id != Guid.Empty)
+            .OrderBy(r => r.ContactId == grantorContactId ? 0 : 1)
+            .ThenByDescending(r => r.ExpiresDate)
+            .Select(r => r.GrantedBySystemUserId!.Value)
+            .Distinct()
+            .ToList();
 
     // =========================================================================================
     // GET /contact-grants

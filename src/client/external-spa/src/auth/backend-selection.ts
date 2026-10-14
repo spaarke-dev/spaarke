@@ -307,6 +307,21 @@ function isDirectoryServiceEnabled(): boolean {
   return readOptionalEnv('VITE_USE_DIRECTORY_SERVICE') === 'true';
 }
 
+/**
+ * True when this SPA's backend directory for `plane` is exactly ONE configured backend (the dev configuration; e.g. the
+ * single `default` entry built from `VITE_BFF_API_URL`). Task 185 (pass 1 K1): the invite code is then sent to that
+ * backend even when the invite link's `?customer=` key differs, since it is the only backend the link can mean. False
+ * behind the T240c directory flag (the directory is not a fixed list) and when nothing usable is configured. Never throws.
+ */
+export function hasSingleConfiguredBackend(plane: BackendPlane): boolean {
+  if (isDirectoryServiceEnabled()) return false;
+  try {
+    return devConfigBackends(plane).length === 1;
+  } catch {
+    return false;
+  }
+}
+
 /** The directory for a plane: the T240c client behind its flag, else the dev configuration. */
 export function createBackendDirectory(plane: BackendPlane): BackendDirectory {
   return isDirectoryServiceEnabled() ? new DirectoryServiceClient(plane) : new DevConfigDirectory(plane);

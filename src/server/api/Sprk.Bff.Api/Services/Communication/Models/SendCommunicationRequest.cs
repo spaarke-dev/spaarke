@@ -133,4 +133,12 @@ public sealed record SendCommunicationRequest
     /// participants. Optional.
     /// </summary>
     public bool? IsInternalOnly { get; init; }
+
+    /// <summary>
+    /// Task 185 (owner round 98 Q4): the system-mail (secret-bearing) send option, or <c>null</c> for a normal send (the
+    /// default; every other send is unchanged). See <see cref="SystemMailOptions"/>. Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>:
+    /// server code sets it, a request body never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal SystemMailOptions? SystemMail { get; init; }
 }

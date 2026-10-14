@@ -43,9 +43,13 @@ public class ContactGrantGuardTests
     private static readonly (string Pattern, string Why)[] Forbidden =
     {
         (@"\bProvisionAsync\s*\(", "CIAM onboarding (InviteExternalUserEndpoint.ProvisionAsync)"),
+        // Task 185 slice E (§12 I-4, owner round 98b): a contact grant never sends the CIAM invite. It may only ASSESS the
+        // colleague (ExternalInviteService.AssessAsync) and tell the record's internal owner.
+        (@"\bInviteOnGrantAsync\s*\(", "sending a CIAM invite (ExternalInviteService.InviteOnGrantAsync)"),
         (@"\bCreateCiamUserAsync\s*\(", "creating a CIAM account"),
         (@"\bCreateContactForOidAsync\s*\(", "creating a contact"),
-        (@"\bBindOidAsync\s*\(|\bBindInvitedContactAsync\s*\(", "binding a sign-in to a contact"),
+        (@"\bBindOidAsync\s*\(|\bBindOidAndConsumeInviteAsync\s*\(|\bBindInvitedContactAsync\s*\(",
+            "binding a sign-in to a contact"),
         (@"sprk_contactorganization", "reading or writing an organization membership row directly"),
         (@"\bCreateAsync\s*\(\s*""contacts""", "creating a contact through the Dataverse client"),
     };
