@@ -121,5 +121,12 @@
 
   <notes>spec.md FR-24 (amended, D-15) and success criterion 7 (the membership half). Amended 2026-10-07 per reconciliation B.2 row 050: membership + order only; the ui-tests below run through the worklist widget (task 059) once 038 exists, or as a direct server-side query before then.</notes>
 
+  <completion>
+    <summary>AUTHORED, NOT APPLIED (2026-10-14, branch task/ontology-050-worklist-gridconfig). The row is a repo artifact: config/worklist.gridconfiguration.json (Decide and Do membership + base order, plus closed today, suppressed and closed earlier), scripts/Apply-WorklistGridConfiguration.ps1 (idempotent; -WhatIf; read-only -Verify; fixed row id 00000000-0000-4000-8000-000000005010), and two tests (offline solution-source guard + opt-in live seam). Creating the row on spaarkedev1 needs the owner's approval; the POML status and TASK-INDEX are left for the main session to set after the live apply.</summary>
+    <verification>Read-only on spaarkedev1: all five queries run (0 rows each, because sprk_signal holds no rows on dev; no write was made to create any). Steps 4 and acceptance criteria 1-3 (the seeded positive matter appears; suppressed and closed do not) are therefore proven structurally, not on rows; see notes/task-050-worklist-gridconfiguration.md for what each query proves. Membership on rows (zz-050- Signals) is filed as ontology-deferred #1843.</verification>
+    <notes-file>projects/spaarke-ontology-platform-r1/notes/task-050-worklist-gridconfiguration.md</notes-file>
+    <apply-command>pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com   (plan first with -WhatIf; confirm with -Verify -RequireRow)</apply-command>
+  </completion>
+
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
