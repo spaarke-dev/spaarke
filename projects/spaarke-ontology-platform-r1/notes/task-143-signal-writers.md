@@ -157,6 +157,9 @@ No F-class findings. The refactor of IsAccessDeniedMessage is behaviour-identica
 - **Test scope:** the stated contract and the closed acceptance set. The extra tests are the review's F-class cases and the
   real-resolver parity. Justification: the criterion "the Signal and its DR agree" can only be proved over the real resolver.
 - **Not run:** the live seam tests, which are blocked by F2.
+- **Base merge 2026-10-13 (fbc92cd28, docs only):** D-137 Q26 says the owner assigned Spaarke Basic User to the Dev 1 and Test 1
+  business-unit default teams. If that role carries Read on sprk_signal, F2 is closed for those units. This task has not verified
+  it, because it made no live reads beyond -Verify. Under Q7 the main session runs the live seam re-run, which is the check.
 
 ## Incident (local tooling, no effect)
 
