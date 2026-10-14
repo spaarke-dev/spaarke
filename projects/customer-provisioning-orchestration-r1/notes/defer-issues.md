@@ -68,7 +68,7 @@ A per-stamp registration (`spaarke-bff-api-{customerId}-{env}`), or intake refus
 
 | Field | Value |
 |---|---|
-| **Status** | Open — investigate (known limit; no cross-customer data path found) |
+| **Status** | Owner approved the fix 2026-10-14 (plan D37): `appRoleAssignmentRequired` on each stamp BFF service principal, assigned to `sprk-{customerId}-users`. Built after the A9 design settles home-directory workforce admission |
 | **Urgency** | before the first external customer |
 | **Filed** | 2026-10-07 |
 | **Source** | T240a review, verifier pass 2 |
@@ -345,7 +345,7 @@ principal. F2, F4 and F5 are unchanged.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — recommendations below; owner decides |
+| **Status** | Owner approved all three recommendations 2026-10-14 (plan D36). Open for the build: the H4b SignalR managed-identity string and the manifest note |
 | **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
 | **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
 | **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
@@ -459,6 +459,25 @@ stamp's multitenant BFF app. Unverified multitenant apps meet risk-based step-up
 customer admins. **Needs:** a Microsoft AI Cloud Partner Program account, and a verified publisher domain (not
 `*.onmicrosoft.com`) set on those apps. Provisioning's A9 work (H3 v2 tokens + `knownClientApplications`, intake
 `customerWorkforceTenantIds`, admin-consent link): `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
+
+**Update 2026-10-14 (owner + research).** Spaarke has a Partner Program account: Partner ID `7011236`, publisher name
+"Spaarke Legal Collaboration Platform". Research on Microsoft Learn (researcher note
+`.claude/agent-memory/researcher/publisher-verification-2026-10-14.md`):
+- The ID must be the partner **global** account (`PartnerGlobal`); a location ID is rejected.
+- The Spaarke tenant must be associated with that account in Partner Center (Settings → Account settings → Tenants).
+- The Partner Center primary-contact email domain must be `spaarke.com`; it is the tenant's verified default domain and
+  the apps' `publisherDomain`.
+- `setVerifiedPublisher` is **delegated-only**: a person with Cloud Application Administrator in Entra and Accounts
+  Admin (or Cloud Partner Program Admin) in Partner Center, with fresh MFA. H3's app-only identity cannot set it, so
+  each customer's BFF app needs an operator step after provisioning.
+- Admin consent is **not** blocked for unverified apps (the prompt shows "Unverified"). Risk-based step-up affects user
+  consent only. So verification does not gate onboarding or T186.
+
+**Plan:** (1) An operator confirms the three Partner Center facts above. (2) One-time: set the Partner ID on the shared
+workforce SPA client, the Office add-in apps and the Teams app (portal: App registrations → Branding & properties →
+Partner ID). (3) Per customer: an operator step in the hand-off checklist (`POST /applications/{id}/setVerifiedPublisher`
+`{"verifiedPublisherId":"7011236"}`), verified with `GET ?$select=verifiedPublisher`. (4) Test whether an unverified
+per-customer API app (a resource, not the client) changes the consent prompt at all. If it does not, step 3 is optional.
 
 ## Resolved
 
