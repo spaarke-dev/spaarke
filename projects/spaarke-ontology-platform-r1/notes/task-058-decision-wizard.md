@@ -72,6 +72,9 @@ Known limits from the same review:
 - **K2 (decided-item replay needs the plan route): fixed.** When the plan cannot be read for a decided item, the wizard falls back to an empty plan: the status bar, the fact snapshot and the record summary still show, without per-action steps. An open item still needs the plan.
 - **K1 (ui-test step to add).** Under jsdom, Fluent's focus manager marks a re-opened nested Discard dialog `aria-hidden`. The first opening is checked accessibly in the unit test; the second uses a `hidden: true` query. Browser ui-test step for the 058 list: "Type a value, click Close, choose Keep deciding, click Close again: the second Discard dialog is announced by a screen reader, is not `aria-hidden` in the inspector, and focus lands inside it".
 - While a review is pinned, the shell's Skip button on a step still changes that step's ring (the draft is read-only and ignores it). Confirm and the posted review always show the pinned choices.
+- Found by the re-check of the fix diff (fixed, test added): a pinned review was rebuilt from the live draft on retry, so an Also resolve item that had closed before the first attempt (and was dropped from it) came back and the route would refuse the retry as changed. The pinned review now keeps the exact draft it first sent.
+- Browsing away from an item and back remounts its shell: the step rings (Taken / Skipped) start fresh, while the draft keeps the choices, so Next stays disabled until each action is Skipped or Taken again. Confirm and the posted review always use the draft. Not fixed here; no data is lost.
+- A pinned review whose retries are refused for good (the route says no every time) cannot be edited; Discard and close, then reopen the item, starts a fresh review.
 - Recording remounts the shell, so the modal flashes once when an item is recorded (like browsing to another item).
 
 ## Why the tests drive DOM events, not user-event

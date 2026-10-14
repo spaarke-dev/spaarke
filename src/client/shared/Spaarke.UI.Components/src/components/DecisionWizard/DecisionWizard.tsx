@@ -142,7 +142,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   // Per item: the review a failed attempt posted. Once a failure keeps the review id it is PINNED: the id never changes again,
   // the review cannot be edited, and `pinning` is the Failed outcome whose `resumable` decides `retry`.
   const attempts = React.useRef<
-    Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null }>
+    Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null; sent: ItemDraft | null }>
   >({});
   const closedNow = React.useRef<(id: string) => boolean>(() => false);
   const mounted = React.useRef(true);
@@ -222,7 +222,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       // `retry` resumes the Failed first attempt; it comes from the failure that pinned the review, not from the latest answer
       // (a refusal after it says nothing about whether the first attempt can be resumed).
       const retry = isPinned && previous?.pinning?.resumable === true;
-      let sendDraft = draft;
+      // A pinned review is posted exactly as first sent (items that closed since were already dropped from it).
+      let sendDraft = isPinned && previous?.sent ? previous.sent : draft;
       if (!isPinned) {
         // Items that closed since they were ticked are not asked for again.
         const stillOpen = draft.alsoResolve.filter(x => !closedNow.current(x));
@@ -295,6 +296,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           key: wasPinned ? attempts.current[id].key : reviewKey(review),
           pinned: isNowPinned,
           pinning,
+          sent: wasPinned ? (attempts.current[id].sent ?? sendDraft) : sendDraft,
         };
         setFailures(prev => ({ ...prev, [id]: failure }));
         setPinned(prev => {

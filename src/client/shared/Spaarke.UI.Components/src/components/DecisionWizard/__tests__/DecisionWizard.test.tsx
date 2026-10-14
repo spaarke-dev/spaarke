@@ -903,6 +903,44 @@ describe('a failed attempt pins the review (duplicate-write hazard)', () => {
   });
 });
 
+describe('a pinned review is posted exactly as first sent', () => {
+  it('an item that closed before the first attempt stays out of the retry, so the content (and the id) still match', async () => {
+    const u = user();
+    const { service } = setup([pathBItem, otherItem]);
+    await pathBToDismissal(u);
+    enter(screen.getByRole('combobox', { name: /reason for dismissing/i }), 'already-approved-offline');
+    await u.click(screen.getByRole('checkbox', { name: /second invoice/i }));
+
+    // The ticked item is decided on its own, here, before this one is recorded.
+    await u.click(screen.getByRole('button', { name: /next record/i }));
+    await pathBToDismissal(u);
+    enter(screen.getByRole('combobox', { name: /reason for dismissing/i }), 'already-approved-offline');
+    await u.click(button('Dismiss and record'));
+    await screen.findByTestId('status-bar');
+    await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(1));
+    service.commit.mockClear();
+    service.commit.mockRejectedValueOnce(new DecisionCommitError(failedOutcome({ landed: [] })));
+
+    await u.click(screen.getByRole('button', { name: /previous record/i }));
+    await screen.findByTestId('step-found');
+    // The shell's step rings start fresh on a remount; the draft keeps the choices, so each action is skipped again.
+    await next(u);
+    for (let i = 0; i < 3; i++) await u.click(await screen.findByRole('button', { name: /^skip$/i }));
+    await next(u);
+    await screen.findByTestId('step-confirm');
+    await u.click(button('Dismiss and record'));
+    await screen.findByTestId('commit-failure');
+    await u.click(button('Retry recording'));
+    await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(2));
+
+    const [first, second] = service.commit.mock.calls.map(c => c[1] as DecisionReview);
+    expect(first.alsoResolve ?? []).toEqual([]);
+    expect(second.alsoResolve ?? []).toEqual([]);
+    expect(second.reviewId).toBe(first.reviewId);
+    expect(second.retry).toBe(true);
+  }, 30000);
+});
+
 describe('recording lands on Confirm', () => {
   it('after Record the closed item is on its Confirm step', async () => {
     const u = user();
