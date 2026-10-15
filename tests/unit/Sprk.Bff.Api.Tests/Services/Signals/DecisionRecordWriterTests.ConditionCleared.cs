@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -24,9 +25,9 @@ public sealed partial class DecisionRecordWriterTests
 
     /// <summary>A no-core To Do last changed by <paramref name="by"/> at <paramref name="on"/>; the user's eligibility columns come back
     /// through the "changedby" link as aliased values (absent: the link found no user).</summary>
-    private static Harness ChangedToDo(Guid by, DateTime on, Entity? user = null)
+    private static Harness ChangedToDo(Guid by, DateTime on, Entity? user = null, IRecordOwnershipResolver? realResolver = null)
     {
-        var h = new Harness();
+        var h = new Harness(realResolver: realResolver);
         var todo = new Entity("sprk_todo", TodoId)
         {
             ["modifiedby"] = new EntityReference("systemuser", by),
@@ -199,5 +200,48 @@ public sealed partial class DecisionRecordWriterTests
         var asked = h.OwnerAsks.Should().ContainSingle().Subject;
         asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeFalse();
         asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_todo", TodoId));
+    }
+
+    [Fact]
+    public async Task ConditionCleared_UnderASecureProject_IsASecureChild_WithNoCreatedByPerson_TheColleagueOnlyInConfirmedBy()
+    {
+        // Adversarial pass 1 F3: sprk_createdbyperson feeds uac-r2's "the creator may move a secure child out" rule. The nightly job writes
+        // this record for nobody, so it names no creator person (RecordCreatorPerson: background-job writers leave it empty); the person
+        // who did the work is named only in the record's attribution, sprk_confirmedby.
+        var project = Guid.NewGuid();
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithSecureRoot("sprk_project", project)
+            .WithRecord("sprk_todo", TodoId, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+                extra: new() { ["sprk_regardingproject"] = new EntityReference("sprk_project", project) });
+        var h = ChangedToDo(Colleague, SignalClosed.AddDays(-1), realResolver: directory.Resolver());
+        h.ReadBackTeam = Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam;
+        h.Rows[("sprk_todo", TodoId)]["sprk_regardingproject"] = new EntityReference("sprk_project", project);
+
+        var result = await h.Writer.WriteConditionClearedAsync(Cleared());
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam,
+            "precondition: a secure child, owned as the other entry points own it");
+        result.SecureOwnerTeamId.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+        h.Row.Contains(RecordCreatorPerson.Column).Should().BeFalse("the job asked for nobody: no creator person on a condition-cleared record");
+        h.Row.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Colleague, "the person is named in the attribution only");
+    }
+
+    [Fact]
+    public async Task ConditionCleared_WhenTheSubjectNoLongerExists_IsRefusedAsAPermanentSkip_NotAFailure_AndNothingIsWritten()
+    {
+        // Adversarial pass 1 F1: the attribution read by id finds no row (the To Do was deleted). The record can never be filed under it, so
+        // the refusal is a counted skip (Warning, ontology.writer.skips), never ontology.writer.failures, and no filing or owner read is made.
+        var h = new Harness();
+
+        var act = () => h.Writer.WriteConditionClearedAsync(Cleared());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ConditionClearedSubjectMissing);
+        DecisionRecordWriter.ConditionClearedSkipTag(DecisionRecordRefusalReason.ConditionClearedSubjectMissing)
+            .Should().Be(Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.ClosureRecordSkippedSubjectMissing);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.ConditionClearedSkipped).Which.Level.Should().Be(LogLevel.Warning);
+        h.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Error, "a permanent skip is not a failure");
     }
 }

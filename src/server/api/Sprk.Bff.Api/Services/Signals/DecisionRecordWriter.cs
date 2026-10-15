@@ -268,6 +268,10 @@ public static class DecisionRecordRefusalReason
     /// Dataverse fault on the lookup), so nothing was written rather than risk a second record. The next pass retries.</summary>
     public const string ConditionClearedLookupFailed = "decision_cleared_lookup_failed";
 
+    /// <summary>Task 153 (adversarial pass 1 F1): the closed Signal's subject no longer exists (the attribution read by id found no row), so
+    /// the closure cannot be filed. Permanent: a counted skip (<see cref="DecisionRecordWriter.ConditionClearedSkipTag"/>), never retried.</summary>
+    public const string ConditionClearedSubjectMissing = "decision_cleared_subject_missing";
+
     /// <summary>Task 142: the record's subject is a table the Decision Record has no subject lookup for (contract C1). No I/O.</summary>
     public const string SubjectUnsupported = "decision_subject_unsupported";
 
@@ -355,6 +359,11 @@ public static class DecisionRecordEvents
     /// <summary>Warning (task 149, D-144 as amended, uac-r2 K2): a gate decision about an unfiled communication is not recorded because the
     /// communication's owning user is disabled (<see cref="DecisionRecordRefusalReason.GateSkippedOwnerDisabled"/>). Ids only.</summary>
     public static readonly EventId GateDecisionSkippedOwnerDisabled = new(50314, nameof(GateDecisionSkippedOwnerDisabled));
+
+    /// <summary>Warning (task 153, adversarial pass 1 F1): a Do-lane condition-cleared closure is not recorded because its record can never be
+    /// written (the subject no longer exists, cannot be filed or is not a table a record can be filed under). Counted on
+    /// <c>ontology.writer.skips</c>, not retried. Ids and the reason only.</summary>
+    public static readonly EventId ConditionClearedSkipped = new(50315, nameof(ConditionClearedSkipped));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -680,7 +689,9 @@ public sealed class DecisionRecordWriter
     /// </remarks>
     /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the lookup faulted
     /// (<see cref="DecisionRecordRefusalReason.ConditionClearedLookupFailed"/>), the subject cannot be filed, the owner was refused, or the
-    /// create failed. Logged and metered on <c>ontology.writer.failures</c> here.</exception>
+    /// create failed. Logged and metered on <c>ontology.writer.failures</c> here; a permanent refusal (the subject no longer exists, cannot be
+    /// filed or is unsupported: <see cref="ConditionClearedSkipTag"/>) is logged at Warning and metered on <c>ontology.writer.skips</c>
+    /// instead.</exception>
     public async Task<DecisionRecordWriteResult> WriteConditionClearedAsync(ConditionClearedRecordRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -741,12 +752,45 @@ public sealed class DecisionRecordWriter
             var written = await CreateAsync(review, plan, resolvedOwner: null, ct).ConfigureAwait(false);
             return written with { ConfirmedByUserId = person };
         }
+        catch (DecisionRecordRefusedException ex) when (ConditionClearedSkipTag(ex.Reason) is { } skip)
+        {
+            // Adversarial pass 1 F1: a record that can never be written (the subject is gone, cannot be filed, or is not a filing table) is
+            // a counted SKIP, never ontology.writer.failures (which pages). Warning, so an operator can see the unrecorded closure.
+            _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                "Signal {SignalId} (episode {Episode}): its condition-cleared closure cannot be recorded (reason={Reason}); nothing was written and it is not retried.",
+                request.SignalId, request.Episode, skip);
+            OntologyWriterTelemetry.RecordSkip(skip);
+            throw;
+        }
         catch (DecisionRecordRefusedException ex)
         {
             LogRefusal(key, ex);
             throw;
         }
     }
+
+    /// <summary>
+    /// Task 153 (adversarial pass 1 F1): the <c>ontology.writer.skips</c> tag of a <see cref="WriteConditionClearedAsync"/> refusal that is
+    /// permanent (a retry is refused the same way), or null for a refusal a later pass can still succeed at. The writer meters the skip; the
+    /// job counts it and does not retry it.
+    /// </summary>
+    internal static string? ConditionClearedSkipTag(string reason) => reason switch
+    {
+        DecisionRecordRefusalReason.ConditionClearedSubjectMissing => OntologyWriterFailureReason.ClosureRecordSkippedSubjectMissing,
+        DecisionRecordRefusalReason.SubjectUnfileable => OntologyWriterFailureReason.ClosureRecordSkippedSubjectUnfileable,
+        DecisionRecordRefusalReason.SubjectUnsupported => OntologyWriterFailureReason.ClosureRecordSkippedSubjectUnsupported,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Task 153 (adversarial pass 1 F2): true when a Decision Record's <c>sprk_steps</c> is the condition-cleared record of this Signal and
+    /// episode: the same two tests <see cref="FindConditionClearedRecordAsync"/> makes in Dataverse (the key as the review id, and the step
+    /// code only this entry point writes). The job uses it on a closed Signal's link, so a closure already linked to its record is not retried.
+    /// </summary>
+    internal static bool IsConditionClearedRecordFor(string? steps, Guid signalId, int episode) =>
+        steps is not null
+        && steps.Contains($"\"reviewId\":\"{ConditionClearedRecordKey.IdOf(signalId, episode):D}\"", StringComparison.Ordinal)
+        && steps.Contains($"\"code\":\"{ConditionClearedStepCode}\"", StringComparison.Ordinal);
 
     /// <summary>Task 153: the one step of a condition-cleared record. Not a catalog code (a review can never carry it: <see cref="Validate"/>
     /// refuses any code the catalog does not know), so the lookup below can require it. No '_' or '%' (it is matched with LIKE).</summary>
@@ -784,7 +828,8 @@ public sealed class DecisionRecordWriter
             AuthorizedOutcome,
             steps,
             steps,
-            Name: $"{RecordedDecisionClass.Routine}: condition cleared");
+            Name: $"{RecordedDecisionClass.Routine}: condition cleared",
+            NoRequester: true);
     }
 
     /// <summary>
@@ -824,9 +869,11 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// Task 153 (D-145b, D-129): the person who last changed the closed Signal's subject, from its <c>modifiedby</c> as read now (one read: the
-    /// user's eligibility columns come with it through a left outer link), or null with the reason the person is unknown. Never throws: a read
-    /// that faults is "unknown", and the record is still written.
+    /// user's eligibility columns come with it through a left outer link), or null with the reason the person is unknown. A read that faults
+    /// is "unknown", and the record is still written.
     /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ConditionClearedSubjectMissing"/>: the read
+    /// answered and found no row (the subject was deleted).</exception>
     private async Task<(Guid? Person, string? UnknownWhy, DateTime? ChangedOn)> ReadChangedByAsync(
         ConditionClearedRecordRequest request, CancellationToken ct)
     {
@@ -853,7 +900,14 @@ public sealed class DecisionRecordWriter
             return (null, "the change could not be read", null);
         }
 
-        if (row is null) return (null, "the record could not be found", null);
+        if (row is null)
+        {
+            // Adversarial pass 1 F1: a by-id read through the sysadmin reader that finds no row means the subject was deleted. The record
+            // could never be filed under it (the stamp read would fail the same way on every pass), so this is a permanent refusal.
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ConditionClearedSubjectMissing,
+                "The closed Signal's subject no longer exists, so its closure cannot be filed; nothing was written.");
+        }
 
         var changedOn = row.GetAttributeValue<DateTime?>("modifiedon");
         if (row.GetAttributeValue<EntityReference>("modifiedby") is not { LogicalName: "systemuser", Id: var userId } || userId == Guid.Empty)
@@ -1053,7 +1107,8 @@ public sealed class DecisionRecordWriter
     {
         var content = Content(request, plan);
         // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
-        var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct, plan.AlreadyDerived, plan.IsGate).ConfigureAwait(false);
+        var (entity, recordOwner) = await FiledAndOwnedAsync(
+            request, resolvedOwner, ct, plan.AlreadyDerived, plan.IsGate, plan.NoRequester).ConfigureAwait(false);
         var owner = recordOwner.Resolution;
         foreach (var (column, value) in content)
         {
@@ -1154,9 +1209,12 @@ public sealed class DecisionRecordWriter
     /// <see cref="ResolveRequestOwnerAsync"/>, and only when it is ordinary). A parent whose table is not an ownership parent is
     /// ignored by the resolver itself, as for every other writer. The deciding user is the person who asked
     /// (<see cref="RecordOwnershipContext.RequestedBy"/>, #1783 / D-135): stamped as <c>sprk_createdbyperson</c>, deciding nothing
-    /// about the owner.
+    /// about the owner. Task 153 (adversarial pass 1 F3): with <paramref name="noRequester"/> (a condition-cleared closure, written by the
+    /// nightly job for nobody) no person is the requester, so <c>sprk_createdbyperson</c> stays empty as for every background-job writer
+    /// (<see cref="RecordCreatorPerson"/>); the person who did the work is named only in <c>sprk_confirmedby</c>.
     /// </summary>
-    internal static RecordOwnershipContext OwnershipContextOf(DecisionRecordRequest request, IReadOnlyList<CoreAncestorStamp> derivedCores)
+    internal static RecordOwnershipContext OwnershipContextOf(
+        DecisionRecordRequest request, IReadOnlyList<CoreAncestorStamp> derivedCores, bool noRequester = false)
     {
         ArgumentNullException.ThrowIfNull(derivedCores);
         var subject = SubjectOf(request);
@@ -1178,7 +1236,10 @@ public sealed class DecisionRecordWriter
             parents.Add(new RecordOwnershipParent(signalSubject.Entity, signalSubject.Id));
         }
 
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = RecordRequester.Of(request.ConfirmedByUserId) };
+        return RecordOwnershipContext.ForParents(parents) with
+        {
+            RequestedBy = noRequester ? null : RecordRequester.Of(request.ConfirmedByUserId),
+        };
     }
 
     /// <summary>
@@ -1220,7 +1281,8 @@ public sealed class DecisionRecordWriter
     /// assignee; otherwise it is asked again.
     /// </summary>
     private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
-        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null, bool gate = false)
+        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null, bool gate = false,
+        bool noRequester = false)
     {
         var subject = SubjectOf(request);
         var entity = new Entity(Table);
@@ -1252,7 +1314,7 @@ public sealed class DecisionRecordWriter
         // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's resolver
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
-        var context = OwnershipContextOf(request, filing.DerivedCores);
+        var context = OwnershipContextOf(request, filing.DerivedCores, noRequester);
         // Task 153: the gate is named by its plan (ValidateGate), not by an empty confirmer: a condition-cleared record whose person is
         // unknown also has no confirmer, and must be owned like a review, never through the gate's unfiled-communication rule.
         if (gate)
@@ -1608,6 +1670,9 @@ public sealed class DecisionRecordWriter
     /// step so the derivation is not paid for twice; null derives there.</param>
     /// <param name="IsGate">Task 153: true only for a communications-gate decision (<see cref="ValidateGate"/>), the one record whose owner
     /// question is asked as the content of a communication (<see cref="FiledAndOwnedAsync"/>).</param>
+    /// <param name="NoRequester">Task 153 (adversarial pass 1 F3): true only for a condition-cleared closure
+    /// (<see cref="ValidateConditionCleared"/>): the nightly job writes it for nobody, so the owner question names no requester and
+    /// <c>sprk_createdbyperson</c> stays empty (<see cref="OwnershipContextOf"/>).</param>
     private sealed record Plan(
         RecordedDecisionClass Class,
         int Outcome,
@@ -1616,7 +1681,8 @@ public sealed class DecisionRecordWriter
         string? Name = null,
         string SkippedOutcome = "Skipped",
         CoreAncestorResult? AlreadyDerived = null,
-        bool IsGate = false);
+        bool IsGate = false,
+        bool NoRequester = false);
 
     private static Plan Validate(DecisionRecordRequest r)
     {

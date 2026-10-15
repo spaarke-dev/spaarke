@@ -2507,6 +2507,7 @@ public partial class SignalReevaluationJobTests
         {
             Clock = new FakeTimeProvider(runAt ?? RunAt);
             Sysadmin.Org = Org;
+            Org.Now = () => Clock.GetUtcNow().UtcDateTime;
             var writerClient = writerClientId is null
                 ? new OntologyWriterDataverseClient(() => Org, Logger<OntologyWriterDataverseClient>())
                 : new OntologyWriterDataverseClient(
@@ -2942,8 +2943,19 @@ public partial class SignalReevaluationJobTests
             _zoneOfUser[user] = code;
         }
 
+        /// <summary>Task 153 (adversarial pass 1 K4): a by-id read that faults, chosen per (table, id).</summary>
+        public Func<string, Guid, Exception?>? RetrieveFaultFor { get; set; }
+
+        /// <summary>Task 153 (adversarial pass 1 F1c): a by-id read of a row that does not exist faults as the SDK's ServiceClient does:
+        /// <see cref="FaultException{OrganizationServiceFault}"/> with ObjectDoesNotExist (<c>0x80040217</c>). Production never answers an
+        /// empty row for a missing id.</summary>
+        internal static FaultException<OrganizationServiceFault> DoesNotExist(string table, Guid id) =>
+            new(new OrganizationServiceFault { ErrorCode = -2147220969, Message = $"{table} With Id = {id:D} Does Not Exist" },
+                new FaultReason($"{table} With Id = {id:D} Does Not Exist"));
+
         public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
         {
+            if (RetrieveFaultFor?.Invoke(entityLogicalName, id) is { } readFault) throw readFault;
             var entity = new Entity(entityLogicalName, id);
             if (entityLogicalName == "usersettings" && _zoneOfUser.TryGetValue(id, out var code))
             {
@@ -2956,6 +2968,10 @@ public partial class SignalReevaluationJobTests
             else if (_rows.TryGetValue((entityLogicalName, id), out var row))
             {
                 foreach (var attribute in row.Attributes.Where(a => a.Value is not null)) entity[attribute.Key] = attribute.Value;
+            }
+            else
+            {
+                throw DoesNotExist(entityLogicalName, id);
             }
 
             return Task.FromResult(entity);
@@ -2989,6 +3005,11 @@ public partial class SignalReevaluationJobTests
                         }
 
                         result.Entities.Add(changed);
+                    }
+                    else if (_rows.ContainsKey((subjectTable, changedId)))
+                    {
+                        // Adversarial pass 1 F1c: the row exists but names no modifying user this World knows; a missing row answers none.
+                        result.Entities.Add(new Entity(subjectTable, changedId));
                     }
 
                     break;
@@ -3298,6 +3319,13 @@ public partial class SignalReevaluationJobTests
         /// <summary>K1: when set, every row read through the writer's client throws exactly this (the owner read-back after a create).</summary>
         public Exception? RetrieveFault { get; set; }
 
+        /// <summary>Task 153 (adversarial pass 1 F2): Dataverse's clock, stamped as <c>createdon</c> on each Decision Record created here.</summary>
+        public Func<DateTime>? Now { get; set; }
+
+        /// <summary>Task 153 (adversarial pass 1 F2): another writer changes the row (its version moves) after the conditional update's read
+        /// and before it lands, for the updates this picks (by their fields).</summary>
+        public Func<Entity, bool>? TouchBeforeConditionalUpdateFor { get; set; }
+
         public void ResetCounts()
         {
             CreateCalls = 0;
@@ -3377,6 +3405,7 @@ public partial class SignalReevaluationJobTests
                 CreateCalls--; // task 153: a Decision Record, not a Signal create
                 var record = new Entity("sprk_decisionrecord", Guid.NewGuid());
                 foreach (var attribute in entity.Attributes) record[attribute.Key] = attribute.Value;
+                if (Now is { } now) record["createdon"] = now(); // Dataverse stamps it
                 if (record.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "team" } recordTeam)
                     record["owningteam"] = new EntityReference("team", recordTeam.Id);
                 DecisionRecordRows[record.Id] = record;
@@ -3445,6 +3474,11 @@ public partial class SignalReevaluationJobTests
                     if (FailConditionalUpdates)
                     {
                         throw new InvalidOperationException("Simulated Dataverse failure on the conditional update.");
+                    }
+
+                    if (TouchBeforeConditionalUpdateFor?.Invoke(target) == true)
+                    {
+                        _versions[target.Id]++;
                     }
 
                     if (ResolveByPersonBeforeConditionalUpdate.Remove(target.Id))

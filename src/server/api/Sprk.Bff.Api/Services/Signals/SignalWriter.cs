@@ -174,12 +174,15 @@ public enum SignalRecordLinkOutcome
     /// <summary>The Signal already named this record; nothing was written.</summary>
     AlreadyLinked,
 
-    /// <summary>The Signal is no longer a ConditionCleared closure with no record (a person's decision re-closed it, or it names another
-    /// record); nothing was written.</summary>
+    /// <summary>The Signal is no longer a ConditionCleared closure (a person's decision re-closed it); nothing was written.</summary>
     NotApplicable,
 
     /// <summary>The Signal changed between the read and the write (its row version moved); nothing was written. The next pass retries.</summary>
     ChangedSinceRead,
+
+    /// <summary>Adversarial pass 1 F2: the Signal names a Decision Record other than the one it named when the job closed it; nothing was
+    /// overwritten. Logged at Warning and counted on <c>ontology.writer.skips</c> (permanent: not retried).</summary>
+    ForeignLink,
 }
 
 /// <summary>
@@ -927,12 +930,17 @@ public sealed partial class SignalWriter
     /// <summary>
     /// Task 153 (D-145b): links a Do-lane Signal the job closed as ConditionCleared to its Routine Decision Record: <c>sprk_decisionrecord</c>
     /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Reads the Signal first and writes only
-    /// when it is still Resolved as ConditionCleared with no record, conditional on the version just read, so a person's decision that
-    /// re-closed it in between (with its own record) is never overwritten. A failure is logged at Error, metered and thrown as the writer's
-    /// escalation (already metered: the caller does not meter it again).
+    /// when it is still Resolved as ConditionCleared, conditional on the version just read, so a person's decision that re-closed it in
+    /// between (with its own record) is never overwritten.
+    /// <para><b>Replacing the link (adversarial pass 1 F2, D-128 Q18).</b> A D-128 reminder or inquiry leaves the Signal Acknowledged and
+    /// linked to that record; the item stays open until the work is done, so the closing record REPLACES that link. The link replaces exactly
+    /// <paramref name="expectedPriorRecordId"/>, the record the Signal named when the job closed it (null: none), and nothing else: any other
+    /// record the Signal names now is a foreign link, left as it is, logged at Warning and counted on <c>ontology.writer.skips</c>
+    /// (<see cref="SignalRecordLinkOutcome.ForeignLink"/>). The replaced record itself is not touched (records are append-only).</para>
+    /// A failure is logged at Error, metered and thrown as the writer's escalation (already metered: the caller does not meter it again).
     /// </summary>
     internal async Task<SignalRecordLinkOutcome> LinkConditionClearedRecordAsync(
-        Guid signalId, Guid recordId, Guid? resolvedBy, string policyCode, CancellationToken ct = default)
+        Guid signalId, Guid recordId, Guid? expectedPriorRecordId, Guid? resolvedBy, string policyCode, CancellationToken ct = default)
     {
         if (signalId == Guid.Empty) throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
         if (recordId == Guid.Empty) throw new ArgumentException("recordId must not be Guid.Empty.", nameof(recordId));
@@ -943,14 +951,23 @@ public sealed partial class SignalWriter
                 new[] { "sprk_signalstatus", "sprk_resolutiontype", "sprk_decisionrecord", "versionnumber" }, ct).ConfigureAwait(false);
             var linked = row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id;
             if (linked == recordId) return SignalRecordLinkOutcome.AlreadyLinked;
-            if (linked is not null
-                || row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value != SignalStatusResolved
+            if (row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value != SignalStatusResolved
                 || row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value != ResolutionConditionCleared)
             {
                 _logger.LogInformation(
-                    "Signal {SignalId} (policy {PolicyCode}) is no longer a condition-cleared closure without a record; Decision Record {RecordId} was not linked to it.",
+                    "Signal {SignalId} (policy {PolicyCode}) is no longer a condition-cleared closure; Decision Record {RecordId} was not linked to it.",
                     signalId, policyCode, recordId);
                 return SignalRecordLinkOutcome.NotApplicable;
+            }
+
+            if (linked is not null && linked != expectedPriorRecordId)
+            {
+                _logger.LogWarning(OntologyWriterEvents.WriteRefused,
+                    "Signal {SignalId} (policy {PolicyCode}) names Decision Record {LinkedRecordId}, not the one it named when it was closed; " +
+                    "its condition-cleared Decision Record {RecordId} was NOT linked (reason={Reason}). Nothing was overwritten.",
+                    signalId, policyCode, linked, recordId, OntologyWriterFailureReason.ClosureRecordSkippedForeignLink);
+                OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedForeignLink);
+                return SignalRecordLinkOutcome.ForeignLink;
             }
 
             var version = row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
