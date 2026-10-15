@@ -29,10 +29,10 @@ describe('parseWorklistResponse', () => {
       ['10000000-0000-0000-0000-000000000003'],
     ]);
     expect(data.Do.map(g => g.core?.recordType ?? 'not-filed')).toEqual([
-      'not-filed',
       'sprk_workassignment',
       'sprk_project',
       'sprk_matter',
+      'not-filed',
     ]);
     expect(data.Decide[0].core).toEqual({
       recordType: 'sprk_matter',

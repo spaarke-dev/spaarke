@@ -3,8 +3,9 @@
  * (task 038). The wizard asks its host for an item (`DecisionItemLoader`); the worklist answers from the sets it holds, so the
  * wizard never reads `sprk_signal` either (D-15) and never asks the user to wait for a second query.
  *
- * What the route does NOT return is shown as missing rather than invented: the rule sentence is `null`, and a closed item carries
- * its closing type and time but no Decision Record (record number, who decided, the values sent). See notes/059-worklist-widget.md.
+ * What the route does NOT return is shown as missing rather than invented: a Signal that stores no rule sentence passes `null`
+ * (task 154 returns the stored sentence), and a closed item carries its closing type and time but no Decision Record (record number,
+ * who decided, the values sent). See notes/059-worklist-widget.md.
  *
  * Task: spaarke-ontology-platform-r1, task 059.
  */
@@ -121,8 +122,8 @@ export function buildWizardItem({ item, group, set, today = new Date() }: BuildW
   return {
     row: item,
     core: group.core,
-    // The route returns no rule sentence (sprk_sentence). The wizard omits its quote block when this is null.
-    sentence: null,
+    // The rule's sentence as the route returns it (task 154, D-23); null when the Signal stores none, and the wizard then omits its quote block.
+    sentence: item.sentence ?? null,
     evidence: parseEvidenceRefs(item.evidenceRefs),
     // Other open items on the same core record in the same lane. A Not filed item has none (D-34/35).
     otherOpenItems: open && group.core ? group.items.filter(i => i.signalId !== item.signalId) : [],
