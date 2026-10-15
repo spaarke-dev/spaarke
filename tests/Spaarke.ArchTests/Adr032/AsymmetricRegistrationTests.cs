@@ -56,7 +56,6 @@ public class AsymmetricRegistrationTests
     {
         new("InvoiceExtractionJobHandler", "IInvoiceAnalysisService", "DEF-FIN", "registered unconditionally; IInvoiceAnalysisService only under DocumentIntelligence:Enabled"),
         new("InvoiceExtractionJobHandler", "TextExtractorService", "DEF-FIN", "registered unconditionally; the concrete TextExtractorService only under DocumentIntelligence:Enabled (the else branch registers only the ITextExtractor Null-Object)"),
-        new("AttachmentClassificationJobHandler", "IInvoiceAnalysisService", "DEF-FIN", "gated on RecordMatchingEnabled alone; IInvoiceAnalysisService needs DocumentIntelligence:Enabled"),
         new("AttachmentClassificationJobHandler", "TextExtractorService", "DEF-FIN", "gated on RecordMatchingEnabled alone; TextExtractorService needs DocumentIntelligence:Enabled"),
 
         new("AppOnlyDocumentAnalysisJobHandler", "IAppOnlyAnalysisService", "DEF-JOBS", "registered unconditionally; IAppOnlyAnalysisService only under analysis && docIntel"),
@@ -80,7 +79,7 @@ public class AsymmetricRegistrationTests
     {
         new("AttachmentClassificationJobHandler", "IRecordMatchService", "FP-1",
             "Both gates read the SAME flag, DocumentIntelligence:RecordMatchingEnabled — FinanceModule inline, AddRecordMatchingServices through a local variable — so the scanner (which compares condition text) sees two unrelated conditions. " +
-            "Proven by the runtime oracle: with RecordMatching on and DocIntel off, Attachment…Handler fails only on IInvoiceAnalysisService (DEF-FIN), never IRecordMatchService."),
+            "Proven by the runtime oracle: with RecordMatching on and DocIntel off, Attachment…Handler fails only on TextExtractorService (DEF-FIN), never IRecordMatchService. (Since ebilling-r1 task 042 its AI dependency is IInvoiceAi, which is always registered.)"),
     };
 
     /// <summary>Methods that take an <c>IServiceCollection</c> and register, but are not reachable from <c>Program.cs</c> by a call the scanner can read.</summary>

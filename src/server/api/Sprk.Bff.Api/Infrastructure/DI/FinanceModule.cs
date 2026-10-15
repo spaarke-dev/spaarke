@@ -20,7 +20,7 @@ public static class FinanceModule
         // Bind FinanceOptions from "Finance" configuration section
         // Provides: ClassificationConfidenceThreshold, BudgetWarningPercentage,
         //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes,
-        //           ClassificationDeploymentName, ExtractionDeploymentName
+        //           ExtractionDeploymentName
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
         // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
         // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
@@ -65,8 +65,9 @@ public static class FinanceModule
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
-        // Scoped: loads playbook prompts per-request, calls OpenAI structured output
-        // Uses IPlaybookService for prompt loading (FinanceClassification, FinanceExtraction)
+        // Scoped: loads the extraction playbook prompt per-request, calls OpenAI structured output
+        // (classification no longer goes through it: task 042 moved it to IInvoiceAi.ClassifyAsync / INVOICE-CLASSIFY@v1)
+        // Uses IPlaybookService for prompt loading (FinanceExtraction)
         // Uses IOpenAiClient.GetStructuredCompletionAsync for constrained JSON output
         //
         // Depends on IOpenAiClient which is only registered when DocumentIntelligence:Enabled=true
@@ -178,7 +179,9 @@ public static class FinanceModule
         // ============================================================================
         // Attachment Classification Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)
         // ============================================================================
-        // Scoped: classifies email attachments as invoice candidates via AI (Playbook A)
+        // Scoped: classifies email attachments as invoice candidates through IInvoiceAi.ClassifyAsync
+        // (Action INVOICE-CLASSIFY@v1 via its Binding; ebilling-r1 task 042). IInvoiceAi is registered
+        // unconditionally (real or Null facade), so the handler no longer depends on DocumentIntelligence:Enabled for it.
         // IdempotencyKey: classify-{documentId}-attachment
         // Writes sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson
         // Sets sprk_invoicereviewstatus=ToReview for InvoiceCandidate and Unknown

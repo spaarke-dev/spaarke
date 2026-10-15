@@ -34,11 +34,6 @@ public class FinanceOptions
     public int FinanceSummaryCacheTtlMinutes { get; set; } = 5;
 
     /// <summary>
-    /// Azure OpenAI deployment name for classification (Playbook A). gpt-4o-mini for speed/cost.
-    /// </summary>
-    public string ClassificationDeploymentName { get; set; } = "gpt-4o-mini";
-
-    /// <summary>
     /// Azure OpenAI deployment name for extraction (Playbook B). gpt-4o for accuracy.
     /// </summary>
     public string ExtractionDeploymentName { get; set; } = "gpt-4o";

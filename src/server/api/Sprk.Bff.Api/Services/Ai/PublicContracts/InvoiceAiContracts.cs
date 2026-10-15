@@ -101,8 +101,8 @@ public enum InvoiceClassification
 }
 
 /// <summary>
-/// Output of <see cref="IInvoiceAi.ClassifyAsync"/>. Mirrors the Finance <c>ClassificationResult</c> field
-/// for field so task 042 maps one-to-one. Output JSON: <c>classification</c> (required),
+/// Output of <see cref="IInvoiceAi.ClassifyAsync"/>. Mapped one-to-one by
+/// <c>AttachmentClassificationJobHandler</c> (task 042) to the Finance <c>DocumentClassification</c> / <c>InvoiceHints</c>. Output JSON: <c>classification</c> (required),
 /// <c>confidence</c> (required, 0–1), <c>hints</c> (optional object or null), <c>reasoning</c> (optional).
 /// </summary>
 public sealed record InvoiceClassifyResult

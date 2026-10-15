@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// </para>
 /// <para>
 /// Current consumers (Phase 1 inventory, 2026-05-24):
-/// - <c>Services/Finance/InvoiceAnalysisService.cs</c> — Playbook A (classification) + Playbook B (extraction)
+/// - <c>Services/Finance/InvoiceAnalysisService.cs</c> — Playbook B (extraction); classification moved to <see cref="ClassifyAsync"/> in task 042
 /// - <c>Services/Finance/InvoiceSearchService.cs</c> — query embedding for hybrid invoice search
 /// - <c>Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</c> — document embedding for invoice indexing
 /// </para>
@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <see cref="CodeLinesAsync"/>, <see cref="DraftRulesAsync"/>, <see cref="DraftFirmNoticeAsync"/>) with
 /// SDAP-domain DTOs (<c>InvoiceAiContracts.cs</c>). <see cref="GetPlaybookByNameAsync"/> and
 /// <see cref="GetStructuredCompletionAsync{T}"/> are legacy members kept only until their Finance callers
-/// move (ebilling-r1 tasks 042 and 050); do not add new callers.
+/// move (ebilling-r1 task 050; the classification caller moved in task 042); do not add new callers.
 /// </para>
 /// </remarks>
 public interface IInvoiceAi
