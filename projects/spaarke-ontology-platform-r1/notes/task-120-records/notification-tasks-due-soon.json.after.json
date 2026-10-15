@@ -1,0 +1,61 @@
+{
+  "playbook": {
+    "id": "77f77aa5-5f2d-f111-88b5-7ced8d1dc988",
+    "name": "Tasks Due Soon",
+    "description": "Notifies the user of open Task-type sprk_event records (sprk_eventtype_ref = Task) due from their local today through today + 3 days on their matters, on matters they own, or that they own. The 3-day window is fixed (the scheduler sets dueSoonWindowUtc; the dueWithinDays parameter is not applied yet). Uses Spaarke custom sprk_event entity (NOT OOB task activity).",
+    "configjson": "{\"schedule\":{\"frequency\":\"daily\",\"time\":\"06:00\"},\"category\":\"tasks-due-soon\",\"channelLabel\":\"Upcoming Tasks\",\"channelIcon\":\"clock\",\"parameters\":{\"dueWithinDays\":{\"type\":\"integer\",\"default\":3,\"options\":[1,2,3,5,7],\"label\":\"Due within\",\"unit\":\"days\"}}}",
+    "lastrundate": "2026-10-08T18:00:26Z"
+  },
+  "nodes": [
+    {
+      "id": "b0d94997-9574-f111-ab0e-7ced8ddc4a05",
+      "name": "Start",
+      "executortype": 33,
+      "executionorder": 1,
+      "outputvariable": "start",
+      "isactive": true,
+      "dependsonjson": null,
+      "configjson": "{\"__actionType\":33,\"scope\":\"user-matters\",\"resolveUserId\":true,\"description\":\"Scoped to the current user's matters (resolved via LookupUserMembership node)\"}"
+    },
+    {
+      "id": "b1d94997-9574-f111-ab0e-7ced8ddc4a05",
+      "name": "Lookup My Matters",
+      "executortype": 52,
+      "executionorder": 2,
+      "outputvariable": "myMatters",
+      "isactive": true,
+      "dependsonjson": "[\"b0d94997-9574-f111-ab0e-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":52,\"entityType\":\"sprk_matter\",\"targeting\":\"people\",\"includeRelated\":false,\"description\":\"Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids).\"}"
+    },
+    {
+      "id": "b2d94997-9574-f111-ab0e-7ced8ddc4a05",
+      "name": "Query Tasks Due Soon",
+      "executortype": 51,
+      "executionorder": 3,
+      "outputvariable": "dueSoonQuery",
+      "isactive": true,
+      "dependsonjson": "[\"b1d94997-9574-f111-ab0e-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":51,\"queryMode\":true,\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch top=\\\"50\\\"><entity name=\\\"sprk_event\\\"><attribute name=\\\"sprk_eventname\\\"/><attribute name=\\\"sprk_duedate\\\"/><attribute name=\\\"sprk_finalduedate\\\"/><attribute name=\\\"sprk_eventid\\\"/><attribute name=\\\"sprk_eventtype_ref\\\"/><attribute name=\\\"statuscode\\\"/><attribute name=\\\"modifiedon\\\"/><attribute name=\\\"sprk_regardingrecordname\\\"/><attribute name=\\\"sprk_regardingrecordurl\\\"/><attribute name=\\\"sprk_regardingmatter\\\"/><attribute name=\\\"ownerid\\\"/><link-entity name=\\\"sprk_matter\\\" from=\\\"sprk_matterid\\\" to=\\\"sprk_regardingmatter\\\" link-type=\\\"outer\\\" alias=\\\"m\\\"><attribute name=\\\"sprk_mattername\\\"/><attribute name=\\\"ownerid\\\"/></link-entity><filter type=\\\"and\\\"><condition attribute=\\\"sprk_eventtype_ref\\\" operator=\\\"eq\\\" value=\\\"124f5fc9-98ff-f011-8406-7c1e525abd8b\\\"/><condition attribute=\\\"statuscode\\\" operator=\\\"eq\\\" value=\\\"659490001\\\"/><filter type=\\\"and\\\"><condition attribute=\\\"sprk_duedate\\\" operator=\\\"ge\\\" value=\\\"{{todayUtc}}\\\"/><condition attribute=\\\"sprk_duedate\\\" operator=\\\"le\\\" value=\\\"{{dueSoonWindowUtc}}\\\"/></filter><filter type=\\\"or\\\"><condition attribute=\\\"sprk_regardingmatter\\\" operator=\\\"in\\\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\\\"m\\\" attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/><condition attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/></filter></filter><order attribute=\\\"sprk_duedate\\\" descending=\\\"false\\\"/></entity></fetch>\",\"templateParameters\":{\"dueWithinDays\":\"{{userPreferences.dueWithinDays ?? 3}}\"},\"description\":\"Open Task-type sprk_event rows (sprk_eventtype_ref = Task 124f5fc9-98ff-f011-8406-7c1e525abd8b, statuscode = Open 659490001) with sprk_duedate from the user's local today (todayUtc, set per user by the scheduler) through today + 3 days (dueSoonWindowUtc, set by the scheduler), where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the task's own owner is the user. sprk_finalduedate is read for display only (D-63). Ordered by sprk_duedate ascending (D-73); at most 50.\"}"
+    },
+    {
+      "id": "b3d94997-9574-f111-ab0e-7ced8ddc4a05",
+      "name": "Check Results",
+      "executortype": 30,
+      "executionorder": 4,
+      "outputvariable": "hasDueSoon",
+      "isactive": true,
+      "dependsonjson": "[\"b2d94997-9574-f111-ab0e-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":30,\"condition\":{\"operator\":\"gt\",\"left\":\"{{dueSoonQuery.output.count}}\",\"right\":0},\"trueBranch\":\"Create Notification\",\"description\":\"Check if any tasks are due within the configured window\"}"
+    },
+    {
+      "id": "b4d94997-9574-f111-ab0e-7ced8ddc4a05",
+      "name": "Create Notification",
+      "executortype": 50,
+      "executionorder": 5,
+      "outputvariable": "notification",
+      "isactive": true,
+      "dependsonjson": "[\"b3d94997-9574-f111-ab0e-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":50,\"title\":\"{{dueSoonQuery.output.count}} task(s) due in the next {{dueWithinDays}} day(s)\",\"body\":\"{{#each dueSoonQuery.output.items}}{{sprk_eventname}} is due on {{sprk_duedate}}.\\n{{/each}}\",\"category\":\"tasks-due-soon\",\"priority\":200000000,\"actionUrl\":\"/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039\",\"recipientId\":\"{{run.userId}}\",\"regardingType\":\"sprk_event\",\"iterateItems\":true,\"itemNotification\":{\"title\":\"Due soon: {{item.sprk_eventname}}\",\"body\":\"{{item.sprk_eventname}} is due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})\",\"category\":\"tasks-due-soon\",\"priority\":200000000,\"actionUrl\":\"/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}\",\"recipientId\":\"{{run.userId}}\",\"regardingId\":\"{{item.sprk_eventid}}\",\"regardingType\":\"sprk_event\",\"dueDate\":\"{{item.sprk_duedate}}\",\"regardingName\":\"{{item.sprk_eventname}}\",\"sourceEntityType\":\"sprk_event\",\"sourceId\":\"{{item.sprk_eventid}}\",\"sourceModifiedOn\":\"{{item.modifiedon}}\",\"sourceOwningUser\":\"{{item.ownerid}}\",\"viaMatterId\":\"{{item.sprk_regardingmatter}}\",\"viaMatterName\":\"{{lookup item 'm.sprk_mattername'}}\",\"viaMatterMembershipsVariable\":\"myMatters\"},\"deduplication\":{\"enabled\":true,\"key\":\"tasks-due:{{run.userId}}:{{item.sprk_eventid}}\"}}"
+    }
+  ]
+}

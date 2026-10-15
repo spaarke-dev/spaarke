@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="140" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract T1: 14 regarding columns on sprk_decisionrecord; sprk_signal.sprk_regardingrecordtype text → Lookup (sprk_recordtype_ref)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>startable (owner approved D-132 2026-10-12; uac-r2 approved the column list)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live Dataverse schema change including a column delete; irreversible ordered procedure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified column list and recipe; the judgment points are escalation triggers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Schema + docs only; no BFF source files.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,solution,fields,deploy,security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the standard regarding columns to sprk_decisionrecord and convert sprk_signal's regarding record type from text to a lookup, on dev, through the scoped recipe, so the writers in 141-145 build against the final shape.</prompt>
+  <role>SPAARKE Dataverse engineer. Expert in the Web API metadata recipe and solution-scoped deployment.</role>
+  <goal>Both tables carry the ADR-024 pair (id String + type Lookup → sprk_recordtype_ref) plus the subject lookups; the schema is in the repo's solution source; the runbook for other environments exists; uac-r2 has the confirmed live column list.</goal>
+
+  <context>
+    <background>Decisions D-131, D-132 (notes/decisions.md). Contract: `git show origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md` (C1, §4 item 1). Live read 2026-10-12: DR has no sprk_regarding* columns; Signal has 9 subject lookups and a String pair type (SignalWriter.cs:238 documents why; D-132 supersedes it). To Do/Event/Communication use Lookup → sprk_recordtype_ref (the To Do shape is the reference).</background>
+    <relevant-files>
+      <file>projects/spaarke-ontology-platform-r1/schema-draft.md (Web API recipe banner)</file>
+      <file>the OntologyPlatformSolution source folder under src/solutions/ (find it; the five ontology tables live there)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (upgrade notes)</file>
+      <file>scripts/Import-SolutionScoped.ps1</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>sprk_decisionrecord has only typed sprk_matter/sprk_project/sprk_workassignment and the immutable sprk_corerecordid/type (live read 2026-10-12); sprk_todo carries the full ADR-024 regarding set.</existing>
+    <extension>No: the typed core lookups are context-adjacent and not in CoreAncestorResolver.CoreAncestorLookups, so the restamper never writes them (uac-r2, contract C2); the To Do column set is the extension path being copied.</extension>
+    <cost-of-doing-nothing>A Decision Record has no subject filing, so a subject re-filed into a secure family leaves its DR readable by the old business unit (audit F5), and the lineage/reconciler cannot reach it (contract acceptance 4, 8).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-132">Exactly these 14 columns on sprk_decisionrecord, solution OntologyPlatformSolution, publisher Spaarke, explicit PascalCase SchemaName: lookups sprk_RegardingCommunication(sprk_communication), sprk_RegardingDocument(sprk_document), sprk_RegardingEvent(sprk_event), sprk_RegardingInvoice(sprk_invoice), sprk_RegardingMatter(sprk_matter), sprk_RegardingProject(sprk_project), sprk_RegardingServiceRequest(sprk_servicerequest), sprk_RegardingTodo(sprk_todo), sprk_RegardingWorkAssignment(sprk_workassignment); sprk_RegardingRecordId (String 100); sprk_RegardingRecordType (Lookup → sprk_recordtype_ref); sprk_RegardingRecordName, sprk_RegardingRecordNumber, sprk_RegardingRecordUrl (String; copy lengths from sprk_todo). Nothing else.</constraint>
+    <constraint source="D-132">sprk_signal.sprk_regardingrecordtype: delete the String column and recreate it as Lookup → sprk_recordtype_ref with the same logical name, back to back, while no Signal job is running. Existing dev Signal rows are test data. Nothing else on sprk_signal changes.</constraint>
+    <constraint source="D-83">No tenant-wide publish: publish only the two entities (PublishXml). No full SpaarkeMaster import (#1618). Use the Web API recipe, never MCP create_table.</constraint>
+    <constraint source="project">No BFF code changes in this task (141 rewrites the readers). Do not evict any Redis key (dev data operation, owner decides). Never commit secrets; never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only checks first: RetrieveDependenciesForDelete for sprk_signal.sprk_regardingrecordtype; list alternate keys, views, forms and charts on sprk_signal that use it; grep src/solutions/** and src/client/** for code or views reading the Signal pair type as a string; check whether any deployed BFF build on dev writes sprk_signal. Write findings to notes/140-schema-delta.md.</step>
+    <step order="2">If anything blocks the delete or any deployed writer depends on the text value, STOP and escalate (see escalation).</step>
+    <step order="3">Create the 14 DR columns via the recipe; verify by metadata read.</step>
+    <step order="4">Delete and recreate the Signal column back to back; verify AttributeType = Lookup, Targets = [sprk_recordtype_ref].</step>
+    <step order="5">Publish the two entities only. Export the unmanaged solution and update the repo's solution source for both tables.</step>
+    <step order="6">Write the upgrade runbook: any environment that already has sprk_signal must delete the String column before importing the new solution version (an import cannot change a column's type); add it to the deployment guide's upgrade notes. State which environments have sprk_signal today.</step>
+    <step order="7">Record in the notes file that the BFF metadata cache key sdap:dv:entitymetadata:sprk_decisionrecord lives up to 6 h in Redis, so the 146 live gate must not run until it expires or the owner approves an eviction.</step>
+    <step order="8">Report the final live column list (metadata read output) for the main session to send to uac-r2. Update TASK-INDEX (✅ [done]) and run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If RetrieveDependenciesForDelete returns any dependency, an alternate key includes the column, or a deployed component reads/writes the Signal pair type as text, STOP before deleting and escalate per root CLAUDE.md §6.</trigger>
+    <trigger>If the recreate under the same logical name is refused, STOP; do not invent a new name.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md</output>
+    <output type="code">OntologyPlatformSolution source for sprk_decisionrecord and sprk_signal</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md upgrade note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A metadata read on spaarkedev1 shows the 14 DR columns with the stated types and targets, and no other new DR column.</criterion>
+    <criterion testable="true">sprk_signal.sprk_regardingrecordtype is a Lookup to sprk_recordtype_ref; the 9 Signal subject lookups and sprk_regardingrecordid/name/number/url are unchanged.</criterion>
+    <criterion testable="true">Only the two entities were published (no PublishAllXml); no full solution import ran.</criterion>
+    <criterion testable="true">The repo's solution source matches the live schema for both tables.</criterion>
+    <criterion testable="true">The upgrade runbook for environments with an existing sprk_signal is in the deployment guide.</criterion>
+    <criterion testable="true">The dependency check results, the environment list and the cache note are in notes/140-schema-delta.md.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/data-model/sprk_matter-related-tables.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 by the main session from the uac-r2 child-record contract (round 95) and owner decisions D-131..D-133.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

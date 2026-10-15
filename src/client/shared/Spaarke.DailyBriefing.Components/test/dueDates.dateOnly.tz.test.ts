@@ -13,7 +13,8 @@
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
 // changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { computeDueDate } from '../src/hooks/useInlineTodoCreate';
-import { filterByDueWithinDays } from '../src/services/notificationService';
+// filterByDueWithinDays (notificationService.ts) is not tested here: ontology-platform-r1 task 010 / C-1 deleted
+// that module as wholly dead (no live consumer), so task 098's fix to it is moot on this branch.
 import type { NotificationItem } from '../src/types/notifications';
 
 function item(dueDate: string | null): NotificationItem {
@@ -52,18 +53,5 @@ describe('Date Only due dates in the Daily Briefing (task 098)', () => {
   it('computeDueDate: the +3-day default is three LOCAL days on, also in the evening (task 106)', () => {
     // 21:30 on Oct 1 in New York (01:30Z Oct 2): the UTC date is already Oct 2, the user's day is Oct 1.
     expect(computeDueDate(item(null), new Date(Date.parse('2026-10-02T01:30:00Z')))).toBe('2026-10-04');
-  });
-
-  it('filterByDueWithinDays: a bare date is measured from its LOCAL midnight', () => {
-    // 2026-10-03 local midnight is 04:00Z; "now" is 2026-10-02 03:30Z (23:30 on Oct 1 in New York), so it is
-    // 24.5 h away — outside a 1-day window. Read as UTC midnight (the former Date.parse) it was 20.5 h away: inside.
-    const realNow = Date.now;
-    Date.now = () => Date.parse('2026-10-02T03:30:00Z');
-    try {
-      expect(filterByDueWithinDays([item('2026-10-03')], 1)).toHaveLength(0);
-      expect(filterByDueWithinDays([item('2026-10-02')], 1)).toHaveLength(1);
-    } finally {
-      Date.now = realNow;
-    }
   });
 });

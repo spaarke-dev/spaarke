@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Create the four missing Dataverse columns</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema change; logical names are immutable, so an error here is delete-and-recreate after code references exist.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical metadata work with an exact recipe and verified settings; no architectural judgement.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Schema change every later task depends on; must land before anything reads these columns.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,schema,prerequisite</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the four columns that settled decisions require but which do not exist. Use the Dataverse Web API with explicit PascalCase SchemaName. Do NOT use the MCP create_table tool.</prompt>
+  <role>SPAARKE platform developer with Dataverse metadata experience. Follow ADRs strictly.</role>
+  <goal>Four columns exist in solution OntologyPlatformSolution under publisher Spaarke, with the exact settings in spec FR-01 and FR-02, and zero logical names containing an underscore between words.</goal>
+
+  <context>
+    <background>Five tables were created on 2026-10-02 and verified. A 2026-10-03 query against the draft found three columns missing, and checking the Inquiry SLA requirement found a fourth. Two of the four block a path outright: without sprk_action the deny path cannot save (D-2 constraint), and without the servicerequest columns success criterion 10 cannot be measured.</background>
+    <relevant-files>
+      <file role="modify">Dataverse entity sprk_decisionrecord (spaarkedev1)</file>
+      <file role="modify">Dataverse entity sprk_servicerequest (spaarkedev1)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this task only. Use Web API POST/PUT to EntityDefinitions Attributes with an explicit PascalCase SchemaName plus the MSCRM.SolutionUniqueName OntologyPlatformSolution header. The MCP create_table tool is FORBIDDEN here: it has no publisher parameter, this environment default publisher prefix is new, and logical names are immutable.</constraint>
+    <constraint source="project">Scope: sprk_decisionrecord.sprk_action MUST be Optional. D-2 constraint: a deny path has no action. Making it required breaks the deny path permanently.</constraint>
+    <constraint source="project">Scope: sprk_servicerequest.sprk_direction is Business Required with NO default value (-1). With 0 existing rows a default is harmless, but a silent default means a human-created record gets Inbound without choosing, and direction keys the per-outside-firm disposition accrual.</constraint>
+    <constraint source="project">Scope: sprk_responseduedate MUST match sprk_workassignment.sprk_ResponseDueDate exactly: DateOnly format, TimeZoneIndependent behavior. Any DateTime column omitting DateTimeBehavior is created with behavior None, which breaks filtered-view generation and then every later relationship on that entity.</constraint>
+    <constraint source="project">Scope: local choice option values start at 100000000, matching every choice already on these tables.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema metadata</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Web API entity metadata recipe" location="projects/spaarke-ontology-platform-r1/notes/schema-draft.md">The banner records the working method and its three traps: DateTimeBehavior, the solution-create header, and money base twins.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Acquire a token: az account get-access-token --resource https://spaarkedev1.crm.dynamics.com</step>
+    <step order="2">Create sprk_decisionrecord.sprk_Action as a Lookup targeting sprk_analysisaction (verified: 79 rows, carries sprk_actioncode, sprk_inputschema, sprk_outputschemajson; this IS the ADR-039 Action registry). RequiredLevel None. Relationship schema name sprk_decisionrecord_action, cascade Delete RemoveLink and all others NoCascade.</step>
+    <step order="3">OPTIONAL and recommended: create sprk_decisionrecord.sprk_ActionCode, Text 50, Optional. It mirrors the existing sprk_policy plus sprk_policycode pair so the record survives deletion of the Action row and renders without a join. Skip if the reviewer prefers strictly specified scope.</step>
+    <step order="4">Create sprk_servicerequest.sprk_Direction as a local Picklist: Inbound 100000000, Outbound 100000001. RequiredLevel ApplicationRequired, DefaultFormValue -1.</step>
+    <step order="5">Create sprk_servicerequest.sprk_Disposition as a local Picklist: Write-off 100000000, Budget Revised 100000001, Scope Approved 100000002, No Action 100000003. RequiredLevel None, DefaultFormValue -1. It is null while the Inquiry is open, mirroring sprk_signal.sprk_resolutiontype.</step>
+    <step order="6">Create sprk_servicerequest.sprk_ResponseDueDate as DateTime with Format DateOnly and DateTimeBehavior TimeZoneIndependent. RequiredLevel None.</step>
+    <step order="7">Verify by query: list all sprk_ attributes on both tables and confirm the new logical names are sprk_action, sprk_direction, sprk_disposition, sprk_responseduedate with NO underscore between words.</step>
+    <step order="8">Update notes/schema-draft.md with a section recording these four as created, including the date and the reason the fourth was added.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_analysisaction turns out NOT to be the intended Action target (for example a different Action registry is introduced), STOP and escalate per CLAUDE.md section 6 rather than guessing. A lookup pointed at the wrong table means deleting and recreating the relationship after code references it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No sprk_action column exists on sprk_decisionrecord (verified: 22 columns, none matching sprk_action*). No direction or disposition column exists on sprk_servicerequest (verified across its 17 sprk_ columns). No due-date column of any kind exists there (only createdon, modifiedon, overriddencreatedon).</existing>
+    <extension>No. These are missing columns required by already-settled decisions D-2 and CM-5; there is nothing to extend.</extension>
+    <cost-of-doing-nothing>Without sprk_action a Decision Record cannot be saved on a deny path, so FR-23 fails. Without the servicerequest columns an Inquiry cannot record direction or outcome, so success criterion 10 cannot be measured at all and nothing accrues per matter or per outside firm.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="bash">curl against the Dataverse Web API</tool>
+    <tool name="az">Acquire the Dataverse access token</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: sprk_decisionrecord.sprk_action</output>
+    <output type="schema">Dataverse: sprk_servicerequest.sprk_direction, sprk_disposition, sprk_responseduedate</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a query of sprk_decisionrecord attributes, when filtered to sprk_action, then exactly one Lookup column exists targeting sprk_analysisaction and its RequiredLevel is None.</criterion>
+    <criterion testable="true">Given a query of sprk_servicerequest attributes, when filtered to sprk_direction, sprk_disposition and sprk_responseduedate, then all three exist with the option values and behavior specified above.</criterion>
+    <criterion testable="true">Given sprk_responseduedate, when its metadata is read, then Format is DateOnly and DateTimeBehavior is TimeZoneIndependent.</criterion>
+    <criterion testable="true">Negative: no new logical name contains an underscore between words (money base twins created by Dataverse itself are the only permitted exception).</criterion>
+    <criterion testable="true">Negative: attempting to save a sprk_decisionrecord row with sprk_action empty succeeds, proving the column is genuinely nullable.</criterion>
+    <criterion testable="true">All four columns are in solution OntologyPlatformSolution under publisher Spaarke, not in the default solution.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-01, FR-02, FR-03. The fourth column (sprk_responseduedate) was found during the /design-to-spec review and is not in the original schema draft. Naming it to match sprk_workassignment.sprk_ResponseDueDate is deliberate: BR-2 third Do-lane rule is already work assignment past sprk_responseduedate, so an overdue Inquiry reuses the same Temporal rule shape rather than needing new rule machinery.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

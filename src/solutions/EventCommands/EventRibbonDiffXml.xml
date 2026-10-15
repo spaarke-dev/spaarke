@@ -8,9 +8,9 @@
 
   Web Resource: sprk_event_ribbon_commands.js
 
-  Event Status Values (sprk_eventstatus):
-  - 0: Draft, 1: Open, 2: Completed, 3: Closed, 4: On Hold
-  - 5: Cancelled, 6: Reassigned, 7: Archived
+  Event Status Values (statuscode - D-28, task 066):
+  - 1: Draft, 659490001: Open, 659490002: Completed, 659490003: Closed, 659490006: On Hold
+  - 659490004: Cancelled, 659490007: Reassigned, 2: No Further Action (Archive)
 
   Deployment:
   1. Upload sprk_event_ribbon_commands.js as web resource

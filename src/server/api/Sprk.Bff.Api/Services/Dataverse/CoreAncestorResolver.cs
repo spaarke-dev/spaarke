@@ -202,7 +202,10 @@ public sealed class CoreAncestorResolver
     /// <c>sprk_analysis</c> (2026-10-02).
     /// </summary>
     /// <remarks>
-    /// Only these four tables carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
+    /// Ontology task 144 adds <c>sprk_signal</c> and <c>sprk_decisionrecord</c>, stamped OUTSIDE the access taxonomy
+    /// (<see cref="StampedOutsideAccessTaxonomy"/>), so the restamper and the reconciliation job keep their stamp equal to
+    /// their subject's current root.
+    /// Of the tables in the access taxonomy, only these carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
     /// assignment, a project and a contact carry none, so they are never re-stamped (a work assignment's
     /// <c>sprk_regardingmatter</c> is its own, user-chosen filing — task 155 interpretation iii). A service request is
     /// CORE: a to-do's <c>sprk_regardingservicerequest</c> is a root column, not a source. <c>sprk_analysis</c>'s
@@ -248,7 +251,25 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingagreement", "sprk_agreement"),
                 ("sprk_regardingbudget", "sprk_budget"), ("sprk_reportcard", "sprk_reportcard"),
             ],
+            // Ontology task 144 (D-131, child-record contract C2): a Signal and a Decision Record are stamped children OUTSIDE
+            // the access taxonomy (StampedOutsideAccessTaxonomy). Their stamp lives in the four sprk_regarding{core} columns (the
+            // To Do convention) and follows their SUBJECT: these are the subject lookups that name an intermediate (live
+            // spaarkedev1 2026-10-12, ontology task 140; solution source sprk_Signal / sprk_DecisionRecord). A subject that is
+            // itself a core (sprk_regarding{matter,project,workassignment,servicerequest}) is the row's own root, never a
+            // source, so ClassifyStampSource reads such a row as filed under no intermediate and nothing re-stamps it. The
+            // typed sprk_matter / sprk_project / sprk_workassignment and the decision context (sprk_corerecordid,
+            // sprk_corerecordtype, the policy version, the snapshot) are not stamp columns and are never written here (D-34).
+            ["sprk_signal"] = OntologySubjectSources(),
+            ["sprk_decisionrecord"] = OntologySubjectSources(),
         };
+
+    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.</summary>
+    private static IReadOnlyList<(string Column, string Intermediate)> OntologySubjectSources() =>
+    [
+        ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
+        ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
+        ("sprk_regardingtodo", "sprk_todo"),
+    ];
 
     /// <summary>
     /// The typed PARTY regarding lookups of each table that carries the polymorphic pair (task 155 f5, from the f3 / f4
@@ -292,6 +313,44 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardingaccount", "account"),
             ],
         };
+
+    /// <summary>
+    /// The stamped tables that are OUTSIDE the access taxonomy (ontology task 144; the exemption unified-access-control-r2
+    /// chose, option A): they carry the stamp (<see cref="StampSourceColumns"/>), but they are not in
+    /// <see cref="ChildRecordEntities"/> (nor the TypeScript <c>CHILD_RECORD_ENTITIES</c>), never an intermediate
+    /// (<see cref="IntermediateRootColumns"/>), and never read by the storage resolver. <b>The one source</b> every guard over
+    /// the stamp topology reads (<c>CoreAncestorResolverTests.StampSourceTopology_IsClosed</c>,
+    /// <c>CoreAncestorStampTopologyLockstepTests</c>, the <c>StampFreshness</c> theory); pinned both ways, and
+    /// <c>StampedOutsideAccessTaxonomyGuardTests</c> fails the build if anything links TO one of them. Why:
+    /// <see cref="StampedOutsideAccessTaxonomyReason"/>.
+    /// </summary>
+    public static readonly IReadOnlyList<string> StampedOutsideAccessTaxonomy =
+    [
+        "sprk_signal",
+        "sprk_decisionrecord",
+    ];
+
+    /// <summary>Why <see cref="StampedOutsideAccessTaxonomy"/> exists — the claim its guards hold the code to.</summary>
+    public const string StampedOutsideAccessTaxonomyReason =
+        "Ontology Signals and Decision Records (D-131, child-record contract C2) carry the sprk_regarding{core} stamp so it "
+        + "follows their subject's family when the subject is re-filed. The stamp is never an access input for them: access "
+        + "is D-130 ownership through RecordOwnershipResolver, which reads the stamp only as one more parent (a secure parent "
+        + "wins), and no reader grants on it (SignalCoreRecordAccess reads the row and its immutable core as the caller). "
+        + "They are not in the CHILD access taxonomy and are not intermediates; nothing in the stamp or storage topology is "
+        + "filed under them, so the storage resolver never reads one, and the only lineage edge into one is Signal to "
+        + "Decision Record, which only narrows (a secure Decision Record makes its Signal secure). "
+        + "The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
+        + "never the owner; the owner moves only through SecureChildReconciler. A refused re-own into a secure parent keeps "
+        + "the previous owner until the reconciler succeeds, and a persistent refusal fails every 2-minute run (the root stays "
+        + "in incompleteRoots with Success=false, and AfterRefileAsync logs an Error after its second attempt). A refused "
+        + "release out of isolation leaves the row isolated: a refusal never puts a row on a wider owner.";
+
+    private static readonly HashSet<string> StampedOutsideAccessTaxonomySet =
+        new(StampedOutsideAccessTaxonomy, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when <paramref name="entityLogicalName"/> is in <see cref="StampedOutsideAccessTaxonomy"/>.</summary>
+    public static bool IsStampedOutsideAccessTaxonomy(string entityLogicalName) =>
+        !string.IsNullOrWhiteSpace(entityLogicalName) && StampedOutsideAccessTaxonomySet.Contains(entityLogicalName);
 
     /// <summary>The party regarding column names of <paramref name="entity"/> (empty when it has none).</summary>
     public static IReadOnlyList<string> PartyRegardingColumnNames(string entity) =>
@@ -488,7 +547,16 @@ public sealed class CoreAncestorResolver
     public async Task<CoreAncestorResult> ResolveStampsAsync(
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        // Ontology task 042 (uac-r2 re-check F1): the result records the target it was derived for, so a caller that hands it back to
+        // StampAsync can only have it reused for the SAME target. Set here, in the one public derivation, and nowhere else.
+        (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false))
+            with { For = (targetEntityLogicalName, targetRecordId) };
+
+    private async Task<CoreAncestorResult> DeriveStampsAsync(
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetEntityLogicalName))
         {
@@ -566,13 +634,14 @@ public sealed class CoreAncestorResolver
             _logger.LogError(ex,
                 "Core-ancestor read failed for {Entity}({Id}); failing closed per NFR-01.",
                 targetEntityLogicalName, targetRecordId);
-            return CoreAncestorResult.Failed(
-                $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}");
+            var failure = $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}";
+            // Ontology task 142: a target that does not exist is a data condition, not a fault (still Error, still no write).
+            return IsRecordNotFound(ex) ? CoreAncestorResult.Refused(failure) : CoreAncestorResult.Failed(failure);
         }
 
         if (row is null)
         {
-            return CoreAncestorResult.Failed(
+            return CoreAncestorResult.Refused(
                 $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).");
         }
 
@@ -596,7 +665,7 @@ public sealed class CoreAncestorResolver
                     _logger.LogError(
                         "{Entity}({Id}) names two different {Root} records ({First}, {Second}); refusing to derive a stamp.",
                         targetEntityLogicalName, targetRecordId, rootEntity, already.RecordId, reference.Id);
-                    return CoreAncestorResult.Failed(
+                    return CoreAncestorResult.Refused(
                         $"{targetEntityLogicalName}({targetRecordId}) names two different {rootEntity} records, so its "
                         + "root cannot be determined.");
                 }
@@ -616,6 +685,18 @@ public sealed class CoreAncestorResolver
         }
 
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
+    }
+
+    /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -737,12 +818,13 @@ public sealed class CoreAncestorResolver
         Entity child,
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        CoreAncestorResult? alreadyDerived = null)
     {
         ArgumentNullException.ThrowIfNull(child);
 
         var (result, hostColumns, failure) =
-            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct)
+            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct, alreadyDerived)
                 .ConfigureAwait(false);
         if (failure is not null)
         {
@@ -1056,12 +1138,24 @@ public sealed class CoreAncestorResolver
             string hostEntityLogicalName,
             string targetEntityLogicalName,
             Guid targetRecordId,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAncestorResult? alreadyDerived = null)
     {
-        var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        // Ontology task 042 (K2): a caller that has ALREADY derived this target's stamps (a writer that needed the core before it could
+        // build its payload) hands the successful result in, so the derivation is not paid for twice. A failed or absent result derives here.
+        // Reused only when it SUCCEEDED and was derived for THIS target (case-insensitive entity, same id): a result built with the public
+        // constructor, or derived for another record, can carry no target and is never reused (uac-r2 re-check F1). Everything else derives here.
+        var result = alreadyDerived is { Succeeded: true, For: { } derivedFor }
+            && string.Equals(derivedFor.Entity, targetEntityLogicalName, StringComparison.OrdinalIgnoreCase)
+            && derivedFor.Id == targetRecordId
+            ? alreadyDerived
+            : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed."));
+            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
+            {
+                IsPermanent = result.IsPermanent,
+            });
         }
 
         if (result.Stamps.Count == 0)
@@ -1163,8 +1257,25 @@ public sealed record CoreAncestorResult(
     /// <summary>True when the caller may proceed with the write.</summary>
     public bool Succeeded => Status != CoreAncestorStatus.Error;
 
+    /// <summary>
+    /// Ontology task 142: on an <see cref="CoreAncestorStatus.Error"/>, true when the failure is a DATA condition a retry does not
+    /// change (the target names two different records of one root table, or the target row does not exist), false for a fault (a
+    /// timeout, a throttle, a metadata read). Either way the caller does not write; a caller that reports the failure may say
+    /// "cannot" rather than "try again". Additive: <see cref="Status"/> stays <see cref="CoreAncestorStatus.Error"/>, so every
+    /// caller that checks <see cref="Succeeded"/> is unchanged.
+    /// </summary>
+    public bool IsPermanent { get; init; }
+
+    /// <summary>The target this result was derived for, set only by <see cref="CoreAncestorResolver.ResolveStampsAsync"/>. A result with
+    /// no target (built with the public constructor) is never reused by <c>StampAsync(..., alreadyDerived)</c> (ontology task 042).</summary>
+    internal (string Entity, Guid Id)? For { get; init; }
+
     internal static CoreAncestorResult Failed(string error) =>
         new(CoreAncestorStatus.Error, [], error);
+
+    internal static CoreAncestorResult Refused(string error) =>
+        Failed(error) with { IsPermanent = true };
+
 }
 
 /// <summary>
@@ -1194,6 +1305,9 @@ public sealed record CoreAncestorStampOutcome(
     /// nothing then.
     /// </summary>
     public int? InheritedAccessPermission { get; init; }
+
+    /// <summary>On a failure, true when it is a data condition, not a fault (<see cref="CoreAncestorResult.IsPermanent"/>).</summary>
+    public bool IsPermanent { get; init; }
 
     internal static CoreAncestorStampOutcome Failed(string error) =>
         new(CoreAncestorStatus.Error, [], [], error);

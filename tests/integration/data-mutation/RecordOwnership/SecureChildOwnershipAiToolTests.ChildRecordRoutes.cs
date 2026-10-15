@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
@@ -12,6 +13,7 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -381,8 +383,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public void TheCensusTheory_CoversEveryCreateTable()
     {
+        // Ontology task 046: a work assignment is a ROOT on this route — under a secure matter it is created INTO isolation
+        // (not owned by the named team as a child), so its secure/ordinary/refusal cases are its own
+        // (SecureChildOwnershipAiToolTests.WorkAssignmentCreate.cs, SecureRootInheritanceWriterTests.ChildRecordRoute.cs).
         CensusCreateTablesUnderAMatter.Select(row => (string)row[0]).Should()
-            .BeEquivalentTo(ChildRecordEndpoints.CreateTables, "a table added to the route gets its secure/ordinary/refusal cases");
+            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t)),
+                "a table added to the route gets its secure/ordinary/refusal cases");
     }
 
     [Theory]
@@ -1334,10 +1340,19 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> CreateChild(string table, Dictionary<string, object?> payload) =>
+    /// <summary>
+    /// POST /api/v1/child-records/{table}'s REAL handler. The secure-create plan is a gate over a Dataverse with no rows (no
+    /// record is filed under anything secure) unless a test passes its own (ontology task 046: a work assignment's plan);
+    /// the host has no AssignedAccessMaterializer (its inline step logs and leaves a root to the job — never fails).
+    /// </summary>
+    private Task<IResult> CreateChild(
+        string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
+        IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(), HttpContextOfCaller(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+            gate ?? SecureRootFilingGateFixtures.NothingSecure(),
+            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
@@ -1351,7 +1366,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Event, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
-    /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
+    /// <summary>The ONE re-file core (<see cref="ChildRecordEndpoints.UpdateAsync"/>, filing columns only) that
+    /// PATCH /api/communications/{id}/filing calls. It does NOT run the route handler, so it queues no Signal trigger; the
+    /// route's trigger is driven by <c>RefileCommunicationWithTrigger</c>.</summary>
     /// <remarks>Task 129: <paramref name="threads"/> is the reconciler's thread resolver — the route reaches the thread
     /// reconcile only through SecureChildReconciler.AfterRefileAsync.</remarks>
     private Task<IResult> RefileCommunication(

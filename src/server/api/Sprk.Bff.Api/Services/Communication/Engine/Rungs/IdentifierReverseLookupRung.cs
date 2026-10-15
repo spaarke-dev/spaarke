@@ -99,14 +99,44 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
     private const double ReferencedNotFiledCap = 0.65;
 
     /// <summary>
-    /// Well-formed record-number token: a 2+ letter prefix, a <c>-</c> or <c>.</c> separator, then
-    /// alphanumerics/dots/hyphens ending on an alphanumeric. Matches e.g. <c>PRJT.10001.01</c>, <c>INV-002</c>,
-    /// <c>CMRCL-441482</c>, <c>MAT-123</c>. Generalizes <see cref="RecordNameMatchRung"/>'s shape (2–6 letter,
+    /// Well-formed record-number token: EITHER a 2+ letter prefix directly before the separator, OR a 3+
+    /// letter word followed by exactly one single-letter word (e.g. live matter number
+    /// <c>"Form D - 2023"</c>, prefix words <c>Form</c> + <c>D</c>) — then optional whitespace, a <c>-</c> or
+    /// <c>.</c> separator, optional whitespace, then an alphanumeric/dot/hyphen body ending on an
+    /// alphanumeric. Matches e.g. <c>PRJT.10001.01</c>, <c>INV-002</c>, <c>CMRCL-441482</c>, <c>MAT-123</c>,
+    /// and now <c>Form D - 2023</c>. Generalizes <see cref="RecordNameMatchRung"/>'s shape (2–6 letter,
     /// hyphen-only) to allow dot separators + longer prefixes. Precision comes from the EXACT reverse lookup,
     /// not this pattern — an over-match simply resolves to no record.
     /// </summary>
+    /// <remarks>
+    /// <b>Task 082 repair.</b> The pattern previously required the alpha prefix IMMEDIATELY adjacent to the
+    /// separator, so a live matter numbered with embedded spaces around its hyphen (<c>"Form D - 2023"</c>)
+    /// never tokenized and <see cref="RungKind.ExplicitReference"/> never fired for it, even with the number
+    /// and name verbatim in the subject. Three changes, deliberately narrow (ADR-045 governs this rung's
+    /// precision/cost profile — see the measured delta in
+    /// <c>projects/spaarke-ontology-platform-r1/notes/tokenizer-cost-delta.md</c>):
+    /// <list type="bullet">
+    /// <item>whitespace is now tolerated around the separator;</item>
+    /// <item>the two-word prefix case is admitted ONLY when the word directly touching the separator is
+    /// EXACTLY one letter (e.g. <c>"D"</c> in <c>"Form D"</c>) — never for a 2+ letter second word. This is
+    /// NOT an arbitrary restriction: a first draft allowed ANY second word, which made
+    /// <c>"… related to MAT-123"</c> tokenize as <c>"to MAT-123"</c> (the connector "to" absorbed as a bogus
+    /// first word, swallowing the real 3-letter prefix "MAT" as the "second" word) — caught by the EXISTING
+    /// <c>Fr12_NewRecordFraming_…</c> regression test, which started failing because the match value stopped
+    /// equaling the stored field value. A single letter can never stand alone as a prefix word (the {2,}
+    /// floor exists for exactly this reason), so it is only ever a genuine second half of a compound name,
+    /// never a connector's accidental neighbor;</item>
+    /// <item>the body (after the separator) must now contain at least one digit — every real record number
+    /// in this system's catalog is numeric-bodied (<c>123</c>, <c>002</c>, <c>10001.01</c>, …), and this is
+    /// what keeps ordinary hyphenated English compounds (<c>"follow-up"</c>, <c>"state-of-the-art"</c>,
+    /// <c>"well-known"</c>, <c>"catch-up"</c>, <c>"good-to-go"</c>, <c>"sign-off"</c>, <c>"up-to-date"</c>)
+    /// OUT, which the measurement shows is the dominant source of PRE-EXISTING false-positive reverse-lookup
+    /// queries this pattern already issued before this fix — the digit requirement removes more queries than
+    /// the whitespace tolerance adds back.</item>
+    /// </list>
+    /// </remarks>
     private static readonly Regex WellFormedTokenPattern =
-        new(@"\b[A-Za-z]{2,}[-.][A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]\b",
+        new(@"\b(?:[A-Za-z]{3,}[ \t][A-Za-z]|[A-Za-z]{2,})[ \t]*[-.][ \t]*(?=[A-Za-z0-9]*\d)[A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]\b",
             RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>Bare-numeric token: 4+ digits (shorter is too noisy). Never auto-files alone (0.65).</summary>

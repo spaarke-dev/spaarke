@@ -558,6 +558,37 @@ public class TodoGenerationServiceTests
         capturedEntity["sprk_regardingrecordname"].Should().Be(invoiceName);
     }
 
+    [Fact]
+    public async Task CreateTodoAsync_CatalogReadFaults_CreatesNothing_AndTheNextToDoOfThatParentTypeIsTyped()
+    {
+        // Task 141 review F1: the job keeps ONE builder for its lifetime. A 429 on the sprk_recordtype_ref read used to be cached
+        // as "no row", so every later generated to-do of that parent type was untyped until restart.
+        var recordTypeId = Guid.NewGuid();
+        var service = CreateService();
+        _commServiceMock
+            .SetupSequence(c => c.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("429: too many requests"))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", recordTypeId) { ["sprk_recorddisplayname"] = "Matter" });
+        var created = new List<Entity>();
+        _dataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((entity, _) => created.Add(entity))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var faulted = async () => await service.CreateTodoAsync(
+            "Budget Alert: Acme", regardingEntityName: "sprk_matter", regardingId: Guid.NewGuid(), regardingDisplayName: "Acme",
+            ct: CancellationToken.None);
+        await faulted.Should().ThrowAsync<TimeoutException>("each rule's own catch counts it as failed; nothing is created");
+        created.Should().BeEmpty();
+
+        await service.CreateTodoAsync(
+            "Budget Alert: Acme", regardingEntityName: "sprk_matter", regardingId: Guid.NewGuid(), regardingDisplayName: "Acme",
+            ct: CancellationToken.None);
+
+        created.Should().ContainSingle().Which["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(recordTypeId, "the fault was not cached: the same builder types the next to-do");
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Title patterns
     // ──────────────────────────────────────────────────────────────────────────

@@ -219,8 +219,13 @@ public sealed class CoreAncestorRestamper
     /// <see langword="false"/> on the after-write path for a record whose own root columns were just written: a row filed
     /// under nothing is then taken at its word (the write may be the user's direct choice), and only the job clears orphans.
     /// </param>
+    /// <param name="holdTables">
+    /// Ontology task 144: child tables the cascade below this row does NOT write (the reconciliation job's report-only tables,
+    /// <see cref="CoreAncestorStampReconciliationJob.ReportOnlyTablesConfigKey"/>). Null on every BFF write path.
+    /// </param>
     public async Task<RestampReport> RestampChildAsync(
-        string childEntity, Guid childId, CancellationToken ct = default, bool clearOrphans = true)
+        string childEntity, Guid childId, CancellationToken ct = default, bool clearOrphans = true,
+        IReadOnlySet<string>? holdTables = null)
     {
         var report = new RestampReport();
         var entity = (childEntity ?? string.Empty).Trim().ToLowerInvariant();
@@ -306,7 +311,7 @@ public sealed class CoreAncestorRestamper
 
         if (CoreAncestorResolver.IntermediateRootColumns.ContainsKey(entity) && ChildColumnsOf(entity).Count > 0)
         {
-            await CascadeAsync(entity, childId, depth: 1, report, ct).ConfigureAwait(false);
+            await CascadeAsync(entity, childId, depth: 1, report, ct, holdTables).ConfigureAwait(false);
         }
 
         return report;
@@ -317,7 +322,8 @@ public sealed class CoreAncestorRestamper
         Guid intermediateId,
         int depth,
         RestampReport report,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlySet<string>? holdTables = null)
     {
         var childColumns = ChildColumnsOf(intermediate);
         if (childColumns.Count == 0)
@@ -345,6 +351,11 @@ public sealed class CoreAncestorRestamper
 
         foreach (var (childTable, column) in childColumns)
         {
+            if (holdTables?.Contains(childTable) == true)
+            {
+                continue; // a report-only table of the job: its stale rows are reported by the job's own scan, never written here
+            }
+
             IReadOnlySet<string> host;
             try
             {
@@ -414,7 +425,7 @@ public sealed class CoreAncestorRestamper
                         && ChildColumnsOf(childTable).Count > 0)
                     {
                         // Transitive: this child is itself an intermediate, and its copy just changed.
-                        await CascadeAsync(childTable, child.Id, depth + 1, report, ct).ConfigureAwait(false);
+                        await CascadeAsync(childTable, child.Id, depth + 1, report, ct, holdTables).ConfigureAwait(false);
                     }
                 }
 

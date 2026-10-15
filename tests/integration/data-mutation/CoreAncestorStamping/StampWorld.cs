@@ -69,6 +69,22 @@ internal sealed class StampWorld
         ["sprk_agreement"] = ["sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingdocument"],
         ["sprk_reportcard"] = ["sprk_regardingmatter", "sprk_regardingproject"],
         ["sprk_budget"] = ["sprk_matter", "sprk_project"],
+        // Ontology task 144: the stamped children outside the access taxonomy (solution source sprk_Signal /
+        // sprk_DecisionRecord: the eight subject lookups, the service-request lookup, the pair, the typed core lookups).
+        ["sprk_signal"] =
+        [
+            "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment",
+            "sprk_regardingservicerequest", "sprk_regardingcommunication", "sprk_regardingdocument", "sprk_regardingevent",
+            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+            "sprk_matter", "sprk_decisionrecord",
+        ],
+        ["sprk_decisionrecord"] =
+        [
+            "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment",
+            "sprk_regardingservicerequest", "sprk_regardingcommunication", "sprk_regardingdocument", "sprk_regardingevent",
+            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+            "sprk_matter", "sprk_project", "sprk_workassignment",
+        ],
     };
 
     /// <summary>This world's columns per table: <see cref="Columns"/>, less any <see cref="WithoutColumn"/> dropped.</summary>

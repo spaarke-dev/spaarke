@@ -113,6 +113,42 @@ public class AiClassificationRungTests
     }
 
     [Fact]
+    public async Task Evaluate_CarriesTriageCategoryStructurally_ProvenanceStringAndCategoryUnchanged()
+    {
+        // D-117(b): the taxonomy choice rides on the signal, not inside the provenance string the review UI parses
+        // (types=[...]) and not in Category (the UI keys on values like 'invoice').
+        var classification = new CommunicationClassificationResult
+        {
+            Category = "invoice",
+            Urgency = "routine",
+            CandidateRecordTypes = new[] { "sprk_invoice" },
+            Rationale = "Attached invoice.",
+        };
+        SetupClassification(classification with { TriageCategory = "Some taxonomy row" });
+        var withHint = (await Build().EvaluateAsync(RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None)).Single();
+
+        SetupClassification(classification);
+        var withoutHint = (await Build().EvaluateAsync(RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None)).Single();
+
+        withHint.TriageCategory.Should().Be("Some taxonomy row");
+        withoutHint.TriageCategory.Should().BeNull();
+        withHint.Category.Should().Be("invoice");
+        withHint.Provenance.Should().Be(withoutHint.Provenance, "the provenance string format is unchanged");
+    }
+
+    [Fact]
+    public async Task Evaluate_TriageCategoryAlone_DoesNotCreateASignal()
+    {
+        // The hint never makes rung 5 emit a signal it would not have emitted before (no new triage runs).
+        SetupClassification(new CommunicationClassificationResult { TriageCategory = "Some taxonomy row" });
+
+        var matches = await Build().EvaluateAsync(
+            RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Evaluate_WhenDisabled_ReturnsEmpty_AndDoesNotClassify()
     {
         var matches = await Build(new AiClassificationOptions { Enabled = false }).EvaluateAsync(

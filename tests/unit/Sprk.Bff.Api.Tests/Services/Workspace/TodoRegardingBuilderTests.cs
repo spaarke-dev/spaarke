@@ -272,4 +272,77 @@ public class TodoRegardingBuilderTests
         lookupRef.LogicalName.Should().Be(parentEntityName);
         lookupRef.Id.Should().Be(parentId);
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // A catalog FAULT is not "no row" (task 141 review F1)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ApplyResolverFieldsAsync_CatalogReadFaults_Throws_AndTheFaultIsNotCached_ASecondCallTypesThePair()
+    {
+        // One builder, as TodoGenerationService's singleton job holds it: a 429 on the first read must not make every
+        // later to-do of that parent table untyped until restart.
+        var recordTypeId = Guid.NewGuid();
+        _commServiceMock
+            .SetupSequence(c => c.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("429: too many requests"))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", recordTypeId) { ["sprk_recorddisplayname"] = "Matter" });
+        var builder = new TodoRegardingBuilder(
+            _commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
+
+        var first = new Entity("sprk_todo");
+        var act = async () => await builder.ApplyResolverFieldsAsync(first, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+        await act.Should().ThrowAsync<TimeoutException>("a fault is not an answer; the caller does not create the to-do");
+
+        var second = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(second, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+
+        second["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId,
+            "the fault was not cached as \"no row\": the healthy read types the pair");
+        _commServiceMock.Verify(c => c.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ApplyResolverFieldsAsync_CatalogReadFindsNoRow_IsAnsweredUntyped_ButNotRemembered_AFoundRowIs()
+    {
+        // Task 042 (uac-r2 re-check K2): a read that SUCCEEDS and finds no row is answered untyped (D-133) but NOT cached, so a catalog row
+        // added later types the next pair without a restart (the Decision Record writer keeps one builder for its life); a FOUND row is cached.
+        var recordTypeId = Guid.NewGuid();
+        _commServiceMock
+            .SetupSequence(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null)
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", recordTypeId) { ["sprk_recorddisplayname"] = "Communication" });
+        var builder = new TodoRegardingBuilder(
+            _commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
+
+        var first = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(first, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        var second = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(second, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        var third = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(third, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+
+        first.Attributes.Should().NotContainKey("sprk_regardingrecordtype", "no row: untyped");
+        second["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId, "the row appeared: the miss was not remembered");
+        third["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId);
+        _commServiceMock.Verify(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2),
+            "the miss is read again; the found row is cached");
+    }
+
+    [Fact]
+    public async Task ApplyResolverFieldsAsync_CallerCancels_CancellationPropagatesAsItself_AndIsNotCached()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _commServiceMock
+            .Setup(c => c.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var builder = CreateBuilder();
+
+        var act = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        var again = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", cts.Token);
+        await again.Should().ThrowAsync<OperationCanceledException>("a cancelled read is asked again, never answered from the cache");
+    }
 }

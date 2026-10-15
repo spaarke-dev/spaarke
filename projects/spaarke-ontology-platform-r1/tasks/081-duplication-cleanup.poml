@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>On-branch cleanup the worklist depends on (C-8, C-11, C-13, C-17)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx across several packages and hoists two new shared primitives.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Convergence with known copies and an owner-decided tier scheme.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>084</deps>
+    <tags>cleanup,technical-debt,frontend</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Converge the four cleanup items the worklist directly depends on, on this branch.</prompt>
+  <role>SPAARKE full-stack developer.</role>
+  <goal>One Xrm frame-walk, one EmptyState, one relative-time formatter, and one due-date tier scheme (3/7/10 days), so the worklist row consumes shared primitives instead of adding a fourth copy of each.</goal>
+
+  <context>
+    <background>Rescoped 2026-10-03 under the owner placement rule: cleanup the worklist depends on stays on this branch; unrelated cleanup goes to its own PR. cleanGuid (C-7) moved to task 089 and the Events dependency declaration (C-25) to task 087. C-8: six duplicate Xrm frame-walks, two sharing an exported name in one package; the worklist row runs in the same host as DailyBriefingApp. C-11: three hand-rolled EmptyState components; the worklist needs an empty state. C-13: five relative-time formatter copies (U5); the worklist row shows item age. C-17: two due-date tier schemes (U6). OWNER DECISION 2026-10-03: 3/7/10 days.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared</file>
+      <file role="modify">src/solutions</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: C-8 converges the frame-walks on xrmContext.ts:306, starting with DailyBriefingApp.tsx and WorkspaceLayoutWidget.tsx (both already depend on @spaarke/ui-components). No two implementations may share an exported name.</constraint>
+    <constraint source="project">Scope: C-13 must REUSE the calendar-days helper that task 084 adds in Spaarke.UI.Components/src/utils/dateLocal.ts. Do not write a second daysBetweenLocalMidnight. This is why 081 depends on 084: start C-13 only after the 084 PR has merged and master has been merged into this branch. C-8, C-11 and C-17 can start before that.</constraint>
+    <constraint source="project">Scope: C-17 converges every due-date tier copy on 3/7/10 days, per the owner decision of 2026-10-03.</constraint>
+    <constraint source="project">Scope: this is CONVERGENCE, not refactoring. Where copies differ, pick the correct behaviour and state why.</constraint>
+    <constraint source="ADR-038">Scope: a consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Utility deduplication</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">C-8: enumerate the six Xrm frame-walks, including the two sharing a name, and converge them on xrmContext.ts:306.</step>
+    <step order="2">C-11: hoist one EmptyState into Spaarke.UI.Components and migrate the three hand-rolled copies.</step>
+    <step order="3">C-17: find every due-date tier copy (audit item U6) and converge on 3/7/10 days.</step>
+    <step order="4">C-13 (after 084 has merged and master is merged here): hoist the Intl.RelativeTimeFormat formatter into Spaarke.UI.Components, reuse dateLocal.ts for calendar-day differences, and retire the five copies.</step>
+    <step order="5">Run the affected package tests before and after, and quote both.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>EmptyState exists as three hand-rolled copies and the relative-time formatter as five; neither has a shared implementation.</existing>
+    <extension>No shared copy exists to extend. Both are hoisted into the existing Spaarke.UI.Components package, not a new one.</extension>
+    <cost-of-doing-nothing>The worklist row needs both, so without this it adds a fourth EmptyState and a sixth formatter, which is the duplication the audit exists to stop.</cost-of-doing-nothing>
+  </justification>
+
+  <escalation>
+    <trigger>If two frame-walk or formatter copies turn out to behave differently on purpose, STOP and report; converging genuinely different semantics under one name is a behaviour change disguised as cleanup.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="EmptyState renders in light and dark (ADR-021)">
+      <steps>
+        <step>Open a surface that previously used one of the three hand-rolled empty states, with no data to show</step>
+        <step>Verify the shared EmptyState renders, then toggle dark mode and verify colours come from Fluent tokens</step>
+      </steps>
+    </test>
+    <test name="Daily Briefing still loads after the frame-walk convergence">
+      <steps>
+        <step>Open the Console Daily Briefing in Dataverse and verify it renders its sections</step>
+        <step>Check the console for Xrm-resolution errors</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src</output>
+    <output type="code">src/client/shared</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a grep for the Xrm frame-walk, when reviewed, then one implementation exists and no two share an exported name.</criterion>
+    <criterion testable="true">One EmptyState exists in Spaarke.UI.Components and the three former copies use it.</criterion>
+    <criterion testable="true">One relative-time formatter exists in Spaarke.UI.Components, it uses dateLocal.ts for calendar-day differences, and the five former copies are gone.</criterion>
+    <criterion testable="true">Every due-date tier copy uses 3/7/10 days.</criterion>
+    <criterion testable="true">Negative: no second daysBetweenLocalMidnight implementation exists.</criterion>
+    <criterion testable="true">All affected packages build and their tests show no failure absent from the before run.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-42 remainder. Rescoped 2026-10-03: C-7 moved to 089, C-25 to 087. Owner decision: C-17 tier scheme is 3/7/10 days. Task 086 deletes the AI.Outputs chat-history ChatSessionCard (zero consumers), which held one of the five relative-time formatter copies: count four live copies. 086 REPORTED it WAS the most correct: Intl.RelativeTimeFormat, invalid-date guard, future dates, week/month buckets. Start from 62277d50a:src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx lines 30-61 and fix its two weaknesses: the hard-coded locale (en) and day buckets computed from elapsed 24h periods instead of local-midnight calendar days (use dateLocal.ts from 084). ROUTE (owner 2026-10-05): 081 ships as its OWN PR to master after re-review, not via docs/ontology-platform-design (about 37 projects edit these shared packages). LOCALE (coordinator 2026-10-05, review F11): the surrounding UI strings are English, so following navigator.language produced mixed strings ("Modified vor 5 Minuten"); the formatter takes an optional locale, default 'en'. This narrows the "hard-coded locale" fix above to "configurable, English by default". Review findings and decisions: notes/081-progress.md.</notes>
+
+  <completion>COMPLETED 2026-10-07 (recorded by main session). PR #1309 squash-merged as 14a5e229c (owner-approved "merge when green"; the only red check was the advisory Tier 2 ADR Compliance 3-minute timeout, fixed separately by PR #1346). Nine rounds, seven independent reviews (one FAIL on a pre-existing CI router hole; every finding fixed). Outcome: shared UI duplication removed (relative-time formatter configurable/English default, one due-urgency palette = SmartTodo's, dateLocal helpers); Xrm access consolidated on getXrm(capability) (window-first, ancestor walk, per-frame capability predicates) across ~260 sites with a wrapper-safe API; a TypeScript-AST analyzer (xrmCapabilityAnalyzer.ts, 85 tests, unknown shapes reported as blind spots, seven documented limits) now runs as a BLOCKING Tier 1 job (xrm-capability-guard, ~40-60 s, client/solution/workflow PRs) — owner-approved §6.5 path-A exception to ci-cd-unit-test-remediation-r1 FR-A02 (spec ADR Tensions), extended to fix ci-router.yml docs_only (now: docs-only only when every changed file is documentation; PRs over 3,000 files fail closed); .claude/skills/ci-cd and CHANGELOG updated by the main session. Merged with master after #1312 and #1302 (TodoSection.tsx deletion kept; nothing replaced it). Final: guard 259 sites / 0 violations / 0 blind spots; tsc/jest no new failures vs master. Review history: notes/081-progress.md.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
