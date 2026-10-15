@@ -4,7 +4,7 @@
     <title>Core-ancestor derivation and one-lookup guard for the invoice family</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a shared security component (CoreAncestorResolver, its TypeScript mirror, SecureChildLineage) on the write path; tags security, write-path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -131,7 +131,9 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Security tag: two adversarial-verifier passes (root CLAUDE.md §8.5). Callers (044 submission, 049 job, 100 review, 104 resubmission) call the guard before any invoice-family create / update; this task does not wire them. uac-r2 shares these files - run /conflict-check before the PR. Not parallel-safe: RecordOwnerAssignmentCensusTests.cs is also edited by 011, and the secure-family files are uac-r2's. Deps 023 / 027 added beyond the brief (their tables need registration).</notes>
+  <notes>Security tag: two adversarial-verifier passes (root CLAUDE.md §8.5). Callers (044 submission, 049 job, 100 review, 104 resubmission) call the guard before any invoice-family create / update; this task does not wire them. uac-r2 shares these files - run /conflict-check before the PR. Not parallel-safe: RecordOwnerAssignmentCensusTests.cs is also edited by 011, and the secure-family files are uac-r2's. Deps 023 / 027 added beyond the brief (their tables need registration).
+
+Completed 2026-10-15 (notes/013-core-ancestor-invoice-family.md). Guard + stored-row derivation built and tested; invoice WA root column in C#, TS and the container resolver (lockstep); submission, approval, external identifier and correction registered in the secure family (dev role applied and verified, 403 before / 201 after) and given sprk_createdbyperson (dev applied, -Verify PASS). Deviation: sprk_billingexport NOT registered (no root, spans many core records) - ISS-011 (#1974) for the owner / uac-r2. ISS-010 (#1973): the generic child-record create route bypasses the guard. uac-r2 review of the table entries is still outstanding. Rework: one review fix (the approval's Decision Record lineage edge was removed, F1). The invoice's sprk_supersedesinvoice lineage edge was removed after the full suite showed it altered the external invoices module's root rule; its classification is left to uac-r2. Full BFF suite: 23,346 passed. The 23 load-flaky WAF failures pass in isolation (146/146).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

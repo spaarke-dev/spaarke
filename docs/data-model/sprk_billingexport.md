@@ -44,5 +44,5 @@ The script stops with exit 2 before any write if `sprk_invoice` already carries 
 ## Notes for later tasks
 
 - A `Failed` batch holds no moved invoices; task 150 owns that rule.
-- The table does not carry `sprk_createdbyperson` or secure-record family membership; both are open for task 013 and unified-access-control-r2.
+- Not in the secure-record family (task 013): its only lookups are the export documents, and a batch spans many core records, so no single secure root owns it and the Secure Record team never owns a row. Whether a batch of secure invoices needs its own read restriction is an open owner / unified-access-control-r2 question (task 013 notes, defer-issues). It does not carry `sprk_createdbyperson`.
 - The AP mapping default is the D-56 column set; the mapping itself is configuration (the settings record, D-59), and this table stores only the snapshot used.

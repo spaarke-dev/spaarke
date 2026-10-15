@@ -59,5 +59,5 @@ The associated-menu labels are "Eligible Approvers" on the approval and "Invoice
 ## Notes for later tasks
 
 - A row created through the API takes status Pending (default 100000000) unless the writer sets another.
-- The table does not carry `sprk_createdbyperson` or secure-record family membership; both are open for task 013 and unified-access-control-r2 (task 021 notes).
+- Secure-record family (task 013, for unified-access-control-r2 review): a child table in `config/secure-record-owner-role.json`, `SecureChildLineage` (every core-record lookup plus its invoice / line / document parents) and `RecordOwnerAssignmentCensusTests.ChildTables`; the Secure Record Owner role holds Read on it (dev, 2026-10-15). It carries `sprk_createdbyperson` (lookup to systemuser, field-secured so only the BFF writes it; created by this table's schema script, secured by `scripts/Set-ChildRecordCreatorPersonSchema.ps1`, which lists the table with SpaarkeMaster as its solution home).
 - Deleting an invoice leaves approvals pointing nowhere only in theory: the invoice lookup is SystemRequired, so Dataverse refuses to clear it, and invoices are closed by status, not deleted.

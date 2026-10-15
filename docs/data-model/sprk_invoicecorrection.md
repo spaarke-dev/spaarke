@@ -72,5 +72,5 @@ Filter on `sprk_sourcecode`, `sprk_sourceversion` and `sprk_outcometype` (and `s
 ## Notes for later tasks
 
 - Append-only: writers insert rows and do not update them; a later decision on the same value is a new row.
-- Secure-record family membership of this table is open for task 013 and unified-access-control-r2 (it holds values from secure invoices). It does not carry `sprk_createdbyperson`.
+- Secure-record family (task 013, for unified-access-control-r2 review): a child table in `config/secure-record-owner-role.json`, `SecureChildLineage` (every core-record lookup plus its invoice / line / document parents) and `RecordOwnerAssignmentCensusTests.ChildTables`; the Secure Record Owner role holds Read on it (dev, 2026-10-15). It carries `sprk_createdbyperson` (lookup to systemuser, field-secured so only the BFF writes it; created by this table's schema script, secured by `scripts/Set-ChildRecordCreatorPersonSchema.ps1`, which lists the table with SpaarkeMaster as its solution home).
 - Invoices are closed by status, not deleted, so the invoice cascade is a safety net rather than a normal path.

@@ -96,6 +96,66 @@
 
 **Options**: (1) the eBilling consumers (075 / 078) never link Procedure Library rows to a matter or project (a convention, with a test in those tasks); (2) the external list and fetch routes exclude rows whose `sprk_graphdriveid` is a configured eBilling container (a change to shared external-access code owned by SPA-external-access-platform-r3 / unified-access-control-r2).
 
+### ISS-010 — Generic child-record create route bypasses the FR-05 invoice-family core-record guard
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the first eBilling writer ships (tasks 044 / 049) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 013 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1973 |
+
+**Description**
+
+`POST /api/v1/child-records/{table}` (`ChildRecordEndpoints.CreateTables`) creates `sprk_invoice` and `sprk_billingevent` from the caller's payload without `InvoiceFamilyCoreRecordGuard.Check`, so a row naming two core records is accepted there and FR-05's negative acceptance fails on that route. The secure-record ribbon's "New Billing Event" uses it.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs` (unified-access-control-r2 owns the route)
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs`
+
+**Suggested fix**
+
+For a table in `InvoiceFamilyCoreRecordGuard.CoreRecordLookups`, call `Check` on the payload (merged with the stored row on update) and refuse with its stable code before the write; fill the five resolver fields from `DeriveResolverFieldsAsync`. Test both refusals on the route.
+
+**Estimated effort**: 2-3 hours
+
+**Blockers**: unified-access-control-r2 agreement (their route)
+
+**Related**: FR-05, D-75, task 013 notes
+
+---
+
+### ISS-011 — AP export batches of secure invoices are outside the secure-record family (owner decision)
+
+| Field | Value |
+|---|---|
+| **Status** | Open - owner / unified-access-control-r2 decision |
+| **Urgency** | before task 150 writes the first batch |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 013 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1974 |
+
+**Description**
+
+Task 013 did not register `sprk_billingexport` in the secure-record family (the POML listed it): its only lookups are the export documents, a batch spans many core records, and the role file admits only tables a writer assigns to the Secure Record team. A batch holding secure invoices is therefore ordinary-owned, and its row and export files are readable by that team's business unit, which can expose secure invoice numbers and amounts.
+
+**Entry-points**
+
+- `docs/data-model/sprk_billingexport.md`; task 150 (export writer); task 028 (containers); `config/secure-record-owner-role.json`
+
+**Suggested fix**
+
+Owner choice: (1) separate batches for secure invoices, owned by the Secure Record team (then the table joins the family with a lineage row through its invoices); (2) one batch restricted to the AP role and a restricted container; (3) accept AP users seeing every invoice.
+
+**Estimated effort**: depends on the option (1: about a day with task 150)
+
+**Blockers**: owner decision
+
+**Related**: tasks 023, 028, 150; task 013 notes
+
+---
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
 
 | Field | Value |
