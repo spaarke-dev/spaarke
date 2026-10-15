@@ -48,6 +48,54 @@
 
 **Description**: `sprk_userprofile.sprk_primaryrole` is bound to `sprk_timekeeperrole`; `userProfileService.ts` (`PRIMARY_ROLE_OPTIONS`) and `StatedProfileReader.cs` hard-code its 14 original options. Per D-83 it moves to a lookup on `sprk_contacttype_ref` read from Dataverse; then ebilling deletes the 10 non-LEDES options (only Legal Operations, on 1 user profile, holds data).
 
+### DEF-013 — Customer environments need the Procedure Library and E-Billing Output Files containers (hand-off to customer-provisioning-orchestration-r1)
+
+| Field | Value |
+|---|---|
+| **Status** | Open - handed off |
+| **Urgency** | before eBilling is enabled on any customer stamp (blocks FR-16 outside dev) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 028 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1967 |
+
+**Description**: dev has both containers (D-55, owner-created). Each customer environment needs: two containers of the stamp's EXISTING container type (no new type); both marked `spaarkeCustomerId` = `Customer__Id`; neither stamped on a business unit; two app settings written by H4b from new `per_env_settings` entries in `scripts/canonical-secret-catalog/manifest.yaml`: `Finance__ProcedureLibraryContainerId`, `Finance__EbillingOutputContainerId` (dev examples in task 028 notes). Repeatable per environment.
+
+**Fails without it**: on a customer stamp the keys stay empty, so the consumers (075, 078, 133, 150) refuse with "container not configured" and guidelines and exports have nowhere to go (D-35). The BFF still boots: the keys are optional at start-up.
+
+### DEF-014 — The document-pointer check refuses app-only reads of `sprk_document` rows whose file is in an eBilling container
+
+| Field | Value |
+|---|---|
+| **Status** | Open - decide in task 075 / 078 (first consumers) |
+| **Urgency** | before 075 / 078 create Procedure Library documents; also 133 / 150 |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 028 (CIAM trace) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1968 |
+
+**Description**: `RecordContainerResolver`'s document-pointer check (run by `DocumentStorageResolver` and by `FileIndexingService.IndexFileAppOnlyAsync` when a document is named) serves only a container DERIVED for the document's records: business-unit, secure-record, archive or unfiled default. The eBilling containers are none of those by design. This is what keeps CIAM users out of the Procedure Library (task 028 test `ProcedureLibraryCiamDenyTests`), but it also refuses every INTERNAL app-only read of such a row: the RAG job, upload enqueuer and send-to-index return "Document storage could not be verified", so a Procedure Library guideline with a `sprk_document` row is never indexed (D-55 says it is), and standard download / preview returns 409.
+
+**Fails without a decision**: D-55 "Procedure Library documents are indexed" and internal opening of guideline / export documents through the standard routes.
+
+**Options**: (1) the derivation learns that a BFF-marked eBilling document belongs in the configured eBilling container (shared UAC code: coordinate with unified-access-control-r2; re-check the CIAM deny tests); (2) an eBilling-owned read path that names the configured container itself, with indexing through a server-built request carrying no document id.
+
+**Warning for option 1**: the pointer check is the ONLY thing that keeps CIAM callers from the Procedure Library's bytes today. If the derivation starts serving the eBilling containers, the external download routes would serve them too. Option 1 therefore needs an explicit refusal of the eBilling containers on the `/api/v1/external` routes in the same change, and `ProcedureLibraryExternalDownloadTests` must stay green.
+
+### DEF-015 — External document lists still show the name and summary of a Procedure Library row filed under a firm-readable record
+
+| Field | Value |
+|---|---|
+| **Status** | Open - owner decision (shared external-access code) |
+| **Urgency** | before 075 / 078 create Procedure Library `sprk_document` rows linked to matters or projects |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 028 (adversarial review pass 1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1975 |
+
+**Description**: task 028 proves a CIAM caller cannot download the BYTES of a Procedure Library document (`ProcedureLibraryCiamDenyTests`). The external document LIST and fetch routes on `/api/v1/external/{record}/documents` filter only on the record lookup, not on the file's container. A Procedure Library `sprk_document` row filed under a record the firm can read (by design or by mistake) would still show its name and `sprk_filesummary` to the firm user.
+
+**Fails without it**: D-63 "firm users never see the Procedure Library" holds for content but not for metadata, if any Procedure Library row is ever linked to a matter or project a firm collaborates on.
+
+**Options**: (1) the eBilling consumers (075 / 078) never link Procedure Library rows to a matter or project (a convention, with a test in those tasks); (2) the external list and fetch routes exclude rows whose `sprk_graphdriveid` is a configured eBilling container (a change to shared external-access code owned by SPA-external-access-platform-r3 / unified-access-control-r2).
+
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
 
 | Field | Value |

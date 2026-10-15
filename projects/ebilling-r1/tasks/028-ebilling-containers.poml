@@ -4,7 +4,7 @@
     <title>Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Small BFF configuration change plus one indexing guard and verification of existing access enforcement; brief sets STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,6 +120,15 @@
     Brief said "validation on start"; making the keys required would break stamp boots (IOptionsDriftTests), so start-up validation is format-only and consumers fail closed.
     The brief did not mention the SPE ownership guard; without it every app-only eBilling write to these containers returns 404 spe_container_not_owned.
     Internal (OBO) access to the two containers depends on container permissions; record what the trace finds for 075 / 077 / 078.
+
+    COMPLETED 2026-10-15 (sub-agent worktree, rigor raised to FULL: BFF .cs plus storage access control; two adversarial-review passes). Commits 0935e3c99, ae6ef1a25, 6b30e59c7, 876dd9b4e, plus the docs commit. Detail: notes/028-ebilling-containers.md.
+    - Config: FinanceOptions.ProcedureLibraryContainerId / EbillingOutputContainerId, optional, format-checked (b!...) at start-up; template tokens added.
+    - Ownership (D-67): both keys added to GraphModule.StampContainerSettingKeys; only the exact configured ids are owned.
+    - Not indexed: FileIndexingService skips a file in the output container on both entry points; no caller stamps a skipped file as indexed; the bulk job counts it as skipped.
+    - CIAM: proven for BYTES (download refused 409 by the existing pointer check; no search route admits Ciam). Metadata in external document lists is NOT covered: DEF-015 / #1975 (owner decision).
+    - Hand-off DEF-013 / #1967; pointer check vs eBilling document reads DEF-014 / #1968.
+    - No live change. Publish delta +1,468 B. ADR-010 ceiling unchanged (162). ArchTests 1045/1045.
+    rework: fix-round-1 task 028
   </notes>
 
   <execution>
