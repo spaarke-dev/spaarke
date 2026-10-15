@@ -151,7 +151,19 @@ Live evidence on dev (`ContentUnderstandingLiveTests.ReadInvoiceAsync_SampleInvo
 
 ## BFF hygiene (§10)
 
-PUBLISH_DELTA_PLACEHOLDER
+Publish-size delta, measured 2026-10-15 with `dotnet publish -c Release src/server/api/Sprk.Bff.Api/` from clean source exports of each commit, zipped with `Compress-Archive -CompressionLevel Optimal` (PDBs included):
+
+| Build | Files | Zip (B) | Uncompressed (B) |
+|---|---|---|---|
+| origin/master `645f48a86` | 192 | 38,902,440 | 129,944,116 |
+| this branch `3afd0f6eb` | 192 | 38,956,888 | 130,115,296 |
+| **Delta** | 0 | **+54,448 (+0.05 MB)** | +171,180 |
+
+- Code only: no package, csproj or `Directory.Packages.props` change; the same 192 files; `Sprk.Bff.Api.dll` +140,800 B.
+- The delta is an upper bound for 043: it also contains the `work/ebilling-r1` commits not yet on master.
+- Well under the +5 MB per-task threshold; total ~38.96 MB, under the 55 MB review line.
+- `dotnet list package --vulnerable --include-transitive`: no vulnerable packages, so no new HIGH CVE.
+- Full unit suite (`tests/unit/Sprk.Bff.Api.Tests`, 23,318 tests, 42 min under machine load): 23,289 passed, 23 skipped, and 6 WebApplicationFactory contract tests failed with ~3-minute HTTP timeouts (`Issue975_*`, `Document*IdentityContractTests`, `ExternalMessagePostContractTests`). None touches this task's code. Rerun alone, all 35 tests in those classes pass (27 s). ArchTests 1052 / 1052.
 
 ## Review findings (task-execute Step 9.5)
 
@@ -167,4 +179,4 @@ PUBLISH_DELTA_PLACEHOLDER
   7. HTTP 413 classified `service_failed` (K1): now `unreadable`, not retried; seam test.
 - **Fail-before proofs:** with the old `ReadRange`, the 413 classification, the 0 ms floor and completion neutralised, 16 of the new tests fail (3 malformed-result, 1 x 413, 1 validator floor, 10 completion, 1 seam clock-hours); with the census entry removed, `IOptionsDriftTests` fails naming `ContentUnderstandingOptions`.
 
-rework: none yet — task 043
+rework: review fixes in-task (adversarial findings 2, 6, 7; see Review findings) — task 043
