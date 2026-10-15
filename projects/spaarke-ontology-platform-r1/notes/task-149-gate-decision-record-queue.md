@@ -12,7 +12,7 @@
 | Enqueuer | `GateDecisionRecordEnqueuer` (`Services/Signals/GateDecisionRecordJob.cs`) | Builds the `JobContract` (`IdempotencyKey = GateDecisionKey.Of(communication, outcome)`, `CorrelationId` = the run id) and submits it with a 5 s timeout. Never throws: a failure or timeout is logged with ids (`GateDecisionRecordEvents.EnqueueFailed` Error / `EnqueueTimedOut` Warning) and counted on `ontology.writer.failures{reason=decision_gate_enqueue_failed}`. |
 | Payload | `GateDecisionRecordPayload` | Ids, the gate's reason code and numbers, the matched rule id, the privilege flag, the direct-filed-under id and the decision time. No subject, sender or body (D-123); a test serialises it and asserts so. |
 | Job | `GateDecisionRecordJobHandler : IJobHandler` (scoped, `SignalsModule`) | Lock under the decision key, build the request (reads the matched rule's priority), call `DecisionRecordWriter.WriteGateDecisionAsync`. Outcomes: written / already recorded / skipped by design (D-144) / another copy in flight = `Success`; unreadable payload or a refusal a retry cannot change = `Poisoned`; a fault or a retryable refusal = `Failure` (the processor abandons, redelivers, dead-letters after the last delivery). |
-| Idempotency | `GateDecisionKey` and `FindGateRecordAsync` (`DecisionRecordWriter.cs`) | The key is a SHA-256 of `gate-dr-{communication}-{authorized|denied}`, rendered as a GUID, and stored in `sprk_steps.reviewId` (the column every record already carries its review id in: NO schema change, so the POML's first escalation trigger did not fire). The writer looks it up before its one create (Equal on `sprk_regardingcommunication`, Like on `sprk_steps`, through the shared reader so any team's record is visible). A found record is returned as `AlreadyRecorded`. |
+| Idempotency | `GateDecisionKey` and `FindGateRecordAsync` (`DecisionRecordWriter.cs`) | The key is a SHA-256 of `gate-dr-{communication}-{authorized|denied}`, rendered as a GUID, and stored in `sprk_steps.reviewId` (the column every record already carries its review id in: NO schema change, so the POML's first escalation trigger did not fire). The writer looks it up before its one create (Equal on `sprk_regardingcommunication`, Like on `sprk_steps`, `sprk_confirmedby` null so a human review cannot masquerade as the gate record, through the shared reader so any team's record is visible). A found record is returned as `AlreadyRecorded`. |
 | D-144 | `ResolveOwnerCoreAsync` / `AskOwnerAsync` | See below. |
 | uac-r2 K3 | `SignalReadService.cs` | The no-Read refusal logs at Warning. One commit, one assertion in `SignalReadRouteTests`. |
 
@@ -40,9 +40,9 @@ all three from short-path worktrees, measured in this session with one script.
 |---|---|---|---|---|
 | fresh `origin/master` (`C:\p149m`) | `f292ad119` | 37.1023 MB | 192 | 123.9175 MB |
 | task base (`C:\p149base`) | `492d00bd1` | 37.1027 MB | 192 | 123.9171 MB |
-| task head (`C:\p149h`) | HEAD_PLACEHOLDER | HEAD_ZIP_PLACEHOLDER | 192 | HEAD_RAW_PLACEHOLDER |
+| task head (`C:\p149h`) | `176ef2c29` (review-fix head; the fixes add one query condition, tests and notes) | 37.1052 MB | 192 | 123.9369 MB |
 
-Delta vs fresh master: DELTA_PLACEHOLDER. Far below the +5 MB / 55 MB / 60 MB thresholds.
+Delta vs fresh master: +0.0029 MB zip (37.1052 vs 37.1023), +0.0194 MB raw, +0 files. Far below the +5 MB / 55 MB / 60 MB thresholds.
 
 ## D-144 (uac-r2 to review)
 
@@ -85,7 +85,27 @@ turned back to Information the K3 assertion fails (1/1).
 | `Spaarke.ArchTests` filtered to the three create-site / census / secure-family classes | 44 passed, 0 failed |
 | BFF build | 0 errors, 0 warnings |
 
-REVIEW_PLACEHOLDER
+## Review record
+
+One independent adversarial pass (CLAUDE.md §8.5; the task is not `auth`/`security`/`tenant-isolation`). Fixed in the review round (head `176ef2c29`):
+
+- **F1 - review-id spoofing.** `FindGateRecordAsync` matched any record under the communication whose `sprk_steps.reviewId` equalled the gate key, so a
+  human review commit carrying a client-chosen review id equal to that key would have stopped the gate record from ever being written. The lookup now
+  also requires `sprk_confirmedby` null (a gate record never sets it; a review record always does). Test: a review-shaped seeded row (confirmer set,
+  same key) is not "already recorded" and the gate record is written. Seeding proof: with the condition removed, that case and the lookup-shape
+  assertion fail (2 of 120 in `DecisionRecordWriterTests`); restored, 315/315 in the filtered unit run.
+- **F3 - publish size.** The head row and delta above were still placeholders; measured and filled in.
+- **F4 - guard coverage.** `DecisionRecordWriterOnlyCreatesAndReads` scanned `_writerClient` only; the writer's `_entities` (the shared sysadmin
+  `IGenericEntityService`, which can create and update) is now held to `RetrieveMultipleAsync`, with a must-fire control (`_entities.CreateAsync`) and
+  a must-not-fire control (`_entities.RetrieveMultipleAsync`). Also proved against the real writer: a seeded `_entities.UpdateAsync` fails the test.
+
+Known limits K4-K9 from the same pass are accepted as known-limit class (no confirmed defect on a real path) and are not changed in this round; K5 is
+recorded in detail because it is observable.
+
+- **K5 - an outcome that flips back writes two records, not three, by design.** deny -> authorize -> deny leaves two records (one denied, one
+  authorized): the key is the (communication, outcome) pair (D-139), so the second deny finds the first deny's record and writes nothing. The
+  record trail shows each outcome once, not each change of outcome.
+
 
 ## Known limits (K) and what was seen but not fixed
 
