@@ -10,7 +10,7 @@
 | **Task file** | `tasks/003-dataverse-cleanup-spaarkedev1.poml` |
 | **Status** | 🔄 in-progress (FULL rigor). All Dataverse work is done; **blocked on the owner's browser smoke tests** (POML step 6) |
 | **Next Action** | Owner runs the checklist below and records PASS/FAIL in `notes/dataverse-cleanup-log.md` → then mark 003 ✅ (POML `<status>` + TASK-INDEX, then `pwsh scripts/check-task-status-drift.ps1`) and start the 7-day soak before 004 |
-| **Branch / PR** | `work/pcf-orphan-cleanup-r1` (see the PR linked in TASK-INDEX notes) |
+| **Branch / PR** | `work/pcf-orphan-cleanup-r1` → PR #1897 (open, do not merge before smoke tests) |
 
 ## What was done (2026-10-15 02:31–02:35 UTC, spaarkedev1 only)
 
