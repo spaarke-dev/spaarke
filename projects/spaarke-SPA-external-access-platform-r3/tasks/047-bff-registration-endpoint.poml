@@ -58,6 +58,7 @@
     <constraint source="046 UAC review K1 (carried)">Write sprk_externaltenantid, sprk_externalobjectid (and the systemuser secured pair in 048) as lowercase hyphenated GUID text (Guid.ToString("D")). The 046 reads match only that form; braces, N-format or uppercase would never match, so a registered user would be sent to the form again.</constraint>
     <constraint source="owner 2026-10-15 (escalation resolved)">Dev data: 9 of 11 enabled users have internalemailaddress = domainname; 2 differ. That is why both fields are compared in step (2).</constraint>
     <constraint source="owner 2026-10-15 (escalation resolved)">Email is the canonical duplicate check (step 3: emailaddress1 = token email). Dataverse duplicate-detection rules (dev has 3 published OOB contact rules: name, phone, email) do not run on Web API or SDK writes unless the caller opts in (Microsoft Learn: create-entity-web-api "Check for duplicate records"; manage-duplicate-detection-create-update). The registration create and bind must never send MSCRM.SuppressDuplicateDetection: false (or the SDK SuppressDuplicateDetection=false); add a test that pins the create request carries no such header.</constraint>
+    <constraint source="owner 2026-10-15">WorkforceHome contacts receive grant notification emails like other external contacts (owner: "Yes, same as others").</constraint>
   </constraints>
 
   <knowledge>
@@ -107,7 +108,7 @@
     <criterion testable="true">Resubmit and a simulated 412 race → 200 with the same contactId; exactly one contact exists.</criterion>
     <criterion testable="true">Token email matches an enabled systemuser's internalemailaddress, or its domainname (separate cases) → 403 licensed_user_link_required, no write; a disabled systemuser match does not trigger this refusal.</criterion>
     <criterion testable="true">One bindable contact + confirmExistingRecord true → 200, that contact gains tid/oid/plane, no new contact; without the flag → 409 existing_record_found, no write.</criterion>
-    <criterion testable="true">Two matches, or a match that is bound, linked or plane External → 403 registration_contact_conflict, contact(s) flagged EmailAmbiguous, nothing bound or created.</criterion>
+    <criterion testable="true">Two matches, or a match that is bound, linked or plane External → 403 registration_contact_conflict, nothing bound or created; two or more matches are flagged EmailAmbiguous, a single unbindable match is flagged with its cause (BoundToDifferentOid / LinkedToOtherUser / BindingUnreadable) so IdentityLinkReconciliationJob keeps the flag (amended 2026-10-15 after the 047 adversarial passes: an EmailAmbiguous flag on a single match is cleared by the job).</criterion>
     <criterion testable="true">Token without email → 403 registration_email_missing; body email field → 400 (closed DTO); missing/overlong/control-character names → 400.</criterion>
     <criterion testable="true">CustomerBusinessUnitId absent → 500 registration_owner_unconfigured, nothing created.</criterion>
     <criterion testable="true">Spaarke-tenant or CIAM principal → 403; anonymous → 401.</criterion>
