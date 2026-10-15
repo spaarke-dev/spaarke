@@ -133,7 +133,7 @@ Already absent before this session (DEV-006): UQC PCF + `UniversalQuickCreate` s
 - No leftover web resources are named after the deleted controls. (`sprk_analysisbuilder` is the live code page.)
 - **Data check**: the 11 `sprk_chartdefinition.sprk_drillthroughtarget` values in use name no deleted page. One record, "Due Date Count Card" `4929d1ed-…`, has the pre-existing broken value `sprk_eventspage` with no `.html`. It is filed as **#1895** and was not caused by this session.
 
-### Smoke tests (procedure §3.2 step 8): partial (owner, 2026-10-15)
+### Smoke tests (procedure §3.2 step 8): complete (owner, 2026-10-15) — no cleanup regressions
 
 Browser checks need the owner. The checklist is in [`../current-task.md`](../current-task.md#owner-smoke-test-checklist). Each failure below was investigated read-only against spaarkedev1 and master `09dbed8f3`. None was caused by a deletion in this log, so nothing was restored.
 
@@ -142,13 +142,13 @@ Browser checks need the owner. The checklist is in [`../current-task.md`](../cur
 | 1. Event calendar filter | PASS | — |
 | 2a. Calendar drill-through | PASS (dialog filtered to the matter) | — |
 | 2a. Calendar day counts | FAIL, pre-existing, not cleanup | VisualHost `CalendarVisual.tsx` never applies the matter context, and chart `154bd4a4-…` uses a FetchXML with the deprecated `sprk_eventstatus` filter and a 5-day/top-10 window (returns 0 rows live). Filed **#1950** (related #1709). |
-| 2b. VisualHost drill-through | FAIL, not cleanup; cause not reproduced | VisualHost has used web-resource drill-through since b7da8e4e83 (2026-02-09). No chart definition names a deleted page. The Matter-form charts all target `.html` pages that filter. Waiting on the owner to say which card, plus the console lines. |
+| 2b. VisualHost drill-through | FAIL, not cleanup; cause not reproduced | VisualHost has used web-resource drill-through since b7da8e4e83 (2026-02-09). No chart definition names a deleted page. The Matter-form charts all target `.html` pages that filter. Filed **#1956** (needs the card and the console lines). |
 | 3. Document upload, email send | PASS | — |
 | 4. Console renders | PASS | — |
-| 4. "Matters workspace" missing | FAIL, pre-existing (since 2026-08-28), not cleanup | Saved layouts owned by the BFF app user have been hidden by #832's owner filter since then. Filed **#1952**. A dev1 data fix (reassign 5 rows) needs the owner's OK. |
-| 5. Analysis entry points | pending owner | |
-| 6. Held controls | pending owner | |
-| 7. Console errors | pending owner | |
+| 4. "Matters workspace" missing | FAIL, pre-existing (since 2026-08-28), not cleanup | Saved layouts owned by the BFF app user have been hidden by #832's owner filter since then. Filed **#1952**. The owner meant a *system* Matters workspace: none had ever existed (skipped in #531 because a user-authored "Matters" layout was then visible to everyone; that record is gone). Created on dev1 as system layout `779bcf42-…` and in `scripts/system-layouts.json` (PR #1955). |
+| 5. Analysis entry points | PASS (opens; owner will revisit the Analysis UX later) | — |
+| 6. Held controls | PASS | — |
+| 7. Console errors | PASS (none) | — |
 
 ### Issues filed or updated this session
 
@@ -157,4 +157,5 @@ Browser checks need the owner. The checklist is in [`../current-task.md`](../cur
 - #1468: progress comment (what was deleted, what is held, AnalysisWorkspaceSolution export failure).
 - #1950: VisualHost calendar ignores matter context; its chart query returns no rows (smoke item 2a, pre-existing).
 - #1951: PROJECT BUDGET chart drill-through targets the non-existent `sprk_invoicepage.html` (found during smoke triage, pre-existing).
+- #1956: VisualHost drill-through on a Matter opens an unfiltered list (smoke item 2b, cause not reproduced, needs info).
 - #1952: saved workspace layouts created before #832 are invisible to their users (smoke item 4, pre-existing since 2026-08-28).
