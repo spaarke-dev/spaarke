@@ -364,13 +364,15 @@ public static class ConsumerTypes
 
     // ── eBilling (ebilling-r1 task 041, D-52) ─────────────────────────────────────────────────────
     // Linear AI Consumers invoked only through the IInvoiceAi facade (never chat/loop-projected).
-    // Deliberately NOT in All yet: RoutingConsumerTypeHealthCheck turns /healthz Unhealthy for an All
-    // entry with no Binding row, so each constant joins All in the same change that seeds its Binding.
+    // A constant joins All in the same change that seeds its Binding row. RoutingConsumerTypeHealthCheck reports an
+    // All entry with no Binding row as Degraded (forward-declared) and a Binding row with no All entry as
+    // Unhealthy (the admin-typo class), so the row must never be seeded on an environment whose BFF lacks the constant.
 
     /// <summary>
     /// <see cref="IInvoiceAi.ClassifyAsync"/> — Finance attachment classification (spec
-    /// <c>INVOICE-CLASSIFY@v1</c>, FR-46). Binding + Action seeded by ebilling-r1 task 042, which also adds
-    /// this constant to <see cref="All"/>.
+    /// <c>INVOICE-CLASSIFY@v1</c>, FR-46). Action <c>invoice-classify</c> + Binding seeded by ebilling-r1 task 042
+    /// (<c>infra/dataverse/actions/invoice-classify.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>); this
+    /// constant is in <see cref="All"/> from the same change.
     /// </summary>
     public const string InvoiceClassify = "invoice-classify";
 
@@ -429,5 +431,6 @@ public static class ConsumerTypes
         CreateMatter,
         ComposeReviseDocument,
         AssistantSuggest,
+        InvoiceClassify,
     };
 }

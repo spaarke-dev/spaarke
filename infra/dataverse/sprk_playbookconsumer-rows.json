@@ -572,6 +572,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "ebilling-r1 task 042 (FR-46, D-52) - Binding for invoice-classify, a Linear AI Consumer reached only through the IInvoiceAi PublicContracts facade (IInvoiceAi.ClassifyAsync, called by AttachmentClassificationJobHandler) - NOT chat/loop-projectable, deliberately: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null (same shape as email-triage). actionCode resolves to the JPS Action infra/dataverse/actions/invoice-classify.action.json (display name INVOICE-CLASSIFY@v1, Fast tier). The sprk_modeltieroverride column is not mirrored by this script and is not applied on the linear path (ISS-005); the Action row carries the tier. ConsumerTypes.InvoiceClassify joined ConsumerTypes.All in the same change.",
+      "consumerType": "invoice-classify",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Invoice Classify (Finance attachment classification)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "invoice-classify",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "matter-pre-fill",
       "consumerCode": "default",
       "environment": "*",

@@ -2392,6 +2392,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5)"
       }
+    },
+    {
+      "caseId": "GU-142",
+      "family": "invoice-classify",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "a Finance attachment reaches the AttachmentClassification job and its extracted text is classified as invoice / not invoice (ebilling-r1 task 042, FR-46)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceClassify constant (added task 042). A Linear AI Consumer, same shape as GU-138 email-triage: invoked server-side by AttachmentClassificationJobHandler through IInvoiceAi.ClassifyAsync (the invoice-classify Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, output to DTO, fail-closed reason codes, Binding resolution) lives in tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs and tests/integration/seam/Finance/AttachmentClassificationJobHandlerTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/InvoiceClassifyActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-attachment-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-classify",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 042 (FR-46)"
+      }
     }
   ]
 }
