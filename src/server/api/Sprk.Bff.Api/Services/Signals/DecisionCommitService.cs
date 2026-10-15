@@ -227,6 +227,10 @@ public static class DecisionCommitReasons
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
 
+    /// <summary>Task 154 (D-111): Mark complete was taken on an inquiry's "Record the outcome" To Do (409). It is completed by recording
+    /// the inquiry's disposition (<c>POST /api/v1/inquiries/{id}/disposition</c>); the code is that route's family.</summary>
+    public const string InquiryDispositionRequired = "inquiry.disposition_required";
+
     /// <summary>Task 141 fix round 2 (K2): a Signal names a subject (its pair id is set) but the subject's table cannot be
     /// derived, for example the subject was deleted and its RemoveLink cascade cleared the lookup. Refused exactly as before
     /// (Forbidden, fail closed, no new allow path); only the code and message say what is wrong. A Replay's warning for the
@@ -1261,8 +1265,47 @@ public sealed class DecisionCommitService
         if (resolution.Plan is not { } plan)
             return No(DecisionCommitReasons.PlanRefused, "This item's decision plan does not resolve against the action catalog.");
 
-        // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
         var given = review.Actions ?? [];
+
+        // Task 154 (D-111, 059 review): an OPEN inquiry's "Record the outcome" To Do is completed by recording the inquiry's
+        // disposition (071's route), never by Mark complete, which would close the To Do and leave the inquiry open with nobody
+        // prompted again. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). The plan route offers the reduced plan
+        // (ResolvedDecisionPlan.WithoutMarkComplete); this route applies the same reduction and refuses a Mark complete that is taken.
+        // Read AS THE CALLER, only when the plan offers Mark complete on a To Do: the To Do, then the hinted inquiry or (no usable
+        // hint) the matter's open inquiries, the for-todo lookup's own identification.
+        // Pass 2 K4: not on the finishing path (linkedRecord set). A writer-created record of this same review already exists, so no
+        // executor runs; the check would protect nothing and could only refuse (or 503) and leave the Signals unclosed.
+        var isTodo = lane == DecisionLane.Do && string.Equals(primary.SubjectEntity, "sprk_todo", StringComparison.OrdinalIgnoreCase);
+        if (linkedRecord is null && isTodo
+            && primary.SubjectId is { } todoId && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            var inquiryOutcome = await _access.CheckInquiryOutcomeTodoAsync(todoId, ct).ConfigureAwait(false);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.Unavailable)
+                return No(DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.", status: DecisionCommitStatus.Unavailable);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.NotReadable)
+                return (new DecisionCommitResult { Status = DecisionCommitStatus.NotFound }, null);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.OpenInquiry)
+            {
+                if (given.Any(a => a?.Code == ResolvedDecisionPlan.MarkCompleteCode && a.Taken))
+                    return No(DecisionCommitReasons.InquiryDispositionRequired,
+                        "This To Do is completed by recording how the inquiry turned out, not by marking it complete; nothing was done.",
+                        ResolvedDecisionPlan.MarkCompleteCode, DecisionCommitStatus.Conflict);
+
+                plan = plan.WithoutMarkComplete();
+                // A review built from an earlier plan may still list Mark complete as skipped: that is not an action of this plan.
+                given = given.Where(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode).ToList();
+            }
+        }
+        else if (linkedRecord is not null && isTodo && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode)
+            && given.All(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            // K4, finishing a review recorded under the reduced plan (the inquiry was open then): the stored record carries this
+            // review's content hash (StoredRecord.Covers), so the review was matched against that plan when it was written. Without
+            // the read, the plan it was matched against is the one without Mark complete.
+            plan = plan.WithoutMarkComplete();
+        }
+
+        // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
         foreach (var action in given)
         {
             if (!DecisionActionCatalog.TryGet(action?.Code, out _))

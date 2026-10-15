@@ -197,6 +197,24 @@ public static class DecisionPlanEndpoints
                 });
         }
 
+        // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
+        // complete. Pass 2 F1: identified exactly as the commit route identifies it (the hint, else the To Do's matter's open
+        // inquiries), from the notes and matter the gate's own "mine" read returned, as the caller; only for a To Do whose plan offers
+        // Mark complete. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). A fault offers nothing (503).
+        if (plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
+            if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
+            {
+                return AccessUnavailable(httpContext);
+            }
+
+            if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)
+            {
+                plan = plan.WithoutMarkComplete();
+            }
+        }
+
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);

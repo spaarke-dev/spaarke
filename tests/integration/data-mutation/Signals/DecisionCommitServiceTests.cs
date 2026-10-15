@@ -173,6 +173,32 @@ public sealed class DecisionCommitServiceTests
 
         public DataverseUserResponse? SubjectReadFails { get; set; }
 
+        /// <summary>Task 154 (D-111): a To Do's <c>sprk_notes</c> as the caller reads it (the inquiry hint), returned when selected.</summary>
+        public Dictionary<Guid, string> TodoNotes { get; } = new();
+
+        /// <summary>Task 154: a fault answer for the caller's read of a To Do's notes only.</summary>
+        public DataverseUserResponse? TodoNotesReadFails { get; set; }
+
+        /// <summary>Task 154 (adversarial pass 1): a To Do's matter (<c>_sprk_regardingmatter_value</c>), returned with its notes.</summary>
+        public Dictionary<Guid, Guid> TodoMatter { get; } = new();
+
+        /// <summary>Task 154 (adversarial pass 1): service requests as the caller reads them: their matter, direction and statecode.
+        /// One that is absent is 404.</summary>
+        public Dictionary<Guid, (Guid Matter, int Direction, int State)> Inquiries { get; } = new();
+
+        /// <summary>The caller's reads of service requests (task 154).</summary>
+        public List<string> InquiryReads { get; } = new();
+
+        /// <summary>Task 154 pass 2 F3: a fault answer for the caller's GET of a hinted inquiry.</summary>
+        public DataverseUserResponse? InquiryReadFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: the answer to the caller's list of the matter's open inquiries, instead of the list (a fault,
+        /// or a page with an <c>@odata.nextLink</c>).</summary>
+        public DataverseUserResponse? InquiryListFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: thrown by the caller's list of the matter's open inquiries.</summary>
+        public Exception? InquiryListThrows { get; set; }
+
         /// <summary>Task 150 (D-141): subjects the caller can read but that are not their own work (the "mine" read omits them).</summary>
         public HashSet<Guid> CallerNotMine { get; } = new();
 
@@ -432,9 +458,47 @@ public sealed class DecisionCommitServiceTests
                 var id = Guid.Parse(path["sprk_todos(".Length..path.IndexOf(')')]);
                 if (SubjectReadFails is { } fault)
                     return fault;
-                return CallerCannotReadSubject.Contains(id)
-                    ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no")
-                    : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
+                var selectsNotes = path.Contains("$select=sprk_notes", StringComparison.Ordinal);
+                if (selectsNotes && TodoNotesReadFails is { } notesFault)
+                    return notesFault;
+                if (CallerCannotReadSubject.Contains(id))
+                    return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+                var todo = new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" };
+                if (selectsNotes)
+                {
+                    todo["sprk_notes"] = TodoNotes.TryGetValue(id, out var notes) ? notes : null;
+                    todo["_sprk_regardingmatter_value"] = TodoMatter.TryGetValue(id, out var todoMatter) ? todoMatter.ToString("D") : null;
+                }
+                return Ok(todo);
+            }
+
+            if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
+            {
+                InquiryReads.Add(path);
+                if (InquiryReadFails is { } inquiryFault)
+                    return inquiryFault;
+                var id = Guid.Parse(path["sprk_servicerequests(".Length..path.IndexOf(')')]);
+                return Inquiries.TryGetValue(id, out var inquiry)
+                    ? Ok(new Dictionary<string, object?> { ["statecode"] = inquiry.State, ["sprk_direction"] = inquiry.Direction })
+                    : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+            }
+
+            if (path.StartsWith("sprk_servicerequests?", StringComparison.Ordinal))
+            {
+                // The matter's open outbound inquiries (the fallback), evaluated like Dataverse.
+                InquiryReads.Add(path);
+                if (InquiryListThrows is { } thrown)
+                    throw thrown;
+                if (InquiryListFails is { } listFault)
+                    return listFault;
+                var matter = Guid.Parse(System.Text.RegularExpressions.Regex.Match(path, "_sprk_regardingmatter_value eq ([0-9a-f-]{36})").Groups[1].Value);
+                var direction = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "sprk_direction eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                var state = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "statecode eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = Inquiries.Where(kv => kv.Value.Matter == matter && kv.Value.Direction == direction && kv.Value.State == state)
+                        .Select(kv => new Dictionary<string, object?> { ["sprk_servicerequestid"] = kv.Key.ToString("D") }).ToList(),
+                });
             }
 
             if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) || path.StartsWith("sprk_projects(", StringComparison.Ordinal))
@@ -1395,6 +1459,310 @@ public sealed class DecisionCommitServiceTests
 
     private static DecisionReview MarkComplete() =>
         new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+    // ── Task 154 (D-111, 059 review): an inquiry's "Record the outcome" To Do is never completed by Mark complete ──────────
+
+    private static readonly Guid InquiryTodo = InquiryDispositionService.TodoIdFor(ServiceRequestId);
+
+    /// <summary>A Do Signal on <paramref name="todoId"/>, a To Do on <see cref="Matter"/>; the inquiry <see cref="ServiceRequestId"/> is an
+    /// outbound inquiry on that matter, open unless <paramref name="inquiryState"/> says otherwise.</summary>
+    private static Rig InquiryTodoRig(Guid todoId, string? notes, int inquiryState = 0)
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: todoId);
+        if (notes is not null)
+            rig.TodoNotes[todoId] = notes;
+        rig.TodoMatter[todoId] = Matter;
+        rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, inquiryState);
+        return rig;
+    }
+
+    private static string InquiryHint(Guid serviceRequestId) => $"{InquiryReplyTodoCreator.NotesKey}{serviceRequestId:D}";
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> RescheduleValues =
+        Values(("dueDate", "2026-10-30"), ("reason", "Waiting for the client's reply"));
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_MarkCompleteTaken_Is409DispositionRequired_AndNothingIsWritten()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        result.ReasonCode.Should().Be("inquiry.disposition_required");
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_RescheduleUnderTheReducedPlan_IsRecorded()
+    {
+        // The plan route offers [reschedule] (Mark complete removed); a review built from it lists only that action.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_AReviewThatSkipsMarkComplete_IsRecorded_TheSkipIsNotAnActionOfThePlan()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Skip("mark-complete"), Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]                                   // no notes: an ordinary To Do
+    [InlineData("Call the client back")]                 // notes without the hint
+    [InlineData("serviceRequestId=other")]               // a hint that is not a GUID
+    public async Task AnOrdinaryTodo_StillExecutesMarkComplete(string? notes)
+    {
+        var rig = InquiryTodoRig(ItemTodo, notes);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+    }
+
+    [Fact]
+    public async Task ATodoWhoseHintNamesAnInquiryThatDoesNotDeriveItsId_IsOrdinary_MarkCompleteExecutes()
+    {
+        // The hint is only a hint: a To Do that copies another inquiry's hint is not that inquiry's outcome To Do.
+        var rig = InquiryTodoRig(ItemTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AClosedInquirysOutcomeTodo_IsOrdinary_MarkCompleteExecutes()
+    {
+        // Adversarial pass 1 F1: the disposition was recorded but the To Do's completion failed (logged only); the To Do went overdue.
+        // It must not be stuck: the disposition route answers already_resolved, so Mark complete is the way out.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId), inquiryState: 1);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", InquiryTodo));
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Fact]
+    public async Task AnInquiryTheCallerCannotRead_IsOrdinary_MarkCompleteExecutes()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.Inquiries.Clear();
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+    }
+
+    [Fact]
+    public async Task AnOpenInquirysOutcomeTodo_WithAValidHint_CostsOneGetOfTheInquiry_AndNoList()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        (await rig.CommitAsync(MarkComplete(), DoSignal)).ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Fact]
+    public async Task AHintOnTheSecondLine_IsGuarded_409()
+    {
+        // Adversarial pass 1 F2: the assignee typed a note above the hint in TodoDetail.
+        // No matter on the To Do, so the matter fallback cannot find it: the hint alone must.
+        var rig = InquiryTodoRig(InquiryTodo, $"Phoned the firm on Tuesday\n{InquiryHint(ServiceRequestId)}");
+        rig.TodoMatter.Remove(InquiryTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Theory]
+    [InlineData(null)]                       // the notes were cleared
+    [InlineData("Waiting on the firm")]      // the hint line was deleted
+    public async Task AHintlessOpenInquirysOutcomeTodo_IsFoundByTheMatterFallback_AndRefused_409(string? notes)
+    {
+        // Adversarial pass 1 F2: the commit agrees with for-todo, which finds the inquiry by the derived id.
+        var rig = InquiryTodoRig(InquiryTodo, notes);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.InquiryReads.Should().ContainSingle().Which.Should().StartWith("sprk_servicerequests?$select=sprk_servicerequestid&$filter=");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryTodoOnAMatterWithAnOpenInquiry_IsUnaffected_MarkCompleteExecutes_AfterOneList()
+    {
+        // The fallback finds the matter's open inquiry, but its derived To Do id is not this To Do's.
+        var rig = InquiryTodoRig(ItemTodo, "Call the client back");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+        rig.InquiryReads.Should().ContainSingle("the matter fallback: one list as the caller");
+    }
+
+    [Theory]
+    [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
+    public async Task WhenTheCallerCannotReadTheTodosNotes_TheCommitIsNotFound_NotUnavailable(int status, string code)
+    {
+        // Adversarial pass 1 K2: "cannot read" is the item's not-readable answer, never "try again".
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.TodoNotesReadFails = DataverseUserResponse.Fail(status, code, "no");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound, result.Detail);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WhenTheTodosNotesCannotBeRead_TheCommitIsUnavailable_NeverMarkedComplete()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.TodoNotesReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 F3: the commit fails closed when the inquiry read faults ─────────────────────────────────────────
+
+    public enum InquiryFault { HintedGet503, MatterList503, MatterListHasMorePages, MatterListThrows }
+
+    [Theory]
+    [InlineData(InquiryFault.HintedGet503)]
+    [InlineData(InquiryFault.MatterList503)]
+    [InlineData(InquiryFault.MatterListHasMorePages)]
+    [InlineData(InquiryFault.MatterListThrows)]
+    public async Task WhenTheInquiryCannotBeRead_TheCommitIsUnavailable_NothingRunsOrIsWritten(InquiryFault fault)
+    {
+        // The hinted fault keeps the hint; the matter-list faults have none, so the fallback is the only way to know.
+        var rig = InquiryTodoRig(InquiryTodo, fault == InquiryFault.HintedGet503 ? InquiryHint(ServiceRequestId) : null);
+        switch (fault)
+        {
+            case InquiryFault.HintedGet503:
+                rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterList503:
+                rig.InquiryListFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterListHasMorePages:
+                rig.InquiryListFails = DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                {
+                    ["value"] = Array.Empty<object>(),
+                    ["@odata.nextLink"] = "https://org.example/api/data/v9.2/sprk_servicerequests?$skiptoken=2",
+                }));
+                break;
+            case InquiryFault.MatterListThrows:
+                rig.InquiryListThrows = new TaskCanceledException("Dataverse timed out");
+                break;
+        }
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.InquiryReads.Should().ContainSingle("the fault came from the inquiry read, not before it");
+        rig.Executors.Values.SelectMany(e => e.Requests).Should().BeEmpty("no executor runs");
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 K4: the finishing path (a writer-created record of this review exists) runs no inquiry check ──────
+
+    [Fact]
+    public async Task K4_FinishingAMarkCompleteRecordedWhileTheInquiryWasClosed_ClosesTheSignal_EvenThoughTheInquiryIsNowOpen()
+    {
+        // Mark complete ran while the inquiry was closed (an ordinary To Do); the close failed; the ledger forgot. The inquiry is
+        // open again by the retry: before, the guard ran on the finishing path and answered 409, leaving the Signal open forever.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId), inquiryState: 1);
+        FirstCloseFails(rig);
+        var review = MarkComplete();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 0);
+        var reads = rig.InquiryReads.Count;
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.ReasonCode.Should().NotBe(DecisionCommitReasons.InquiryDispositionRequired);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId, "the Signal is closed with the record found");
+        rig.Status(DoSignal).Should().NotBe(Open);
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.InquiryReads.Should().HaveCount(reads, "the finishing path reads no inquiry");
+    }
+
+    public enum InquiryAtFinish { StillOpen, NowClosed, ReadFaults }
+
+    [Theory]
+    [InlineData(InquiryAtFinish.StillOpen)]
+    [InlineData(InquiryAtFinish.NowClosed)]
+    [InlineData(InquiryAtFinish.ReadFaults)]
+    public async Task K4_FinishingAReviewRecordedUnderTheReducedPlan_ClosesTheSignal_WhateverTheInquiryIsNow(InquiryAtFinish now)
+    {
+        // The review was matched against the plan without Mark complete (the inquiry was open) and lists only Reschedule. Its stored
+        // record carries the review's hash, so the finishing path matches it against that plan without reading the inquiry again.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        FirstCloseFails(rig);
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] };
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        if (now == InquiryAtFinish.NowClosed)
+            rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 1);
+        if (now == InquiryAtFinish.ReadFaults)
+            rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle("nothing is run again");
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task ATeamOwnedNoCoreItem_NowRecords_OwnedByTheTeamUac2sResolverNames_D129()

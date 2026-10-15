@@ -289,7 +289,9 @@ public partial class RouteAuthorizationGuardTests
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
             + "serviceRequestId): no Read is the uniform 404, Read without Write a 403; every write then runs AS THE CALLER "
             + "(IDataverseUserClient, version-conditional), so Dataverse enforces Write a second time. The reply is read as the "
-            + "caller and must be Incoming and filed against the inquiry named."),
+            + "caller and must be Incoming and filed against the inquiry named. GET /api/v1/inquiries/for-todo/{todoId} (task 154) "
+            + "carries RecordRouteAccessAuthorizationFilter(\"read\", sprk_todos, todoId) and reads the To Do, the inquiry and its "
+            + "replies AS THE CALLER: a refused read is the uniform 404, a fault 503."),
         new GovernedFile("Api/FieldMappings/FieldMappingEndpoints.cs", Scope.RouteLevelGate,
             "field-mapping configuration reads, type validation, and the push route: Read on the source as the caller, children "
             + "read and written impersonated (task 166; sweep S-67)."),

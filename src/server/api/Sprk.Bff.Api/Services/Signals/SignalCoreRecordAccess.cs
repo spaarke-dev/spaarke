@@ -33,6 +33,19 @@ public enum SignalAccessOutcome
     Unavailable,
 }
 
+/// <summary>What <see cref="SignalCoreRecordAccess.CheckInquiryOutcomeTodoAsync"/> found (task 154, D-111).</summary>
+internal enum InquiryOutcomeTodoCheck
+{
+    /// <summary>No open inquiry the caller reads derives the To Do's id: Mark complete stays available.</summary>
+    Ordinary,
+    /// <summary>The To Do records the outcome of an open inquiry: completed by the disposition, never by Mark complete.</summary>
+    OpenInquiry,
+    /// <summary>The caller cannot read the To Do (403/404): the uniform not-found answer.</summary>
+    NotReadable,
+    /// <summary>A fault: nothing is done (503).</summary>
+    Unavailable,
+}
+
 /// <summary>The decision, plus what the caller was allowed to learn about the Signal.</summary>
 /// <param name="Outcome">The decision.</param>
 /// <param name="Lane">The Signal's lane; set only when <see cref="Outcome"/> is <see cref="SignalAccessOutcome.Allowed"/>.</param>
@@ -46,9 +59,14 @@ public enum SignalAccessOutcome
 /// <param name="CallerContactId">Do lane only, once the "mine" read admitted the caller (<see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/>):
 /// the caller's linked contact (null when they have none), so the suppression count reports only the caller's own Do-lane count
 /// (task 152, D-145a).</param>
+/// <param name="TodoNotes">Do lane, To Do subject only, from the same "mine" read (task 154, D-111): the To Do's notes (the inquiry
+/// hint). With <paramref name="TodoMatterId"/> it is what the plan route needs to identify an OPEN inquiry's "Record the outcome"
+/// To Do exactly as the commit route does (<see cref="SignalCoreRecordAccess.CheckSubjectTodoInquiryAsync"/>, pass 2 F1).</param>
+/// <param name="TodoMatterId">Do lane, To Do subject only, from the same "mine" read: the To Do's matter
+/// (<c>_sprk_regardingmatter_value</c>), for the matter fallback when the notes carry no usable hint.</param>
 public sealed record SignalAccessDecision(
     SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null,
-    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null)
+    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null, string? TodoNotes = null, Guid? TodoMatterId = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -319,8 +337,11 @@ public sealed class SignalCoreRecordAccess
             }
 
             var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
+            // Task 154 (D-111, pass 1 K3, pass 2 F1): this single-id read also selects a To Do's notes (the inquiry hint) and its
+            // matter (the fallback); the worklist's chunked read of the same rule does not.
             var mine = await _userClient.GetAsync(
-                SignalReadService.MineSubjectQuery(rule, entitySet, [subjectId], caller.CallerId, caller.ContactId), ct).ConfigureAwait(false);
+                SignalReadService.MineSubjectQuery(rule, entitySet, [subjectId], caller.CallerId, caller.ContactId, includeTodoNotes: true), ct)
+                .ConfigureAwait(false);
             if (!mine.IsSuccess)
             {
                 if (mine.ErrorCode is DataverseUserClientErrorCodes.UserContextRequired
@@ -353,7 +374,19 @@ public sealed class SignalCoreRecordAccess
             {
                 if (TryReadGuid(subject, pk, out var id) && id == subjectId)
                 {
-                    return allowed with { CallerContactId = caller.ContactId };
+                    // Task 154 (D-111): the same row carries the To Do's notes and matter (no request of its own); whether it records
+                    // an open inquiry is read only by the route that needs it (CheckSubjectTodoInquiryAsync).
+                    if (!string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return allowed with { CallerContactId = caller.ContactId };
+                    }
+
+                    return allowed with
+                    {
+                        CallerContactId = caller.ContactId,
+                        TodoNotes = ReadNotes(subject),
+                        TodoMatterId = TryReadGuid(subject, SignalReadService.TodoMatterColumn, out var todoMatter) ? todoMatter : null,
+                    };
                 }
             }
 
@@ -364,6 +397,90 @@ public sealed class SignalCoreRecordAccess
         {
             _logger.LogError("Signal access: the Do-lane mine check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
             return SignalAccessDecision.Unavailable;
+        }
+    }
+
+    private static string? ReadNotes(JsonElement row) =>
+        row.TryGetProperty(SignalReadService.TodoNotesColumn, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>
+    /// Task 154 (D-111, pass 2 F1), for the plan route: whether the allowed Do-lane Signal's subject To Do is the "Record the outcome"
+    /// To Do of an OPEN inquiry, read AS THE CALLER with the notes and matter the gate's own "mine" read returned
+    /// (<see cref="SignalAccessDecision.TodoNotes"/>, <see cref="SignalAccessDecision.TodoMatterId"/>): the commit route's own
+    /// identification (<see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/>), so the plan never offers a Mark complete
+    /// the commit refuses. One GET of the hinted inquiry, or one list of the matter's open inquiries when there is no usable hint, or
+    /// nothing for a To Do with neither. Any other subject is <see cref="InquiryOutcomeTodoCheck.Ordinary"/> with no request; a fault
+    /// is <see cref="InquiryOutcomeTodoCheck.Unavailable"/>, never a guess.
+    /// </summary>
+    internal async Task<InquiryOutcomeTodoCheck> CheckSubjectTodoInquiryAsync(SignalAccessDecision decision, CancellationToken ct)
+    {
+        if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane != DecisionLane.Do
+            || !string.Equals(decision.SubjectTable, "sprk_todo", StringComparison.OrdinalIgnoreCase) || decision.SubjectId is not { } todoId)
+        {
+            return InquiryOutcomeTodoCheck.Ordinary;
+        }
+
+        try
+        {
+            return ToCheck(await InquiryDispositionService.FindOpenInquiryOfTodoAsync(
+                _userClient, _logger, todoId, decision.TodoNotes, decision.TodoMatterId, ct).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Signal access: the subject To Do's inquiry check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return InquiryOutcomeTodoCheck.Unavailable;
+        }
+    }
+
+    /// <summary>The one reading of <see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/> for both routes: anything but
+    /// an open inquiry or none (a fault) is unavailable.</summary>
+    private static InquiryOutcomeTodoCheck ToCheck(InquiryTodoMatchResult match) => match.Match switch
+    {
+        InquiryTodoMatch.OpenInquiry => InquiryOutcomeTodoCheck.OpenInquiry,
+        InquiryTodoMatch.None => InquiryOutcomeTodoCheck.Ordinary,
+        _ => InquiryOutcomeTodoCheck.Unavailable,
+    };
+
+    /// <summary>
+    /// Task 154 (D-111, adversarial pass 1), for the commit route: whether the To Do <paramref name="todoId"/> is the "Record the
+    /// outcome" To Do of an OPEN inquiry, read AS THE CALLER. One GET of the To Do (its notes and matter), then
+    /// <see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/>, the for-todo lookup's own identification: one GET of the
+    /// hinted inquiry, or, when the hint fails, one list of the matter's open outbound inquiries. A To Do the caller cannot read (403/404)
+    /// is <see cref="InquiryOutcomeTodoCheck.NotReadable"/>, the same answer as any unreadable item; any other failure or a throw is
+    /// <see cref="InquiryOutcomeTodoCheck.Unavailable"/>, never a guess.
+    /// </summary>
+    internal async Task<InquiryOutcomeTodoCheck> CheckInquiryOutcomeTodoAsync(Guid todoId, CancellationToken ct)
+    {
+        try
+        {
+            var response = await _userClient.GetAsync(
+                $"sprk_todos({todoId:D})?$select={SignalReadService.TodoNotesColumn},{SignalReadService.TodoMatterColumn}", ct).ConfigureAwait(false);
+            if (!response.IsSuccess)
+            {
+                if (response.StatusCode is 403 or 404)
+                {
+                    _logger.LogDebug("Signal access: the caller cannot read the To Do ({ErrorCode}); not found.", response.ErrorCode);
+                    return InquiryOutcomeTodoCheck.NotReadable;
+                }
+
+                _logger.LogWarning("Signal access: the To Do's inquiry hint could not be read ({ErrorCode}); unavailable.", response.ErrorCode);
+                return InquiryOutcomeTodoCheck.Unavailable;
+            }
+
+            if (response.Body is not { ValueKind: JsonValueKind.Object } body)
+            {
+                _logger.LogWarning("Signal access: the To Do's inquiry hint was unparseable; unavailable.");
+                return InquiryOutcomeTodoCheck.Unavailable;
+            }
+
+            Guid? matterId = TryReadGuid(body, SignalReadService.TodoMatterColumn, out var matter) ? matter : null;
+            return ToCheck(await InquiryDispositionService.FindOpenInquiryOfTodoAsync(_userClient, _logger, todoId, ReadNotes(body), matterId, ct)
+                .ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Signal access: the To Do's inquiry check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return InquiryOutcomeTodoCheck.Unavailable;
         }
     }
 
