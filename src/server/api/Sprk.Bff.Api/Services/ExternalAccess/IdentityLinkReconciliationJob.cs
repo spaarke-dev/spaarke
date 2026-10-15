@@ -162,6 +162,21 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     }
 
     /// <summary>
+    /// The active registry rows <see cref="ReconcilableRegistryUrls"/> leaves out, counted by setup status (ordered by
+    /// status). Pure.
+    /// </summary>
+    public static IReadOnlyDictionary<EnvironmentSetupStatus, int> SkippedRegistryRowsByStatus(
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is { } status && status != EnvironmentSetupStatus.Ready)
+            .GroupBy(e => e.SetupStatus!.Value)
+            .OrderBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    /// <summary>
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
     /// (<c>DATAVERSE_URL</c>) and every <paramref name="registryEnvironments"/> URL, trailing slash trimmed, blanks
     /// dropped, de-duplicated case-insensitively, and never <paramref name="ownEnvironment"/> (already reconciled
@@ -312,8 +327,21 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             var registry = services.GetService<DataverseEnvironmentService>()
                 ?? throw new InvalidOperationException("DataverseEnvironmentService is not registered.");
-            registryUrls = ReconcilableRegistryUrls(await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false))
-                .ToList();
+            var active = await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false);
+            registryUrls = ReconcilableRegistryUrls(active).ToList();
+
+            // Skipped rows are logged, so a live environment stuck in Issue (a failed re-provision) shows in the run log
+            // rather than silently dropping out of reconciliation (uac-r2 review of #1901).
+            var skipped = SkippedRegistryRowsByStatus(active);
+            if (skipped.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[ID-LINK-RECON] Skipped {SkippedCount} registry row(s) whose setup is not Ready: {SkippedByStatus}. "
+                    + "correlationId={CorrelationId}",
+                    skipped.Values.Sum(),
+                    string.Join(", ", skipped.Select(kv => $"{kv.Key}={kv.Value}")),
+                    context.CorrelationId);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

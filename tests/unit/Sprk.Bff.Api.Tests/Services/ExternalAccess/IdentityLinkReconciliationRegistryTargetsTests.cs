@@ -49,4 +49,33 @@ public class IdentityLinkReconciliationRegistryTargetsTests
 
         targets.Should().Equal("https://spaarkedev1.crm.dynamics.com", "https://legacy.crm.dynamics.com");
     }
+
+    [Fact]
+    public void SkippedRows_AreCountedByStatus_ReadyAndLegacyAreNotSkipped()
+    {
+        var registry = new[]
+        {
+            Row("https://a.crm.dynamics.com", EnvironmentSetupStatus.InProgress),
+            Row("https://b.crm.dynamics.com", EnvironmentSetupStatus.Issue),
+            Row("https://c.crm.dynamics.com", EnvironmentSetupStatus.InProgress),
+            Row("https://d.crm.dynamics.com", EnvironmentSetupStatus.Ready),
+            Row("https://e.crm.dynamics.com", null),
+        };
+
+        IdentityLinkReconciliationJob.SkippedRegistryRowsByStatus(registry).Should().BeEquivalentTo(
+            new Dictionary<EnvironmentSetupStatus, int>
+            {
+                [EnvironmentSetupStatus.InProgress] = 2,
+                [EnvironmentSetupStatus.Issue] = 1,
+            });
+    }
+
+    [Fact]
+    public void NothingSkipped_WhenEveryRowIsReadyOrLegacy()
+        => IdentityLinkReconciliationJob.SkippedRegistryRowsByStatus(new[]
+            {
+                Row("https://d.crm.dynamics.com", EnvironmentSetupStatus.Ready),
+                Row("https://e.crm.dynamics.com", null),
+            })
+            .Should().BeEmpty();
 }
