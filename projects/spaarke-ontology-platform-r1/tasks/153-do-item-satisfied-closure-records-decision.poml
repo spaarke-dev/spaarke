@@ -4,7 +4,7 @@
     <title>A Do item closed because someone satisfied it writes a Routine Decision Record naming them (D-145b)</title>
     <phase>4 Decision Record</phase>
     <gate>blocked: #1907 (task 149) merged into docs/ontology-platform-design (same writer file)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New secure-family record write from the nightly job; extends the single Decision Record create path.</rigor-reason>
     <model-tier>opus</model-tier>

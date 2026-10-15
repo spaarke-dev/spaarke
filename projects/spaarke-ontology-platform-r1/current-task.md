@@ -20,9 +20,8 @@
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
 | 154 worklist route fields + inquiry lookup | #1982 | `954faa8b3` → fix | `C:\wts-154` | Pass 1 found three fix-now defects in the guard: (1) it ignores a closed inquiry, leaving the item stuck; (2) the hint is accepted only on the first line; (3) a for-todo timeout gives 500. Also the Not filed test gap, plus K2 and K3. Opus fix round running. Pre-existing problems filed: DI-99 #1984 (TodoDetail Complete bypass) and DI-100 #1985 (predictable To Do id). Next: pass 2, then uac-r2. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1` (WhatIf, then Verify for drift, then apply, then Verify). |
-| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `d1d292847` | `C:\wts-153` | uac-r2's re-check of `4d5f8bbfb` found F1: `DecisionCommitService.FindRecordAsync` (task 043 code) let a forged row take the finishing path. Fixed with createdby = writer; Unavailable on a fault; 3 tests plus a seeding proof. K2: one `LeavesSignalOpen` rule, and an unreplaced retry is logged and metered. K1 documented. Filtered tests 751, ArchTests 1046. With uac-r2 for a scoped re-check, then merge on green. |
 
-Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`), #1933 (146, `495faf82c`).
+Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`), #1933 (146, `495faf82c`), #1953 (153, `53f19f0a2`).
 
 ## Dev state (spaarke-bff-dev)
 
