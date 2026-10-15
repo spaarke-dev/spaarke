@@ -4,7 +4,7 @@
     <title>sprk_billingapproverrole into source; firm billing contact</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New script file and a new lookup column; touches existing dev columns that hold data (preserve-only); no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,6 +125,7 @@
     Docs added: docs/data-model/sprk_workassignment.md and docs/data-model/sprk_invoice-matter-project.md (rows for sprk_billingapproverrole; Matter row states the single-select reality).
 
     Not done by design: TASK-INDEX.md (parallel mode: the main session updates it), src/dataverse/solutions/SpaarkeMaster/** (task 029).
+Owner OK 2026-10-15 (DEF-011): the main session ran -ReplaceMatterApproverRole in dev. The first run was refused (0x8004f01f) by the generated aiskillconfig ais_FormFillFieldOptOut_sprk_matter_sprk_billingapproverrole; the script now deletes that config (unmanaged, platform-generated) before the column. Second run: created sprk_matter.sprk_billingapproverrole as multi-select on the global choice, 0 rows before and after; re-run created 0 / changed 0 / skipped 10. #1941 closed.
   </notes>
 
   <execution>

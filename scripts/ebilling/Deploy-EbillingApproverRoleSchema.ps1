@@ -153,21 +153,23 @@ function New-RoleColumnDef([string]$ChoiceId) {
 
 # Everything that would be lost or break if sprk_matter.sprk_billingapproverrole were dropped. Read-only.
 function Get-MatterReplacementEvidence($info) {
-    $ev = [ordered]@{ Total = $null; WithValue = $null; Dependencies = @(); UnexpectedDependencies = @(); References = @() }
+    $ev = [ordered]@{ Total = $null; WithValue = $null; Dependencies = @(); UnexpectedDependencies = @(); SkillConfigIds = @(); References = @() }
     $ev.Total = Get-RowsTotal 'sprk_matter'
     $ev.WithValue = Get-RowsWithRole 'sprk_matter'
     # Dependency API: what refuses or breaks a delete of the column (component type 2 = attribute).
     $deps = Get-DvOrNull "RetrieveDependenciesForDelete(ObjectId=$($info.MetadataId),ComponentType=2)"
-    $list = @(); $bad = @()
+    $list = @(); $bad = @(); $skills = @()
     foreach ($d in @($deps.value)) {
         $desc = "type $($d.dependentcomponenttype) id $($d.dependentcomponentobjectid)"
         $ok = $false
         if ([int]$d.dependentcomponenttype -eq 10314) {
-            # aiskillconfig: the platform's own generated "FormFillFieldOptOut" config for this column (deleted with it).
+            # aiskillconfig: the platform's own generated "FormFillFieldOptOut" config for this column. It blocks the column delete
+            # (0x8004f01f), so the replacement deletes it first.
             $sk = Get-DvOrNull "aiskillconfigs($($d.dependentcomponentobjectid))?`$select=uniquename,aiskill"
             if ($sk) {
                 $desc = "aiskillconfig $($sk.uniquename)"
                 $ok = ($sk.uniquename -eq "ais_FormFillFieldOptOut_sprk_matter_$Column")
+                if ($ok) { $skills += "$($d.dependentcomponentobjectid)" }
             }
         }
         $list += $desc
@@ -175,6 +177,7 @@ function Get-MatterReplacementEvidence($info) {
     }
     $ev.Dependencies = $list
     $ev.UnexpectedDependencies = $bad
+    $ev.SkillConfigIds = $skills
     # Direct text scan of the places a column is placed on: forms, views, personal views, charts, workflows / business rules.
     $refs = @()
     foreach ($f in @((Get-DvOrNull "systemforms?`$select=name,formxml&`$filter=objecttypecode eq 'sprk_matter'").value)) { if ("$($f.formxml)" -match $Column) { $refs += "form '$($f.name)'" } }
@@ -214,6 +217,10 @@ function Invoke-MatterReplacement($info, [string]$ChoiceId) {
         return
     }
     Write-Host "  DROPPING sprk_matter.$Column (single-select; 0 of $($ev.Total) rows hold a value)" -ForegroundColor Magenta
+    foreach ($id in @($ev.SkillConfigIds)) {
+        Write-Host "  DELETING generated aiskillconfig $id (FormFillFieldOptOut for the old column; it blocks the column delete)" -ForegroundColor Magenta
+        Invoke-Dv -Path "aiskillconfigs($id)" -Method DELETE | Out-Null
+    }
     Invoke-Dv -Path "EntityDefinitions(LogicalName='sprk_matter')/Attributes($($info.MetadataId))" -Method DELETE | Out-Null
     $gone = $false
     for ($i = 0; $i -lt 24 -and -not $gone; $i++) {
