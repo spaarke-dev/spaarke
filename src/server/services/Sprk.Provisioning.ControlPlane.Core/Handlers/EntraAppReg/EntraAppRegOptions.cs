@@ -121,6 +121,15 @@ public sealed class EntraAppRegOptions
     public TimeSpan KvOperationTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
+    /// T186 audit: attempts per deferred KV secret write after consent. Transient failures (403 while the Secrets
+    /// Officer grant propagates, 408/429/5xx, timeout) are retried; 8 x 15 s covers the RBAC delay seen live (L24).
+    /// </summary>
+    public int KvCommitRetryCount { get; set; } = 8;
+
+    /// <summary>Delay between deferred KV secret write attempts.</summary>
+    public TimeSpan KvCommitRetryDelay { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// T240a: the shared client apps (application ids) H3 pre-authorizes on every customer BFF app registration for
     /// its <c>user_impersonation</c> scope, so they get that BFF's token without a consent prompt — today the Office
     /// add-in; the Teams client when it exists (T240c). Platform-wide, never per customer; H3 sets exactly this list.

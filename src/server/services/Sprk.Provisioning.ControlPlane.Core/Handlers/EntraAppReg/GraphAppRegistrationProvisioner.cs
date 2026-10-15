@@ -1526,29 +1526,85 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             return null;
         }
 
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(_options.KvOperationTimeout);
+        // Group by vault so a (hypothetical) multi-vault pending set only
+        // constructs one SecretClient per vault.
+        var clients = pendingWrites
+            .Select(w => w.VaultName)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(v => v, v => new SecretClient(new Uri($"https://{v}.vault.azure.net/"), _sharedCredential), StringComparer.Ordinal);
 
-            // Group by vault so a (hypothetical) multi-vault pending set only
-            // constructs one SecretClient per vault.
-            foreach (var group in pendingWrites.GroupBy(w => w.VaultName, StringComparer.Ordinal))
-            {
-                var vaultUri = new Uri($"https://{group.Key}.vault.azure.net/");
-                var client = new SecretClient(vaultUri, _sharedCredential);
-                foreach (var write in group)
-                {
-                    await client.SetSecretAsync(write.SecretName, write.Value, timeoutCts.Token).ConfigureAwait(false);
-                }
-            }
-            return null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return $"KV commit failed: {ex.GetType().Name}: {ex.Message}";
-        }
+        return await CommitWithRetryAsync(
+            pendingWrites,
+            (write, ct) => clients[write.VaultName].SetSecretAsync(write.SecretName, write.Value, ct),
+            _options.KvCommitRetryCount, _options.KvCommitRetryDelay, _options.KvOperationTimeout,
+            _logger, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// T186 audit: writes each pending secret with its own timeout and retries what is transient — Key Vault 403
+    /// while the control plane's Secrets Officer grant propagates (L24), 408/429/5xx, a transport failure, or the
+    /// attempt timing out. A Set is idempotent (same name, same value), so a retry never leaves a different state.
+    /// Returns null on success, else the diagnostic of the last failure. The caller's cancellation still throws.
+    /// </summary>
+    internal static async Task<string?> CommitWithRetryAsync(
+        IReadOnlyList<PendingKvSecretWrite> pendingWrites,
+        Func<PendingKvSecretWrite, CancellationToken, Task> write,
+        int attempts,
+        TimeSpan delay,
+        TimeSpan attemptTimeout,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        foreach (var pending in pendingWrites)
+        {
+            for (var attempt = 1; ; attempt++)
+            {
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptCts.CancelAfter(attemptTimeout);
+                string failure;
+                try
+                {
+                    await write(pending, attemptCts.Token).ConfigureAwait(false);
+                    break;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    failure = $"KV commit of '{pending.SecretName}' timed out after {(int)attemptTimeout.TotalSeconds}s";
+                }
+                catch (Azure.RequestFailedException ex) when (IsTransientKvStatus(ex.Status))
+                {
+                    failure = $"KV commit of '{pending.SecretName}' failed: RequestFailedException {ex.Status}: {ex.Message}";
+                }
+                catch (HttpRequestException ex)
+                {
+                    failure = $"KV commit of '{pending.SecretName}' failed: HttpRequestException: {ex.Message}";
+                }
+                catch (Exception ex)
+                {
+                    return $"KV commit failed: {ex.GetType().Name}: {ex.Message}";
+                }
+
+                if (attempt >= attempts)
+                {
+                    return $"{failure} (after {attempts} attempts)";
+                }
+
+                logger.LogInformation(
+                    "H3 KV commit attempt {Attempt}/{Max} for {SecretName}: {Failure} — retrying in {Delay}.",
+                    attempt, attempts, pending.SecretName, failure, delay);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>0 = no response (transport); 403 = RBAC grant still propagating; 408/429/5xx = transient service.</summary>
+    internal static bool IsTransientKvStatus(int status) => status is 0 or 403 or 408 or 429 or >= 500;
 
     // ---------------------------------------------------------------------
     // Helpers
