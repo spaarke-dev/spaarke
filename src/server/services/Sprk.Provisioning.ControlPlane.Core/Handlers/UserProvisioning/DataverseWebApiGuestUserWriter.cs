@@ -52,6 +52,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
     private readonly HttpClient _httpClient;
     private readonly IDataverseRootBusinessUnitReader _rootBusinessUnitReader;
     private readonly Func<string, TokenCredential> _credentialFactory;
+    private readonly H11UserProvisioningOptions _options;
 
     /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public DataverseWebApiGuestUserWriter(
@@ -77,6 +78,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         _httpClient = httpClient;
         _rootBusinessUnitReader = rootBusinessUnitReader;
         _credentialFactory = credentialFactory;
+        _options = options.Value;
         _httpClient.Timeout = options.Value.DataverseRequestTimeout;
     }
 
@@ -278,21 +280,32 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         Uri envUri, AccessToken token, Guid objectId, CancellationToken ct)
     {
         // Alternate key: Dataverse adds a security-group member who is not yet a user (Microsoft, group-team article).
-        using var request = new HttpRequestMessage(HttpMethod.Get,
-            new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value"));
-        ApplyHeaders(request, token);
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        // T186 audit: the group add just before this read has not necessarily propagated to Dataverse — it answers 404 until it
+        // does. Re-read while that is the answer; any other refusal, and the 404 once the attempts run out, fail as before.
+        var reply = await H11ReplicationRetry.RunAsync(
+            async attemptCt =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value"));
+                ApplyHeaders(request, token);
+                using var response = await _httpClient.SendAsync(request, attemptCt).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(attemptCt).ConfigureAwait(false);
+                return new H11ReplicationRetry.Reply(response.StatusCode, body);
+            },
+            H11ReplicationRetry.IsDataverseUserNotYetVisible,
+            _options.ReplicationRetryCount, _options.ReplicationRetryDelay, logger: null, "guest systemuser read",
+            ct).ConfigureAwait(false);
+        var text = reply.Body;
+        if (!reply.IsSuccess)
         {
-            var why = response.StatusCode == HttpStatusCode.NotFound
+            var why = reply.Status == HttpStatusCode.NotFound
                 ? "Dataverse did not add the user — it adds one on this read only when it is a DIRECT member of the " +
                   "environment security group, the environment allows guests and its billing (pay-as-you-go, PRQ-C-11) " +
                   "covers the user; membership can take minutes to propagate (re-run)"
                 : "Dataverse refused the read";
             throw new InvalidOperationException(
-                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed: {(int)response.StatusCode} " +
-                $"{response.StatusCode} — {why}. Body: {Truncate(text, 400)}");
+                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed: {(int)reply.Status} " +
+                $"{reply.Status} — {why}. Body: {Truncate(text, 400)}");
         }
 
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);

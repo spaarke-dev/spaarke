@@ -45,17 +45,33 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
     private readonly H11UserProvisioningOptions _options;
     private readonly ILogger<GraphRestUserProvisioner> _logger;
 
+    private readonly Func<string, TokenCredential> _credentialFactory;
+
+    /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public GraphRestUserProvisioner(
         HttpClient httpClient,
         IOptions<H11UserProvisioningOptions> options,
         ILogger<GraphRestUserProvisioner> logger)
+        : this(httpClient, options, logger,
+              tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>Test seam constructor — injects the credential factory so tests never touch the real chain.</summary>
+    internal GraphRestUserProvisioner(
+        HttpClient httpClient,
+        IOptions<H11UserProvisioningOptions> options,
+        ILogger<GraphRestUserProvisioner> logger,
+        Func<string, TokenCredential> credentialFactory)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+        _credentialFactory = credentialFactory;
         _httpClient.Timeout = _options.GraphRequestTimeout;
     }
 
@@ -182,19 +198,30 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
 
         try
         {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post, $"https://graph.microsoft.com/v1.0/users/{userId}/assignLicense")
+            // T186 audit: assignLicense on a user created moments ago 404s (or 400s "does not exist" / usage location)
+            // until Entra replicates it. Wait that out; a genuine licence error (no available licences, bad SKU) is not
+            // retried and fails as before.
+            var reply = await H11ReplicationRetry.RunAsync(
+                async ct =>
+                {
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Post, $"https://graph.microsoft.com/v1.0/users/{userId}/assignLicense")
+                    {
+                        Content = JsonContent.Create(payload),
+                    };
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                    using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+                    var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                    return new H11ReplicationRetry.Reply(response.StatusCode, text);
+                },
+                H11ReplicationRetry.IsLicenseTargetNotYetReplicated,
+                _options.ReplicationRetryCount, _options.ReplicationRetryDelay, _logger, "assignLicense on the new user",
+                cancellationToken).ConfigureAwait(false);
+            if (!reply.IsSuccess)
             {
-                Content = JsonContent.Create(payload),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 return new LicenseAssignmentOutcome.Failure(
-                    $"POST /users/{userId}/assignLicense failed: {(int)response.StatusCode} {response.StatusCode}. " +
-                    $"Body: {Truncate(body, 300)}");
+                    $"POST /users/{userId}/assignLicense failed: {(int)reply.Status} {reply.Status}. " +
+                    $"Body: {Truncate(reply.Body, 300)}");
             }
 
             return new LicenseAssignmentOutcome.Success();
@@ -206,9 +233,9 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
         }
     }
 
-    private static async Task<AccessToken> AcquireTokenAsync(string tenantId, CancellationToken cancellationToken)
+    private async Task<AccessToken> AcquireTokenAsync(string tenantId, CancellationToken cancellationToken)
     {
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
+        var credential = _credentialFactory(tenantId);
         return await credential.GetTokenAsync(new TokenRequestContext(GraphScope), cancellationToken)
             .ConfigureAwait(false);
     }

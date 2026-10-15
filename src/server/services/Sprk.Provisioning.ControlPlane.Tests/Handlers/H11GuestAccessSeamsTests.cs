@@ -408,11 +408,15 @@ public sealed class H11GuestAccessSeamsTests
             NullLogger<GraphRestB2BInvitationClient>.Instance, _ => new FakeCredential());
 
     private static GraphRestEnvironmentSecurityGroupClient Groups(FakeHttp http)
-        => new(new HttpClient(http), Options.Create(new H11UserProvisioningOptions()), _ => new FakeCredential());
+        => new(new HttpClient(http), FastRetryOptions(), _ => new FakeCredential());
 
     private static DataverseWebApiGuestUserWriter Writer(FakeHttp http)
-        => new(new HttpClient(http), Options.Create(new H11UserProvisioningOptions()), new FakeRootBusinessUnitReader(),
+        => new(new HttpClient(http), FastRetryOptions(), new FakeRootBusinessUnitReader(),
             _ => new FakeCredential());
+
+    // T186 audit: the replication retry waits ReplicationRetryDelay between attempts — keep the tests that end on a 404 fast.
+    private static IOptions<H11UserProvisioningOptions> FastRetryOptions()
+        => Options.Create(new H11UserProvisioningOptions { ReplicationRetryDelay = TimeSpan.FromMilliseconds(1) });
 
     private sealed class FakeRootBusinessUnitReader : IDataverseRootBusinessUnitReader
     {

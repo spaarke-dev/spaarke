@@ -68,4 +68,15 @@ public sealed class H11UserProvisioningOptions
 
     /// <summary>Per-request timeout for Dataverse Web API calls (task 232 guest users).</summary>
     public TimeSpan DataverseRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// T186 audit: attempts for H11's calls about a user or guest created or invited moments ago — the licence
+    /// assignment of a new native user, the security-group add of a guest, and Dataverse's read of a guest whose
+    /// membership has not propagated. Each waits out Entra/Dataverse replication (404, or 400 "does not reference a
+    /// valid object") and no other error.
+    /// </summary>
+    public int ReplicationRetryCount { get; set; } = 6;
+
+    /// <summary>Delay between those attempts.</summary>
+    public TimeSpan ReplicationRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
 }
