@@ -100,7 +100,7 @@ switch ($Step) {
     if (-not $Apply) { throw 'ShareFirstProof writes: pass -Apply.' }
     $name = "TASK133-PROBE-$(Get-Date -Format yyyyMMddHHmmss)"
     $resp = Invoke-WebRequest "$Api/sprk_projects" -Method Post -Headers $H -Body (@{ sprk_projectname = $name; sprk_issecure = $true; 'ownerid@odata.bind' = "/systemusers($TestUserId)" } | ConvertTo-Json)
-    $id = [Guid]($resp.Headers['OData-EntityId'] -replace '.*\(([^)]+)\).*', '$1')
+    $id = [Guid](@($resp.Headers['OData-EntityId'])[0] -replace '.*\(([^)]+)\).*', '$1')
     "probe $name = $id"
     Show 'pre-call' $id
     try { Grant $id $TestUserId $CreatorRights; '(a) GrantAccess to the CURRENT owner: ACCEPTED' } catch { "(a) GrantAccess to the CURRENT owner: REFUSED - $($_.Exception.Message)" }

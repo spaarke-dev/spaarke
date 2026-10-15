@@ -57,6 +57,18 @@ Three possible verdicts, each with its consequence already worked out:
 | Only `$top=1` returns a `nextLink` | The service **does** page; today's containers are just small. M1 is genuinely latent and goes live as containers grow — the fix is load-bearing |
 | Neither returns one | **No evidence of paging.** Consistent with the docs. The fix stays as protocol compliance, is re-ranked defensive, and **047 need not assert live paging at all** |
 
+### ✅ Verdict (live, 2026-10-08, gatesA run): the service PAGES — row 2
+
+`Test-SpeContainerPermissionPaging.ps1 -ContainerId b!vzGDfDpd… (the BU container, 12 permissions) -Top 1`, with a Graph
+client-credentials token of the container type's owning app `170c98e1…` (secret read from Key Vault, never printed):
+- Probe 1, the unmodified GET the BFF issues: **12 permissions, no `@odata.nextLink`**.
+- Probe 2, `$top=1`: **1 permission, `@odata.nextLink` PRESENT** (`…/permissions?$top=1&$skiptoken=MQ`).
+
+So the endpoint does server-driven paging (with a `$skiptoken`, which the docs omit); today's containers are just under
+the default page size. M1 is a real latent defect and task 024's nextLink-following fix is load-bearing. 047 need not
+assert multi-page enumeration live (no dev container exceeds a page). Record: `notes/batch5-live-gates-2026-10-08.md`
+"Gates run 2026-10-08 (gatesA)".
+
 ---
 
 ## 2. 🔴 The design named the wrong precedent — there is a better one, in-repo, on this exact endpoint
