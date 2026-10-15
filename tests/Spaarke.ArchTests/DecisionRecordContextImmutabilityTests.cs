@@ -60,10 +60,14 @@ public class DecisionRecordContextImmutabilityTests
     /// <summary>A call on the Decision Record writer's Dataverse client.</summary>
     private static readonly Regex WriterClientCall = new(@"\b_writerClient\s*\.\s*(?<method>\w+)\s*\(", RegexOptions.Compiled);
 
-    /// <summary>A call on the writer's shared sysadmin reader (<c>IGenericEntityService</c>, which CAN create and update): task 149's gate-record lookup only.</summary>
-    private static readonly Regex EntitiesCall = new(@"\b_entities\s*\.\s*(?<method>\w+)\s*\(", RegexOptions.Compiled);
+    /// <summary>Any mention of the writer's shared sysadmin reader (<c>IGenericEntityService</c>, which CAN create and update).</summary>
+    private static readonly Regex EntitiesToken = new(@"\b_entities\b", RegexOptions.Compiled);
 
-    private static readonly HashSet<string> AllowedEntitiesCalls = new(StringComparer.Ordinal) { "RetrieveMultipleAsync" };
+    /// <summary>The ONE sanctioned use: task 149's gate-record lookup read. <c>\s</c> spans newlines, so a split call is allowed.</summary>
+    private static readonly Regex EntitiesLookupRead = new(@"\G_entities\s*\.\s*RetrieveMultipleAsync\s*\(", RegexOptions.Compiled);
+
+    /// <summary>(a) the field declaration (checked inline, preceded by the type) and (b) the constructor assignment: the only other sanctioned mentions.</summary>
+    private static readonly Regex EntitiesCtorAssignment = new(@"\G_entities\s*=(?![=>])\s*entities\b[^;]*;", RegexOptions.Compiled);
 
     private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
 
@@ -112,37 +116,74 @@ public class DecisionRecordContextImmutabilityTests
             "D-34: DecisionRecordWriter is create-only (a Decision Record is append-only except the live stamp columns, task 144 C2); it calls its Dataverse client for: " + string.Join(", ", others));
 
         // Task 149: the shared sysadmin reader the gate lookup uses can also create and update, so it is held to the one read.
-        var entityOthers = EntitiesCalls(code);
+        var entityOthers = EntitiesViolations(code);
         Assert.True(entityOthers.Count == 0,
-            "D-34: DecisionRecordWriter may call the shared entity service for RetrieveMultipleAsync only (the gate record lookup); it calls: " + string.Join(", ", entityOthers));
+            "D-34: DecisionRecordWriter may use the shared entity service only to declare it, assign it in the constructor and call RetrieveMultipleAsync (the gate record lookup); other uses:\n  " + string.Join("\n  ", entityOthers));
     }
 
-    private static List<string> EntitiesCalls(string code) => EntitiesCall.Matches(code)
-        .Select(m => m.Groups["method"].Value)
-        .Where(c => !AllowedEntitiesCalls.Contains(c))
-        .Distinct()
-        .ToList();
+    /// <summary>Every <c>_entities</c> token that is not the field declaration, the constructor assignment or a
+    /// <c>.RetrieveMultipleAsync(</c> call: a write call (also via <c>?.</c> or split across lines), a local alias, a method group, or a
+    /// hand-off to a helper all land here. Returns "line N" for each.</summary>
+    private static List<string> EntitiesViolations(string code)
+    {
+        var violations = new List<string>();
+        foreach (Match m in EntitiesToken.Matches(code))
+        {
+            var before = code[..m.Index];
+            if (Regex.IsMatch(before, @"\bIGenericEntityService\s+$")
+                || EntitiesCtorAssignment.IsMatch(code, m.Index)
+                || EntitiesLookupRead.IsMatch(code, m.Index))
+            {
+                continue;
+            }
 
-    [Fact(DisplayName = "Task 149 / D-34: shared-entity-service detector controls — a create through it fires, the lookup read does not")]
+            violations.Add($"line {SourceScan.LineOf(code, m.Index)}");
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 149 / D-34: shared-entity-service detector controls — writes, aliases, ?. and split calls fire; the lookup read, declaration and constructor do not")]
     public void EntitiesCall_Controls()
     {
+        static List<string> Scan(params string[] body) => EntitiesViolations(SourceScan.CodeText(
+            new[] { "private async Task Other(Entity e, QueryExpression q, CancellationToken ct)", "{" }.Concat(body).Append("}").ToArray()));
+
         // Must fire: a create (or any write) through the shared sysadmin service.
-        Assert.Equal(new[] { "CreateAsync" }, EntitiesCalls(SourceScan.CodeText(new[]
-        {
-            "private async Task Other(Entity e)",
-            "{",
-            "    await _entities.CreateAsync(e, CancellationToken.None);",
-            "}",
-        })));
+        Assert.Single(Scan("    await _entities.CreateAsync(e, CancellationToken.None);"));
+
+        // Must fire: the null-conditional form.
+        Assert.Single(Scan("    await _entities?.UpdateAsync(e, ct);"));
+
+        // Must fire: a local alias (the write then goes through the alias, which no token scan sees).
+        Assert.Single(Scan("    var r = _entities;", "    await r.CreateAsync(e, ct);"));
+
+        // Must fire: a call split across lines.
+        Assert.Single(Scan("    await _entities", "        .CreateAsync(e, ct);"));
+
+        // Must fire: a method group (no parenthesis) and a hand-off to a helper.
+        Assert.Single(Scan("    Func<Entity, CancellationToken, Task<Guid>> f = _entities.CreateAsync;"));
+        Assert.Single(Scan("    await Helper(_entities, e, ct);"));
 
         // Must NOT fire: the sanctioned lookup read, on one line or split across lines.
-        Assert.Empty(EntitiesCalls(SourceScan.CodeText(new[]
-        {
-            "private async Task<Guid?> Find(QueryExpression q, CancellationToken ct)",
-            "{",
+        Assert.Empty(Scan(
             "    var rows = await _entities.RetrieveMultipleAsync(q, ct).ConfigureAwait(false);",
             "    var more = await _entities",
             "        .RetrieveMultipleAsync(q, ct);",
+            "    var again = await _entities . RetrieveMultipleAsync",
+            "        (q, ct);"));
+
+        // Must NOT fire: the field declaration and the constructor assignment.
+        Assert.Empty(EntitiesViolations(SourceScan.CodeText(new[]
+        {
+            "public sealed class DecisionRecordWriter",
+            "{",
+            "    private readonly IGenericEntityService _entities;",
+            "",
+            "    public DecisionRecordWriter(IGenericEntityService entities)",
+            "    {",
+            "        _entities = entities ?? throw new ArgumentNullException(nameof(entities));",
+            "    }",
             "}",
         })));
     }

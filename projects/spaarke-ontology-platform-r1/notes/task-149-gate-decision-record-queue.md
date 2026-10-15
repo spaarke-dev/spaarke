@@ -126,3 +126,19 @@ recorded in detail because it is observable.
   `tests/unit/domain/Signals/SignalWriterTests.cs` (1553-1555, 1589), none in lines this task changed (the task adds one ctor argument at 1584).
 - **Note for operators.** The repo's pre-commit hook (lint-staged) takes a transient `git stash` backup while it runs; it was not run by this task's
   commands and left the shared stash list untouched.
+
+## Review pass 2 (CLEAN, no F-class finding) - known limits recorded and hardening
+
+- **K1 - gate records written inline by task 042 before this deploy carry a random review id.** The first re-gate of such a communication with the same
+  outcome therefore finds no record under the deterministic key and writes one more record. It happens once per communication. On spaarkedev1 the only such
+  rows are zz-146 test data, which is being deleted; no other environment runs ontology code.
+- **K2 - hardened (this round).** `DecisionRecordContextImmutabilityTests` now treats every `\b_entities\b` token in the comment-stripped writer as a
+  violation unless it is the field declaration, the constructor assignment, or followed by `.RetrieveMultipleAsync(` (whitespace and newlines allowed). That
+  closes `?.` calls, local aliases, method groups, helper hand-offs and split calls. Must-fire controls: `?.`, alias, split `_entities\n.CreateAsync(`, method
+  group, helper argument; must-not-fire: one-line and multi-line `RetrieveMultipleAsync`, the declaration and the constructor.
+- **K3 - the seam fake in `RiActionsViaSeamSeamTests.cs` does not evaluate the `sprk_confirmedby` Null condition** of the gate-record lookup. The unit-level
+  harness (`DecisionRecordWriterTests`, the review-shaped seeded row) covers it.
+- **K4 - covered (this round).** `Gate_AnUnfiledCommunicationOwnedInTheSecureRecordBusinessUnit_GoesToTheSecureTeam_NeverTheBusinessUnitDefaultTeam_D144`
+  runs the real `RecordOwnershipResolver`: an unfiled communication held in the Secure Record BU is owned by the NAMED Secure team (a secure child), never
+  the BU's default team. Seeding proof: with the writer's plain-parent ask replaced by the Secure default team, the case fails (expected the named team).
+- **K5 - the non-core-parent unreadable / too-deep case is counted as a skip, not a failure.** Already listed above as "skip classification edge".

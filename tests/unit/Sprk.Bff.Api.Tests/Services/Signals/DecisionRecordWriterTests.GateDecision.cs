@@ -219,6 +219,26 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     [Fact]
+    public async Task Gate_AnUnfiledCommunicationOwnedInTheSecureRecordBusinessUnit_GoesToTheSecureTeam_NeverTheBusinessUnitDefaultTeam_D144()
+    {
+        // Task 149 K4 (pass-2 review): D-144's "owning business unit's DEFAULT team" must not leak a secure communication's decision
+        // into the Secure Record BU's DEFAULT team (task 144: that team is a decoy and is never chosen). The second ask is the REAL
+        // resolver's plain-parent answer, so the Secure Record business unit is answered with its NAMED owner team (secure-if-any).
+        // The communication is unfiled (no regarding lookup) and owned by a user in the Secure Record BU (no owning team).
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, SecureBu);
+        var h = new Harness(realResolver: directory.Resolver()) { ReadBackTeam = SecureNamedTeam };
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        var owner = h.Row.GetAttributeValue<EntityReference>("ownerid");
+        owner.Id.Should().Be(SecureNamedTeam, "the Secure Record BU's NAMED owner team");
+        owner.Id.Should().NotBe(SecureDefaultTeam, "the Secure Record BU's default team is a decoy that is never chosen (task 144)");
+        owner.Id.Should().NotBe(ChildTeam).And.NotBe(GeneralTeam);
+        result.SecureOwnerTeamId.Should().Be(SecureNamedTeam, "D-33 / D-123: a gate record about a communication held in the Secure Record BU is a secure child");
+        h.Row.Contains("owninguser").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Gate_AnUnchangedAnswer_IsAskedAgainOnce_AsAPlainParent_OverTheSameParents_D144()
     {
         var h = new Harness();
