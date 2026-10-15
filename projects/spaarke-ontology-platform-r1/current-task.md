@@ -11,15 +11,16 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 059 worklist widget (lane running); 153 (#1953) adversarial pass 1; 146 waits for R3's c20bff283 redeploy. |
+| **Task** | Four agents running: 153 pass 2 (#1953), 059 review (#1964), 154 implementer, 146 third re-run. |
 | **Blocker** | None. |
-| **Next Action** | (1) 059 agent returns a PR, then one adversarial review, a fix round and a re-check, then merge. (2) 153 pass 2 returns, then a fix round if needed, then uac-r2, then merge. (3) R3 reports the c20bff283 deploy (SHA, healthz, writer setting); about 15 minutes later, resume the 146 agent for items 1, 2, 3, 9, 11. |
+| **Next Action** | (1) 059 review returns, then a fix round and a re-check, then merge. (2) 154 PR, then review, then uac-r2, then merge; then launch 155. (3) 153 pass 2 returns, then fixes, then uac-r2, then merge. (4) 146 results, then review and merge #1933, then the 144/148 report-only pass. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 059 worklist widget | — | — | `C:\wts-059` | Sonnet/high implementer running through task-execute. Branch `task/ontology-059-worklist-widget` from `7fc51a796`. On the path to 055 (Console deploy). |
+| 059 worklist widget | #1964 | `d8ff6491c` | `C:\wts-059` | Built. The D-111 picker escalated and was split into 154 and 155. Opus adversarial review running. |
+| 154 worklist route fields + inquiry lookup | — | — | `C:\wts-154` | Opus/high implementer running. Gates 055. |
 | 153 satisfied close writes a Routine DR (D-145b) | #1953 | `672cb8f58` | `C:\wts-153` | Pass 1 fixed in `b68f4ac2b`:
   - F1: a permanent refusal is a skip, with an 8-day cache marker, and closure-record failures are out of `IsSuccess`.
   - F2: the closing record replaces the link the job read before the close.
@@ -28,7 +29,7 @@
   - 531/531 filtered tests and 1046 ArchTests pass.
 
 The gate lookup is untouched. Adversarial pass 2 is running (focus: the retry pass, the cache marker, link races, skip misclassification). Next: uac-r2, with F3 called out for them. |
-| 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | Docs only. Items 5, 6, 7, 10 pass; 4 and 9 are partial; 8 is the UAC known limit. Items 1, 2, 3, 9, 11 are refused because the BFF connection still caches the writer's privileges after the AppendTo-contact grant (`RetrievePrincipalAccess` flipped at 17:51Z). All test data is deleted. |
+| 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | R3 redeployed dev with `c20bff283` (`e276357a7`) and restarted at 20:16-20:18Z; the writer setting survived. A third re-run of items 1, 2, 3, 9, 11 started at 20:33Z (fresh Sonnet agent). |
 
 Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
 
