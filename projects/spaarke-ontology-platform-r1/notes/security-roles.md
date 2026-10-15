@@ -897,3 +897,15 @@ rows.** Both tables hold 0 rows in total after the run.
 - **After**: read-back `privilegedepthmask = 4`. Repo role XML `Roles/Spaarke Basic User.xml` updated to match.
 - **Still to do**: re-run `SignalReadRouteLiveTests` as the non-Console user after the 035 deploy, then close #1882.
   Other environments need the same grant when ontology is provisioned there.
+
+## 13. 2026-10-15 — AppendTo on contact for Spaarke Ontology Service (owner-approved, 146 K-c)
+
+- **Why**: on dev, every decision commit failed with `record_write_failed` (500): the writer lacked `AppendToAccess` on the
+  person's `contact` when the Decision Record write set its contact lookups (146 live gate, K-c; seen for three different contacts).
+- **Approval**: owner, 2026-10-15 (writer-role changes are outside D-110 and need the owner).
+- **Change**: `AddPrivilegesRole` on the root copy of **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`
+  (BU `06fbf21c-…`) at 2026-10-15T17:38:31Z (HTTP 204): `prvAppendToContact` (`158327b5-f4c1-448e-93d1-5f135126665b`) at
+  **Global**, matching the role's other AppendTo privileges.
+- **Read-back** (`RetrieveRolePrivilegesRole`, before and after): **50 → 51; added exactly** `prvAppendToContact|Global`;
+  nothing removed, no depth changed. No other role touched. Repo `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` updated.
+- **Next**: re-run 146 items 1, 2, 3, 9 and 11 (commit-route Decision Records) on dev. Other environments need the same grant.
