@@ -96,3 +96,5 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | 00:22 UTC | Dev control plane redeployed (`5c9b55ca3`, includes the L16 fix): Api swapped, Worker healthy, all post-deploy checks OK | owner OK 2026-10-14 |
 | 00:28 UTC | Step 4.0 POST re-sent | **202**, run `18701ed5-21c4-4efb-b462-0ddbcd136ab3`. **L16 proven live**: the guard's If-Match PATCH succeeded (registry ETag 27691597 → 27692329) |
 | 00:28 UTC | H0 preflight | **Failed** in 7 s: `quota-subscription-vcpu`, standardDv5Family not reported in westus2 (L17). No Azure resource created; `sprk_currentrunid` released (null) |
+| 03:05 UTC | PR #1885 merged (master `ed2b703f3`; every check green, CLEAN). It closes #1889 and carries L14, L16 and the sidecar Trivy fix | — |
+| 04:10 UTC | spaarke-bff-dev redeployed by external-access-r3 at R3 `dfb4b9a43` (= R3 + master `ed2b703f3`). **The L14 demo-expiry fix is live on dev.** Coordinated deploy: dev stays on R3 while the owner tests task 068 | owner OK 2026-10-14 |
