@@ -70,5 +70,19 @@ Changes to shipped parts, each needed so a closed item the route returns renders
   touched.
 
 ## Tests
-See the PR body for the counts. Mutation proofs run on the new behaviour (each failed a named test): sorted visible ids, narrative shown under
-a filter, aggregate row shown under a Do filter, start button ignoring the filter, no reload after a record, replay guard dropped, withheld ignored.
+- UI.Components jest (Worklist, ConsoleKit, DecisionWizard, WorkspaceShell): 343 tests, 342 pass, 1 fail (the pre-existing folder-run flake above; it passes alone).
+  Worklist + ConsoleKit alone: 168 pass. New AI.Widgets tests: 10 pass (host, lookup); `register-workspace-widgets.test.ts` with the new
+  `worklist` describe: 69 pass (79 with the host and lookup suites).
+- `tsc --noEmit`: UI.Components 9 errors, identical to before (unresolved `@spaarke/auth`, `@spaarke/sdap-client`); AI.Widgets 31, all unresolved sibling
+  packages, none in a file this task touched. `vite build` of `src/solutions/SpaarkeAi` succeeds (index.html 6,165 kB, gzip 1,720 kB); no baseline build
+  was taken, so no size delta is claimed.
+- Mutation proofs (each change failed named tests, then was reverted): sort the visible ids (6 failed), narrative shown under a filter (2),
+  aggregate row shown under a Do filter (1), start button ignoring the filter (1), no reload after recording (3), replay guard dropped (2), withheld
+  ignored (2).
+- Fix-the-class grep: `EvidenceLine` has one real consumer (`FoundStep`, now passes `withheld`); `hasRecordedDecision` has two callers, both use the guard.
+- ADR check (ADR-012, -021, -022, -028, -038): no Xrm, token, colour literal, Fluent v8 or React 18-only API in the shared Worklist sources; the host
+  uses the session's authenticated fetch.
+
+## Issues filed
+#1958 (D-111 picker blocked on route fields), #1959 (route gaps: sentence, Decision Record, Not filed last), #1960 (narrative wiring, task 062),
+#1961 (pre-existing DecisionWizard folder-run flake). Label `ontology-deferred`; DI numbers are for the main session to assign.
