@@ -19,7 +19,7 @@
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 059 worklist widget | #1964 | `d8ff6491c` | `C:\wts-059` | Built. The D-111 picker escalated and was split into 154 and 155. Opus adversarial review running. |
+| 059 worklist widget | #1964 | `d8ff6491c` → fix | `C:\wts-059` | Review found three fix-now defects. Sonnet fix round running for the widget-side ones: (1) a Closed today line could open editable because the loader ignored which set it came from; (2) an unrecognised 200 rendered an empty lane; (3) "Nothing to do." showed under the aggregate row. Also two smaller items: the 403 message, and the `WorklistRequestError` export. Server-side findings sent to 154: Not filed last, and no mark-complete on the inquiry-outcome To Do (409 `inquiry.disposition_required`). |
 | 154 worklist route fields + inquiry lookup | — | — | `C:\wts-154` | Opus/high implementer running. Gates 055. |
 | 153 satisfied close writes a Routine DR (D-145b) | #1953 | `672cb8f58` → fix | `C:\wts-153` | Pass 2 found F1 (security): Console User's Deep Create on DRs plus computable keys mean a forged keyed DR suppresses the genuine record. The merged 149 `FindGateRecordAsync` has the same hole. Opus fix round: both lookups also require createdby = the writer; plus the F3 test, the foreign-link hardening (D-128 code), and Warnings on silent orphan and abandon paths. uac-r2 was told the gate lookup changes. |
 | 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | R3 redeployed dev with `c20bff283` (`e276357a7`) and restarted at 20:16-20:18Z; the writer setting survived. A third re-run of items 1, 2, 3, 9, 11 started at 20:33Z (fresh Sonnet agent). |
