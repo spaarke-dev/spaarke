@@ -2,65 +2,58 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md` D-table. Session narrative → commit messages.
 
-> **Last Updated**: 2026-10-14 SESSION 47. PR #1823 merged (master `8cc1ef392`): SpaarkeMaster 1.2.2.0 source, decision-record delete relation, Crypto Pkcs/Xml 10.0.13 CVE pins. SpaarkeMaster 1.2.2.0 PUBLISHED (run 38493202673). Earlier: PRs #1809 and #1822 merged. Dev control plane deployed from `67c80623f` (H14m live; all post-deploy checks green). T240d spike S1 done → option 2. D32 Exchange roles applied, mailbox checks M1–M5 and M7 PASS, ISS-024 closed.
+> **Last Updated**: 2026-10-14 SESSION 48. PR #1860 merged (master `bd52b6290`). SpaarkeMaster **1.2.3.0 PUBLISHED** (CI run 38603706393): it carries `contact.sprk_externalinvitecodehash`, which satisfies the T240d release gate; UAC has been told. The old demo stack has been retired (owner D35). T186 = the ACME Corporation demo stamp; prerequisites are in progress.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | T186 (first live E2E via `/provision-environment`, mock customer homed in Dewey Cheatham, stamp in the DEMO subscription) and the T240d build (option 2), in parallel with reviews of UAC task 185 |
-| **Status** | No agents running. The #1827 gate review was sent to UAC on 2026-10-14. UAC is fixing F1 (owner 98c: the inviter always gets `Sent`), F3 (503) and K1 (`#invite=`) in scope. When UAC sends the fix-round head SHA, re-check the fix diff only. Results are in t240d design §10. The dev control plane is at `67c80623f`; master since then adds only the CVE pins, the decision-record relation and SpaarkeMaster source, so no redeploy is needed for T186. |
-| **Next Action** | (1) Owner OK to start T186. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34); H6 imports 1.2.2.0. (3) T240d build. |
+| **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO subscription `2ff9ee48-…`, managed SpaarkeMaster 1.2.3.0). Run log: `notes/t186-acme-run-log.md`, kept up to date AS THINGS HAPPEN (owner 2026-10-14: the process must be fully documented and repeatable; each lesson goes into the operator docs before T186 closes). |
+| **Status** | Waiting on the owner's prerequisites (below). My prerequisites done: PRQ-S-04 (L2 Worker UAMI Owner on the DEMO sub) and PRQ-C-10 (group `sprk-acme-users` `7de5a154-2604-438b-b1cd-462406a869a9`). No agents running. |
+| **Next Action** | When the owner says the environment `spaarke-acme` exists: (1) add the L2 Worker as a System Administrator application user (PRQ-C-09); (2) set `restrictGuestUserAccess=false` (PRQ-C-12); (3) create the registry placeholder on spaarkedev1 (PRQ-E-13, skill Step 1); (4) create two ACME test users; (5) run `/provision-environment acme`. Each live action needs the owner's OK. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
 ## 🔔 Waiting on the owner
 
-1. ~~L2 UAMI mail grants~~: decided 2026-10-13 (D33): keep for now.
-2. **ISS-026** publisher verification (ADR-028 A9): an owner/business action before the first production customer.
-3. **UAC task 185** (invite code) is with the owner. Our review (2026-10-13): R1 secret-bearing send option, as a T240d production prerequisite; R2 `spaarkeextid` stays email + password. See t240d design §7 step 4 and §10.
+1. **ACME prerequisites:**
+   - the ACME Workforce tenant (PRQ-C-13; plus the PRQ-C-14 outbound B2B attestation);
+   - the Dataverse environment `spaarke-acme` (US, Production, security group `sprk-acme-users`);
+   - the PAYG billing policy on the DEMO sub (PRQ-C-11);
+   - the Exchange group `Spaarke-AppAccess-acme` (PRQ-C-08).
+2. **Demo accounts the owner hasn't classified:** `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` @demo.spaarke.com. Keep or delete?
+3. **Dev BFF secrets:** an agent printed the email-processing webhook secret, the signing key and the SignalR key into its local transcript. Rotating them is the owner's call.
+4. **ISS-026** publisher verification: Partner ID 7011236. The owner asked why it is needed; the answer was "consent-screen trust, not functionally required". The operator steps wait for Partner Center facts.
 
 ## Live state
 
-- Dev control plane `rg-spaarke-platform-dev`: master `67c80623f` (2026-10-13). The Api is swapped to production and the Worker deployed. The sidecar image was built from `d39c066c3` (H14m endpoints). `CustomerRunGuard__Enabled=True`.
-- Spaarke Exchange Admin (app 46670ee2, Exchange SP b5d396bb) holds `Spaarke App RBAC Admin`, `View-Only Recipients`, and the D32 roles `Spaarke Shared Mailbox Create` and `Spaarke Scope Group Membership` (scope `Spaarke Customer Scope Groups`). There is a leftover delegating `sprk-exoadmin-deleg-MailboxSettingsRead` (harmless; remove at the next maintenance).
-- Store: SpaarkeMaster **1.2.2.0** latest (2026-10-14, managed sha256 `691d1dd1…f630f2fb`). It carries `contact.sprk_externalinvitedon` and its field-security profiles. It does NOT carry `sprk_externalinvitecodehash` (UAC #1827, not merged), which needs the next release before T240d production. The workforce role `Spaarke Internal Contact User (Workforce)` is excluded until UAC 186 closes.
-- Demo BFF `spaarke-bff-demo` is stopped (.NET 8). Retire it after T186.
-- T240d spike S1 objects: all deleted (the owner deleted the test user and the spike enterprise app).
+- Dev control plane `rg-spaarke-platform-dev`: redeployed 2026-10-14 from `e18cb33a0` (= master `630373cbb`); all checks green; `CustomerRunGuard__Enabled=True`.
+- Store: SpaarkeMaster **1.2.3.0** latest (2026-10-14, managed sha256 `e84cd5d9…3f662e`). 1.2.3.0 adds `sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. It also adds other projects' dev work: ServiceRequest autonumber `RQST-{SEQNUM:4}`, the CommunicationConnections PCF, and 3 web resources. Nothing removed. The workforce role `Spaarke Internal Contact User (Workforce)` is still excluded until UAC 186 closes.
+- **Old demo (D35), retired 2026-10-14:**
+  - Deleted: the Dataverse env `spaarke-demo` (deleted by the owner), `spaarke-bff-demo` and its plan, SB, OpenAI, docintel, Cosmos, Redis, App Insights, `spaarke-demo-logs`, `mi-bff-api-demo`, the apps "Spaarke BFF API - Demo" and "Spaarke UI - Demo", and 10 test accounts.
+  - KEPT: the website functions with `WestUS2Plan`, `sprkdemosa`, `sprk-demo-kv` and the Smart Detection action group; Syntex `1f3cfdfb` (owner OK); the group "Spaarke Demo Users" `745bfdf6` (used by dev BFF demo approvals); and the accounts jessica, lori, chelsea, `demo@` and `uac.child.user`.
+- The demo-request flow is UNCHANGED and works: website → `spaarke-bff-dev` → `sprk_registrationrequest` (spaarkedev1) → "Approve Demo Access" → registry row "Dev". Retargeting it to the ACME stamp needs a code change (it ignores the row's `sprk_securitygroupid`) plus a cross-stamp identity decision. Bring the owner ONE recommendation after T186 (run log L3).
 
 ## 📋 Remaining
 
-- **T186 prerequisites:** met (SpaarkeMaster 1.2.2.0 published). Live proofs owed at T186:
-  - ISS-008 (a second POST for the same customer is refused);
-  - T261 OwnedBy ownership at H3;
-  - ISS-015 Worker FIC at H6;
-  - T260 census at H13;
-  - H7b S19–S21;
-  - T259 BU placement;
-  - PRQ-C-14 attestation;
-  - H14m route-level M4 (`Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles).
-- **T240d build (option 2):**
-  - MI-FIC provisioner;
-  - H3c (CIAM API app `sprk-{customerId}-ciam-api`, with read-back and retry);
-  - H4b `Ciam:*` (Audience = the CIAM API app id; `Ciam:Domain`);
-  - H13 probes;
-  - CiamUserProvisioningService (authority login.microsoftonline.com, `User.Create`);
-  - `CiamGraphClientFactory`: make `CertificateName` optional under MI-FIC (after #1827 it is required);
-  - the production CIAM SPA client (redirect `https://external.spaarke.com`).
-
-  Gates are in design §10: BFF at or after 185, SpaarkeMaster carrying both contact columns, the secret-bearing send. The live acceptance checks are the cross-customer ExistingAccount check (UAC §11b) and the SSPR lock-out.
-- **A9 (workforce sign-in at the home directory):**
-  - H3: `requestedAccessTokenVersion=2`, `knownClientApplications`, and the workforce SPA client in PreAuthorizedClientAppIds;
-  - intake `customerWorkforceTenantIds`;
-  - H4b `WorkforceIdentity__CustomerTenantIds__N`;
-  - the admin-consent URL in the hand-off;
-  - accept SPA-r3 task 041's directory field.
-
-  Mapping: `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
-- **ISS-025 (#1803):** H7b verifies the locks on `sprk_externalinvitedon` and `sprk_externalinvitecodehash`.
-- **Other:**
-  - T240b, T240c, ISS-022;
-  - remove the old L2 broad Graph roles after the T186 H3 proof;
+- **T186 live proofs:**
+  - ISS-008: a second POST is refused;
+  - T261: OwnedBy at H3;
+  - ISS-015: Worker FIC at H6;
+  - T260: census at H13;
+  - H7b S19–S22;
+  - T259: BU placement;
+  - PRQ-C-14;
+  - H14m route-level M4;
+  - H3: 6-entry delegated catalog with the admin-consent gate (`POST /api/runs/{id}/gates/admin-consent/advance`).
+- **Repo cleanup of old-demo references** (after #1860, now unblocked): `config/environments.json:77-115`, `config/spaarke-resources.yaml:601-630`, `spaarke-constants.yaml:79`, `scripts/Reconcile-DemoEnvironment.ps1`, `redis-demo.bicepparam`, `DocumentOperations.js:164` (demo-URL runtime branch), docs.
+- **Builds:**
+  - D36: H4b keyless SignalR string when `signalrEnabled`, plus a manifest note on `Rag__ApiKey`;
+  - D37: `appRoleAssignmentRequired` on stamp BFF SPs, after A9;
+  - T240c directory service (after T186; D38);
+  - T240d (option 2; the keyless `CiamGraphClientFactory`, with `CertificateName` optional under MI-FIC);
+  - A9 H3 changes (wait on SPA-r3 task 059);
   - 203d; wrap-up 090.
+- Remove the old L2 broad Graph roles after the T186 H3 proof.
 
 ## 🐞 Open defects
 

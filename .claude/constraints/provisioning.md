@@ -193,7 +193,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   member) as the L2 Worker identity. **MUST NOT** grant L2 a Power Platform admin role or register it as a management
   app for this (force sync) — ask the owner first if a live run shows the alternate key is not enough.
   Then (T259) H11 moves the user from the root into the customer's business unit (`PATCH systemusers({id})` `businessunitid@odata.bind`, `If-Match: *`, read back) BEFORE any role, and assigns only that unit's role copies.
-- An existing guest is reused — **never re-invite** (it re-sends the email). `restrictguestuseraccess` must be off
+- An existing guest is reused — **never re-invite** (it re-sends the email). `restrictGuestUserAccess` must be off
   (PRQ-C-12); H11 checks it before inviting. Decisions + known limits: `projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md`.
 
 ## Stamp BFF clients — CORS + app-registration client access (BINDING, task 240a)

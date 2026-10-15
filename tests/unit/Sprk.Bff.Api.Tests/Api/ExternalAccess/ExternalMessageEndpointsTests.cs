@@ -150,10 +150,15 @@ public class ExternalMessageEndpointsTests
             : throw new RecordNotFoundException(entity, id);
     }
 
-    private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null) =>
-        ExternalMessageEndpoints.GetMessagesCoreAsync(
+    // Task 187 fix round 1 (R2): the live-parent reader is passed as the route passes it (GetMessagesAsync), the REAL walk over
+    // _roots' filing world, so a message row's parent lookups are parsed, walked and decided as in production.
+    private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
-            _roots.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+    }
 
     /// <summary>A lookup value as RecordService projects it.</summary>
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
@@ -244,7 +249,9 @@ public class ExternalMessageEndpointsTests
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
             "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
-            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&");
+            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value" +
+            // Task 187: the message's other parents, whose LIVE roots the rule takes in.
+            ",_sprk_communicationthread_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&");
         _impersonated.VerifyNoOtherCalls();
     }
 
@@ -464,6 +471,50 @@ public class ExternalMessageEndpointsTests
             .Should().Equal(id.ToString("D"));
     }
 
+    // ── task 187 fix round 1 (R2): a message row's OTHER parent lookups are parsed and their LIVE roots decide ──
+    // A message on P's thread whose sprk_regardinginvoice / sprk_regardingevent names a record filed under secure matter X is
+    // behind X's wall (SecureChildReconciler's secure-if-any), whatever its stamps say.
+
+    [Theory]
+    [InlineData("_sprk_regardinginvoice_value", "sprk_invoice", "sprk_matter")]
+    [InlineData("_sprk_regardingevent_value", "sprk_event", "sprk_regardingmatter")]
+    public async Task AMessageWhoseOtherParentIsUnderSecureX_IsWithheld_FromAPOnlyReader_AndListed_ForAPAndXReader(
+        string column, string parentTable, string parentRootColumn)
+    {
+        var project = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var parent = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow(parentTable, parent, (parentRootColumn, "sprk_matter", secure));
+        var plain = Guid.NewGuid();
+        var carrier = Guid.NewGuid();
+        var carrierRow = MessageRow(carrier, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        carrierRow[column] = El(parent.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), carrierRow);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(new[] { plain.ToString("D") }, "the message's live parent is under secure X, which the caller cannot read");
+        Messages(await Get("projects", project, Ciam(project: project, matter: secure))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"), carrier.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageWhoseOtherParentIsUnderAnOrdinaryRoot_IsListed()
+    {
+        var project = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, open);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", open));
+        var id = Guid.NewGuid();
+        var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        SetupMessages(row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(id.ToString("D"));
+    }
+
     [Fact]
     public async Task TheThreadQuery_AlwaysReadsAllThreeRootStamps_WhateverRecordItIsKeyedOn()
     {
@@ -477,30 +528,144 @@ public class ExternalMessageEndpointsTests
             .And.Contain("_sprk_regardingworkassignment_value");
     }
 
-    [Fact]
-    public async Task AnInvoiceThread_IsExemptFromTheMultiRootRule_ItIsReachedThroughTheUnionOfItsParents()
+    // ---- Task 187, fix round 1: invoice threads (owner round 100, D1 and D4) ----
+    //
+    // Owner decision 2026-10-11 (option A "inherit") still admits a caller who reaches the invoice through ONE of its parents
+    // when the others are ordinary. D4: an invoice whose LIVE roots include a SECURE root the caller cannot read (its own
+    // matter or project, or the root its agreement is filed under) is behind that root's wall, so its thread is refused, as
+    // the invoices list withholds it (D2). D1: each message's OTHER parents (not the route invoice, which the gate decided)
+    // are walked, so a message also filed under secure X is withheld from a caller who cannot read X.
+
+    private void AddInvoice(Guid invoice, Guid? matter = null, Guid? project = null, Guid? agreement = null)
     {
-        // Owner decision 2026-10-11 (option A "inherit"): a caller who reaches the invoice through ONE of its parents reads
-        // its thread. Every message under an invoice is stamped with exactly the invoice's parents, so the multi-root rule
-        // could empty that thread for the very caller the owner chose to admit. Kept under option B (2026-10-12): even a
-        // SECURE other parent does not withhold it, and no flag is read.
+        var record = new Dictionary<string, object?> { ["id"] = invoice };
+        if (matter is { } m) record["sprk_matter"] = Lookup(m, "sprk_matter");
+        if (project is { } p) record["sprk_project"] = Lookup(p, "sprk_project");
+        if (agreement is { } a) record["sprk_regardingagreement"] = Lookup(a, "sprk_agreement");
+        _records[("sprk_invoice", invoice)] = record;
+    }
+
+    private static CallerPrincipal CiamOnMatters(params Guid[] matters) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "partner@outside.test",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        MatterAccess = matters.ToDictionary(m => m, _ => AccessRights.Read),
+        WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+    };
+
+    [Fact]
+    public async Task AnInvoiceAlsoUnderASecureRootTheCallerCannotRead_ItsThreadIsRefused_AndNoMessageIsRead_D4()
+    {
         var matter = Guid.NewGuid();
         var project = Guid.NewGuid();
         var invoice = Guid.NewGuid();
         _roots.AddSecureRoot(ExternalGrantRootType.Project, project);
-        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
-        {
-            ["id"] = invoice,
-            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
-            ["sprk_project"] = Lookup(project, "sprk_project"),
-        };
+        AddInvoice(invoice, matter: matter, project: project);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeForbiddenNotAccessible(await Get("invoices", invoice, Ciam(matter: matter)));
+        _lastOData.Should().BeNull("no message is read behind the wall");
+    }
+
+    [Fact]
+    public async Task AnInvoiceAlsoUnderAnOrdinaryRootTheCallerCannotRead_ItsThreadIsListed_OptionA()
+    {
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Project, project);
+        AddInvoice(invoice, matter: matter, project: project);
         var row = MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z");
         row["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
         row["_sprk_regardingproject_value"] = El(project.ToString("D"));
         SetupMessages(row);
 
         Messages(await Get("invoices", invoice, Ciam(matter: matter))).Should().HaveCount(1);
-        _roots.FlagReads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnInvoiceWhoseAgreementIsUnderSecureX_ItsThreadIsRefused_AndListed_ForACallerWhoReadsX_D4()
+    {
+        var matter = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var agreement = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow("sprk_agreement", agreement, ("sprk_regardingmatter", "sprk_matter", secure));
+        AddInvoice(invoice, matter: matter, agreement: agreement);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeForbiddenNotAccessible(await Get("invoices", invoice, CiamOnMatters(matter)));
+        _recordReads.Last().Select.Should().Contain("sprk_regardingagreement", "the gate reads every attribute the rule needs");
+        Messages(await Get("invoices", invoice, CiamOnMatters(matter, secure))).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task AnInvoiceWhoseAgreementCannotBeWalked_ItsThreadIsRefused_FailClosed()
+    {
+        var matter = Guid.NewGuid();
+        var agreement = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddFilingRow("sprk_agreement", agreement, ("sprk_regardingmatter", "sprk_matter", matter));
+        _roots.FilingReadThrows = true;
+        AddInvoice(invoice, matter: matter, agreement: agreement);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeForbiddenNotAccessible(await Get("invoices", invoice, CiamOnMatters(matter)));
+    }
+
+    [Fact]
+    public async Task AnInvoiceThreadMessage_AlsoFiledUnderAnEventOfSecureX_IsWithheld_FromAnMOnlyReader_AndListed_ForMAndX_D1()
+    {
+        var matter = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var ev = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow("sprk_event", ev, ("sprk_regardingmatter", "sprk_matter", secure));
+        AddInvoice(invoice, matter: matter);
+        var plain = Guid.NewGuid();
+        var carrier = Guid.NewGuid();
+        var carrierRow = MessageRow(carrier, "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-02T09:00:00Z");
+        carrierRow["_sprk_regardingevent_value"] = El(ev.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"), carrierRow);
+
+        Messages(await Get("invoices", invoice, CiamOnMatters(matter))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(new[] { plain.ToString("D") }, "the message is also filed under an event of secure X");
+        Messages(await Get("invoices", invoice, CiamOnMatters(matter, secure))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"), carrier.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AnInvoiceThreadMessage_AlsoFiledUnderAnEventOfAnOrdinaryRoot_IsListed_D1()
+    {
+        var matter = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        var ev = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, open);
+        _roots.AddFilingRow("sprk_event", ev, ("sprk_regardingmatter", "sprk_matter", open));
+        AddInvoice(invoice, matter: matter);
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingevent_value"] = El(ev.ToString("D"));
+        SetupMessages(row);
+
+        Messages(await Get("invoices", invoice, CiamOnMatters(matter))).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task AnInvoiceThread_DoesNotWalkTheRouteInvoiceAgain_ItIsTheGatesDecision_D1()
+    {
+        // The route invoice is the gate's (D4); each message's walk covers only its OTHER parents.
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        AddInvoice(invoice, matter: matter);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        Messages(await Get("invoices", invoice, CiamOnMatters(matter))).Should().HaveCount(1);
+        _roots.FilingReadLog.Should().BeEmpty("neither the gate (no agreement) nor the message filter has a parent to walk");
     }
 
     [Theory]
@@ -537,8 +702,9 @@ public class ExternalMessageEndpointsTests
 
         messages.Should().HaveCount(1);
         _lastOData.Should().Contain($"_sprk_regardinginvoice_value eq {invoice}");
+        // Task 187 D4: plus the invoice's agreement, whose live roots join the gate's rule.
         _recordReads.Should().ContainSingle()
-            .Which.Select.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project" });
+            .Which.Select.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project", "sprk_regardingagreement" });
     }
 
     // ── outside the accessible set → 403, and nothing is read ──────────────────────────────────────

@@ -221,7 +221,9 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         await ReadAsync(read);
 
         _dataverse.Requests.Should().NotBeEmpty();
-        _dataverse.Requests.Should().OnlyContain(r => r.Prefer == $"odata.maxpagesize={ExternalDataService.CollectionPageSize}",
+        // Task 064 added the formatted-value annotations to the same Prefer value (a choice column's label).
+        _dataverse.Requests.Should().OnlyContain(r => r.Prefer == ExternalDataService.CollectionPrefer
+                && r.Prefer!.StartsWith($"odata.maxpagesize={ExternalDataService.CollectionPageSize}"),
             "Dataverse emits a nextLink only under server-driven paging");
         _dataverse.Requests.Should().OnlyContain(r => !r.Query.Contains("$top"),
             "$top suppresses the nextLink — the cliff ISS-002 was");
@@ -525,7 +527,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             var set = request.Path.StartsWith(ApiPath, StringComparison.Ordinal) ? request.Path[ApiPath.Length..] : request.Path;
             var rawQuery = request.RawQuery ?? string.Empty;
             var query = QueryHelpers.ParseQuery(rawQuery);
-            var prefer = request.Headers is not null && request.Headers.TryGetValue("Prefer", out var p) ? p.FirstOrDefault() : null;
+            var prefer = request.Headers is not null && request.Headers.TryGetValue("Prefer", out var p) ? string.Join(",", p) : null;
 
             if (request.Method == "POST")
             {
@@ -575,7 +577,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             var all = rows.ToList();
 
             var pageSize = prefer is not null && prefer.StartsWith("odata.maxpagesize=", StringComparison.Ordinal)
-                ? int.Parse(prefer["odata.maxpagesize=".Length..])
+                ? int.Parse(prefer["odata.maxpagesize=".Length..].Split(',')[0])
                 : 5000;
 
             var body = new JsonObject();

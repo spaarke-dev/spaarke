@@ -468,7 +468,12 @@ public sealed class CommunicationThreadReadService
     /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks, or holds as JSON null, reads
     /// as not filed).</summary>
     private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
-        RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn));
+        RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn),
+        // Task 187: the row itself, whose other parents (thread, invoice, event ...) the rule derives and takes in LIVE.
+        row);
+
+    /// <summary>The table the external reads select from.</summary>
+    private const string CommunicationTable = "sprk_communication";
 
     /// <summary>Stands for a stamp that is present but not a string; the multi-root rule reads it as an unreadable root.</summary>
     private const string MalformedRootStamp = "malformed";
@@ -506,7 +511,10 @@ public sealed class CommunicationThreadReadService
     {
         // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
         // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.
-        regardingValues = regardingValues.Concat(RootStampColumns).Distinct();
+        // Task 187 (owner round 99, D-123): and the row's other parent lookups, whose LIVE roots the rule takes in (RootsOf).
+        regardingValues = regardingValues.Concat(RootStampColumns)
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalMultiRootRule.LiveParentSelect(CommunicationTable))
+            .Distinct();
         var columns = new List<string> { PkField };
         if (includeContent)
         {

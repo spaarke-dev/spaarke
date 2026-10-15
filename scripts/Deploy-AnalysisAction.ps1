@@ -55,7 +55,6 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 $envMap = @{
     "dev"     = "https://spaarkedev1.crm.dynamics.com"
-    "demo"    = "https://spaarke-demo.crm.dynamics.com"
 }
 if (-not $envMap.ContainsKey($Environment)) {
     Write-Error "Unknown environment '$Environment'. Known: $($envMap.Keys -join ', ')"

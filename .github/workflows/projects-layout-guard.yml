@@ -1,0 +1,37 @@
+name: projects-layout-guard
+
+# NOT a required check. Fails a PR that adds or renames a project folder to projects/x-<slug>
+# (the retired archive-by-rename convention). The Arch Test with the same rule never runs on a
+# projects/-only PR because ci-router.yml classifies that diff as docs-only, so this workflow is
+# the PR-time gate for that case. Same script as .husky/pre-commit and the Stop-hook gate.
+
+on:
+  pull_request:
+    paths:
+      - 'projects/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: projects-layout-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  archive-prefix:
+    name: no x- project folders
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check added/renamed project folders
+        env:
+          BASE_REF: ${{ github.base_ref || 'master' }}
+        run: |
+          git diff --name-only -M --diff-filter=AR "origin/${BASE_REF}...HEAD" \
+            | sh scripts/quality/check-project-archive-prefix.sh

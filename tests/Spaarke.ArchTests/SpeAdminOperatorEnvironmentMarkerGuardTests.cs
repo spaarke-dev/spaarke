@@ -26,7 +26,7 @@ public sealed class SpeAdminOperatorEnvironmentMarkerGuardTests
 
     /// <summary>
     /// The environments Spaarke itself operates. Today only <c>dev</c> (owner round 57 item 1): Spaarke's production
-    /// operator environment does not exist yet (the stopped <c>spaarke-bff-prod</c> / "demo"), and the change that stands it
+    /// operator environment does not exist yet (the old stopped "demo" entry was retired 2026-10-14), and the change that stands it
     /// up adds it here together with its registry key and its App Service setting (Deploy-BffApi.ps1 sets it).
     /// </summary>
     private static readonly HashSet<string> SpaarkeOperatedEnvironments = new(StringComparer.Ordinal) { "dev" };

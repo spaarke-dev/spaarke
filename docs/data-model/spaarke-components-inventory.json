@@ -4,12 +4,12 @@
     "publisher": "Spaarke",
     "publisherId": "6aeef721-ba73-f011-b4cb-6045bdd6a665",
     "publisherPrefix": "sprk",
-    "timestamp": "2026-10-13T16:31:34Z",
+    "timestamp": "2026-10-14T10:50:48Z",
     "totalSolutions": 74,
     "includedSolutions": 70,
     "excludedSolutions": 4,
-    "totalComponents": 2875,
-    "distinctComponents": 1889,
+    "totalComponents": 2877,
+    "distinctComponents": 1890,
     "excludePatterns": "Test$|Temp|SCRATCH|MasterTest|TestSpaarke"
   },
   "solutions": [
@@ -156,7 +156,7 @@
     {
       "uniqueName": "CommunicationConnectionsSolution",
       "friendlyName": "Communication Connections Solution",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "isManaged": false,
       "solutionId": "e36daf9d-cb52-44e3-9e71-78488d27305c"
     },
@@ -310,7 +310,7 @@
     {
       "uniqueName": "SpaarkeMaster",
       "friendlyName": "Spaarke Master",
-      "version": "1.2.2.0",
+      "version": "1.2.3.0",
       "isManaged": false,
       "solutionId": "678e07b0-2c9f-f111-aaad-7ced8ddc4a05"
     },
@@ -529,7 +529,7 @@
     },
     {
       "typeName": "Attribute",
-      "count": 490
+      "count": 492
     },
     {
       "typeName": "CanvasApp",
@@ -2448,6 +2448,13 @@
       "ObjectId": "93d3ca0a-4f18-f111-8343-7ced8d1dc988",
       "RootBehavior": 0,
       "InSolutions": "SPRKDOCINTELLIGENCE"
+    },
+    {
+      "ComponentType": 2,
+      "ComponentTypeName": "Attribute",
+      "ObjectId": "94470fcf-67c7-f111-a05c-3833c5e9614d",
+      "RootBehavior": null,
+      "InSolutions": "SpaarkeMaster,SpaarkeCore"
     },
     {
       "ComponentType": 2,

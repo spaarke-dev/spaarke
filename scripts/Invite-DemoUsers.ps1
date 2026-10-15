@@ -21,7 +21,8 @@
 
 .PARAMETER DataverseUrl
     Dataverse environment URL for role assignment.
-    Default: reads from demo-users.json
+    Default: reads from demo-users.json (null there since the old demo environment was
+    retired on 2026-10-14, so pass it explicitly for the ACME demo stamp)
 
 .PARAMETER TenantId
     Entra ID tenant ID for Graph API calls.
@@ -60,7 +61,7 @@
     Project: production-environment-setup-r1
     Prerequisites:
       - Azure CLI authenticated (az login)
-      - PAC CLI authenticated to demo Dataverse environment
+      - PAC CLI authenticated to the target demo Dataverse environment
       - Microsoft Graph permissions: User.Invite.All, User.ReadWrite.All
 #>
 
@@ -208,6 +209,10 @@ if (-not $DataverseUrl) {
 }
 if (-not $TenantId) {
     $TenantId = $config.tenantId
+}
+
+if (-not $DataverseUrl) {
+    throw "DataverseUrl is required: demo-users.json no longer carries one (the old demo environment was retired 2026-10-14). Pass -DataverseUrl for the current demo (ACME stamp)."
 }
 
 $inviteRedirectUrl = $config.inviteRedirectUrl
@@ -609,7 +614,7 @@ Write-Host ""
 Write-Host "  Next Steps:" -ForegroundColor White
 Write-Host "    1. Ensure all B2B invitations are accepted by demo users"
 Write-Host "    2. Assign Dataverse security roles via Admin Center (if not automated)"
-Write-Host "    3. Have demo users sign in to https://spaarke-demo.crm.dynamics.com/"
+Write-Host "    3. Have demo users sign in to $DataverseUrl"
 Write-Host "    4. Verify they can view documents, run AI queries, and create records"
 Write-Host "    5. Run full smoke test suite (task 027)"
 Write-Host ""
