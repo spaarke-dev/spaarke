@@ -40,6 +40,14 @@ The only addition is one caller read per witness table (here one: `sprk_communic
 - **Write-time (POML constraint "write-time"):** not changed. Task 145's write-time rule and the job's stored-evidence redaction cannot know future readers, and no rule on existing ownership primitives matches "readable by the reader". The stored `sprk_signal.sprk_evidencerefs` still holds such detail; any Signal reader can read it directly from Dataverse (the column is not field-secured; no repo form or view shows it). Filed as **DI-88 [#1900](https://github.com/spaarke-dev/spaarke/issues/1900)** with options (recommended: store no detail, read it at read time as the caller).
 - **The caller read uses `{table}id` as the key** from `SecureChildLineage.Table.IdColumn` (uac-r2: "every Spaarke table, verified live").
 - **A caller-identity fault on the witness read** (OBO exchange failure after the caller was resolved) is treated as a fault: every detail withheld, list unchanged, not the single 403.
+- **Behaviour change, fail closed:** in an environment with no Secure Record owner team, a detail line whose `ref` names no lineage table (or is not `{table}:{id}`) used to keep its detail; it is now withheld, because the caller's read cannot prove it readable.
+- **URL size:** 200 ids is about 8 KB of GET URL, under Dataverse's 32 KB limit (the core reads use 100).
+- **The exception branch** of the caller read (as opposed to a failed response) has no seeding test; it returns null exactly as the failed-response branch does (K3).
+- **`withheld: true` keeps the `ref`** (table and id) of a witness the caller cannot read. This is the existing secure-wall shape the POML mandates; the id carries no subject or sender.
+
+## Review record
+
+- Two independent adversarial-reviewer launches were refused by the harness (concurrent sub-agent limit, 4 in use by other sessions). The pass was run in-session over `492d00bd1..62431c35f` against the checklist (fail-open paths, ref casing, duplicate refs, both placement branches, 403/fault/unresolved handling, OData shape, other evidence routes, tests that prove nothing, query counts). No F finding; the K items are listed above. An independent pass is still owed (see the PR).
 
 ## Evidence
 
@@ -55,6 +63,16 @@ The only addition is one caller read per witness table (here one: `sprk_communic
 |---|---|
 | M1: `readableByCaller` ignored (every reference judged) | the other-BU and the unfiled cases |
 | M2: a failed table read skipped instead of null | the fault case (a readable document witness on the page kept its detail) |
+
+**Publish size (Release, `Compress-Archive`):** base is a fresh build of `origin/master` @ `f292ad119` (it includes #1111) at `C:\wt151m`; head is `62431c35f` at `C:\wts-151`.
+
+| | Files | Bytes | Zip |
+|---|---|---|---|
+| Base (master) | 192 | 129,936,932 | 38,904,567 |
+| Head | 192 | 129,941,256 | 38,905,808 |
+| Delta | 0 | +4,324 | +1,241 |
+
+**CVE:** `dotnet list package --vulnerable --include-transitive` reports no vulnerable packages. No package added.
 
 ## Coordination
 
