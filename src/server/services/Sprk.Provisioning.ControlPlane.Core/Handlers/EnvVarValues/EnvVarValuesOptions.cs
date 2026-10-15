@@ -107,6 +107,7 @@ public sealed class EnvVarValuesOptions
         // Fail-fast on invalid provider-chain configuration FIRST (A44.5) —
         // an unparseable/contradictory chain must never reach a handler.
         var secretRequired = Credentials.ClientSecretIsRequiredFirst(SectionName);
+        Credentials.ValidatePropagation(SectionName);
 
         if (secretRequired && string.IsNullOrWhiteSpace(ClientSecret))
         {

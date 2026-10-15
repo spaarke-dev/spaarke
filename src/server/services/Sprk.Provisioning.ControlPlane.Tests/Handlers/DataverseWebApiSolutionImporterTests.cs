@@ -31,6 +31,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Xunit;
 
@@ -585,6 +586,116 @@ public sealed class DataverseWebApiSolutionImporterTests
             "guessing 'fresh install' would bypass the type-switch and downgrade refusals");
     }
 
+    // ---------- T186 audit: first-use propagation (Entra FIC / Dataverse application user) ----------
+
+    private static WorkerCredentialSelectionOptions Propagation(TimeSpan budget) => new()
+    {
+        EntraPropagationTimeout = budget,
+        EntraPropagationRetryInterval = TimeSpan.FromMilliseconds(5),
+        DataverseAppUserPropagationTimeout = budget,
+        DataverseAppUserPropagationRetryInterval = TimeSpan.FromMilliseconds(5),
+    };
+
+    private static FakeDataverseHandler FreshInstallDataverse(Func<HttpRequestMessage, HttpResponseMessage>? solutionsGet = null) => new()
+    {
+        OnSolutionsGet = solutionsGet ?? (_ => JsonResponse(HttpStatusCode.OK, InstalledJson())),
+        OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+        OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
+    };
+
+    [Theory]
+    [InlineData("AADSTS70025")]
+    [InlineData("AADSTS700211")]
+    [InlineData("AADSTS700016")]
+    public async Task ImportAsync_FirstTokenExchangeHitsEntraPropagation_IsWaitedOut_ThenImports(string code)
+    {
+        var credential = new FlakyCredential(failures: 2, $"{code}: not replicated yet.");
+        var dv = FreshInstallDataverse();
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                credential: credential, credentials: Propagation(TimeSpan.FromSeconds(10)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        credential.Calls.Should().BeGreaterThanOrEqualTo(3);
+    }
+
+    [Fact]
+    public async Task ImportAsync_UnrelatedAadstsCode_IsNotRetried_StaysAuthFailure()
+    {
+        var credential = new FlakyCredential(failures: int.MaxValue, "AADSTS7000215: Invalid client secret provided.");
+
+        var outcome = await BuildImporter(FreshInstallDataverse(), new FakeBlobs(ManifestJson("1.2.0.0")),
+                credential: credential, credentials: Propagation(TimeSpan.FromSeconds(10)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Which;
+        failure.FailureKind.Should().Be(SolutionImportFailureKind.AuthFailure);
+        failure.Diagnostic.Should().StartWith("Token acquisition failed").And.Contain("AADSTS7000215");
+        credential.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ImportAsync_EntraPropagationNeverClears_FailsAsAuthFailureAfterTheBudget()
+    {
+        var credential = new FlakyCredential(failures: int.MaxValue, "AADSTS70025: no federated identity credentials.");
+
+        var outcome = await BuildImporter(FreshInstallDataverse(), new FakeBlobs(ManifestJson("1.2.0.0")),
+                credential: credential, credentials: Propagation(TimeSpan.FromMilliseconds(80)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Which;
+        failure.FailureKind.Should().Be(SolutionImportFailureKind.AuthFailure);
+        failure.Diagnostic.Should().StartWith("Token acquisition failed").And.Contain("AADSTS70025");
+        credential.Calls.Should().BeGreaterThan(1);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    public async Task ImportAsync_FirstDataverseReadRefusedWhileTheAppUserPropagates_IsWaitedOut_ThenImports(HttpStatusCode refused)
+    {
+        var reads = 0;
+        var dv = FreshInstallDataverse(_ => ++reads <= 2
+            ? new HttpResponseMessage(refused) { Content = new StringContent("principal not found") }
+            : JsonResponse(HttpStatusCode.OK, InstalledJson()));
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                credentials: Propagation(TimeSpan.FromSeconds(10)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        reads.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ImportAsync_FirstDataverseReadForbiddenAfterTheBudget_KeepsTheAuthFailureMapping_NoImport()
+    {
+        var dv = FreshInstallDataverse(_ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("nope") });
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                credentials: Propagation(TimeSpan.FromMilliseconds(80)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Which.FailureKind.Should().Be(SolutionImportFailureKind.AuthFailure);
+        dv.Requests.Count(r => r.Uri.AbsolutePath.EndsWith("/solutions", StringComparison.Ordinal)).Should().BeGreaterThan(1);
+        dv.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task ImportAsync_ServerErrorOnFirstRead_IsNotRetried()
+    {
+        var dv = FreshInstallDataverse(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("boom") });
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                credentials: Propagation(TimeSpan.FromSeconds(10)))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.UnknownInvocationFailure);
+        dv.Requests.Count(r => r.Uri.AbsolutePath.EndsWith("/solutions", StringComparison.Ordinal)).Should().Be(1);
+    }
+
     // ---------- pure parsers ----------
 
     [Fact]
@@ -747,7 +858,8 @@ public sealed class DataverseWebApiSolutionImporterTests
         bool throwingCredential = false,
         TimeSpan? importTimeout = null,
         TimeSpan? pollInterval = null,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        WorkerCredentialSelectionOptions? credentials = null)
     {
         TokenCredential Factory(string tenantId, string clientId, string clientSecret)
             => credential ?? (throwingCredential ? new ThrowingCredential() : new FakeCredential());
@@ -761,6 +873,13 @@ public sealed class DataverseWebApiSolutionImporterTests
                 SolutionArtifactManifestBlobName = "dataverse-solutions-latest.json",
                 ImportTimeout = importTimeout ?? TimeSpan.FromSeconds(5),
                 ImportJobPollInterval = pollInterval ?? TimeSpan.FromMilliseconds(5),
+                // T186 audit: the propagation waits are OFF unless a test opts in, so the existing 401/403 and
+                // token-failure cases keep their immediate outcomes.
+                Credentials = credentials ?? new WorkerCredentialSelectionOptions
+                {
+                    EntraPropagationTimeout = TimeSpan.Zero,
+                    DataverseAppUserPropagationTimeout = TimeSpan.Zero,
+                },
             }),
             NullLogger<DataverseWebApiSolutionImporter>.Instance,
             TimeProvider.System,
@@ -882,6 +1001,22 @@ public sealed class DataverseWebApiSolutionImporterTests
         {
             Calls++;
             return new($"token-{Calls}", DateTimeOffset.UtcNow.AddHours(1));
+        }
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
+
+    private sealed class FlakyCredential(int failures, string message) : TokenCredential
+    {
+        public int Calls { get; private set; }
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Calls <= failures
+                ? throw new Azure.Identity.AuthenticationFailedException(message)
+                : new AccessToken("fake-dataverse-test-token", DateTimeOffset.UtcNow.AddHours(1));
         }
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)

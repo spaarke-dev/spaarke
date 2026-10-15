@@ -279,7 +279,11 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
             // as a failed token acquisition.
             credential = _credentialFactory(
                 request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
-            token = await credential.GetTokenAsync(tokenContext, cancellationToken).ConfigureAwait(false);
+            // T186 audit: the first exchange for a just-created app / FIC can hit Entra propagation errors
+            // (AADSTS70025 / 700211-3 / 700016); they are waited out within the budget, anything else rethrows here.
+            token = await EntraPropagationRetry.GetTokenAsync(
+                credential, tokenContext, _options.Credentials, _timeProvider, _logger, "H6 importer", cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -300,7 +304,12 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 
         // (1) What the environment holds now. A failed read is a failure, not "fresh install": guessing would bypass
         // the type-switch and downgrade refusals below.
-        var installed = await GetInstalledPackageAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false);
+        // T186 audit: this is the first Dataverse call this importer makes; the H10 application user / role may
+        // not be effective yet, so a 401/403 here is retried within the shared budget before it is classified.
+        var propagationGate = new DataverseAppUserPropagationGate(
+            _options.Credentials, _timeProvider, _logger, "H6 importer");
+        var installed = await GetInstalledPackageAsync(envUri, bearerToken, propagationGate, cancellationToken)
+            .ConfigureAwait(false);
         if (installed is InstalledPackage.Unknown unknown)
         {
             return new SolutionImportOutcome.Failure(unknown.Kind, unknown.Diagnostic);
@@ -446,14 +455,15 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     }
 
     private async Task<InstalledPackage> GetInstalledPackageAsync(
-        Uri envUri, string bearerToken, CancellationToken cancellationToken)
+        Uri envUri, string bearerToken, DataverseAppUserPropagationGate propagationGate, CancellationToken cancellationToken)
     {
         var uri = new Uri(envUri,
             $"/api/data/v9.2/solutions?$select=uniquename,version,ismanaged&$filter=uniquename eq '{SpaarkePackage.SolutionUniqueName}'");
         try
         {
-            using var request = BuildRequest(HttpMethod.Get, uri, bearerToken);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await propagationGate
+                .SendAsync(_httpClient, () => BuildRequest(HttpMethod.Get, uri, bearerToken), cancellationToken)
+                .ConfigureAwait(false);
             var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {

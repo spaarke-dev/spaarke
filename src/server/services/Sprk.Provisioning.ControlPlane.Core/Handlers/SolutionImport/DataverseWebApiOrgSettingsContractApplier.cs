@@ -51,6 +51,8 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     private readonly HttpClient _httpClient;
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
     private readonly ILogger<DataverseWebApiOrgSettingsContractApplier> _logger;
+    private readonly WorkerCredentialSelectionOptions _propagation;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Production constructor (typed-client registration in Worker/Program.cs). The credential is selected by the
@@ -60,7 +62,8 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         HttpClient httpClient,
         IOptions<SolutionImportOptions> options,
         WorkerDataverseCredentialFactory credentialFactory,
-        ILogger<DataverseWebApiOrgSettingsContractApplier> logger)
+        ILogger<DataverseWebApiOrgSettingsContractApplier> logger,
+        TimeProvider? timeProvider = null)
         : this(
             httpClient,
             logger,
@@ -71,7 +74,9 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
                     tenantId,
                     clientId,
                     string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret)
-                .Credential)
+                .Credential,
+            options.Value.Credentials,
+            timeProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(credentialFactory);
@@ -84,7 +89,9 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     internal DataverseWebApiOrgSettingsContractApplier(
         HttpClient httpClient,
         ILogger<DataverseWebApiOrgSettingsContractApplier> logger,
-        Func<string, string, string, TokenCredential> credentialFactory)
+        Func<string, string, string, TokenCredential> credentialFactory,
+        WorkerCredentialSelectionOptions? propagation = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(logger);
@@ -92,6 +99,8 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         _httpClient = httpClient;
         _logger = logger;
         _credentialFactory = credentialFactory;
+        _propagation = propagation ?? new WorkerCredentialSelectionOptions();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -130,8 +139,10 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         {
             var credential = _credentialFactory(request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
             var scope = new Uri(envUri, "/").ToString().TrimEnd('/') + "/.default";
-            token = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
-                .ConfigureAwait(false);
+            // T186 audit: this is H6's FIRST token exchange for the just-created BFF app / FIC — wait out Entra propagation.
+            token = await EntraPropagationRetry.GetTokenAsync(
+                credential, new TokenRequestContext(new[] { scope }), _propagation, _timeProvider, _logger,
+                "H6 org settings", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -143,8 +154,13 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         // (1) Read the organization row once.
         var names = request.OrgSettings.Keys.OrderBy(n => n, StringComparer.Ordinal).ToArray();
         var select = "organizationid," + string.Join(",", names);
-        using var get = NewRequest(HttpMethod.Get, new Uri(envUri, $"/api/data/v9.2/organizations?$select={select}"), token);
-        var read = await SendAsync(get, "organization GET", request.TargetDataverseUrl, cancellationToken).ConfigureAwait(false);
+        // T186 audit: H6's first Dataverse call — the H10 application user / role may not be effective yet, so a
+        // 401/403 is retried within the shared budget before it becomes the failure below.
+        var propagationGate = new DataverseAppUserPropagationGate(_propagation, _timeProvider, _logger, "H6 org settings");
+        var orgUri = new Uri(envUri, $"/api/data/v9.2/organizations?$select={select}");
+        var read = await SendAsync(
+            () => NewRequest(HttpMethod.Get, orgUri, token), "organization GET", request.TargetDataverseUrl,
+            propagationGate, cancellationToken).ConfigureAwait(false);
         if (read.Failure is not null)
         {
             return new OrgSettingsContractOutcome.Failure(read.Failure + " Nothing was applied.");
@@ -177,10 +193,16 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
             return new OrgSettingsContractOutcome.Success(appliedOrAlreadyCorrect);
         }
 
-        using var patch = NewRequest(HttpMethod.Patch, new Uri(envUri, $"/api/data/v9.2/organizations({organizationId})"), token);
-        patch.Headers.TryAddWithoutValidation("If-Match", "*");
-        patch.Content = new StringContent(BuildPatchBody(toWrite), Encoding.UTF8, "application/json");
-        var written = await SendAsync(patch, "organization PATCH", request.TargetDataverseUrl, cancellationToken).ConfigureAwait(false);
+        var patchBody = BuildPatchBody(toWrite);
+        var written = await SendAsync(
+            () =>
+            {
+                var patch = NewRequest(HttpMethod.Patch, new Uri(envUri, $"/api/data/v9.2/organizations({organizationId})"), token);
+                patch.Headers.TryAddWithoutValidation("If-Match", "*");
+                patch.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
+                return patch;
+            },
+            "organization PATCH", request.TargetDataverseUrl, propagationGate, cancellationToken).ConfigureAwait(false);
         if (written.Failure is not null)
         {
             return new OrgSettingsContractOutcome.Failure(
@@ -312,11 +334,13 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     }
 
     private async Task<(string Body, string? Failure)> SendAsync(
-        HttpRequestMessage request, string what, string environmentUrl, CancellationToken cancellationToken)
+        Func<HttpRequestMessage> buildRequest, string what, string environmentUrl,
+        DataverseAppUserPropagationGate propagationGate, CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await propagationGate.SendAsync(_httpClient, buildRequest, cancellationToken)
+                .ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {

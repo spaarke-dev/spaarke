@@ -19,6 +19,7 @@ using System.Text.Json;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Xunit;
 
@@ -99,6 +100,73 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
             .Which.Diagnostic.Should().Contain("PATCH").And.Contain("prvWriteOrganization").And.Contain("maxuploadfilesize=25600000");
     }
 
+    // ---------- T186 audit: first-use propagation (Entra FIC / Dataverse application user) ----------
+
+    private static WorkerCredentialSelectionOptions Propagation(TimeSpan budget) => new()
+    {
+        EntraPropagationTimeout = budget,
+        EntraPropagationRetryInterval = TimeSpan.FromMilliseconds(5),
+        DataverseAppUserPropagationTimeout = budget,
+        DataverseAppUserPropagationRetryInterval = TimeSpan.FromMilliseconds(5),
+    };
+
+    [Fact]
+    public async Task ApplyAsync_FirstTokenExchangeHitsEntraPropagation_IsWaitedOut_ThenApplies()
+    {
+        var credential = new FlakyCredential(failures: 2, "AADSTS70025: The client has no configured federated identity credentials.");
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 31457280));
+
+        var outcome = await NewApplier(handler, propagation: Propagation(TimeSpan.FromSeconds(10)), credential: credential)
+            .ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>();
+        credential.Calls.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_UnrelatedAadstsCode_IsNotRetried_FailsWithNoHttpCall()
+    {
+        var credential = new FlakyCredential(failures: int.MaxValue, "AADSTS7000215: Invalid client secret provided.");
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 5242880));
+
+        var outcome = await NewApplier(handler, propagation: Propagation(TimeSpan.FromSeconds(10)), credential: credential)
+            .ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("Token acquisition").And.Contain("AADSTS7000215");
+        credential.Calls.Should().Be(1);
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApplyAsync_FirstGetRefusedWhileTheAppUserPropagates_IsWaitedOut_ThenApplies()
+    {
+        var gets = 0;
+        var handler = new FakeHandler(request => request.Method == HttpMethod.Get && ++gets <= 2
+            ? Json(HttpStatusCode.Forbidden, """{"error":{"message":"principal not found"}}""")
+            : OrganizationRow(maxUpload: 5242880)(request));
+
+        var outcome = await NewApplier(handler, propagation: Propagation(TimeSpan.FromSeconds(10)))
+            .ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>();
+        gets.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_FirstGetForbiddenAfterTheBudget_KeepsTheFailureAndPatchesNothing()
+    {
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.Forbidden,
+            """{"error":{"message":"Principal user is missing prvReadOrganization privilege"}}"""));
+
+        var outcome = await NewApplier(handler, propagation: Propagation(TimeSpan.FromMilliseconds(80)))
+            .ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("403").And.Contain("prvReadOrganization").And.Contain("Nothing was applied");
+        handler.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get).And.HaveCountGreaterThan(1);
+    }
+
     [Fact]
     public async Task ApplyAsync_TokenAcquisitionFails_FailsWithNoHttpCall()
     {
@@ -165,11 +233,19 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
         TargetDataverseUrl: EnvUrl,
         OrgSettings: StaticOrgSettingsContractManifest.DefaultOrgSettings);
 
-    private static DataverseWebApiOrgSettingsContractApplier NewApplier(FakeHandler handler, bool throwingCredential = false)
+    private static DataverseWebApiOrgSettingsContractApplier NewApplier(
+        FakeHandler handler, bool throwingCredential = false, WorkerCredentialSelectionOptions? propagation = null,
+        TokenCredential? credential = null)
         => new(
             new HttpClient(handler),
             NullLogger<DataverseWebApiOrgSettingsContractApplier>.Instance,
-            (_, _, _) => throwingCredential ? new ThrowingCredential() : new FakeCredential());
+            (_, _, _) => credential ?? (throwingCredential ? new ThrowingCredential() : new FakeCredential()),
+            // T186 audit: the propagation waits are OFF unless a test opts in.
+            propagation ?? new WorkerCredentialSelectionOptions
+            {
+                EntraPropagationTimeout = TimeSpan.Zero,
+                DataverseAppUserPropagationTimeout = TimeSpan.Zero,
+            });
 
     private static Func<HttpRequestMessage, HttpResponseMessage> OrganizationRow(long maxUpload)
         => request => request.Method == HttpMethod.Get
@@ -208,6 +284,22 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     {
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new("fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1));
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
+
+    private sealed class FlakyCredential(int failures, string message) : TokenCredential
+    {
+        public int Calls { get; private set; }
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Calls <= failures
+                ? throw new Azure.Identity.AuthenticationFailedException(message)
+                : new AccessToken("fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1));
+        }
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new(GetToken(requestContext, cancellationToken));
