@@ -4,7 +4,7 @@
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-145; D-144 amended). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-93**).
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-99**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
