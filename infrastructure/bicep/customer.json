@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9428926323124642200"
+      "templateHash": "7395548179934998239"
     }
   },
   "parameters": {
@@ -3273,7 +3273,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7592742079279306541"
+              "templateHash": "35904168131660294"
             }
           },
           "parameters": {
@@ -3355,6 +3355,7 @@
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
+                "keyVaultReferenceIdentity": "[parameters('userAssignedIdentityResourceId')]",
                 "virtualNetworkSubnetId": "[if(not(empty(parameters('vnetIntegrationSubnetId'))), parameters('vnetIntegrationSubnetId'), null())]",
                 "vnetRouteAllEnabled": "[not(empty(parameters('vnetIntegrationSubnetId')))]",
                 "siteConfig": {
@@ -3447,7 +3448,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "603088285904044342"
+              "templateHash": "434425010265106412"
             }
           },
           "parameters": {
@@ -3514,6 +3515,7 @@
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
+                "keyVaultReferenceIdentity": "[parameters('userAssignedIdentityResourceId')]",
                 "siteConfig": {
                   "linuxFxVersion": "DOTNETCORE|10.0",
                   "alwaysOn": true,
