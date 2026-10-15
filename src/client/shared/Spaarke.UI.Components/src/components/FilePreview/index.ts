@@ -17,3 +17,11 @@ export type { IFilePreviewDialogProps, IFilePreviewDialogSummary } from './RichF
 // renderer.
 export { RichFilePreview, DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS } from './RichFilePreview';
 export type { IRichFilePreviewProps } from './RichFilePreview';
+
+// PdfHighlightViewer — renders host-supplied PDF bytes page by page (lazy pdfjs-dist) and boxes an extracted
+// line and field with the F-4 highlight and scroll behaviour (ebilling-r1 task 108). Unlike RichFilePreview's
+// cross-origin iframe it owns the page canvases, so it can carry an overlay. Context-agnostic: the host
+// supplies the bytes.
+export { PdfHighlightViewer } from './PdfHighlightViewer';
+export type { IPdfHighlightViewerProps, IPdfHighlight, PdfBytes } from './PdfHighlightViewer';
+export type { IPdfNormalisedBox } from './pdfHighlightGeometry';
