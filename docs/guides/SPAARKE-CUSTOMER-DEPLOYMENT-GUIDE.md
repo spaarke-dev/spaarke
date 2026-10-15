@@ -1751,6 +1751,8 @@ here. Re-check with the query in step 1 before every upgrade; do not rely on thi
 regarding columns (nine subject lookups, `sprk_regardingrecordid`, `sprk_regardingrecordtype`,
 `sprk_regardingrecordname`, `sprk_regardingrecordnumber`, `sprk_regardingrecordurl`); additive, no action needed.
 
+**Ordering: the 140 schema before the BFF (#1780 K1).** The `sprk_decisionrecord` `sprk_regarding*` columns above must reach an environment **before** any BFF build that contains the Decision Record lineage row (unified-access-control-r2 task 182). `SecureChildShareSynchronizer` and `SecureChildReconciliationJob` select those columns without a probe, so a BFF deployed ahead of the schema fails the whole secure-child load (every secure Signal and Decision Record stops being re-owned or mirrored, not just the Decision Records). Import the SpaarkeMaster version that carries the columns first, confirm one column with `GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_decisionrecord')/Attributes(LogicalName='sprk_regardingmatter')?$select=AttributeType` (`Lookup`), and only then deploy the BFF. Recorded by ontology task 146 (from the code; a missing column was not provoked on dev) (`projects/spaarke-ontology-platform-r1/notes/146-live-gate.md`).
+
 **Which runbook.** SpaarkeMaster is **managed by default** in customer environments (ADR-027;
 `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`), so the managed runbook is the normal case. Check the environment's
 `ismanaged` flag on the `SpaarkeMaster` solution row first and follow exactly one of the two.
