@@ -33,7 +33,7 @@
 
 ## Open owner items
 - The live CIAM sign-ins: checklist §12 (185's code-gated bind) and §11 (184's ExistingAccount option). §13: 187's optional live secure-wall proof.
-- Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), DI-81 #1879 (column audit); and enabling 148's writes after its report-only dev run.
+- Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), DI-81 #1879 (column audit); and enabling 144/148 writes: ontology holds them off until 146 creates real Signals. One report-only pass then comes to UAC, and writes are enabled only on a CLEAN review (D-138, 2026-10-15).
 - Restate the Model 1 `-Apply` rule once #1815 merges.
 - Task 186 ceiling decision.
 - Checklist §14 (the combined CIAM session closes 135's gate, 136, 037 and 039). #1889 fixed on dev 2026-10-15 (provisioning PR #1885; owner-approved marker backfill). The 136 content check re-ran and PASSED (notes/task-136 §12.1).
