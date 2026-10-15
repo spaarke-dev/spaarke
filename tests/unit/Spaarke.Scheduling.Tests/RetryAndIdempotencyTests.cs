@@ -268,9 +268,14 @@ public class RetryAndIdempotencyTests
         // property the old ceiling could only ever approximate. (The production loop routes every
         // sleep through the injected TimeProvider specifically so this is provable — see the
         // comment on ScheduledJobHost.TickAsync's idle sleep.)
-        var run = store.RunRecords.FirstOrDefault(r => r.JobId == "cancellable-retry");
-        run.Should().NotBeNull();
-        run!.Result.Should().NotBeNull();
+        //
+        // #1912: select the dispatched run, not just any record for the job. The every-second cron
+        // keeps ticking while the first run is in flight, and the host records an overlapping tick as
+        // Skipped (Success=true, by design — see RecordUndispatchedTickAsync). RunRecords is
+        // unordered, so FirstOrDefault could return that skip record instead of the cancelled run.
+        var run = store.RunRecords.Where(r => r.JobId == "cancellable-retry" && r.Result?.Skipped != true)
+            .Should().ContainSingle("exactly one dispatched run of 'cancellable-retry' was in flight at stop").Subject;
+        run.Result.Should().NotBeNull();
         run.Result!.Success.Should().BeFalse();
         run.Result.ErrorMessage.Should().Contain("Cancelled");
     }
