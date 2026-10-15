@@ -112,11 +112,9 @@ public class SecureChildLineageTests
             ["sprk_reportdocument"] = "sprk_document",
             ["sprk_resubmissionof"] = "sprk_invoicesubmission",
         });
-        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Should().Contain(new Dictionary<string, string>
-        {
-            ["sprk_invoice"] = "sprk_invoice",
-            ["sprk_decisionrecord"] = "sprk_decisionrecord",
-        });
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Should().Contain("sprk_invoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Keys.Should().NotContain("sprk_decisionrecord",
+            "a Decision Record is stamped outside the access taxonomy; nothing but a Signal is filed under one");
         SecureChildLineage.Children["sprk_externalidentifier"].Lookups.Should().Contain("sprk_regardinginvoice", "sprk_invoice");
         SecureChildLineage.Children["sprk_invoicecorrection"].Lookups.Should().Contain(new Dictionary<string, string>
         {

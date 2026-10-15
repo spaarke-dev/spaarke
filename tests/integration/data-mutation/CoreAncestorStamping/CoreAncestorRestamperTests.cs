@@ -154,6 +154,27 @@ public class CoreAncestorRestamperTests
             "the invoice names no matter, so the matter copy is cleared");
     }
 
+    [Fact(DisplayName = "ebilling-r1 task 013: a communication under a matter-only invoice that holds its own work assignment has it CLEARED — the column is now a copy of the invoice")]
+    public async Task InvoiceWithoutAWorkAssignment_ClearsTheChildsWorkAssignment()
+    {
+        // Behaviour change made explicit (adversarial review K1): before task 013 an invoice could not carry a work
+        // assignment, so a child's own sprk_regardingworkassignment was its direct link and was never written. Now it is a
+        // copy of the invoice's (live 2026-10-15: no child under an invoice holds one, so no stored row changes).
+        var world = new StampWorld()
+            .Row("sprk_invoice", Invoice, [("sprk_matter", "sprk_matter", MatterB)])
+            .Row("sprk_communication", Communication,
+            [
+                ("sprk_regardinginvoice", "sprk_invoice", Invoice), ("sprk_regardingmatter", "sprk_matter", MatterB),
+                ("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignment),
+            ], pairId: Invoice.ToString());
+
+        await world.Restamper.RestampChildAsync("sprk_communication", Communication);
+
+        world.Lookup("sprk_communication", Communication, "sprk_regardingworkassignment").Should().BeNull(
+            "the invoice names no work assignment, so the copy is cleared");
+        world.Lookup("sprk_communication", Communication, "sprk_regardingmatter").Should().Be(MatterB);
+    }
+
     [Fact(DisplayName = "Task 156: re-filing a record to NO root CLEARS the copies (they would otherwise keep granting the old root's access)")]
     public async Task RefiledToNoRoot_ClearsTheCopy()
     {

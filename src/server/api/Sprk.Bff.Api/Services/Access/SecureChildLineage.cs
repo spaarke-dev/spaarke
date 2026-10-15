@@ -145,8 +145,10 @@ internal static class SecureChildLineage
                 ("sprk_invoice", "sprk_invoice"), ("sprk_document", "sprk_document"), ("sprk_reportdocument", "sprk_document"),
                 ("sprk_resubmissionof", "sprk_invoicesubmission"),
             }.Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+        // Its sprk_decisionrecord lookup is left out: a Decision Record is stamped outside the access taxonomy and nothing is
+        // filed under one but a Signal (CoreAncestorResolver.StampedOutsideAccessTaxonomy, uac-r2's condition 3).
         T("sprk_invoiceapproval", "sprk_invoiceapprovals",
-            new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_decisionrecord", "sprk_decisionrecord") }
+            new[] { ("sprk_invoice", "sprk_invoice") }
                 .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
         T("sprk_externalidentifier", "sprk_externalidentifiers",
             Regarding("sprk_invoice", Matter, Project, WorkAssignment)),
