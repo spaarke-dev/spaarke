@@ -226,7 +226,8 @@ public class RagIndexingJobHandler : IJobHandler
                 // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
                 // sprk_searchindexed=true + sprk_searchindexedon for the transition window
                 // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
-                if (!string.IsNullOrEmpty(payload.DocumentId))
+                // A skipped file (E-Billing Output Files container, ebilling-r1 FR-16) was not indexed: no stamp.
+                if (!string.IsNullOrEmpty(payload.DocumentId) && !result.Skipped)
                 {
                     try
                     {

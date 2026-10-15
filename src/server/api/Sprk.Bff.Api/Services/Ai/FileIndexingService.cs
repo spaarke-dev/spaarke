@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -30,6 +32,10 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly IRagService _ragService;
     private readonly ILogger<FileIndexingService> _logger;
     private readonly RecordContainerResolver _containerResolver;
+    private readonly IOptions<FinanceOptions> _financeOptions;
+
+    /// <summary>The <see cref="FileIndexingResult.SkipReason"/> for a file in a container that is never indexed.</summary>
+    public const string NonIndexedContainerReason = "container_not_indexed";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
@@ -42,13 +48,17 @@ public sealed class FileIndexingService : IFileIndexingService
     /// <param name="containerResolver">
     /// Verifies a <c>sprk_document</c> row's pointer before the app-only download (unified-access-control-r2 task 166 r1).
     /// </param>
+    /// <param name="financeOptions">
+    /// Names the E-Billing Output Files container, whose files are never indexed (ebilling-r1 FR-16, D-55).
+    /// </param>
     public FileIndexingService(
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         ITextChunkingService chunkingService,
         IRagService ragService,
         ILogger<FileIndexingService> logger,
-        RecordContainerResolver containerResolver)
+        RecordContainerResolver containerResolver,
+        IOptions<FinanceOptions> financeOptions)
     {
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
@@ -56,6 +66,32 @@ public sealed class FileIndexingService : IFileIndexingService
         _ragService = ragService;
         _logger = logger;
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
+        _financeOptions = financeOptions ?? throw new ArgumentNullException(nameof(financeOptions));
+    }
+
+    /// <summary>
+    /// Every file-based entry point (OBO and app-only — and through them the upload enqueuer, the RAG job, the bulk job,
+    /// the Office indexing worker, index-file and send-to-index) passes here first. A file in the E-Billing Output Files
+    /// container (<see cref="FinanceOptions.EbillingOutputContainerId"/>) is never AI-indexed (ebilling-r1 FR-16, D-55):
+    /// export files are documents, not knowledge. An SPE file's drive id IS its container id.
+    /// </summary>
+    private bool TrySkipNonIndexedContainer(FileIndexRequest request, out FileIndexingResult skipped)
+    {
+        var outputContainerId = _financeOptions.Value.EbillingOutputContainerId?.Trim();
+        if (!string.IsNullOrEmpty(outputContainerId)
+            && string.Equals(request.DriveId?.Trim(), outputContainerId, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "Skipped indexing {FileName} (DocumentId={DocumentId}, ItemId={ItemId}): it is in the E-Billing Output " +
+                "Files container, which is never indexed (ebilling-r1 FR-16).",
+                request.FileName, request.DocumentId ?? "(none)", request.ItemId);
+
+            skipped = FileIndexingResult.Skip(NonIndexedContainerReason, request.DocumentId, request.ItemId);
+            return true;
+        }
+
+        skipped = null!;
+        return false;
     }
 
     /// <inheritdoc />
@@ -78,6 +114,11 @@ public sealed class FileIndexingService : IFileIndexingService
         if (!string.IsNullOrWhiteSpace(request.DocumentId))
         {
             return await IndexFileAppOnlyAsync(request, cancellationToken);
+        }
+
+        if (TrySkipNonIndexedContainer(request, out var skipped))
+        {
+            return skipped;
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -154,6 +195,11 @@ public sealed class FileIndexingService : IFileIndexingService
         FileIndexRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (TrySkipNonIndexedContainer(request, out var skipped))
+        {
+            return skipped;
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try

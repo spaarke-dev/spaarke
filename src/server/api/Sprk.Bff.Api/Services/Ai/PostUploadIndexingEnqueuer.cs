@@ -217,6 +217,12 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
 
             var result = await _fileIndexingService.IndexFileAsync(fileIndexRequest, httpContext, ct);
 
+            if (result.Skipped)
+            {
+                // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): no index-status stamp.
+                return PostUploadIndexingResult.Skipped(result.SkipReason ?? "NotIndexed");
+            }
+
             if (result.Success)
             {
                 _logger.LogInformation(

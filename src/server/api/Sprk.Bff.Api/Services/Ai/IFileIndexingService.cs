@@ -298,6 +298,28 @@ public sealed record FileIndexingResult
     public string? SpeFileId { get; init; }
 
     /// <summary>
+    /// True when the file was deliberately NOT indexed (it is in the E-Billing Output Files container, ebilling-r1
+    /// FR-16). <see cref="Success"/> is also true — nothing failed and nothing should be retried — but no chunk was
+    /// written, so a caller must not record the document as indexed.
+    /// </summary>
+    public bool Skipped { get; init; }
+
+    /// <summary>Why the file was skipped (a stable code), when <see cref="Skipped"/> is true.</summary>
+    public string? SkipReason { get; init; }
+
+    /// <summary>
+    /// Creates a skipped result: success, zero chunks, nothing to retry, and the document must not be stamped as indexed.
+    /// </summary>
+    public static FileIndexingResult Skip(string reason, string? documentId = null, string? speFileId = null) => new()
+    {
+        Success = true,
+        Skipped = true,
+        SkipReason = reason,
+        DocumentId = documentId,
+        SpeFileId = speFileId
+    };
+
+    /// <summary>
     /// Creates a failed result with the specified error message.
     /// </summary>
     /// <param name="error">The error message describing the failure.</param>
