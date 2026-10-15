@@ -53,7 +53,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 065 | MDA message send carries "Internal only" (default No) + sender (check-3 #5) | P5b | ✅ [done] merged bbcb80659 (D1-D9; ISS-009 done, ISS-010 #1864 filed); reaches dev with the next BFF deploy | none | O/h | FULL | CHK3 |
 | 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK3 |
 | 067 | Service Request automatic numbers RQST-{SEQNUM:4} (check-2 #3) | P5b | ✅ [done] dev applied 2026-10-13 (next value 3); owner create-test pending | none (owner yes 2026-10-13; dev apply gated) | S/h | STANDARD | CHK3 |
-| 068 | "Internal Only" switch on message and email compose surfaces; column and form label "Internal Only" | P5b | 🔲 [open] built + reviewed (85d1d26f6, cbe633bbe); dev import pending owner, after the BFF deploy | 065 | S/h | FULL | CHK3 |
+| 068 | "Internal Only" switch on message and email compose surfaces; column and form label "Internal Only" | P5b | ✅ [done] on dev and owner-checked 2026-10-15; "External / Internal Only" tags in the Messages modal and New Email (7419e8637, 247ce6a6e) | 065 | S/h | FULL | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | 🔲 [open] | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |

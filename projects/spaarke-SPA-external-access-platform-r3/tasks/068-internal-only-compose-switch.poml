@@ -4,7 +4,7 @@
     <title>"Internal Only" switch on the message and email compose surfaces; column and form label "Internal Only" (check-3 #5 follow-up)</title>
     <phase>5b owner check fixes</phase>
     <gate>startable after 065 merges (the BFF must accept and store isInternalOnly); every dev deploy is a live change shown to the owner first</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include pcf and react; modifies .ts/.tsx in shared components and three PCF controls</rigor-reason>
     <model-tier>sonnet</model-tier>
