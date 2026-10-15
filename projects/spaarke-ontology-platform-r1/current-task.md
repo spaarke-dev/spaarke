@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-15 (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-15 (main session, 154 at uac-r2). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-145; D-144 amended). Deferred work: one self-contained GitHub issue per item,
@@ -11,15 +11,15 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 154 (#1982) Opus pass 2 running. Merged today: 151, 150, 149, 152, 059, 146, 153. |
+| **Task** | 154 (#1982) at uac-r2 review (head `19f61eeef`; two Opus passes done, pass-2 F1/F3/K4 fixed). Merged today: 151, 150, 149, 152, 059, 146, 153. |
 | **Blocker** | None. |
-| **Next Action** | (1) 154 pass 2, then fixes, then uac-r2, then merge; then launch 155 (sonnet/high, worktree from the docs branch). (2) Docs branch to master: open a PR to master once 154 is in (D-126; tell uac-r2 for their ledger). (3) 055 Console + BFF deploy from master, plus the grid configuration apply. (4) After the owner answers: enable the dev policies, then the 144/148 report-only pass, then uac-r2, then the writes; and 049 role removals. |
+| **Next Action** | (1) 154: await uac-r2 verdict (PR comment + message), then merge via merge-when-green3.sh 1982 19f61eeef199679ec2e17bb6dd5a58ab5beed274; then launch 155 (sonnet/high, worktree from the docs branch). (2) Docs branch to master: open a PR to master once 154 is in (D-126; tell uac-r2 for their ledger). (3) 055 Console + BFF deploy from master, plus the grid configuration apply. (4) After the owner answers: enable the dev policies, then the 144/148 report-only pass, then uac-r2, then the writes; and 049 role removals. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 154 worklist route fields + inquiry lookup | #1982 | `b579e77f6` | `C:\wts-154` | Pass 1 fixed in `d23dc4521`: the guard applies only to an open, outbound inquiry; the hint is matched on any line, with a matter fallback on commit; 503 on timeout; K2 and K3. The docs branch with #1953 merged in cleanly (831 + 53 filtered tests pass). Opus pass 2 running, then uac-r2, then merge, then launch 155. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1`. |
+| 154 worklist route fields + inquiry lookup | #1982 | `19f61eeef` | `C:\wts-154` | Pass 1 fixed in `d23dc4521`: the guard applies only to an open, outbound inquiry; the hint is matched on any line, with a matter fallback on commit; 503 on timeout; K2 and K3. The docs branch with #1953 merged in cleanly (831 + 53 filtered tests pass). Pass 2 fixed in `19f61eeef`: plan shares the commit's inquiry check incl. matter fallback (F1), commit inquiry-fault tests + seeding proof (F3), finishing path skips the guard and matches a review under the reduced plan (K4, hash-covered). K1/K3 stay known limits. uac-r2 review running, then merge, then launch 155. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1`. |
 
 Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`), #1933 (146, `495faf82c`), #1953 (153, `53f19f0a2`).
 
@@ -30,7 +30,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Next, in order
 
-1. Merge 153 (uac-r2 re-check running) and 154; then launch 155 (needs 154).
+1. Merge 154 (uac-r2 review running); then launch 155 (needs 154).
 2. 146 re-run → merge #1933 → 144/148 report-only pass → uac-r2 → enable writes.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
 4. Docs branch → master merge (tell uac-r2), then the **055** Console deploy, then 049, 064, 105.
