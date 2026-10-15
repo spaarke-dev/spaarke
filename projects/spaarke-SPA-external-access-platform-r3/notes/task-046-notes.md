@@ -84,7 +84,7 @@ Against the pre-change code (guard present, only the constant added so the tests
 - `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
 - Affected classes (`WorkforcePrincipalResolverTests`, `CallerPrincipalResolverTests`, `ModuleEntitlementResolverTests`, `DataverseContactIdentityStoreTests`): 267 passed, 0 failed.
 - `dotnet test tests/unit/Sprk.Bff.Api.Tests` with the filter ExternalAccess|Workforce|Principal|Entitlement|Membership: 3671 passed, 0 failed.
-- Full `dotnet test tests/unit/Sprk.Bff.Api.Tests`: run by the main session after merge
+- Full `dotnet test tests/unit/Sprk.Bff.Api.Tests`: run by the main session on R3 after merge (dfee0a438, R3 + master f63b57f8d): 23,467 passed, 17 failed, all TaskCanceledException under machine contention; those 17 (26 cases) rerun alone: 26 passed, 0 failed. ArchTests 1,049/1,049. Build -warnaserror clean.
 - `dotnet test tests/Spaarke.ArchTests`: 1010 passed, 0 failed.
 
 ## Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false`, Compress-Archive)
@@ -129,3 +129,11 @@ Filtered runs (`dotnet test tests/unit/Sprk.Bff.Api.Tests --filter`):
 - WorkforcePrincipalResolverTests | DataverseContactIdentityStoreTests | GrantAccessNotifierExternalTests: before 3 failed / 202 passed (205); after 0 failed / 205 passed.
 - Plus ContactBinding | IdentityBinding | GrantExternalContactEmail | ContactGrant (suites that use the in-memory double): 0 failed / 591 passed.
 - `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
+
+## Main-session review and close (2026-10-15)
+
+- Adversarial pass 1 (Opus, auth): no F. K: root-set cache eviction misses customer-tenant keys (carried to 048), field-security-masked columns lead to registration_required (carried to 047), and the link read had no $orderby (fixed in round 1). It judged the GrantAccessNotifier residual a false positive.
+- Adversarial pass 2 (Opus, tenant isolation): two F1. The $orderby gap allowed a [disabled, enabled, enabled] ambiguity to resolve, and a missing column logged twice. Both are fixed in round 1 (bc0113e9d). It showed the GrantAccessNotifier path IS reachable (ContactGrantEndpoints -> NotifyInviteNeededAsync -> SendAsync); the main session verified this, and it is fixed in round 1. K2 (the last-seen marker is per tid) is accepted and noted in 048. K3 (plane 100000002 is unreadable outside the home read) is carried to 047.
+- Round-1 re-check (main session, fix diff and callers): the new home-contact read matches ReadContactsAsync except for its single log; the $orderby copies the ResolveSystemUserAsync precedent; the notifier skip is narrow. No F remains.
+- Carried constraints were added to the 047 and 048 POMLs (validator PASS).
+- Not deployed: dev runs 3115b90f2 (no 046). The next R3 dev deploy turns on home-principal resolution on dev, and it needs owner approval plus the shared-BFF coordination check.

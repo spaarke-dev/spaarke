@@ -52,6 +52,9 @@
     <constraint source="ADR-008 / ADR-001">Minimal API endpoint with endpoint-level authorization; ProblemDetails for every refusal with the reason code in extensions.</constraint>
     <constraint source="CLAUDE.md §10">Placement Justification (in BFF: validates the stamp user token and writes the stamp's Dataverse app-only next to the existing create path), publish-size delta, CVE check, tests.</constraint>
     <constraint source="project">Audit logs carry the contactId and hashed tid/oid; never the email or names.</constraint>
+    <constraint source="046 review (K, carried)">Before ANY registration create or bind, probe that the binding and A9 columns are readable (ContactIdentityBinder.ProbeBindingReadabilityAsync pattern). The 046 reads cannot tell a field-security-masked column from no match: a masked secured column makes a registered contact look unregistered, so without the probe this route would create a duplicate. If unreadable, deny; never create.</constraint>
+    <constraint source="046 review (K, carried)">Plane 100000002 (WorkforceHome) is matched as a raw value only in ContactBindingDecision.DecideHomeContact. Everywhere else ReadBinding treats it as unreadable: the grant email path (GrantAccessNotifier.cs ~290) would never email a WorkforceHome grantee, and the Spaarke-tenant binder would flag a same-email WorkforceHome contact as unreadable. Since 047 creates the first WorkforceHome contacts, add the IdentityPlaneMarker member and decide (record in notes) how each ReadBinding caller treats the home plane.</constraint>
+    <constraint source="046">Step (1) reuses the 046 resolution and reads (IContactIdentityStore.FindHomeLinkedSystemUsersAsync / FindHomeContactsAsync, DecideHomeLink / DecideHomeContact). Do not add a parallel lookup.</constraint>
   </constraints>
 
   <knowledge>

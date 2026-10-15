@@ -4,7 +4,7 @@
     <title>BFF home principal resolution: stored link → systemuser, contact by (tid, oid), registration_required; guards (d)/(e)</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 044 (columns exist on dev) and 045 (scheme)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, auth; changes principal resolution</rigor-reason>
     <model-tier>opus</model-tier>

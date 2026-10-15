@@ -47,6 +47,9 @@
     <constraint source="project">The guest token is never logged, stored or echoed; audit logs record the systemuserid and hashed tid/oid only. Request body size limit 16 KB.</constraint>
     <constraint source="ADR-028 A9">No OBO with either token.</constraint>
     <constraint source="CLAUDE.md §10">Placement line, publish-size delta, no new package.</constraint>
+    <constraint source="046 review K1 (carried)">Once a link exists, the linked systemuser's cached root sets are keyed by the CUSTOMER tenant id (ImpersonatedRootSetSource.cs ~225/233, IdentityNormalizationService.cs ~112). NoAccessShareEnforcer.cs ~1159 and RestrictedExternalShareRemover.cs ~395 evict only the deployment tenant's keys, so a record turned Restricted would stay visible to a home sign-in for up to CacheTtl. This task must also evict under every WorkforceIdentity:CustomerTenantIds entry (copy ExternalParticipationService.GrantCacheTenantIds ~606), with a test.</constraint>
+    <constraint source="046">The collision check (pair already on another systemuser) reads through IContactIdentityStore.FindHomeLinkedSystemUsersAsync (secured pair only, any state, ordered isdisabled asc); never by the mirror columns or azureactivedirectoryobjectid.</constraint>
+    <constraint source="046 review K2 (accepted)">The external notification last-seen marker is keyed by (token tid, principal id), so a linked user's unread state differs between their company and guest sign-ins. Accepted; no change required. Note it in the task notes.</constraint>
   </constraints>
 
   <knowledge>
