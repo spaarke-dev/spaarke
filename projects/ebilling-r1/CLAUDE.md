@@ -125,6 +125,12 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-66 (confirmed): firms see guideline *content* — clause quotes on findings plus the SPA Billing Guidelines view — never the documents.
 - 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. After 029, `src/dataverse/solutions/SpaarkeMaster/**` is edited only by serial tasks: 015 and 026 (their entities), 070 (billing values on the `sprk_policyversion.sprk_ruletype` option set) and the deploy tasks 053, 079, 112, 136 and 153 (sitemap / navigation entries for the pages they deploy, plus any columns or tables their phase added after 029, using 029's export-to-temp procedure). No parallel task edits it.
 
+- 2026-10-15 — D-67: Procedure Library and Output Files container keys join `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed).
+- 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
+- 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
+- 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
+- 2026-10-15 — D-71: legacy Finance extraction deleted; confirm route redirected into 044; ontology-r1 confirmed no dependency 2026-10-15; keep `sprk_totalamount` + matter/project lookup for `FinanceBaseValues`; send the 050 PR to ontology-r1 for review.
+
 ### Open owner questions
 
 Carried into the tasks:

@@ -95,6 +95,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-69, report whether the provisional confidence weights and caps (sprk_ebillingsetting) meet NFR-04 - NFR-06 and recommend values for owner confirmation at UAT (163).</criterion>
     <criterion testable="true">evaluation-results.md reports baseline and tuned values for NFR-04 (header fields; line date, timekeeper, hours, rate, amount), NFR-05, NFR-06, NFR-01 p90 and NFR-02 p90, each with item or run count and the analyzer, Action and settings versions measured.</criterion>
     <criterion testable="true">Every target is either met in the tuned run or has an owner decision D-entry in notes/decisions-log.md referenced from the results.</criterion>
     <criterion testable="true">Every tuned artefact has a new version; no measured version was modified in place (git diff of earlier analyzer and Action files shows no content change other than a version bump).</criterion>

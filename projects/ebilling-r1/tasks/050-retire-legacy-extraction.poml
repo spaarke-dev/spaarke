@@ -8,7 +8,7 @@
     <rigor>STANDARD</rigor>
     <rigor-reason>Deletion of superseded AI members and their callers; tagged deletion, so code-review and adr-check run regardless (root CLAUDE.md §8).</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Mechanical removal guided by grep, with one owner decision (retire vs redirect) taken before coding.</model-tier-reason>
+    <model-tier-reason>Mechanical removal guided by grep; owner decided redirect + delete (D-71); ontology-r1 confirmed no dependency.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -17,7 +17,7 @@
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
-  <prompt>Remove the legacy Finance extraction path now that 049 extracts through ReadInvoiceAsync and 042 classifies through ClassifyAsync: delete ExtractInvoiceFactsAsync and the extraction schema, deployment name and playbook id options, remove GetPlaybookByNameAsync and GetStructuredCompletionAsync from IInvoiceAi, and route InvoiceExtractionJobHandler per the owner's retire-or-redirect decision (FR-21, FR-46, D-19, D-52).</prompt>
+  <prompt>Remove the legacy Finance extraction path now that 049 extracts through ReadInvoiceAsync and 042 classifies through ClassifyAsync: delete ExtractInvoiceFactsAsync and the extraction schema, deployment name and playbook id options, remove GetPlaybookByNameAsync and GetStructuredCompletionAsync from IInvoiceAi, and remove InvoiceExtractionJobHandler and redirect the confirm route into 044 (owner decision D-71) (FR-21, FR-46, D-19, D-52).</prompt>
 
   <role>SPAARKE platform developer. Expert in safe deletion with grep proof and ArchTest ratchets. Follow ADRs strictly.</role>
 
@@ -30,7 +30,7 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs and InvoiceAnalysisService.cs (remove; delete both files if empty, with their FinanceModule registration :41-45)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Models/FinanceJsonSchemas.cs (remove ExtractionResultSchema; delete the file if empty) and the ExtractionResult model if no reader remains</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs (remove ExtractionDeploymentName, InvoiceExtractionPlaybookId) and appsettings.template.json:454-455 (shared append point)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs (retire or redirect per decision)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs (removed; confirm redirected into 044 per D-71)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (only if the decision changes the confirm path)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point; comment :23)</file>
       <file role="modify">tests/Spaarke.ArchTests/Adr032/AsymmetricRegistrationTests.cs:57-58, Adr032/GateCombinationConstructibilityTests.cs:62, ADR013_LinearConsumerBoundaryTests.cs:74 (remove entries that no longer apply)</file>
@@ -67,7 +67,7 @@
   <steps mode="directional">
     <step order="0" name="Context and rigor">Declare rigor STANDARD (deletion tag: code-review and adr-check run). Grep every member listed in the goal across src/, tests/, docs/ and scripts/; save the list in notes.</step>
     <step order="1">Present the InvoiceExtractionJobHandler decision to the owner (escalation) and wait for it.</step>
-    <step order="2">Apply the decision: retire (remove handler, registration and the confirm path's enqueue, and document what confirm now does) or redirect (confirm calls 044's internal submission service with the existing document; remove the handler).</step>
+    <step order="2">Apply D-71: confirm calls 044's internal submission service with the existing document; remove the handler, its registration and the InvoiceExtraction enqueue.</step>
     <step order="3">Remove the members and options listed; delete InvoiceAnalysisService / IInvoiceAnalysisService and FinanceJsonSchemas if empty; update registrations, comments and appsettings.template.json.</step>
     <step order="4">Shrink the three ArchTest baselines; update the two architecture docs.</step>
     <step order="5">Re-run grep: no remaining reference outside notes and history docs; build, full test, publish-size delta (expected negative).</step>
@@ -76,7 +76,7 @@
   </steps>
 
   <escalation>
-    <trigger>Before coding, STOP and ask the owner: retire or redirect InvoiceExtractionJobHandler. It changes what POST /api/finance/invoice-review/confirm does for email-attachment invoices (InvoiceReviewService.cs, last changed by uac-r2). Recommendation: redirect confirm into the internal submission operation (044) so email-derived invoices get the same checks (D-24), and notify uac-r2.</trigger>
+    <trigger>Owner decided D-71 (2026-10-15): delete the legacy extraction path and redirect POST /api/finance/invoice-review/confirm into the internal submission operation (044); notify uac-r2 (last changed InvoiceReviewService.cs). ontology-r1 confirmed on 2026-10-15 that it does not depend on the legacy handler, ExtractInvoiceFactsAsync, FinanceJsonSchemas, the by-name AI methods, sprk_billingevent, the invoice-index enqueue or PB-013 (see D-71). Preserve what FinanceBaseValues reads: submission-written invoices carry sprk_totalamount and the matter / project lookup. Send the PR to ontology-r1 for review; if the change would touch FinanceBaseValues or those columns, STOP and report.</trigger>
     <trigger>If any caller outside Finance (for example a playbook node or the tool handler) still needs a removed member, STOP and report instead of keeping the member.</trigger>
   </escalation>
 
@@ -93,7 +93,7 @@
   <acceptance-criteria>
     <criterion testable="true">grep over src/ and tests/ finds no ExtractInvoiceFactsAsync, ExtractionResultSchema, ExtractionDeploymentName, InvoiceExtractionPlaybookId, and no GetPlaybookByNameAsync or GetStructuredCompletionAsync on IInvoiceAi / InvoiceAi / NullInvoiceAi (FR-21 acceptance).</criterion>
     <criterion testable="true">IInvoiceAi still exposes GenerateEmbeddingAsync and every Action-backed method; NullInvoiceAi covers each remaining method.</criterion>
-    <criterion testable="true">The confirm route behaves as decided, with a test: redirect → a confirm produces a submission (channel Internal) and enqueues InvoiceSubmissionProcessing; retire → confirm no longer enqueues InvoiceExtraction.</criterion>
+    <criterion testable="true">Per D-71, a confirm produces a submission (channel Internal) and enqueues InvoiceSubmissionProcessing; nothing enqueues InvoiceExtraction any more (test).</criterion>
     <criterion testable="true">Negative: no code path except 049 creates sprk_invoice (grep for creates of sprk_invoice in src/server).</criterion>
     <criterion testable="true">The three ArchTest baselines contain no entry for a deleted type and the ArchTests pass.</criterion>
     <criterion testable="true">Deleted tests are listed in notes with the removed member each covered.</criterion>

@@ -28,7 +28,7 @@
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs (two properties)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (Finance section, two tokens)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs:24-29 (StampContainerSettingKeys — only after the escalation decision)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs:24-29 (StampContainerSettingKeys — add both keys, owner decision D-67)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs (skip the output container) or the converging indexing sink found by Grep</file>
       <file role="modify">tests/integration/tenant/Spe/SpeAppOnlyContainerIsolationTests.cs:870 (StampContainerIds coverage)</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PostUploadIndexingEnqueuerTests.cs or the sink's tests (exclusion test)</file>
@@ -83,7 +83,7 @@
   </steps>
 
   <escalation>
-    <trigger>Container ownership is a tenant-isolation guard (root CLAUDE.md §6 security-sensitive). Before editing GraphModule, present to the owner: (a) add Finance:ProcedureLibraryContainerId and Finance:EbillingOutputContainerId to StampContainerSettingKeys — same status as the two existing operator-written keys (recommended); (b) list the dev ids in SharePointEmbedded:OwnedContainerIds and rely on the spaarkeCustomerId marker for customer stamps (no code change). STOP until chosen.</trigger>
+    <trigger>Owner decided D-67 (2026-10-15): add Finance:ProcedureLibraryContainerId and Finance:EbillingOutputContainerId to GraphModule.StampContainerSettingKeys (same status as the existing operator-written keys). If doing so would admit any other container or change the guard for existing keys, STOP and report.</trigger>
     <trigger>If CIAM access to Procedure Library documents cannot be shown to be denied without changing external-access code shared with unified-access-control-r2 or SPA-r3, STOP and escalate before editing Infrastructure/ExternalAccess/**.</trigger>
     <trigger>If the owner wants the keys required at start-up, STOP: that needs manifest.yaml entries (customer-provisioning-orchestration-r1) or IOptionsDriftTests fails.</trigger>
   </escalation>
@@ -106,6 +106,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-67 both keys are in GraphModule.StampContainerSettingKeys; a test shows an app-only write to each configured container is admitted by SpeContainerOwnershipGuard and a write to an unlisted container is still refused (seeding proof for the guard).</criterion>
     <criterion testable="true">With both keys set to well-formed ids the BFF starts; with a malformed id start-up validation fails with a message naming the key; with both empty it starts.</criterion>
     <criterion testable="true">Under the chosen ownership option, an app-only client for each configured container is allowed and an unconfigured container is still refused (test).</criterion>
     <criterion testable="true">A file in the output container is skipped by indexing (must-skip test) and a file in another container is not (must-not-skip test).</criterion>

@@ -82,7 +82,7 @@
     <step order="6" name="Build + size">dotnet build src/server/api/Sprk.Bff.Api/ and the unit tests green; publish-size delta per .claude/rules/bff-hygiene.md item 4; dotnet list package --vulnerable.</step>
     <step order="7" name="Docs">docs/data-model/sprk_ebillingsetting.md (columns, ranges, singleton mechanism, seed values) and an INDEX.md row.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
-    <step order="9">Record deviations and the provisional weight / cap values (owner question) in projects/ebilling-r1/notes/ and this task's notes.</step>
+    <step order="9">Record deviations and the provisional weight / cap values in projects/ebilling-r1/notes/ and this task's notes. Per D-69 they are owner-accepted as provisional and are validated in 161 / 162 and at UAT (163).</step>
   </steps>
 
   <escalation>

@@ -85,6 +85,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-69, the UAT script includes an explicit check of the provisional confidence weights and caps (sprk_ebillingsetting) against the 161 / 162 results; the owner confirms or changes them and the outcome is recorded.</criterion>
     <criterion testable="true">uat-script.md covers every Success Criterion 1-12, either as a script section (1, 3, 4, 6) or as a mapped evidence file and test name (2, 5, 7-12).</criterion>
     <criterion testable="true">uat-results.md records pass / fail per step with record ids and the criterion 1 timing within NFR-01 (or the linked owner decision).</criterion>
     <criterion testable="true">The flag-off check recorded 503 ebilling.disabled on both probed routes and a hidden SPA entry, then normal status after restore; Ebilling__Enabled is true at task end.</criterion>

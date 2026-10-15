@@ -76,7 +76,7 @@
   </steps>
 
   <escalation>
-    <trigger>Key composition. A unique key on (firm, type, value) as the brief states would refuse legitimate rows: a resubmission creates a new invoice with the same firm invoice number (D-37, D-43), and one PO number is quoted on many invoices. STOP before creating any key and present to the owner (root CLAUDE.md §6): (a) unique key (sprk_issuingorganization, sprk_identifiertype, sprk_normalizedvalue, sprk_regardingrecordid) — prevents exact duplicates, lookups by (firm, type, value) are a filtered query, and ambiguity (one client-matter number on two core records) is refused by the resolver in 044; (b) no alternate key, query only; (c) the brief's key, accepting that firm invoice numbers and POs cannot repeat. Recommendation: (a).</trigger>
+    <trigger>Key composition decided by the owner (D-68, 2026-10-15): unique key (sprk_issuingorganization, sprk_identifiertype, sprk_normalizedvalue, sprk_regardingrecordid). Lookups by (firm, type, value) are filtered queries; ambiguity (one value on two core records) is refused by the resolver in 044. If Dataverse cannot build a key on these columns, STOP and report rather than choosing another key.</trigger>
     <trigger>If task 012 chose different entity-specific lookup names for the invoice family, STOP and align with the main session before creating lookups.</trigger>
   </escalation>
 

@@ -43,6 +43,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-70">Firm scoping applies to every external invoice read surface eBilling touches (invoices module grid and record, submission status, findings, report, guidelines); the firm is resolved server-side from the caller identity, never from a client parameter.</constraint>
     <constraint source="D-66, D-63">Clause quote and section reference appear only when 076's helper allows them for that rule's rule set. No item, field or link anywhere in the projection points at a Procedure Library document or container.</constraint>
     <constraint source="spec FR-38">An invoice still In Review (or a submission still Received / Processing) projects status and billed total only: no findings, no line decisions, no approved total. Findings never adopted by a decision (Pending, Flagged, overridden, AI observations) never appear.</constraint>
     <constraint source="NFR-10, ADR-015">Firm-visible text only: firm-visible reason text, reviewer reason, values read; never internal Signal messages, confidence scores, reviewer identity, internal notes or other firms' data.</constraint>
@@ -100,6 +101,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-70, the external invoices module (the invoices ExternalModuleDescriptor in Infrastructure/DI/ExternalAccessModule.cs) also scopes by firm: a CIAM caller sees only sprk_invoice rows whose sprk_vendororg is the caller's firm, in addition to the existing matter / project and secure-root scoping. A test with two firms on one shared matter shows each firm sees only its own invoices, submissions and findings (seeding proof). uac-r2 reviews the descriptor change (it owns decision D2 for that module); record the review in notes.</criterion>
     <criterion testable="true">Seeding proof: with firms A and B seeded on one shared matter, a firm-A CIAM caller requesting firm B's invoice or submission outcome gets 403 ProblemDetails with a stable code and no outcome data; the same test fails if the firm check is removed.</criterion>
     <criterion testable="true">A caller of the right firm without access to the core record gets 403; 401 unauthenticated; 503 ebilling.disabled when the flag is off; 200 for the own firm with access.</criterion>
     <criterion testable="true">An invoice In Review projects no findings, no line decisions and no approved total; Pending, Flagged, overridden and AI-observation findings never appear.</criterion>
