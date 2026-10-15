@@ -1872,6 +1872,15 @@ pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1
 ```
 
+### `ebilling/Deploy-EbillingSettingsSchema.ps1`
+
+Additive Dataverse metadata script (FR-48 / D-59 / D-47 / D-54 / D-56 / D-69, `ebilling-r1` task 025) that creates the audited organization-owned singleton table `sprk_ebillingsetting` and seeds its one default row: auditing on the table and every custom column; the required one-option choice `sprk_singleton` plus the alternate key `sprk_ebillingsetting_singleton` (a second row is refused by the platform); range-checked decimal (0 to 1) and whole-number columns for the rejection threshold, the confidence weights and caps, the related-work window and the coding chunk size; three multi-selects on the global choice `sprk_billingapproverrole`; the AP export mapping; the firm-notice AI toggle; and the `sprk_defaultcodeset` lookup (printed SKIPPED when `sprk_billingcodeset` does not exist; re-run after task 018). The seed row is written only when the table is empty, so an admin edit is never overwritten; the weights and caps are provisional (D-69). Runs only against the dev environment, stops with exit 2 if organization auditing is off, supports `-WhatIf`, publishes entity-scoped only when it changed something, and ends with a metadata read-back. Columns and values: `docs/data-model/sprk_ebillingsetting.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
@@ -2056,3 +2065,4 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingExportSchema.ps1 (sprk_billingexport AP batch table, CSV / JSON document lookups, single-valued sprk_invoice.sprk_billingexport batch lookup; `ebilling-r1` task 023).
 - **2026-10-15:** Added ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 (sprk_externalidentifier table, ADR-024 regarding lookups, D-68 alternate key on firm, type, normalized value and core record id; `ebilling-r1` task 022).
 - **2026-10-15:** Added ebilling/Deploy-EbillingCorrectionSchema.ps1 (sprk_invoicecorrection structured correction record table, four-value outcome type, SystemRequired invoice lookup, ADR-024 regarding lookups; `ebilling-r1` task 027).
+- **2026-10-15:** Added ebilling/Deploy-EbillingSettingsSchema.ps1 (sprk_ebillingsetting audited singleton table: alternate-key singleton, range-checked threshold / weights / caps / window / chunk size, approver-role multi-selects, AP mapping, default code set lookup, seeded default row; `ebilling-r1` task 025).

@@ -48,6 +48,11 @@ public static class FinanceModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // eBilling settings (ebilling-r1 task 025, FR-48, D-59): the one audited sprk_ebillingsetting row, read with a
+        // 30 s IMemoryCache copy (ADR-009 exception documented on the class). Singleton: it takes a scope per load for the
+        // scoped IGenericEntityService, so background jobs and requests share one cache. Unconditional (see the flag rule above).
+        services.AddSingleton<IEbillingSettingsReader, EbillingSettingsReader>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================

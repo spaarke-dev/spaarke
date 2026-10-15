@@ -318,7 +318,16 @@ public class ADR010_DITests
         // through its Moq double in ExternalMessageEndpointsTests, and ADR-038 bans Mock<HttpMessageHandler>. Adding an
         // app-only member to IImpersonatedCommunicationQuery instead would contradict that interface's "no app-only
         // fallback" contract and break its hand-written test doubles.
-        const int knownOneToOneCeiling = 159;
+        //
+        // ───────── Ceiling raised 159 → 160, 2026-10-15 (ebilling-r1 task 025) ─────────
+        // IEbillingSettingsReader -> EbillingSettingsReader. SEAM JUSTIFICATION: it is the Dataverse boundary of the eBilling
+        // business settings (FR-48, D-59) and the module boundary every eBilling consumer fakes: the rejection gate (task 046),
+        // coding chunking and the default code set (047), approver resolution (103), the AP export mapping (150) and the firm-notice
+        // AI toggle (131) are each proven by feeding them an EbillingSettings value through a Moq double, not by standing up a
+        // FetchXml-reading singleton with a scoped IGenericEntityService behind it. The reader is a singleton that takes a scope per
+        // cache-miss load (like IAllowedIndexesProvider above, which is the accepted precedent); a concrete registration would put
+        // that Dataverse plumbing into every consumer test. Verified as the only addition on this branch (master measured 159).
+        const int knownOneToOneCeiling = 160;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
