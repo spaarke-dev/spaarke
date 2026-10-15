@@ -405,3 +405,99 @@ Add `0x80072551` to the duplicate test of each script's lookup-create helper (co
 **Related**: DEF-006, DEF-007; ebilling-r1 task 020
 
 ---
+
+### DEF-009 — ApplicationRequired is not enforced on API writes; eBilling schema scripts and docs rely on it (SystemRequired is)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before any writer relies on a "required" column from schema 017-020 |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 021 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1939 |
+
+**Description**
+
+Verified live: a Web API create of `sprk_invoiceapproval` without the lookup marked ApplicationRequired succeeded. After raising `sprk_invoice` to SystemRequired and publishing, the same create is refused (`Attribute 'sprk_invoice' cannot be NULL`). Scripts, comments and docs of tasks 017-020 say an API write without the value is refused; only forms refuse. Where a null breaks an invariant, nothing but a server-side writer stands between the data and a broken row.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (`sprk_ratecardrate.sprk_ratecard`, line 665; `Set-PrimaryNameRequired` comment)
+- `scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1` (`sprk_codeset`, `sprk_codetype`, lines 531, 533)
+- the primary-name steps and comments in the 019 and 020 scripts; the matching data-model docs (grep, not individually verified)
+- `scripts/ebilling/Deploy-EbillingApprovalSchema.ps1` (`Set-LookupRequiredLevel`, the working model)
+
+**Suggested fix**
+
+Raise the level to SystemRequired for each lookup or column whose null breaks an invariant (idempotent PUT of the attribute plus publish, as in `Set-LookupRequiredLevel`); keep primary names at ApplicationRequired and correct the comments and docs. Check that no writer, seed or import creates rows without the value first.
+
+**Estimated effort**: 2 hours
+
+**Blockers**: none
+
+**Related**: DEF-006, DEF-007; ebilling-r1 tasks 017, 018, 019, 020, 021
+
+---
+
+### DEF-010 — eBilling schema scripts: table-create duplicate (`0x8009050d`) not recognised and false "has rows" in `Set-PrimaryNameLength`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the next schema script re-run (tasks 022-028 should copy the fixed helpers) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 021 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1940 |
+
+**Description**
+
+(1) A table create whose existence read was stale is refused with `0x8009050d: Entities already exist`; the helpers match only `already exists` and a few codes, so the re-run stops with exit 1 instead of reporting no change. (2) Right after a table create, `Set-PrimaryNameLength` judged `@($rows).Count -gt 0` true on an empty table and left the primary name at 850 until the next run. Both fixed in `Deploy-EbillingApprovalSchema.ps1` (`Add-Table` / `Invoke-DvCreate` regex; row count by `$count=true` repeated until a count is returned).
+
+**Entry-points**
+
+- Regex not fixed in: `Deploy-EbillingBillingCodeSchema.ps1`, `Deploy-EbillingInvoiceHeaderSchema.ps1`, `Deploy-EbillingInvoiceLineSchema.ps1`, `Deploy-EbillingPolicyStoreSchema.ps1`, `Deploy-EbillingSubmissionSchema.ps1`, `Deploy-EbillingTimekeeperRateCardSchema.ps1` (grep for `already exists|0x80047013`)
+- Row count not fixed in: the 017, 018, 019 and 020 scripts (grep for `@($rows).Count`)
+- `scripts/ebilling/Deploy-EbillingApprovalSchema.ps1` (the model fix)
+
+**Suggested fix**
+
+Port both changes to the other scripts, or move the helpers into one shared file so the next fix lands once. Nothing is lost today (the scripts are re-runnable).
+
+**Estimated effort**: 1 hour
+
+**Blockers**: none
+
+**Related**: DEF-008; ebilling-r1 tasks 017-021
+
+---
+
+### DEF-011 — `sprk_matter.sprk_billingapproverrole` is single-select; Project and Work Assignment are multi-select (D-33 / task 024)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before task 024 and task 103 start |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 021 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1941 |
+
+**Description**
+
+D-33, FR-14 and task 024 describe `sprk_billingapproverrole` as multi-select on Matter, Project and Work Assignment. In dev, Project and Work Assignment hold a `MultiSelectPicklistAttributeMetadata`, but Matter holds a plain `PicklistAttributeMetadata` (one value). Approver resolution (task 103) cannot store or read the default "Assigned Attorney 1 + Assigned To Internal" on a Matter. Also noted: Matter and Project have no `sprk_assignedto` lookup, so the option "Assigned To" resolves only on Work Assignment. All assignment lookups that exist target `contact` (task 021's pre-check), so the eligible-approver store is unaffected.
+
+**Entry-points**
+
+- `sprk_matter.sprk_billingapproverrole` (dev metadata, read-only check 2026-10-15)
+- `projects/ebilling-r1/tasks/024-approver-role-billing-contact.poml`; task 103
+
+**Suggested fix**
+
+In task 024 decide with the owner: replace the Matter column with a multi-select (a column type cannot change in place, so this is destructive and needs the owner's OK and a check that no Matter row has a value) or accept single-select on Matter and amend the spec. Task 103 handles both shapes until then.
+
+**Estimated effort**: 1-2 hours
+
+**Blockers**: owner decision (destructive change)
+
+**Related**: D-33, D-54; ebilling-r1 tasks 024, 103
+
+---

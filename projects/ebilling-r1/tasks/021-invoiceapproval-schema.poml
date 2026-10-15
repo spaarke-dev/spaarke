@@ -4,7 +4,7 @@
     <title>sprk_invoiceapproval schema</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new table, an N:N relationship and a new script file; no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,6 +109,11 @@
     Spec says "eligible approvers resolved at acceptance (per spec)" without a shape. An N:N to contact is chosen over a JSON column because a view can filter an N:N through contact.sprk_systemuser for the current user, and JSON cannot be filtered.
     sprk_decidedby / sprk_decidedon follow design.md section data model ("approver") so the worklist can show who decided without reading the Decision Record.
     Open for 013 / uac-r2 (not this task): secure-record family membership and sprk_createdbyperson for this table.
+  
+
+    COMPLETED 2026-10-15. Script run against spaarkedev1 (WhatIf, apply, second run: no change). Full evidence, deviations and the class check: projects/ebilling-r1/notes/021-invoiceapproval-schema.md.
+    Deviation: sprk_invoice is SystemRequired (ApplicationRequired is not enforced on API writes, so the acceptance criterion failed with it). Defects filed: DEF-009 (#1939), DEF-010 (#1940), DEF-011 (#1941). D-33 escalation did not fire (all approver assignment lookups target contact).
+    rework: fix-round-1 task 021
   </notes>
 
   <execution>

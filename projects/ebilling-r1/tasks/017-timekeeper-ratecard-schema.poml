@@ -4,7 +4,7 @@
     <title>Timekeeper (extend stub) and rate card schema</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>blocked</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script; extends one table and adds two; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
