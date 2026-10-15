@@ -11,13 +11,13 @@
 
 ## Purpose
 
-Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (Wave C4, forthcoming) before H1 starts. Each module verifies quota headroom for **one Azure/PAC resource** required by the Model 2 dedicated-stamp provisioning pipeline. If ANY check fails, H0 blocks the run before H1 — surfacing quota bumps UP-FRONT (1–3 day lead time per spec.md § External Dependencies) instead of failing deep in H2a/H2b/H8 with cryptic "quota exceeded" errors that cascade into partial state + Quarantine per §4C.
+Reusable PowerShell prep modules invoked by the **H0 preflight handler** (Wave C4, forthcoming) before H1 starts. Each module verifies quota headroom for **one Azure/PAC resource** required by the Model 2 dedicated-stamp provisioning pipeline. If ANY check fails, H0 blocks the run before H1 — surfacing quota bumps UP-FRONT (1–3 day lead time per spec.md § External Dependencies) instead of failing deep in H2a/H2b/H8 with cryptic "quota exceeded" errors that cascade into partial state + Quarantine per §4C.
 
-**Why four checks** (per spec.md FR-01 + design.md § handlers H0):
+**Why these checks** (per spec.md FR-01 + design.md § handlers H0):
 
 1. **Azure OpenAI regional TPM headroom** — the stamp deployment set (task 247: DataZoneStandard gpt-4o 150, gpt-4.1-mini 200, text-embedding-3-large 350), in the stamp's OpenAI region
 2. **Dataverse environment-creation rate** — ~4/hour per tenant typical
-3. **Subscription vCPU quota** — per SKU family per region for App Service Plan + AI Search stamps
+3. ~~**Subscription vCPU quota** — per SKU family per region for App Service Plan + AI Search stamps~~ — **REMOVED 2026-10-15 (T186 L17)**, script and L2 probe both deleted. The stamp deploys no Microsoft.Compute resources, so `standardDv5Family` quota is irrelevant (it is 0 on a fresh subscription and refused every run); App Service plans draw on their own Microsoft.Web per-SKU worker quota, for which no supported read API exists. A real shortfall surfaces at H2a's deployment with Azure's own error.
 4. ~~**SPE cert-bootstrap status** — cert present in KV AND ≥24h old (SPE replication complete per FR-11 T6)~~ — **RETIRED 2026-10-03 (task 248)**. The L2 control plane signs in as the SPE owning app through a managed-identity federated identity credential (MI-FIC) trusting the L2 Worker UAMI; there is no certificate to bootstrap. H0 runs `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`) in C# instead — see below.
 
 ---
@@ -46,7 +46,7 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 - `0` — check passed (Result = 'Pass')
 - non-zero — check failed OR an unexpected error occurred (Result = 'Fail' or exception)
 
-**H0 handler orchestrates all four in parallel** (per constraint: no cross-module state dependency). Any Fail → run blocked before H1.
+**H0 handler orchestrates the checks in parallel** (per constraint: no cross-module state dependency). Any Fail → run blocked before H1.
 
 ---
 
@@ -55,14 +55,13 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 | Script | Checks | Underlying API |
 |---|---|---|
 | `Test-AzureOpenAiTpmHeadroom.ps1` | Regional TPM headroom per Azure quota name for the stamp deployment set (task 247 — default mirrors openai.bicep and L2's `PinnedModelCatalog`; L2's H0 runs the C# port `ArmCognitiveServicesTpmProbe`) | `az cognitiveservices usage list --location <openAiLocation> --subscription <id>` |
-| `Test-SubscriptionVCpuQuota.ps1` | Per-SKU-family regional vCPU headroom for the expected +1-customer stamp (App Service Plan + AI Search) | `az vm list-usage --location <region>` |
 | `Test-SpeCertBootstrap.ps1` | **RETIRED 2026-10-03 (task 248) — throws on invocation.** Formerly: KV cert-secret `SPE-OwnerCert-Pfx` exists AND is ≥24h old. Replaced by L2's `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`: owner entry → owning-app token through the Worker UAMI's federated credential → container type registration GET; codes `spe-owner-not-configured`, `spe-owner-token-failed`, `spe-container-type-not-registered`; no age gate). Set-up: `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` | — (formerly `az keyvault secret show`) |
 
 ---
 
 ## Invocation Examples
 
-Each script is independently invocable. Handler H0 orchestrates them in parallel (e.g. via PS7 `ForEach-Object -Parallel` or four sequential `Start-Job` calls that Wait-Job together).
+Each script is independently invocable. Handler H0 orchestrates them in parallel (e.g. via PS7 `ForEach-Object -Parallel` or sequential `Start-Job` calls that Wait-Job together).
 
 ### OpenAI TPM headroom
 ```powershell
@@ -72,17 +71,6 @@ $r = & ./Test-AzureOpenAiTpmHeadroom.ps1 `
 # -RequestedTpmPerModel defaults to the stamp set; override with full Azure quota names, e.g.
 #   @{ 'OpenAI.DataZoneStandard.gpt-4o' = 150; 'OpenAI.DataZoneStandard.gpt4.1-mini' = 200 }
 if ($r.Result -eq 'Fail') { Write-Host $r.Diagnostic; exit 1 }
-```
-
-### Subscription vCPU quota
-```powershell
-$r = & ./Test-SubscriptionVCpuQuota.ps1 `
-    -SubscriptionId $env:SPAARKE_SUBSCRIPTION_ID `
-    -Region 'eastus' `
-    -RequestedVCpuPerFamily @{
-        'standardDv5Family' = 8
-        'standardFsv2Family' = 4
-    }
 ```
 
 ### SPE cert-bootstrap — RETIRED (task 248)
@@ -104,10 +92,10 @@ $r = & ./Test-SpeCertBootstrap.ps1 `
 
 The H0 handler (forthcoming, tagged `l1-handler`, `orchestration`) will:
 
-1. Read run parameters (region, subscriptionId, tenantId, KV name, cert secret name, per-model TPM, per-family vCPU) from Cosmos `ProvisioningRun.parameters`.
-2. Dispatch all 4 checks in parallel; collect the 4 `PSCustomObject` results.
+1. Read run parameters (region, subscriptionId, tenantId, KV name, cert secret name, per-model TPM) from Cosmos `ProvisioningRun.parameters`.
+2. Dispatch the checks in parallel; collect the `PSCustomObject` results.
 3. Aggregate: **any Result = 'Fail' → block the run** (Cosmos state → `Failed`; §4C class = `Resumable` per design.md § Rollback semantics; operator resolves external precondition + `POST /api/runs/{id}/resume`).
-4. On `Pass` from all four: transition state to allow H1 to enqueue.
+4. On `Pass` from every check: transition state to allow H1 to enqueue.
 
 **H0's contract with this directory is the shared return object** — do not break the field names/types without a coordinated H0 handler change.
 
@@ -117,7 +105,7 @@ The H0 handler (forthcoming, tagged `l1-handler`, `orchestration`) will:
 
 Each script has a "pass-path" mode and a "simulated fail-path" mode:
 
-- **Pass path**: run against a healthy dev subscription/tenant/KV with reasonable RequestedTpm/vCPU values.
+- **Pass path**: run against a healthy dev subscription/tenant/KV with reasonable RequestedTpm values.
 - **Fail path**: pass absurdly high requested values (e.g., `RequestedTpm = 999999`) — verify the diagnostic cites both observed and requested. (`Test-SpeCertBootstrap.ps1` is retired and has no pass/fail path.)
 
 The scripts do not depend on each other and can be tested independently (per FR-01 constraint: "no cross-module state").

@@ -1971,8 +1971,9 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 🔔 MANUAL GATE: Azure quota bump required (H1)
 
   Handler: H1 resource-group provisioning
-  Reason:  Target subscription hit soft cap on {vCPUs / P1v3 count / Storage GB /
-           whatever the specific quota is}.
+  Reason:  Target subscription hit soft cap on {App Service PremiumV3 workers /
+           Storage GB / whatever the specific quota is}. H0 does not check
+           App Service quota (no readable API; T186 L17), so it surfaces here.
 
   ACTION FOR OPERATOR:
     1. Open Azure Portal → Subscription → Usage + Quotas → filter by {quota-name}

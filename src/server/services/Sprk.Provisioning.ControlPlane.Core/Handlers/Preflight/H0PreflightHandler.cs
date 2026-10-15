@@ -3,7 +3,7 @@
 //
 // The first handler in the provisioning pipeline (task 041, wave C4). Validates
 // run parameters + queries the quota / readiness sources — Azure OpenAI
-// regional TPM, Dataverse env-creation rate, subscription vCPU, SPE owning-app
+// regional TPM, OpenAI pin freshness, SPE owning-app
 // credential (task 248) — and BLOCKS the run before H1 starts if any headroom is
 // insufficient.
 //
@@ -24,8 +24,8 @@
 //   - projects/customer-provisioning-orchestration-r1/design.md § 15 north-star:
 //       lead-time items surfaced by H0 BEFORE the 30-min Bicep step, not
 //       after.
-//   - scripts/preflight/README.md § Purpose: 4 checks + shared return
-//       contract; H0 orchestrates all four in parallel.
+//   - scripts/preflight/README.md § Purpose: the script-backed checks + shared
+//       return contract; H0 orchestrates all three probes in parallel.
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (Wave G-8
 //       Batch 10 — upgrade-mode version-compat gate): when `provisionedOn` is
 //       populated (upgrade of an already-provisioned customer), H0 queries the
@@ -42,7 +42,7 @@
 //       supplies the target versions.
 //
 // ROLLBACK CLASSIFICATION (§ 4C):
-//   H0 writes NO external side effect — the four probes are pure read-only
+//   H0 writes NO external side effect — the three probes are pure read-only
 //   quota queries. On any failure, the ProvisioningRun transitions to
 //   Status = Failed with a distinct RejectionCode per failing check, but no
 //   quarantine is warranted. Operator addresses the missing precondition
@@ -160,7 +160,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// </summary>
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H0.5 on success (wave-C4 temporary bridge — see file header).</param>
-    /// <param name="probes">The four preflight probes. Registration order does not matter; the handler orchestrates all four in parallel and aggregates results.</param>
+    /// <param name="probes">The three preflight probes. Registration order does not matter; the handler orchestrates all three in parallel and aggregates results.</param>
     /// <param name="versionCompatMatrix">Version-compat matrix queried in upgrade mode ONLY (spec.md FR-34; Wave G-8 Batch 10).</param>
     /// <param name="options">COMP-10 (SESSION 17): H0 options — cost-envelope gate configuration. Optional (defaults to <see cref="H0Options"/> defaults when null so the handler stays constructible in ad-hoc tests without an Options.Create wrapper).</param>
     /// <param name="logger">Structured logger.</param>
@@ -618,7 +618,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private static string BuildRejectionCode(string checkName) => checkName switch
     {
         PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
-        PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
         // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
         // code the punchlist mandates so operators can filter for the
         // specific fast-fail without string-matching the diagnostic.

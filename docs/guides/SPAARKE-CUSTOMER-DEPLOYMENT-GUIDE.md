@@ -160,7 +160,7 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline time (NFR-03):
 
 - **Azure OpenAI regional TPM quota** — `az cognitiveservices` returns per-model per-region quota; lead time 1–3 days for quota bump
-- **Azure subscription vCPU quota** — verify per SKU per region
+- **Azure subscription vCPU quota** — no longer checked: H0's Compute vCPU check was removed 2026-10-15 (T186 L17) because the stamp deploys no Microsoft.Compute resources and App Service plans draw on their own per-SKU worker quota (no supported API reads it), so a real shortfall surfaces as an H2a deployment error
 - **The customer's subscription and Dataverse environment** — created by the operator before the run (PRQ-S-00, PRQ-S-04,
   PRQ-C-09; T228). L2 creates neither — the former environment-creation rate limit no longer applies
 - **Management groups + common customer policy** — one-time per tenant (ADR-027, T262): `spaarke-environments` →
@@ -577,7 +577,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 
 | # | Handler | Purpose | Gate | Idempotency key |
 |---|---|---|---|---|
-| **H0** | Preflight + quota checks | Validate run params + **cost envelope** (§3.2a — `tier` + `estimatedMonthlyUsd`, every model; `quota-cost-envelope-*` / `quota-cost-overrun`, no override) + Azure OpenAI TPM headroom + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
+| **H0** | Preflight + quota checks | Validate run params + **cost envelope** (§3.2a — `tier` + `estimatedMonthlyUsd`, every model; `quota-cost-envelope-*` / `quota-cost-overrun`, no override) + Azure OpenAI TPM headroom + OpenAI pin freshness + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
@@ -1054,8 +1054,8 @@ Each phase invokes one or more handlers. Post-Phase-D, `/provision-environment` 
 
 **[GATE]** — H0 must pass:
 - Azure OpenAI regional TPM headroom for the stamp deployment set, per Azure quota name, in `openAiLocation` (default westus3): DataZoneStandard gpt-4o 150, gpt-4.1-mini 200, text-embedding-3-large 350 (task 247)
-- Dataverse env-creation rate quota (`pac admin quota`)
-- Subscription vCPU quota
+- ~~Dataverse env-creation rate quota (`pac admin quota`)~~ — removed earlier by T228; H0 no longer runs it.
+- ~~Subscription vCPU quota~~ — removed 2026-10-15 (T186 L17): the stamp deploys no Microsoft.Compute resources and App Service plans draw on their own per-SKU worker quota (not readable via any supported API), so a real shortfall surfaces at H2a's deployment with Azure's own error.
 - SPE owner check (`SpeOwnerCredential`): owner entry configured, owning-app token obtained through the federated credential, container type registered
 
 Failure diagnostic surfaces to operator; run does not start until resolved.

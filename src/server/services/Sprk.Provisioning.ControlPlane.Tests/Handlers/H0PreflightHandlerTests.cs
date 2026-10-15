@@ -12,7 +12,7 @@
 //   integration coverage would ship alongside a real dev-env probe wiring).
 //
 // COVERAGE:
-//   T1  Happy path: all four probes Pass → Success + Cosmos state advances
+//   T1  Happy path: all probes Pass → Success + Cosmos state advances
 //                   to CurrentPhase=H0.5 + CompletedPhase for H0 recorded +
 //                   H0.5 enqueued.
 //   T2  Idempotent no-op: run already has an H0 CompletedPhase matching the
@@ -29,9 +29,8 @@
 //   T5  Dataverse env-creation rate insufficient: Failure with distinct
 //                                                  quota-dataverse-env-rate
 //                                                  rejection code.
-//   T6  Subscription vCPU insufficient: Failure with distinct
-//                                        quota-subscription-vcpu rejection
-//                                        code.
+//   T6  (retired 2026-10-15, T186 L17 — the Compute vCPU check was removed;
+//        the stamp consumes no Microsoft.Compute quota.)
 //   T7  SPE owner check fails: H0 uses the code the probe names
 //       (SpeOwnerCredentialProbe has three — task 248), not a check-name default.
 //   T8  Run not found in Cosmos partition: Failure(Resumable, run-not-found).
@@ -99,7 +98,6 @@ public sealed class H0PreflightHandlerTests
         var probes = new[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
         var handler = CreateHandler(repo, enqueuer, probes);
@@ -189,7 +187,6 @@ public sealed class H0PreflightHandlerTests
 
     [Theory]
     [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
-    [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
     [InlineData(PreflightCheckNames.SpeOwnerCredential, SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
         string failingCheck,
@@ -203,9 +200,6 @@ public sealed class H0PreflightHandlerTests
             failingCheck == PreflightCheckNames.AzureOpenAiTpmHeadroom
                 ? FakeProbe.Fail(PreflightCheckNames.AzureOpenAiTpmHeadroom, "OpenAI TPM: observed 100/1000 required in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            failingCheck == PreflightCheckNames.SubscriptionVCpuQuota
-                ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
-                : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             failingCheck == PreflightCheckNames.SpeOwnerCredential
                 ? FakeProbe.Fail(PreflightCheckNames.SpeOwnerCredential, "SPE owner: token exchange failed",
                     SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)
@@ -440,7 +434,7 @@ public sealed class H0PreflightHandlerTests
     [Fact]
     public async Task OpenAiPinFreshnessProbeFailure_H0MapsToQuotaOpenAiPinStaleRejectionCode()
     {
-        // Arrange — five probes, only the pin-freshness one fails. Fake stub
+        // Arrange — several probes, only the pin-freshness one fails. Fake stub
         // returns the exact per-pin diagnostic shape the real probe emits so
         // the assertion on ErrorDetail is meaningful.
         var run = BuildRunWithTenant();
@@ -449,7 +443,6 @@ public sealed class H0PreflightHandlerTests
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             FakeProbe.Fail(
                 PreflightCheckNames.OpenAiPinFreshness,
@@ -563,13 +556,12 @@ public sealed class H0PreflightHandlerTests
             TimeProvider.System,
             NullLogger<ArmOpenAiPinFreshnessProbe>.Instance);
 
-        // Compose alongside the four other probes as no-ops so the H0
+        // Compose alongside the other probes as no-ops so the H0
         // orchestration decision is driven by the pin-freshness verdict
         // alone.
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             realPinnedProbe,
         };
@@ -829,7 +821,6 @@ public sealed class H0PreflightHandlerTests
     private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]
     {
         FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-        FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
         FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
     };
 
