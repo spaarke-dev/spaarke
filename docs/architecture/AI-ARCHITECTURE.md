@@ -371,7 +371,7 @@ Located in `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/`:
 | `IConsumerRoutingService` | **The Binding-table catalog reader** — resolves `sprk_playbookconsumer` rows (full routing contract) for all three entry paths; boot-reconciled by `RoutingConsumerTypeHealthCheck` |
 | `IBriefingAi` | `IOpenAiClient.GetCompletionAsync` (narrative generation) |
 | `IInsightsAi` | Insights family Zone-A facade (frozen-engine cluster) |
-| `IInvoiceAi` | `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` + `IOpenAiClient.GenerateEmbeddingAsync` |
+| `IInvoiceAi` | `IActionResolver` + `IActionRunner` for the Action-backed capabilities (`ClassifyAsync` = `invoice-classify`), plus legacy `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` (extraction) + `IOpenAiClient.GenerateEmbeddingAsync` |
 | `IRecordMatchingAi` | `IRecordSearchService.SearchAsync` |
 | `IWorkspacePrefillAi` | Matter/project prefill |
 | `IObservationMirror` | Insights observation mirroring |

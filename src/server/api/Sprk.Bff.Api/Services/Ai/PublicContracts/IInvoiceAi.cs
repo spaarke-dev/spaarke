@@ -39,7 +39,7 @@ public interface IInvoiceAi
 {
     /// <summary>
     /// Look up an analysis playbook by its system name (e.g.
-    /// <c>FinanceClassification</c>, <c>FinanceExtraction</c>). The Finance flows use
+    /// <c>FinanceExtraction</c>; the former <c>FinanceClassification</c> playbook was replaced by the <c>invoice-classify</c> Action in task 042). The Finance flows use
     /// the playbook <c>Description</c> field as the system prompt (ADR-014: prompts
     /// live in Dataverse, not hard-coded strings).
     /// </summary>

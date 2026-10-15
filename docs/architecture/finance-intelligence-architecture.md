@@ -20,8 +20,8 @@ The core design decision is a **sequential pipeline with a human review gate**: 
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| InvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs` | AI classification (gpt-4o-mini) and extraction (gpt-4o) via structured output |
-| IInvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs` | Interface for classification and extraction |
+| InvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs` | AI extraction (gpt-4o) via structured output. Classification moved to the `invoice-classify` Action behind `IInvoiceAi.ClassifyAsync` (ebilling-r1 task 042) |
+| IInvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs` | Interface for extraction |
 | InvoiceReviewService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs` | Human review confirmation/rejection workflow; creates `sprk_invoice`, enqueues extraction job |
 | SpendSnapshotService | `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs` | Aggregates BillingEvents into Month + ToDate snapshots; upserts via 5-field alternate key |
 | SignalEvaluationService | `src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs` | Threshold-based signal detection (BudgetExceeded, BudgetWarning, VelocitySpike); strategy pattern for extensibility |
@@ -30,7 +30,7 @@ The core design decision is a **sequential pipeline with a human review gate**: 
 | InvoiceSearchService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs` | Hybrid semantic search (vector + keyword + reranking) via Azure AI Search |
 | FinancialCalculationToolHandler | `src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs` | AI tool handler for finance calculations (ADR-013) |
 | InvoiceExtractionToolHandler | `src/server/api/Sprk.Bff.Api/Services/Finance/Tools/InvoiceExtractionToolHandler.cs` | AI tool handler for extraction (ADR-013) |
-| Models/ | `src/server/api/Sprk.Bff.Api/Services/Finance/Models/` | ClassificationResult, ExtractionResult, InvoiceHints, InvoiceHeader, BillingEventLine, FinanceJsonSchemas |
+| Models/ | `src/server/api/Sprk.Bff.Api/Services/Finance/Models/` | DocumentClassification, ExtractionResult, InvoiceHints, InvoiceHeader, BillingEventLine, FinanceJsonSchemas |
 
 ---
 
@@ -38,7 +38,7 @@ The core design decision is a **sequential pipeline with a human review gate**: 
 
 ### Job Pipeline (Sequential with Human Review Gate)
 
-1. **Classification** (`AttachmentClassification` job, gpt-4o-mini): `InvoiceAnalysisService.ClassifyAttachmentAsync` classifies an email attachment as `InvoiceCandidate`, `NotInvoice`, or `Unknown`. Returns confidence score (0-1) and six hint fields (vendor name, invoice number, invoice date, total amount, currency, matter reference). Feature-flagged trigger from `EmailToDocumentJobHandler`.
+1. **Classification** (`AttachmentClassification` job, Fast tier): `AttachmentClassificationJobHandler` calls `IInvoiceAi.ClassifyAsync` (Action `invoice-classify`, INVOICE-CLASSIFY@v1, resolved through its `sprk_playbookconsumer` Binding) to classify an email attachment as `InvoiceCandidate`, `NotInvoice`, or `Unknown`. Returns confidence score (0-1) and six hint fields (vendor name, invoice number, invoice date, total amount, currency, matter reference). Feature-flagged trigger from `EmailToDocumentJobHandler`.
 
 2. **Human Review Gate**: Reviewer confirms or rejects via `InvoiceReviewService`. On confirm: updates `sprk_document` status to `ConfirmedInvoice`, creates `sprk_invoice` record linking document/matter/vendor with reviewer-corrected hints, enqueues `InvoiceExtraction` job. On reject: updates document status to `RejectedNotInvoice`.
 
@@ -69,7 +69,7 @@ Finance visualization uses **denormalized fields** on `sprk_matter` / `sprk_proj
 
 ## Invoice Analysis (AI)
 
-**Classification** (Playbook A, `FinanceClassification`): Uses `IOpenAiClient.GetStructuredCompletionAsync<ClassificationResult>` with `gpt-4o-mini`. Prompts are loaded from Dataverse via `IPlaybookService` (ADR-014). Returns `ClassificationResult` with confidence score and six hint fields.
+**Classification** (Action `invoice-classify`, INVOICE-CLASSIFY@v1; ebilling-r1 task 042): `IInvoiceAi.ClassifyAsync` resolves the Action only through the `invoice-classify` Binding and runs it through `IActionRunner` (ADR-039 / ADR-043); the prompt, output schema and model tier (Fast) live in the `sprk_analysisaction` row, mirrored in `infra/dataverse/actions/invoice-classify.action.json` and `infra/dataverse/outputschemas/invoice-classify.schema.json`. It fails closed (FR-46): a missing Binding, failed completion or invalid output raises `InvoiceAiException` (`ai.invoice.binding_missing` / `completion_failed` / `output_invalid`) and the job retries the first two a bounded number of times, then poisons; it never falls back to a hard-coded prompt. Returns a verdict with confidence score and six hint fields.
 
 **Extraction** (Playbook B, `FinanceExtraction`): Uses `gpt-4o` for structured extraction of invoice header + line items. Reviewer-corrected hints from the confirm step are injected as `<reviewer_hints>` XML block to ground the extraction. Returns `ExtractionResult` with header, line items array, and extraction confidence.
 

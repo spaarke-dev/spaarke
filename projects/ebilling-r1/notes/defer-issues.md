@@ -696,3 +696,53 @@ Make the required-level update wait for a settled read of the length the previou
 **Related**: DEF-010; ebilling-r1 tasks 017-023
 
 ---
+
+### DEF-042a — Binding mirror `sprk_playbookconsumer-rows.json` is missing four live dev rows; `Seed-PlaybookConsumers.ps1 -DiffOnly` is never clean
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the next task that adds a Binding row and is asked for a clean `-DiffOnly` |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 042 (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1986 |
+
+**Description**: the mirror (dated 2026-07-07) lacks `assistant-suggest|default|`, `chat-summarize|reanalyze|*`, `create-project|default|*` and `create-todo|default|`, which exist in dev, so `-DiffOnly` reports four differences on every run (none for `invoice-classify`). `-Export` would also drop the per-row `$comment` fields. Fails without a fix: the mirror cannot serve as the drift gate and a stamp seeded from it misses four routed capabilities.
+
+**Suggested fix**: add the four rows with comments, make Export keep comments, then gate on `-DiffOnly`. **Estimated effort**: 1 hour. **Blockers**: none. **Related**: task 042.
+
+*(ID is provisional: other worktrees allocated DEF-013..015 in parallel; renumber on merge.)*
+
+---
+
+### DEF-042b — Dev `/healthz/catalog` is Unhealthy: eight Binding rows have no `ConsumerTypes` constant; the check is documented backwards
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before `/healthz/catalog` is used as a deploy gate |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 042 (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1987 |
+
+**Description**: rows without a constant on this branch: `agreement-classify`, `compose-make-concise`, `compose-rewrite-instruction`, `create-project`, `create-todo`, `list-tasks`, `nda-review`, `nda-standard-summary`. `RoutingConsumerTypeHealthCheck` reports a row with no `All` entry as Unhealthy and an `All` entry with no row as Degraded (forward-declared); the task 042 POML and the `ConsumerTypes.cs` block comment said the opposite (comment corrected in task 042; main `/healthz` stays Healthy). Fails without a fix: an always-Unhealthy check masks real routing regressions.
+
+**Suggested fix**: reconcile constants and rows per branch at merge. **Estimated effort**: 1-2 hours. **Blockers**: other branches' constants. **Related**: task 042.
+
+---
+
+### DEF-042c — `FinanceOptions.ClassificationConfidenceThreshold` is declared but never read
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | when classification routing is next changed |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 042 (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1988 |
+
+**Description**: the handler writes every verdict and sends InvoiceCandidate and Unknown to review without comparing the confidence to the threshold. Fails without a fix: an operator who sets it expects different handling and gets none.
+
+**Suggested fix**: implement the intended routing or delete the option and its docs. **Estimated effort**: 1 hour. **Blockers**: owner decision on intended behaviour. **Related**: task 042.
+
+---

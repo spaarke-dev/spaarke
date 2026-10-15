@@ -103,7 +103,7 @@ if ($existing.value.Count -eq 0) {
     $row = $existing.value[0]
     $patch = [ordered]@{}
     if ($null -ne $tier -and $row.sprk_modeltier -ne $tier) { $patch['sprk_modeltier'] = $tier }
-    if ($null -ne $temperature -and [decimal]$row.sprk_temperature -ne $temperature) { $patch['sprk_temperature'] = $temperature }
+    if ($null -ne $temperature -and ($null -eq $row.sprk_temperature -or [decimal]$row.sprk_temperature -ne $temperature)) { $patch['sprk_temperature'] = $temperature }
     if ($inputSchemaJson) {
         $current = $null
         if ($row.sprk_inputschema) { try { $current = ($row.sprk_inputschema | ConvertFrom-Json) | ConvertTo-Json -Depth 30 -Compress } catch { $current = $null } }
