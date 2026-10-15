@@ -100,6 +100,15 @@ Deviations from §3.2: step 3 (unpublish canvas) was skipped because a custom pa
   - Backup: `baseline-PcfOrphanBackupCanvasPages-*`
   - Smoke test: pending owner (checklist items 1 and 2)
 
+- 2026-10-15 20:29 — `sprk_Spaarke.Controls.AnalysisWorkspace` v1.3.5 (owner approved 2026-10-15; was held under DEV-005)
+  - §1.2 results: `RetrieveDependenciesForDelete` = 0; `dependency` table empty; no form, view, sitemap or app placement; hosting canvas already gone; the ribbon (`sprk_analysis_commands.js`) opens `sprk_spaarkeai`; no master code reference (docs only: `package-scope.json` exclusion, components inventory).
+  - Already broken live: 2 of its 3 resources (`bundle.js`, `css/AnalysisWorkspace.css`) pointed at deleted web resources, so the control could not render.
+  - Solutions touched: AnalysisWorkspaceSolution, PowerAppsToolsTemp_sprk (RemoveSolutionComponent), then DELETE
+  - Deletion confirmed: GUID `286d7717-5ec3-47eb-87ce-c022cec09f2d`; 404 / 0 by name / 0 solutioncomponents / 0 resources; the shared `fluent_9_4_0` web resource is intact; `sprk_` customcontrols 27 → 26
+  - Backup: a fresh export is impossible (`ExportSolution` fails on the dangling resource). Use `backups-2026-06-22/baseline-AnalysisWorkspaceSolution-pre-cleanup-2026-06-22.zip` (same v1.3.5, sha256 `749a1c128d06…`), plus the row metadata in `backups-2026-10-14/metadata-AnalysisWorkspace-customcontrol-2026-10-15.json`
+  - Restore: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ZipPath projects/pcf-orphan-cleanup-r1/backups-2026-06-22/baseline-AnalysisWorkspaceSolution-pre-cleanup-2026-06-22.zip -SolutionUniqueName AnalysisWorkspaceSolution`
+  - Left behind: `AnalysisWorkspaceSolution` is now empty (unmanaged). The old `sprk_analysisworkspace` code-page web resource belongs to `ai-advanced-capabilities-analysis-hub-r1` task 071.
+
 ### Resurrection drill (NFR-07): PASS
 
 | Step | UTC | Result |

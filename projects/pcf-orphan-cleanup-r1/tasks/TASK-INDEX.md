@@ -15,7 +15,7 @@
 | **(soak)** | **7-day calendar wait — monitor for regressions** (ends 2026-10-22) | 🔄 | 7 days | 003 | (sequential) | — | NO work; calendar gate only |
 | 004 | Shared lib `@types/react` peerDep declaration (PR-D1) | 🔲 | 2-4h | 003+soak | (sequential) | **FULL** | Includes React 18+ API audit pre-merge |
 | 005 | VisualHost re-pin to React 16 (PR-D2) — deploy + smoke | 🔲 | 3-5h | 004 | (sequential) | **FULL** | Re-verify VisualHost source pre-merge; bump v1.4.16 → v1.4.17 |
-| 006 | Dataverse cleanup session — spaarkedev2 replay | 🔲 | 3-5h | 005 | (sequential) | **FULL** | Same shape as 003, lower risk after spaarkedev1 success |
+| 006 | Dataverse cleanup session — spaarkedev2 replay | [cancelled] 2026-10-15 | 3-5h | 005 | (sequential) | **FULL** | Dropped (owner, 2026-10-15): spaarkedev2 does not exist (no DNS; `config/environments.json` lists only spaarkedev1). Other environments get changes via the standard release procedure (spec D-06). |
 | 007 | Cleanup-log finalize + inventory refresh | 🔲 | 1-2h | 006 | (sequential) | STANDARD | Updates `pcf-deployment-inventory-2026-06-22.md` + `pcf-bundle-sizes.md` |
 
 ## Parallel execution groups
