@@ -691,6 +691,127 @@ public class ClientChildFixUpTests
         job.World.OwnerWrites.Should().BeEmpty();
     }
 
+    // ── #1943: a record made secure by a direct write (Web API, script) changes no child, so the recent-changes pass also
+    //    reconciles every secure record whose OWN modifiedon is in its window ────────────────────────────────────────────
+
+    /// <summary>
+    /// #1943: one scheduled tick over a world whose work assignment is still ordinary, so this instance's catch-up finishes
+    /// (it walks no secure record) and its watermark is set. From then on only the recent-changes pass can reach a record
+    /// on a scheduled tick while the sweep is report-only.
+    /// </summary>
+    private static async Task<(JobHarness Job, Guid Root, Guid Todo)> AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync()
+    {
+        var job = new JobHarness();
+        var (root, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.OrdinaryRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root));
+
+        var settled = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+        settled.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+        job.World.OwnerWrites.Should().BeEmpty("an ordinary record's child keeps today's ownership");
+        return (job, root, todo);
+    }
+
+    /// <summary>What a direct Web API or script write that makes a record secure leaves: its flag set and its owner moved.</summary>
+    private static void MadeSecureByADirectWrite(JobHarness job, Guid root)
+    {
+        job.World.Set("sprk_workassignment", root, "sprk_issecure", true);
+        job.World.MoveOwner("sprk_workassignment", root, DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// #1943 (seen live on dev: Signal and Decision Record children not re-owned after 420 s): a record made secure by a
+    /// direct write changes no child row, so it is not found through a changed child. Its OWN <c>modifiedon</c> is after
+    /// the watermark, so the next SCHEDULED tick — the sweep report-only, the catch-up long finished — re-owns its
+    /// non-isolated child to the Secure Record owner team, and counts the record under <c>recentChanges.rootsChanged</c>.
+    /// An ordinary record changed in the same window is never written.
+    /// </summary>
+    [Fact]
+    public async Task ARecordMadeSecureByADirectWrite_HasItsChildReowned_ByTheNextScheduledTick_WithNoChildChanged()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        var (ordinaryProject, ordinaryTodo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.OrdinaryRoot("sprk_project", ordinaryProject)
+            .Modified("sprk_project", ordinaryProject, DateTime.UtcNow)
+            .UserOwnedChild("sprk_todo", ordinaryTodo, ("sprk_regardingproject", "sprk_project", ordinaryProject));
+
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, DateTime.UtcNow);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the record changed since the watermark, so the recent-changes pass reconciles it");
+        report.GetProperty("sweepRan").GetBoolean().Should().BeFalse("the sweep is report-only: this tick is the L4 net alone");
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("rowsChanged").GetInt32().Should().Be(0, "no child changed");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        recent.GetProperty("corrected").GetInt32().Should().Be(1);
+        report.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == todo)
+            .GetProperty("pass").GetString().Should().Be("recent");
+        job.World.OwnerWrites.Should().NotContain(w => w.Id == ordinaryTodo, "an ordinary record's child is never written");
+        job.LastResult!.Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// #1943, the negative: a secure record whose own <c>modifiedon</c> is BEFORE the watermark, with no child changed, is
+    /// not reconciled by a scheduled tick with the sweep report-only. Nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ASecureRecordNotChangedSinceTheWatermark_IsNotReconciled_ByAScheduledTick()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, MinutesAgo(10));
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerWrites.Should().BeEmpty();
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        report.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32().Should().Be(0);
+        job.LastResult!.ProcessedItems.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #1943: a record found BOTH by its own <c>modifiedon</c> and through a changed child is reconciled once — one item of
+    /// work, its child re-owned by one owner write.
+    /// </summary>
+    [Fact]
+    public async Task ARecordFoundByItsOwnChangeAndThroughAChangedChild_IsReconciledOnce()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, DateTime.UtcNow).Modified("sprk_todo", todo, DateTime.UtcNow);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.LastResult!.ProcessedItems.Should().Be(1);
+        job.World.OwnerWrites.Where(w => w.Id == todo).Should().ContainSingle();
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("roots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal($"sprk_workassignment:{root:D}");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        report.GetProperty("examined").GetInt32().Should().Be(1, "the record's one child was examined once");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// #1943, fail closed: a secure record whose <c>modifiedon</c> comes back empty counts as changed. It is reconciled,
+    /// never silently left out of the recent-changes pass.
+    /// </summary>
+    [Fact]
+    public async Task ASecureRecordWithNoModifiedOn_CountsAsChanged_AndIsReconciled()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Set("sprk_workassignment", root, "modifiedon", null);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        report.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32().Should().Be(1);
+    }
+
     /// <summary>
     /// The job over a world, built as the scheduler builds it: ONE job instance (it keeps its cursor and its watermark),
     /// with the real reconciler and the real synchronizer resolved per run from a scope. Work-assignment roots cascade

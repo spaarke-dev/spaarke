@@ -41,8 +41,11 @@ namespace Sprk.Bff.Api.Services.Access;
 /// reconciles those records first, with the same pass and the same Sweep trigger, so a run never releases anything. A child
 /// written outside the product (out-of-the-box form, quick create, grid edit, import, flow) or by a client writer still on
 /// <c>Xrm.WebApi</c> is therefore corrected within one run. It does not wait for the capped sweep window to reach its
-/// record. The watermark is the run's start time minus <see cref="RecentChangesOverlap"/>. It lives in this singleton, per
-/// instance, like the cursor. It moves only past a listing that completed. A changed row the walk cannot place (under a
+/// record. A record made secure by a direct write (Web API, script) changes no child row, so the pass also reconciles
+/// every secure record whose OWN <c>modifiedon</c> is in the same window, read by the sweep's listing of the secure records
+/// (#1943). One with no <c>modifiedon</c> counts as changed. These are counted in <c>recentChanges.rootsChanged</c>, and
+/// one left incomplete is carried like any other. The watermark is the run's start time minus
+/// <see cref="RecentChangesOverlap"/>. It lives in this singleton, per instance, like the cursor. It moves only past a listing that completed. A changed row the walk cannot place (under a
 /// record flagged secure but not isolated, or under a missing ancestor) is listed in <c>recentChanges.undetermined</c>, and
 /// the run is not a success.</para>
 /// <para><b>Standing schedule (task 147, round 28 item 2, decided 2026-10-04).</b> Every 2 minutes, writes on for the
@@ -229,7 +232,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var synchronizer = scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>();
 
         // The secure records, in a fixed order. A listing that cannot complete decides nothing: ADR-036 A1 rule 4.
-        var roots = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
+        var listing = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
+        var roots = listing.Roots;
 
         // Task 147, the RECENT-CHANGES pass: the secure records whose children changed since the last run (the watermark).
         // This catches children written outside the product (out-of-the-box forms, quick create, grid edits, imports,
@@ -302,10 +306,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 "carried.", context.RunId, droppedTable, droppedId);
         }
 
+        // #1943: a record made secure by a direct write (Web API, script) changes no child row, so the listing above cannot
+        // find it. Every secure record whose OWN modifiedon is in the same window (one with none counts as changed) is
+        // reconciled with them, in the same mode and by the same Sweep trigger, which only moves a child INTO isolation.
+        // Left incomplete, it is carried like any other record of this group.
+        var rootsChanged = listing.ChangedSince(since);
         var firstRoots = recent.Roots
+            .Concat(rootsChanged)
             .Concat(retriedRoots)
             .Distinct()
             .ToList();
+        var rootsChangedKeys = rootsChanged.ToHashSet();
         var recentKeys = firstRoots.ToHashSet();
         var catchUpKeys = catchUpBatch.Select(c => (c.Table, c.Id)).Where(k => !recentKeys.Contains(k)).ToHashSet();
         var work = firstRoots
@@ -340,6 +351,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     "[SECURE-CHILD-RECONCILE] catch-up run={RunId} mode={Mode} root={Root}: this instance has not yet walked " +
                     "every secure record since it started.",
                     context.RunId, recentMode, key);
+            }
+            else if (rootsChangedKeys.Contains((table, id)))
+            {
+                _logger.LogInformation(
+                    "[SECURE-CHILD-RECONCILE] recent-changes run={RunId} mode={Mode} root={Root}: the record itself changed " +
+                    "since {Since:o}.",
+                    context.RunId, recentMode, key, since);
             }
             else
             {
@@ -483,11 +501,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "wouldChange={WouldChange} untouched={Untouched} refused={Refused} failed={Failed} needsF3={NeedsF3} " +
             "sharesWritten={SharesWritten} mirrorsRevoked={MirrorsRevoked} incompleteRoots={IncompleteRoots} " +
             "recentSince={RecentSince:o} recentRowsChanged={RecentRows} recentRoots={RecentRoots} " +
+            "recentRootsChanged={RecentRootsChanged} " +
             "recentUndetermined={RecentUndetermined} recentFailure={RecentFailure} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             mode, batch.Count, roots.Count, passComplete, passComplete ? null : lastKey, totals[0], totals[1], totals[2],
             totals[3], totals[4], totals[5], totals[6], totals[7], sharesWritten, mirrorsRevoked, incompleteRoots.Count,
-            since, recent.RowsChanged, recent.Roots.Count, recent.Undetermined.Count, recent.Failure,
+            since, recent.RowsChanged, recent.Roots.Count, rootsChanged.Count, recent.Undetermined.Count, recent.Failure,
             context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         var problems = incompleteRoots.Take(20)
@@ -552,6 +571,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     rowsChanged = recent.RowsChanged,
                     rootsFound = recent.Roots.Count,
                     roots = recent.Roots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
+                    // #1943: secure records whose OWN modifiedon is in the window (none counts as changed) — a record made
+                    // secure by a direct write changes no child, so it is not among the roots found above.
+                    rootsChanged = rootsChanged.Count,
                     undetermined = recent.Undetermined.Take(50).ToArray(),
                     failure = recent.Failure,
                     // Task 147 r1: what earlier runs left unfinished and this run looked at again — records whose pass was
@@ -987,15 +1009,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// Every record flagged <c>sprk_issecure = true</c>, as (table, id, key), ordered by table then id. Paged; past the page
     /// ceiling it throws rather than sweep part of a table.
     /// </summary>
-    private static async Task<List<(string Table, Guid Id, string Key)>> ListSecureRootsAsync(
+    private static async Task<SecureRootListing> ListSecureRootsAsync(
         IGenericEntityService dataverse, CancellationToken ct)
     {
         var roots = new List<(string, Guid, string)>();
+        var modifiedOn = new Dictionary<(string Table, Guid Id), DateTime?>();
         foreach (var table in SecureChildLineage.Roots.OrderBy(t => t, StringComparer.Ordinal))
         {
             var query = new QueryExpression(table)
             {
-                ColumnSet = new ColumnSet(table + "id"),
+                // #1943: modifiedon too, so the recent-changes pass finds a record made secure by a direct write, which
+                // changes no child row — read in this same listing, with no second query per table.
+                ColumnSet = new ColumnSet(table + "id", ModifiedOnColumn),
                 NoLock = true,
                 PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
             };
@@ -1009,7 +1034,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         $"{table} still had secure records to list after {MaxPages} pages; the sweep does not run on part of them.");
 
                 var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-                ids.AddRange(result.Entities.Select(e => e.Id));
+                foreach (var entity in result.Entities)
+                {
+                    ids.Add(entity.Id);
+                    // A record listed twice (across pages) keeps its latest modifiedon; one with none keeps none, so it
+                    // counts as changed (#1943: never silently dropped from the recent-changes pass).
+                    var at = entity.GetAttributeValue<DateTime?>(ModifiedOnColumn);
+                    modifiedOn[(table, entity.Id)] = modifiedOn.TryGetValue((table, entity.Id), out var seen)
+                        ? seen is null || at is null ? null : (at > seen ? at : seen)
+                        : at;
+                }
+
                 if (!result.MoreRecords)
                     break;
                 query.PageInfo.PageNumber++;
@@ -1019,7 +1054,30 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             roots.AddRange(ids.Distinct().OrderBy(id => id).Select(id => (table, id, $"{table}:{id:D}")));
         }
 
-        return roots;
+        return new SecureRootListing(roots, modifiedOn);
+    }
+
+    /// <summary>
+    /// The secure records in sweep order, and each one's own <c>modifiedon</c> (null when Dataverse returned none) — the
+    /// recent-changes pass reconciles every one changed since its window opened (#1943).
+    /// </summary>
+    private sealed record SecureRootListing(
+        List<(string Table, Guid Id, string Key)> Roots, IReadOnlyDictionary<(string Table, Guid Id), DateTime?> ModifiedOn)
+    {
+        /// <summary>
+        /// The secure records whose own <c>modifiedon</c> is at or after <paramref name="since"/>, in sweep order. A record
+        /// with no <c>modifiedon</c> counts as changed: it is included, never silently left out (fail closed).
+        /// </summary>
+        public List<(string Table, Guid Id)> ChangedSince(DateTimeOffset since) =>
+            Roots
+                .Where(r => !ModifiedOn.TryGetValue((r.Table, r.Id), out var at) || at is not { } value
+                            || AsUtc(value) >= since.UtcDateTime)
+                .Select(r => (r.Table, r.Id))
+                .ToList();
+
+        // Dataverse answers modifiedon in UTC; a local value is converted, an unspecified one read as UTC.
+        private static DateTime AsUtc(DateTime value) =>
+            value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc);
     }
 
     /// <summary>The sweep order: table (ordinal), then id — the order <see cref="ListSecureRootsAsync"/> returns.</summary>
@@ -1077,7 +1135,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <summary>Which part of a run a record is reconciled in (task 147 r1c).</summary>
     private enum WorkGroup
     {
-        /// <summary>A record whose related records changed since the watermark, or one an earlier run left unfinished.</summary>
+        /// <summary>
+        /// A record whose related records changed since the watermark, one that itself changed since then (#1943), or one an
+        /// earlier run left unfinished.
+        /// </summary>
         Recent,
 
         /// <summary>The once-per-instance walk of every secure record after a start.</summary>
