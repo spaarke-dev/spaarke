@@ -139,12 +139,27 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     public string Description =>
         "Links every enabled interactive systemuser to its contact by Entra oid (bind, create, or link), flags "
         + "identity collisions for an operator, and clears flags whose collision has been resolved — in this BFF's "
-        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active "
+        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active, set-up "
         + "sprk_dataverseenvironment rows). Never re-points or clears an existing link. Report-only until "
         + "IdentityLink:Reconciliation:WritesEnabled is true.";
 
     /// <summary>Report-only unless the switch parses to <c>true</c>.</summary>
     internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
+
+    /// <summary>
+    /// The URLs of the registry rows this job reconciles: active rows whose setup has finished. A row still being
+    /// provisioned (<see cref="EnvironmentSetupStatus.NotStarted"/>, <see cref="EnvironmentSetupStatus.InProgress"/>) or
+    /// whose provisioning failed (<see cref="EnvironmentSetupStatus.Issue"/>) has no identity-binding schema and no BFF
+    /// access yet, so reading it fails every run (T186: the ACME placeholder failed the job every 5 minutes from
+    /// 2026-10-14). A row with no status predates the column and is kept, as before. Pure.
+    /// </summary>
+    public static IEnumerable<string?> ReconcilableRegistryUrls(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
+            .Select(e => e.DataverseUrl);
+    }
 
     /// <summary>
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
@@ -297,8 +312,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             var registry = services.GetService<DataverseEnvironmentService>()
                 ?? throw new InvalidOperationException("DataverseEnvironmentService is not registered.");
-            registryUrls = (await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false))
-                .Select(e => e.DataverseUrl)
+            registryUrls = ReconcilableRegistryUrls(await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false))
                 .ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
