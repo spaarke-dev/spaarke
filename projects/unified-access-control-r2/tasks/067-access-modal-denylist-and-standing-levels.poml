@@ -4,7 +4,7 @@
     <title>AccessGrantModal: deny-list (ethical wall) management + level-bearing standing grants (FR-23 UI, FR-25 UI, design §6)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 064 (deny endpoints) + 066 (report-based rows) merged</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend writing authorization vetoes (ethical walls); tags pcf/frontend + auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

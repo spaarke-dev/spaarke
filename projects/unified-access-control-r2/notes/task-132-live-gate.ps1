@@ -81,6 +81,12 @@ $statePath = $StatePath
 $Api = "$EnvironmentUrl/api/data/v9.2"
 $BffUrl = "https://$AppServiceName.azurewebsites.net"
 
+# PowerShell 7's ConvertFrom-Json turns the stored ISO 'o' strings into DateTime (Kind Utc); [DateTime]::Parse of that
+# value re-reads its culture string as LOCAL time (negative 'minutes since'). Normalise either shape to UTC once, here.
+function ConvertTo-UtcTime($v) {
+  if ($v -is [DateTime]) { if ($v.Kind -eq [DateTimeKind]::Unspecified) { [DateTime]::SpecifyKind($v, [DateTimeKind]::Utc) } else { $v.ToUniversalTime() } }
+  else { [DateTimeOffset]::Parse([string]$v, [Globalization.CultureInfo]::InvariantCulture).UtcDateTime }
+}
 function Get-State { if (Test-Path $statePath) { Get-Content $statePath -Raw | ConvertFrom-Json -AsHashtable } else { @{} } }
 function Set-State($state) { $state | ConvertTo-Json -Depth 5 | Set-Content $statePath; "state recorded in $statePath" }
 # The per-matter record: { OriginalOwner, ReassignedUtc, Restored, RestoredUtc }. A state file written before the per-matter
@@ -151,7 +157,7 @@ switch ($Step) {
       if (-not $state.DeployStartedUtc) { throw 'No recorded deploy start - run -Step Deploy -Apply first.' }
       try { $code = (Invoke-WebRequest "$BffUrl/healthz" -UseBasicParsing -TimeoutSec 30).StatusCode } catch { $code = "error: $($_.Exception.Message)" }
       $modified = [DateTime]::Parse((az webapp show -g $ResourceGroupName -n $AppServiceName --query lastModifiedTimeUtc -o tsv)).ToUniversalTime()
-      "healthz = $code (must be 200); site modified $($modified.ToString('o')) vs deploy start $($state.DeployStartedUtc) -> $(if ($modified -ge [DateTime]::Parse($state.DeployStartedUtc).ToUniversalTime()) { 'DEPLOYED' } else { 'NOT REDEPLOYED' })"
+      "healthz = $code (must be 200); site modified $($modified.ToString('o')) vs deploy start $($state.DeployStartedUtc) -> $(if ($modified -ge (ConvertTo-UtcTime $state.DeployStartedUtc)) { 'DEPLOYED' } else { 'NOT REDEPLOYED' })"
       break
     }
     $ok = Invoke-Preflight
@@ -167,7 +173,7 @@ switch ($Step) {
       $record = Get-MatterRecord (Get-State) $MatterId
       if (-not $record -or -not $record.ReassignedUtc) { throw "No recorded reassign of $MatterId - run -Apply first." }
       Show-Owner 'now' 'sprk_matters' $MatterId
-      $minutes = ([DateTime]::UtcNow - [DateTime]::Parse($record.ReassignedUtc).ToUniversalTime()).TotalMinutes
+      $minutes = ([DateTime]::UtcNow - (ConvertTo-UtcTime $record.ReassignedUtc)).TotalMinutes
       "minutes since the reassign = $([Math]::Round($minutes, 1)) (bound: the matter must have left the test user's Teams/SPA list within 4)"
       "test user's RetrievePrincipalAccess = $(Get-Rights $TestUserId 'sprk_matters' $MatterId) (without ReadAccess, only a cache can still list it)"
       break
