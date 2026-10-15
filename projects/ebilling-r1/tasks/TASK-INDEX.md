@@ -17,7 +17,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 001 | ✅ [completed] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
 | 002 | 🟡 [in-progress] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
 | 003 | ✅ [completed] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
-| 004 | 🟡 [in-progress] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |
+| 004 | ✅ [completed] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |
 | 005 | 🔲 [open] | Extraction spike — four arms, coding model comparison, package size; go / no-go | STANDARD | opus / high | none | 002, 004 |
 
 ### Phase 1 — Data model (WP1)

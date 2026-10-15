@@ -17,7 +17,7 @@
     <estimated-effort>1-2 days</estimated-effort>
   </metadata>
 
-  <prompt>Add IInvoiceAi.ReadInvoiceAsync backed by an internal Content Understanding client (package Azure.AI.ContentUnderstanding 1.1.0, GA API 2025-11-01, managed identity) that calls the custom analyzer sprk-invoice-vN once and maps header, fee lines, expense lines and timekeeper summary — every field with confidence, page and bounding box — to a typed result, with stable reason codes for unreadable documents. If task 005 was no-go, STOP before coding (see escalation).</prompt>
+  <prompt>Add IInvoiceAi.ReadInvoiceAsync backed by an internal Content Understanding client (package Azure.AI.ContentUnderstanding 1.1.0, GA API 2025-11-01, managed identity) that calls the custom analyzer sprk_invoice_vN once and maps header, fee lines, expense lines and timekeeper summary — every field with confidence, page and bounding box — to a typed result, with stable reason codes for unreadable documents. If task 005 was no-go, STOP before coding (see escalation).</prompt>
 
   <role>SPAARKE platform developer. Expert in Azure AI SDKs, managed identity in the BFF, and the PublicContracts AI facades. Follow ADRs strictly.</role>
 

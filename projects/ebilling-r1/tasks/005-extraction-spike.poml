@@ -17,7 +17,7 @@
     <estimated-effort>2-3 days</estimated-effort>
   </metadata>
 
-  <prompt>Run the FR-03 extraction spike on the 30+ invoice spike subset from the evaluation set: arms (a) current text + LLM extraction, (b) Content Understanding prebuilt-invoice, (c) sprk-invoice-v1 on GA 2025-11-01, (c-prime) the same analyzer on 2026-06-01-preview; plus the gpt-5.4-mini vs gpt-5.6-luna coding comparison, the activity-code classify experiment, and the Azure.AI.ContentUnderstanding publish-size delta. Write notes/extraction-spike.md and end with an owner go / no-go.</prompt>
+  <prompt>Run the FR-03 extraction spike on the 30+ invoice spike subset from the evaluation set: arms (a) current text + LLM extraction, (b) Content Understanding prebuilt-invoice, (c) sprk_invoice_v1 on GA 2025-11-01, (c-prime) the same analyzer on 2026-06-01-preview; plus the gpt-5.4-mini vs gpt-5.6-luna coding comparison, the activity-code classify experiment, and the Azure.AI.ContentUnderstanding publish-size delta. Write notes/extraction-spike.md and end with an owner go / no-go.</prompt>
 
   <role>SPAARKE AI engineer. Expert in document extraction evaluation, confidence calibration and Azure AI Content Understanding.</role>
 
@@ -38,7 +38,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="002" status="pending">Evaluation set, spike subset and ground truth</dependency>
-      <dependency task="004" status="pending">sprk-invoice-v1 deployed in dev</dependency>
+      <dependency task="004" status="pending">sprk_invoice_v1 deployed in dev</dependency>
     </dependencies>
   </context>
 

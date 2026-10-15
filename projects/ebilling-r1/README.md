@@ -55,7 +55,7 @@ Law departments review outside-counsel invoices by hand against billing guidelin
 ## Solution Summary
 
 - **Submission:** SPA and internal wizard entry points share one server-side operation, followed by an `IJobHandler` processing job.
-- **Extraction:** the Content Understanding custom analyzer `sprk-invoice-vN` (GA `2025-11-01`) returns per-field confidence and page and bounding-box positions.
+- **Extraction:** the Content Understanding custom analyzer `sprk_invoice_vN` (GA `2025-11-01`) returns per-field confidence and page and bounding-box positions.
 - **Coding:** UTBMS coding is the Action `INVOICE-LINE-CODE@v1`, restricted to the resolved code set.
 - **Rules:** an in-memory evaluator runs 11 billing rule types from published, immutable policy versions. These share the rule system with Ontology (#1111).
 - **Rejection:** only Reject-consequence, reject-eligible rules whose fields were read at ≥ 0.90 combined confidence can reject. AI never rejects.

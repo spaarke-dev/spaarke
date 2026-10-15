@@ -81,7 +81,7 @@ Change: `prebuilt-analyzer-completion` moved from gpt-5-608736 to `gpt-5.2`; `gp
 
 - `Endpoint`: `#{CONTENT_UNDERSTANDING_ENDPOINT}#`
 - `ApiVersion`: `2025-11-01`
-- `AnalyzerId`: `sprk-invoice-v1`
+- `AnalyzerId`: `sprk_invoice_v1`
 - `_comment`: names task 003, states auth is managed identity and no key exists.
 
 JSON check: the template is **not strict JSON in HEAD** (unquoted tokens such as `"RecordMatchingEnabled": #{RECORD_MATCHING_ENABLED}#` at lines 209, 250, 251). With unquoted tokens neutralised, HEAD and the working copy both parse (55 and 56 top-level keys); the new section itself is strict JSON with quoted tokens.

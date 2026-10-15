@@ -109,7 +109,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
   - Guidelines, rate cards and procedures go in **Procedure Library** (internal only, indexed).
   - Export files go in **E-Billing Output Files** (not indexed).
   - Both use SPE, never Blob.
-- 2026-10-14 — D-46 / D-49 / D-51 / D-53: extraction (Content Understanding custom analyzer `sprk-invoice-vN`, gpt-5.2) is separate from coding (`INVOICE-LINE-CODE@v1`, gpt-5.4-mini; gpt-5.6-luna is compared in 005).
+- 2026-10-14 — D-46 / D-49 / D-51 / D-53: extraction (Content Understanding custom analyzer `sprk_invoice_vN`, gpt-5.2) is separate from coding (`INVOICE-LINE-CODE@v1`, gpt-5.4-mini; gpt-5.6-luna is compared in 005).
 - 2026-10-14 — D-47: field confidence is combined from four signals: analyzer confidence, arithmetic consistency, reference-data match and model self-report.
 - 2026-10-14 — D-56: AP export default columns, with the mapping snapshotted per batch.
 - 2026-10-14 — D-58: the Invoice Review UI follows the owner's prototype (`c:\code_files\spaarke-prototype\projects\ebilling.r1`, README + `src/review/`):

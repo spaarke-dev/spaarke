@@ -4,7 +4,7 @@
     <title>Content Understanding analyzer definition v1 and deploy script</title>
     <phase>0 Baseline and AI foundations (WP0)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates two new repo files (analyzer JSON, deploy script) and runs the script against dev; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,7 +95,9 @@
     <criterion testable="true">One analyze call on a synthetic sample returns header, TimeEntries, Expenses and TimekeeperSummary values each with confidence and source; result summary (field names, confidence range, latency — no document text) recorded in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>005 uses this analyzer as arm c and a copy of it on the preview API as arm c-prime (outside the repo). 043's ReadInvoiceAsync maps these field names, so keep them stable after 005; a rename after 005 is a v2. The activity-code classify experiment is 005's, not part of v1 unless 005 adopts it.</notes>
+  <notes>COMPLETED 2026-10-15 (dev only, GA 2025-11-01). Full record: projects/ebilling-r1/notes/004-cu-analyzer.md. KEY DEVIATION: the service rejects hyphens in analyzer ids (InvalidAnalyzerId), so the deployed analyzer is sprk_invoice_v1 (file name unchanged: sprk-invoice-v1.json); appsettings.template.json ContentUnderstanding:AnalyzerId, spec/README/plan/CLAUDE.md and tasks 005, 027, 043, 101, 162 still say sprk-invoice-v1 and need the underscore form. Created and deleted two probe analyzers of this task's own (sprk_probe_004, sprk_probe_004b). Escalation triggers did not fire. Step 7 (TASK-INDEX) left to the main session by instruction. rework: none task 004
+
+005 uses this analyzer as arm c and a copy of it on the preview API as arm c-prime (outside the repo). 043's ReadInvoiceAsync maps these field names, so keep them stable after 005; a rename after 005 is a v2. The activity-code classify experiment is 005's, not part of v1 unless 005 adopts it.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
