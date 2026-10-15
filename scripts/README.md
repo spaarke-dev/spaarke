@@ -1771,6 +1771,15 @@ pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https
 pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
+### `ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1`
+
+Additive Dataverse metadata script that extends `sprk_invoice` for eBilling (FR-05 / FR-06 / FR-07, D-43): the `sprk_regardingworkassignment` lookup, the five totals (fees, expenses, line adjustments, invoice adjustments, approved), the `sprk_supersedesinvoice` self-lookup, the date-only billing period, and the lifecycle `statuscode` values (In Review, Approved, Sent to AP on statecode 0; Paid, Rejected, Returned to Firm, Cancelled on statecode 1). It counts invoices at statecode 1 first and stops with exit 2, before any write, if any exist (value 2 would be relabelled Cancelled). Supports `-WhatIf`; never deletes or renames by logical name; retries on customization / publish locks and tolerates eventually consistent metadata reads. It does not change `CoreAncestorResolver` (task 013). Columns and status table: `docs/data-model/sprk_invoice.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
@@ -1946,3 +1955,4 @@ Most scripts require:
 - **2026-10-02:** Added Set-RecordNumberingSchema.ps1 — interim `MAT-`/`PRJ-` platform autonumber on the matter/project primary-name columns, data-derived seed, blank-row backfill, alternate keys, `-Verify` (`spaarkeai-word-add-in-r1` task 076, write-path invariant I-11).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).
 - **2026-10-15:** Added the eBilling Scripts section: Deploy-EbillingInvoiceLineSchema.ps1 (task 010) and content-understanding/Deploy-Analyzers.ps1 (task 004), `ebilling-r1`.
+- **2026-10-15:** Added ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (sprk_invoice header columns and lifecycle statuscode values, `ebilling-r1` task 012).

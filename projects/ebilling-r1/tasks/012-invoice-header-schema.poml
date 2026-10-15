@@ -4,7 +4,7 @@
     <title>Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script and additive dev schema change (columns and statuscode values); no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,7 +95,7 @@
     <criterion testable="true">docs/data-model/sprk_invoice.md and task notes list every new column and every statuscode value with its number and statecode.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append point: docs/data-model/sprk_invoice.md (edit only this entity's rows). Billing period columns are included because FR-21's header has no other home; the brief did not list them — recorded as a deviation for the main session. The statuscode numbers are an interface for 014 / 015 / 016 / 150.</notes>
+  <notes>COMPLETED 2026-10-15 (dev). Details, runs, resolver analysis and statuscode numbers: projects/ebilling-r1/notes/012-invoice-header-schema.md. Dev held 0 invoices at statecode 1, so value 2 was relabelled Cancelled. Statuscode numbers: 1 In Review, 659490000 Approved, 659490001 Sent to AP (statecode 0); 659490002 Paid, 659490003 Rejected, 659490004 Returned to Firm, 2 Cancelled (statecode 1). No resolver/C#/TS change (task 013). rework: fix-round-1 task 012. Shared append point: docs/data-model/sprk_invoice.md (edit only this entity's rows). Billing period columns are included because FR-21's header has no other home; the brief did not list them — recorded as a deviation for the main session. The statuscode numbers are an interface for 014 / 015 / 016 / 150.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
