@@ -1,7 +1,7 @@
 # Spaarke Customer Deployment Guide
 
 > **Version**: 1.0 (consolidation baseline)
-> **Last Updated**: 2026-08-17
+> **Last Updated**: 2026-10-14
 > **Status**: **Authoritative**. Supersedes the customer-provisioning content in `CUSTOMER-DEPLOYMENT-GUIDE.md`, `CUSTOMER-ONBOARDING-RUNBOOK.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md`, `auth-deployment-setup.md`, `SPAARKE-DEPLOYMENT-GUIDE.md`, and `PRODUCTION-DEPLOYMENT-GUIDE.md`. Those files are retained as one-paragraph stubs pointing here.
 > **Audience**: Platform Operator (primary). Claude Code AI executes automated phases; a human operator holds accountability for gates, secrets, and customer communication.
 > **Applies To**: Every new Spaarke customer environment. **Model 1** = dedicated stamp in Spaarke's Azure tenant; **Model 2** = dedicated stamp in the customer's own Azure tenant (D-12, 2026-09-28).
@@ -1320,7 +1320,7 @@ r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
 - ~~God-class ratchet~~ — retired 2026-08-20 (root CLAUDE.md §11.5: complexity is judged at review, with a non-blocking `scripts/report-large-server-files.ps1` observation report)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
-- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0 — blocking in `sdap-ci.yml` since T230a)
+- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0 — blocking as the Tier 1 `naming-conformance` job in `ci-tier1-blocking.yml` since T230a)
 - Graph app-role parity (`GraphAppRoles.cs` constant)
 
 **BFF publish-size ceiling**: **≤ 60 MB compressed (HARD)**. Current net10 baseline: 44.96 MB incl. PDBs. Per-PR measurement + delta report required (NFR-01).
@@ -1497,7 +1497,7 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
   input) → Resumable `h13-customer-mailbox-inconclusive`
 - **The §4D I2–I5 tenant-isolation invariants sample-verified on the deployed stamp** (see §8; I1 is a build gate —
   T230a), with I3 checking the Cosmos account holds exactly `cosmos-db.bicep`'s containers and partition keys
-- (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run
+- (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1`, the Tier 1 `naming-conformance` job in `ci-tier1-blocking.yml` — not a per-run
   H13 check: it lints the repository's own files, T230a.)
 - Cost envelope: the subscription's month-to-date cost, extrapolated, within 20 % of $400/month (one envelope for both models — §3.2, T229)
 - **Secure-record isolation (T260, ISS-014)**: H13 calls the stamp BFF's `POST /api/platform/secure-record-isolation-census`
@@ -2129,7 +2129,7 @@ Per §11.1. If `sprk_currentrunid` is set + status = `Quarantined`:
 
 ### 13.6 Naming-conformance failure in CI
 
-`scripts/naming-conformance-check.ps1` exits non-0 in `sdap-ci.yml` (a build gate since T230a — H13 no longer runs it per
+`scripts/naming-conformance-check.ps1` exits non-0 in the Tier 1 `naming-conformance` job (`ci-tier1-blocking.yml`; a build gate since T230a — H13 no longer runs it per
 customer). Read the output — typically a secret or vault name in a changed file that matches neither `sprk-{env}-kv` /
 `sprk-{customerId}-{env}-kv` nor the secret-name rules. Rename it, or codify an exception in the script with a rationale
 (reviewed at code-review).

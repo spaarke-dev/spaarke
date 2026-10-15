@@ -11,7 +11,7 @@ name: Environment Promotion
 #   4. Environment-specific secrets set (see .github/ENVIRONMENTS.md)
 #
 # Usage:
-#   - Triggered after successful SDAP CI build on master
+#   - Artifacts: `deployment-packages` from ci-standalone-checks.yml (release-build job)
 #   - Manual dispatch to promote a specific artifact version
 #   - Can target a single environment (skip earlier stages)
 
@@ -27,7 +27,7 @@ on:
           - staging
           - production
       artifact_run_id:
-        description: 'Workflow run ID for deployment artifacts (blank = latest successful CI)'
+        description: 'Run ID of a MASTER push run of ci-standalone-checks.yml (has deployment-packages). Blank = the latest completed master push run of that workflow that carries the artifact.'
         required: false
         type: string
       skip_smoke_tests:
@@ -146,11 +146,22 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          # Blank run id: the latest COMPLETED push run on master that carries the artifact.
+          # branch must be empty when run_id is set (the action rejects both), hence the expression.
+          # workflow_conclusion 'completed' matches any finished run: the default 'success' would skip
+          # a master run whose release-build passed but an unrelated standalone job was red, and so
+          # silently pick an older build; search_artifacts then takes the first run that has one.
+          branch: ${{ needs.plan.outputs.artifact_run_id == '' && 'master' || '' }}
+          event: push
+          workflow_conclusion: completed
+          search_artifacts: true
           name: deployment-packages
           path: ./artifacts
-          if_no_artifact_found: error
+          # 'error' is not a value of this input (fail | warn | ignore): it fell through to 'ignore',
+          # so a missing artifact only logged and the job went on with an empty ./artifacts.
+          if_no_artifact_found: fail
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -227,11 +238,22 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          # Blank run id: the latest COMPLETED push run on master that carries the artifact.
+          # branch must be empty when run_id is set (the action rejects both), hence the expression.
+          # workflow_conclusion 'completed' matches any finished run: the default 'success' would skip
+          # a master run whose release-build passed but an unrelated standalone job was red, and so
+          # silently pick an older build; search_artifacts then takes the first run that has one.
+          branch: ${{ needs.plan.outputs.artifact_run_id == '' && 'master' || '' }}
+          event: push
+          workflow_conclusion: completed
+          search_artifacts: true
           name: deployment-packages
           path: ./artifacts
-          if_no_artifact_found: error
+          # 'error' is not a value of this input (fail | warn | ignore): it fell through to 'ignore',
+          # so a missing artifact only logged and the job went on with an empty ./artifacts.
+          if_no_artifact_found: fail
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -342,11 +364,22 @@ jobs:
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v14
         with:
-          workflow: sdap-ci.yml
+          workflow: ci-standalone-checks.yml  # was sdap-ci.yml (retired by CICD-077); its release-build job publishes deployment-packages
           run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          # Blank run id: the latest COMPLETED push run on master that carries the artifact.
+          # branch must be empty when run_id is set (the action rejects both), hence the expression.
+          # workflow_conclusion 'completed' matches any finished run: the default 'success' would skip
+          # a master run whose release-build passed but an unrelated standalone job was red, and so
+          # silently pick an older build; search_artifacts then takes the first run that has one.
+          branch: ${{ needs.plan.outputs.artifact_run_id == '' && 'master' || '' }}
+          event: push
+          workflow_conclusion: completed
+          search_artifacts: true
           name: deployment-packages
           path: ./artifacts
-          if_no_artifact_found: error
+          # 'error' is not a value of this input (fail | warn | ignore): it fell through to 'ignore',
+          # so a missing artifact only logged and the job went on with an empty ./artifacts.
+          if_no_artifact_found: fail
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2

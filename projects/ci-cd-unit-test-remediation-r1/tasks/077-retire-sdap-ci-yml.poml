@@ -1,7 +1,7 @@
 <task id="CICD-077" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Retire .github/workflows/sdap-ci.yml (at cutover+14d minimum per spec MUST rule)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 hours</estimated-effort>
     <phase>3 - Retirement</phase>
     <stream>A - CI tiering</stream>
@@ -51,4 +51,28 @@
     <criterion testable="true">Branch protection no longer references sdap-ci jobs</criterion>
     <criterion testable="true">No other workflow depends on sdap-ci.yml</criterion>
   </acceptance-criteria>
+  <notes>
+    COMPLETE 2026-10-14 (owner rulings of 2026-10-14 supersede the POML's "delete" wording).
+    - Gates: cutover 2026-09-29 + 14d = 2026-10-13 elapsed; 075 soak passed by owner ruling (notes/soak-passed.md).
+      The "additional 7 days beyond 075" reading was waived by the owner's "proceed with 075 and 077 now".
+    - Required checks (ruleset 21824191, read-only check): Router + Client lint (type-aware ratchet). Neither is an
+      sdap-ci job. Classic branch protection is disabled (404).
+    - MOVED, not deleted: sdap-ci.yml and sdap-ci-docs-only.yml -> docs/archive/workflows/ (ARCHIVED headers).
+    - Checks with no per-PR equivalent preserved in NEW .github/workflows/ci-standalone-checks.yml (not required):
+      dependency-audit (now fails closed), release-build (FR-B07 Release build + BFF publish + deployment-packages on
+      master pushes), compose-client-gate (no continue-on-error), client-typecheck (shared-lib tsc). Master failures
+      raise quality alerts ci-standalone/* via .github/actions/quality-alert (PR #1837; merge after #1837).
+    - NEW .github/workflows/master-ci-alert.yml + scripts/ci/master-ci-verdict.ps1: router-master and
+      tier2-master/full-unit-tests alerts on master CI runs (workflow_run). Replayed against 5 historical runs.
+    - Dropped (one-line reasons in notes/sdap-ci-retirement.md): per-PR Trivy (nightly trivy-fs; Security-tab SARIF
+      upload stops), Prettier auto-fix, environment readiness echo, ADR Violations PR comment (duplicate),
+      CI Summary, sdap-ci-docs-only.
+    - deploy-promote.yml: its three download steps named sdap-ci.yml; repointed to ci-standalone-checks.yml in a
+      separate commit. Spec MUST says "functionally untouched" -> flagged for the owner in the PR. Pre-existing
+      hazard (blank artifact_run_id has no branch filter) not fixed; recommended: branch: master.
+    - shadow-window-status.ps1 now reports the window CLOSED (exit 0); -Historical re-runs the old comparison.
+    - Docs swept (ci-cd-workflow.md "How CI problems are surfaced", testing-and-code-quality.md, WORKFLOWS.md,
+      ENVIRONMENTS.md, ADR docs, Eval comments). Stale sdap-ci comments remain in ci-router.yml / tier1 / tier2
+      (owner rule: do not edit) and office-addins-tests.yml (history). .claude/ edits handed to the main session.
+  </notes>
 </task>
