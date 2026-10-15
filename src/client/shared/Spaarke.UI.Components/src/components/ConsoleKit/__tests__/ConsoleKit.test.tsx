@@ -182,6 +182,36 @@ describe('StatusBar', () => {
     expect(bar).toHaveTextContent('by A. Reviewer');
   });
 
+  // Task 058: the states the decision wizard needs after recording and on a dismissed / superseded item.
+  it('leads with Recorded and says how many other open items are left (task 058)', () => {
+    const { unmount } = renderThemed(<StatusBar state="Decided" recorded recordClass="Judgement" openItemsLeft={2} />);
+    expect(screen.getByTestId('status-bar')).toHaveTextContent('Recorded · Judgement · 2 other open items left');
+    unmount();
+    renderThemed(<StatusBar state="Decided" recorded openItemsLeft={1} />);
+    expect(screen.getByTestId('status-bar')).toHaveTextContent('1 other open item left');
+  });
+
+  it('says there are no other open items when none are left, and omits the count when it is unknown', () => {
+    const { unmount } = renderThemed(<StatusBar state="Done" recorded openItemsLeft={0} />);
+    expect(screen.getByTestId('status-bar')).toHaveTextContent('No other open items');
+    unmount();
+    renderThemed(<StatusBar state="Done" recorded />);
+    expect(screen.getByTestId('status-bar')).not.toHaveTextContent(/open item/);
+  });
+
+  it('shows the dismissal reason and who superseded the item', () => {
+    const { unmount } = renderThemed(<StatusBar state="Dismissed" reason="Already approved offline" />);
+    expect(screen.getByTestId('status-bar')).toHaveTextContent('Reason: Already approved offline');
+    unmount();
+    renderThemed(<StatusBar state="Superseded" supersededBy="DR-00050" />);
+    expect(screen.getByTestId('status-bar')).toHaveTextContent('Superseded by DR-00050');
+  });
+
+  it('a bar for an item that was already closed does not say Recorded', () => {
+    renderThemed(<StatusBar state="Decided" recordId="DR-1" />);
+    expect(screen.getByTestId('status-bar')).not.toHaveTextContent('Recorded');
+  });
+
   it('omits who/when when there is no person (a condition that cleared on its own)', () => {
     renderThemed(<StatusBar state="ClearedItself" />);
     expect(screen.getByTestId('status-bar')).not.toHaveTextContent('by ');

@@ -135,6 +135,11 @@ public sealed class DataverseUserClient : IDataverseUserClient
         SendAsync(HttpMethod.Patch, $"/api/data/v9.2/{relativePath.TrimStart('/')}", jsonBody, cancellationToken, ifMatchAnyExisting: true);
 
     /// <inheritdoc />
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Patch, $"/api/data/v9.2/{relativePath.TrimStart('/')}", jsonBody, cancellationToken,
+            ifMatch: $"W/\"{expectedVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"");
+
+    /// <inheritdoc />
     public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Delete, $"/api/data/v9.2/{relativePath.TrimStart('/')}", jsonBody: null, cancellationToken);
 
@@ -144,7 +149,8 @@ public sealed class DataverseUserClient : IDataverseUserClient
         string? jsonBody,
         CancellationToken cancellationToken,
         bool preferRepresentation = false,
-        bool ifMatchAnyExisting = false)
+        bool ifMatchAnyExisting = false,
+        string? ifMatch = null)
     {
         if (string.IsNullOrEmpty(_environmentUrl))
         {
@@ -232,6 +238,11 @@ public sealed class DataverseUserClient : IDataverseUserClient
         {
             // dataverse.update_record: update-only — never let Web API PATCH upsert-create.
             request.Headers.TryAddWithoutValidation("If-Match", "*");
+        }
+        if (ifMatch is not null)
+        {
+            // A specific ETag (a row's versionnumber): the write applies only if the row is unchanged, and never creates.
+            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
         }
         if (jsonBody is not null)
         {

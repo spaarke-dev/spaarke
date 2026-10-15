@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Seed the first Policy, PolicyVersion and taxonomy rows</title>
+    <phase>0 Foundations</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data authoring against a built schema; no new code surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration data entry with exact values from the spec.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>dataverse,configuration,seed-data</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the first sprk_policy and sprk_policyversion rows for Path B, plus enable the ten authored classifier guidance rows, so later tasks have a policy to evaluate.</prompt>
+  <role>SPAARKE platform developer. Configuration is data, not code.</role>
+  <goal>A disabled-by-default Path B policy exists with an immutable version row carrying a valid Existence rule body, a short headline, a message template and a proposed action.</goal>
+
+  <context>
+    <background>All five tables are at 0 rows. The evaluator has nothing to evaluate until a policy exists. sprk_policy.sprk_enabled defaults to No deliberately, so authoring a row does not put it live.</background>
+    <relevant-files>
+      <file role="modify">Dataverse: sprk_policy, sprk_policyversion (spaarkedev1)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: sprk_enabled stays No until a reviewer turns it on. A new rule must not go live before review. The 2026-09-29 taxonomy rows defaulted to disabled and were invisible to the classifier until noticed, which is the same trap in the opposite direction.</constraint>
+    <constraint source="project">Scope: sprk_name is a PLAIN DISPLAY NAME, for example Budget Variance Policy, not POL-BUDGET v3. Codes belong in the how-this-was-determined disclosure (prototype finding 15).</constraint>
+    <constraint source="project">Scope: sprk_priority defaults 500 and LOWEST WINS, ties broken by record id, copying CommunicationRuleGate.cs:129-133 verbatim.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Policy authoring</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/mvp-technical-spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Create the sprk_policy row: name Budget Variance Policy, policycode POL-COMMIT-BUDGET, lane Decide, enabled No, priority 500, countstowardsuppression Yes, subjecttype set to the communication subject.</step>
+    <step order="2">Create the sprk_policyversion row: version 1, ruletype Existence, inforcefrom today, inforceto null (null means currently in force).</step>
+    <step order="3">Write sprk_rulebody as the two-clause form from spec FR-06: an exists clause over sprk_communication filtered to the fee or scope categories within the window, ANDed with a notExists clause over sprk_budgetrevision on sprk_revisedon within the same window. NO cross-clause variable passing.</step>
+    <step order="4">Write sprk_shortheadline (what the list row shows) and sprk_messagetemplate (what renders sprk_signal.sprk_sentence). Verify against section 0.3: the template may reference ONLY fields the rule body reads.</step>
+    <step order="5">Write sprk_proposedaction, because a rule must declare its proposed action to be reviewable (prototype finding 16).</step>
+    <step order="6">Enable the ten already-authored sprk_classifierguidance rows so task 072 has something to inject.</step>
+    <step order="7">Point sprk_policy.sprk_currentversion at the version row.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the rule body cannot be expressed without cross-clause variable passing, STOP and escalate. That is the CM-3 violation design.md section 8.0.1(a) rejected, and working around it in code reintroduces the thing predicates were chosen to avoid.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: sprk_policy row POL-COMMIT-BUDGET</output>
+    <output type="data">Dataverse: sprk_policyversion row v1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new policy row, when read, then sprk_enabled is No and sprk_policycode is POL-COMMIT-BUDGET.</criterion>
+    <criterion testable="true">Given the version row, when read, then sprk_ruletype is Existence and sprk_rulebody contains exactly two ANDed clauses with no variable binding between them.</criterion>
+    <criterion testable="true">Given sprk_messagetemplate, when each field it references is checked against the rule body, then every referenced field is one the body actually reads.</criterion>
+    <criterion testable="true">Negative: the message template does not assert a budget comparison, because the predicate makes none.</criterion>
+    <criterion testable="true">The ten sprk_classifierguidance rows are enabled and queryable.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-06, FR-10. The alternate key sprk_policycode is Active, so a duplicate code will be refused by the platform.
+
+  COMPLETED 2026-10-03 in spaarkedev1. sprk_policy POL-COMMIT-BUDGET = 4d204810-61bf-f111-aaaf-0022482913fc
+  (sprk_enabled=No, sprk_priority=500, sprk_lane=Decide, sprk_subjecttype=Matter, sprk_countstowardsuppression=Yes).
+  sprk_policyversion v1 = 42b3e716-61bf-f111-aaaf-0022482913fc (sprk_ruletype=Existence; sprk_rulebody validated
+  against src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json — 2 ANDed clauses, no
+  cross-clause binding). sprk_policy.sprk_currentversion points at the version row. Full details and the one
+  deviation from this POML's literal wording: notes/004-seed-policy-rows.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

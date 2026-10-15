@@ -36,7 +36,7 @@ export function loadRibbon(xrm, now) {
     Number,
     Math,
     isNaN,
-    window: { addEventListener() {}, removeEventListener() {} },
+    window: { Xrm: xrm, addEventListener() {}, removeEventListener() {} },
     location: { reload() {} },
     prompt: xrm.__prompt ?? (() => null),
   });

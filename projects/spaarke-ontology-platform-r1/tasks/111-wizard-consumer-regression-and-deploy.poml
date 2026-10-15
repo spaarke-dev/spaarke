@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Regression and deploy of the re-based WizardShell across its non-embedded consumers (incl. SemanticSearchControl PCF)</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>056 complete</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploys a shared component change to code pages and a PCF in a shared environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted builds and deploys plus a fixed regression table.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
+    <deps>056</deps>
+    <tags>deploy,frontend,pcf,modal</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Map the non-embedded consumers' raw maxWidth/height to named sizes, build and deploy the affected code pages and the SemanticSearchControl PCF to dev, and run the modal note's regression rows 1-5 in order, canary first and the PCF last.</prompt>
+  <role>SPAARKE platform engineer.</role>
+  <goal>Every non-embedded WizardShell consumer works on dev in light and dark at 100% and large display size, with explicit dismiss, and the PCF bundle delta is recorded.</goal>
+
+  <context>
+    <background>notes/modal-wizard-canonical-approach.md section 5.2 phase P4: regression rows 1 CreateAnalysisWizardWidget (canary), 2 SmartTodo CreateTodoWizard, 3 DocumentRelationshipViewer DocumentEmailWizard (1280px/85vh, map to lg), 4 external-spa DocumentUploadPage, 5 SemanticSearchControl PCF DocumentEmailWizard (React 16.14 + Fluent 9.46 platform libs, stacked over FilePreviewDialog; highest risk). The eight navigateTo wizard code pages are embedded and unaffected (one live open each as a smoke check).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx</file>
+      <file role="modify">src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file role="canonical-reference">scripts/Deploy-SpaarkeAi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: MERGE MASTER FIRST and confirm 0 behind.</constraint>
+    <constraint source="project">Scope: PCF builds use npm run build:prod, never npm run build; record the SemanticSearchControl bundle size before and after.</constraint>
+    <constraint source="project">Scope: Vite solutions install with npm install --legacy-peer-deps --no-audit --no-fund, not npm ci.</constraint>
+    <constraint source="project">Scope: replace the raw maxWidth/height strings in consumers 1, 3 and 5 with named sizes; no other consumer code changes.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-70, ADR-050 Path A ends here): after the consumers use named sizes, DELETE SprkModal's legacySize prop and WizardShell's deprecated maxWidth/height props from @spaarke/ui-components (code, types, docs), and add a test that fails if either prop is reintroduced. git grep for legacySize across src/ must return nothing outside history. Also REPLACE the '1px'/'2px' literals in WizardStepper.tsx (lines ~37 and ~73 at #1386 head 54e8f637f) with Fluent tokens, per ADR-050's zero-'1px'-literals rule (#1386 review K4 and re-check K1).</constraint>
+    <constraint source="project">Scope: verify against real dev (spaarkedev1), never a mock; record every row's result in notes/deploy-log.md naming the environment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code page and PCF deployment</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Merge origin/master; confirm 0 behind.</step>
+    <step order="2">Map consumers 1, 3, 5 to named sizes; build all affected packages.</step>
+    <step order="3">Deploy SpaarkeAi, SmartTodo, DocumentRelationshipViewer and the external SPA per their skills; run rows 1-4.</step>
+    <step order="4">Build the PCF with build:prod, record the bundle delta, deploy, run row 5 (preview then Email from preview, stacked; and bulk Email).</step>
+    <step order="5">Smoke-open each embedded navigateTo wizard once.</step>
+    <step order="6">Record results in notes/deploy-log.md.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If row 5 (the React 16 PCF) fails or its bundle grows by more than the SprkModal footprint already present in other PCFs, STOP and escalate before deploying it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Regression rows 1-5">
+      <steps>
+        <step>Run each row in modal note section 5.2 in light and dark, at 100% and large display size</step>
+        <step>For each: Escape does not close, close button closes, finish shows the success screen</step>
+      </steps>
+      <expected>All five rows pass on dev.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Open each non-embedded wizard in dark mode</step>
+      </steps>
+      <expected>No white header or white surfaces.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Builds (build:prod for PCF)</tool>
+    <tool name="pwsh">Deployment scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given rows 1-5, when run on dev, then each passes in light and dark at both sizes, with Escape not closing and close closing.</criterion>
+    <criterion testable="true">Given the SemanticSearchControl PCF, when built with build:prod, then the before and after bundle sizes are recorded.</criterion>
+    <criterion testable="true">AMENDED 2026-10-07 (D-70): Given @spaarke/ui-components, when searched, then SprkModal has no legacySize prop and WizardShell has no maxWidth/height props; a test fails if either returns; spec section 6's ADR-050 row is marked closed.</criterion>
+    <criterion testable="true">Given each embedded navigateTo wizard, when opened once on dev, then it renders unchanged.</criterion>
+    <criterion testable="true">Negative: verification was not done against a mock; the environment is named in the log; the branch was merged up to master first.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-60; D-26; modal note section 5.2 P4.
+2026-10-09: #1415 merged with master (75fe34c0f; SemanticSearchControl now 1.1.84). DEPLOY NOTE: the tracked `Solution/Controls/.../bundle.js` is not regenerated by `build:prod`; pack must produce 1.1.84 before import (verify the packed bundle, not the tracked copy). PR #1415 MERGED 47ffb8537 (owner approval 2026-10-09). Remaining: dev deploy + regression (owner checklist r2-r5).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

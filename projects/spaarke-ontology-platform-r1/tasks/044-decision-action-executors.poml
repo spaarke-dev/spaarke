@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Action executors: Revise budget, Approve variance (record-only), Do actions, Next-step creators</title>
+    <phase>4b Commit and actions</phase>
+    <gate>036, 008, 047 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Server-side writes to budgets, events, To Dos and communications on behalf of a decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Each executor reuses an existing core (TaskActionCore, events complete, child-records, communications send); the new write is Revise budget.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 008, 047</deps>
+    <tags>bff-api,actions,dataverse</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement one executor per catalog action (except send-budget-inquiry, task 070, and assign-work, task 046) that the commit route calls, reusing the existing write cores and authorizing each write as the caller; Revise budget creates the sprk_budgetrevision as the writer after checking the caller can write the budget.</prompt>
+  <role>SPAARKE backend developer. Reuse the shipped cores; one route per table per #1312.</role>
+  <goal>Each executor performs exactly its write, returns the written record id and outcome for the record's step list, and refuses before writing when the caller lacks rights.</goal>
+
+  <context>
+    <background>D-18 (spec section 9; #26): the BFF writer creates the budget revision (Spaarke Ontology Service granted Create in task 008) after checking the caller can write the target sprk_budget, and the revision also updates that budget's amount; when a matter has several budgets, the user picks one. D-19: Approve variance is record-only. D-27: Reschedule writes sprk_duedate. #29/#30: event complete exists (POST /api/v1/events/{id}/complete); To Do complete, reschedule and reassign go through the child-records PATCH; event reschedule and reassign have no BFF route (#1312 deleted the general PUT); reassign writes a contact lookup (sprk_assignedto) and statuscode Reassigned (659490007); the reminder goes through POST /api/communications/send. #23: Next-step creators move server-side so they run inside the commit.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/OntologyWriterDataverseClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-18, D-55): revise-budget checks, as the caller, Write on the chosen sprk_budget; the WRITER creates sprk_budgetrevision (sprk_budget, sprk_revisedon, the new amount) via OntologyWriterDataverseClient; the new budget AMOUNT is written onto sprk_budget AS THE SIGNED-IN USER (IDataverseUserClient: their rights, their audit) (D-55). The writer never writes sprk_budget.</constraint>
+    <constraint source="owner">Scope (D-19): approve-variance writes nothing outside the record; its executor returns an outcome only.</constraint>
+    <constraint source="project">Scope: Do-lane executors call the existing cores, not new copies: event complete via the events complete core; To Do complete / reschedule / reassign via the child-records core; send-reminder via the communications send core. For event reschedule (sprk_duedate, D-27) and event reassign (sprk_assignedto contact + statuscode Reassigned + sprk_reassignedby), add ONE narrow event write to the events route family as the caller, per #1312's one-route-per-table rule (#29), with its census entry.</constraint>
+    <constraint source="project">Scope: Next-step creators add-todo, create-event and send-email reuse the same cores; assign-work is task 046. Each returns the created id for sprk_followons.</constraint>
+    <constraint source="owner">Scope (D-54): extend-response-date writes sprk_workassignment.sprk_responseduedate as the caller; record-the-response writes the D-54 response columns (from task 047) on the work assignment as the caller. The send-reminder executor resolves a law-firm assignee (sprk_assignedlawfirm1) to a contact with an email address or refuses (#30).</constraint>
+    <constraint source="project">Scope: every executor refuses BEFORE writing when the caller lacks rights; executors are internal services, not new public routes (except the one narrow event write above).</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): the narrow event write is in the census, authorized as the caller, single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: each executor proven live against spaarkedev1 as a low-privilege user (create then clean up), not only with mocks.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Server-side write paths</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">List each catalog action with the existing core it calls and the caller-rights check it makes; record it in notes.</step>
+    <step order="2">Implement the executors and the one narrow event write.</step>
+    <step order="3">Integration tests per executor as a low-privilege user, including the refusal case.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the signed-in user cannot write the budget amount after the writer created the revision, STOP: report the revision id; do not write the amount with another identity (D-55).</trigger>
+    <trigger>If any Do action cannot reuse an existing core without changing that core's behaviour for its current consumers, STOP and escalate.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>EventEndpoints (complete), ChildRecordEndpoints (To Do create/update), CommunicationEndpoints (send) and TaskActionCore are the shipped write paths; no route creates sprk_budgetrevision or writes an event's due date or assignee (#26, #29).</existing>
+    <extension>Yes for the Do actions and Next steps: executors are thin adapters over those cores. No for revise-budget and the event due-date/assignee write, which have no existing path.</extension>
+    <cost-of-doing-nothing>Path B's own remedy (Revise budget) cannot be recorded, the Do lane's actions cannot run inside a decision, and Next steps stay browser-created after a record that can no longer list them (#23).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller with Write on budget B, when revise-budget runs, then a sprk_budgetrevision for B exists with sprk_revisedon set, created by the writer identity.</criterion>
+    <criterion testable="true">Negative: given a caller without Write on B, when revise-budget runs, then nothing is written and a refusal is returned.</criterion>
+    <criterion testable="true">Given approve-variance, when executed, then no Dataverse row is written.</criterion>
+    <criterion testable="true">Given each Do action and each Next-step creator, when executed by an authorized low-privilege user, then exactly its write happens (event complete, sprk_duedate change, reassign to a contact with statuscode Reassigned, To Do write, email send) and the created/updated id is returned.</criterion>
+    <criterion testable="true">Negative: no executor writes sprk_finalduedate.</criterion>
+    <criterion testable="true">Negative: the new event write route rejects an unauthorized caller (404 no read / 403 unresolved) and is in the census.</criterion>
+    <criterion testable="true">Tests cover the stated contract and refusals; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given revise-budget, when executed, then the revision is created by the writer and the budget amount is updated by the signed-in user (audit shows them) (D-55).</criterion>
+    <criterion testable="true">Given record-the-response with an outcome, when executed by an authorized user, then the D-54 response columns are written on the work assignment as that user.</criterion>
+  </acceptance-criteria>
+
+  <completion>COMPLETED 2026-10-09: PR #1515 merged into docs/ontology-platform-design (9d1a8d475) after independent review (4 rounds) and uac-r2 confirmation of the two entries in their files (#1355 comment 6089838200 (uac-r2, 2026-10-09): SecureChildLineage sprk_budgetrevision -> sprk_budget, sprk_matter; config Read at Basic, kind child). IDecisionActionExecutor with PreflightAsync and Written/PossiblyWritten; role grants D-108/D-109.</completion>
+
+  <notes>spec.md FR-52, FR-61; D-18, D-19, D-27, D-29. D-54 (response columns, task 047), D-55 (amount as the signed-in user).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

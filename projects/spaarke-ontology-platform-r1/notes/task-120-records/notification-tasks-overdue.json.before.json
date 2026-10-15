@@ -1,0 +1,61 @@
+{
+  "playbook": {
+    "id": "4369cab2-5f2d-f111-88b5-7ced8d1dc988",
+    "name": "Tasks Overdue",
+    "description": "Identifies tasks past their due date on user's matters and creates notifications for each overdue item. Runs on schedule via PlaybookSchedulerService.",
+    "configjson": "{\"schedule\":{\"frequency\":\"daily\",\"time\":\"06:00\"},\"category\":\"tasks-overdue\",\"channelLabel\":\"Overdue Tasks\",\"channelIcon\":\"warning\",\"parameters\":{},\"nodes\":[{\"name\":\"Start\",\"nodeType\":\"Control\",\"actionType\":null,\"canvasType\":\"start\",\"outputVariable\":\"start\",\"positionX\":100,\"positionY\":200,\"dependsOn\":[],\"configJson\":{\"__actionType\":33,\"scope\":\"user-matters\",\"resolveUserId\":true,\"description\":\"Scoped to the current user's matters (resolved via LookupUserMembership node)\"}},{\"name\":\"Lookup My Matters\",\"nodeType\":\"Workflow\",\"actionType\":52,\"canvasType\":\"lookupUserMembership\",\"outputVariable\":\"myMatters\",\"positionX\":250,\"positionY\":200,\"dependsOn\":[\"Start\"],\"configJson\":{\"__actionType\":52,\"entityType\":\"sprk_matter\",\"roles\":[\"owner\",\"assignedAttorney\",\"assignedParalegal\"],\"includeRelated\":false,\"description\":\"Resolve the executing user's matter memberships per ADR-034. Bound to `myMatters.ids` for downstream filtering.\"}},{\"name\":\"Query Overdue Tasks\",\"nodeType\":\"Workflow\",\"actionType\":51,\"canvasType\":\"queryDataverse\",\"outputVariable\":\"overdueQuery\",\"positionX\":450,\"positionY\":200,\"dependsOn\":[\"Lookup My Matters\"],\"configJson\":{\"__actionType\":51,\"queryMode\":true,\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch top=\\\"50\\\"><entity name=\\\"sprk_event\\\"><attribute name=\\\"sprk_eventname\\\"/><attribute name=\\\"sprk_duedate\\\"/><attribute name=\\\"sprk_finalduedate\\\"/><attribute name=\\\"sprk_eventid\\\"/><attribute name=\\\"sprk_eventtype_ref\\\"/><attribute name=\\\"statuscode\\\"/><attribute name=\\\"modifiedon\\\"/><attribute name=\\\"sprk_regardingrecordname\\\"/><attribute name=\\\"sprk_regardingrecordurl\\\"/><attribute name=\\\"sprk_regardingmatter\\\"/><attribute name=\\\"ownerid\\\"/><link-entity name=\\\"sprk_matter\\\" from=\\\"sprk_matterid\\\" to=\\\"sprk_regardingmatter\\\" link-type=\\\"outer\\\" alias=\\\"m\\\"><attribute name=\\\"sprk_mattername\\\"/><attribute name=\\\"ownerid\\\"/></link-entity><filter type=\\\"and\\\"><condition attribute=\\\"sprk_eventtype_ref\\\" operator=\\\"eq\\\" value=\\\"124f5fc9-98ff-f011-8406-7c1e525abd8b\\\"/><condition attribute=\\\"statuscode\\\" operator=\\\"eq\\\" value=\\\"659490001\\\"/><filter type=\\\"or\\\"><condition attribute=\\\"sprk_duedate\\\" operator=\\\"lt\\\" value=\\\"{{todayUtc}}\\\"/><condition attribute=\\\"sprk_finalduedate\\\" operator=\\\"lt\\\" value=\\\"{{todayUtc}}\\\"/></filter><filter type=\\\"or\\\"><condition attribute=\\\"sprk_regardingmatter\\\" operator=\\\"in\\\" value=\\\"{{joinIds myMatters.ids}}\\\"/><condition entityname=\\\"m\\\" attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/><condition attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/></filter></filter><order attribute=\\\"sprk_finalduedate\\\" descending=\\\"false\\\"/><order attribute=\\\"sprk_duedate\\\" descending=\\\"false\\\"/></entity></fetch>\",\"description\":\"Open Task-type sprk_events (sprk_eventtype_ref = Task GUID 124f5fc9-…, statuscode=Open 659490001) with sprk_duedate OR sprk_finalduedate before today. Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: sprk_finalduedate asc, sprk_duedate asc tiebreaker. Dedupe by sprk_eventid (NOT activityid).\"}},{\"name\":\"Check Results\",\"nodeType\":\"Control\",\"actionType\":30,\"canvasType\":\"condition\",\"outputVariable\":\"hasOverdue\",\"positionX\":700,\"positionY\":200,\"dependsOn\":[\"Query Overdue Tasks\"],\"configJson\":{\"__actionType\":30,\"condition\":{\"operator\":\"gt\",\"left\":\"{{overdueQuery.output.count}}\",\"right\":0},\"trueBranch\":\"Create Notification\",\"description\":\"Check if any overdue tasks were found\"}},{\"name\":\"Create Notification\",\"nodeType\":\"Workflow\",\"actionType\":50,\"canvasType\":\"createNotification\",\"outputVariable\":\"notification\",\"positionX\":1000,\"positionY\":150,\"dependsOn\":[\"Check Results\"],\"configJson\":{\"__actionType\":50,\"title\":\"You have {{overdueQuery.output.count}} overdue task(s)\",\"body\":\"{{#each overdueQuery.output.items}}{{sprk_eventname}} is overdue (was due {{sprk_duedate}}).\\n{{/each}}\",\"category\":\"tasks-overdue\",\"priority\":300000000,\"actionUrl\":\"/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039\",\"recipientId\":\"{{run.userId}}\",\"regardingType\":\"sprk_event\",\"iterateItems\":true,\"itemNotification\":{\"title\":\"Overdue: {{item.sprk_eventname}}\",\"body\":\"{{item.sprk_eventname}} was due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})\",\"category\":\"tasks-overdue\",\"priority\":300000000,\"actionUrl\":\"/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}\",\"recipientId\":\"{{run.userId}}\",\"regardingId\":\"{{item.sprk_eventid}}\",\"regardingType\":\"sprk_event\",\"dueDate\":\"{{item.sprk_duedate}}\",\"regardingName\":\"{{item.sprk_eventname}}\",\"sourceEntityType\":\"sprk_event\",\"sourceId\":\"{{item.sprk_eventid}}\",\"sourceModifiedOn\":\"{{item.modifiedon}}\",\"sourceOwningUser\":\"{{item.ownerid}}\",\"viaMatterId\":\"{{item.sprk_regardingmatter}}\",\"viaMatterName\":\"{{item.m_sprk_mattername}}\",\"viaMatterMembershipsVariable\":\"myMatters\"},\"deduplication\":{\"enabled\":true,\"key\":\"tasks-overdue:{{run.userId}}:{{item.sprk_eventid}}\"}}}],\"edges\":[{\"source\":\"Start\",\"target\":\"Lookup My Matters\"},{\"source\":\"Lookup My Matters\",\"target\":\"Query Overdue Tasks\"},{\"source\":\"Query Overdue Tasks\",\"target\":\"Check Results\"},{\"source\":\"Check Results\",\"target\":\"Create Notification\",\"condition\":\"true\"}]}",
+    "lastrundate": "2026-10-08T18:00:39Z"
+  },
+  "nodes": [
+    {
+      "id": "338b6395-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Start",
+      "executortype": 33,
+      "executionorder": 1,
+      "outputvariable": "start",
+      "isactive": true,
+      "dependsonjson": null,
+      "configjson": "{\"__actionType\":33,\"scope\":\"user-matters\",\"resolveUserId\":true,\"description\":\"Scoped to the current user's matters (resolved via LookupUserMembership node)\"}"
+    },
+    {
+      "id": "4bd19f94-a171-f111-ab0d-7ced8ddc4cc6",
+      "name": "Lookup My Matters",
+      "executortype": 52,
+      "executionorder": 2,
+      "outputvariable": "myMatters",
+      "isactive": true,
+      "dependsonjson": "[\"338b6395-a171-f111-ab0d-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":52,\"entityType\":\"sprk_matter\",\"roles\":[\"owner\",\"assignedAttorney\",\"assignedParalegal\"],\"includeRelated\":false,\"description\":\"Resolve the executing user's matter memberships per ADR-034. Bound to `myMatters.ids` for downstream filtering.\"}"
+    },
+    {
+      "id": "348b6395-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Query Overdue Tasks",
+      "executortype": 51,
+      "executionorder": 3,
+      "outputvariable": "overdueQuery",
+      "isactive": true,
+      "dependsonjson": "[\"4bd19f94-a171-f111-ab0d-7ced8ddc4cc6\"]",
+      "configjson": "{\"__actionType\": 51, \"queryMode\": true, \"entityLogicalName\": \"sprk_event\", \"fetchXml\": \"<fetch top=\\\"50\\\"><entity name=\\\"sprk_event\\\"><attribute name=\\\"sprk_eventname\\\"/><attribute name=\\\"sprk_duedate\\\"/><attribute name=\\\"sprk_finalduedate\\\"/><attribute name=\\\"sprk_eventid\\\"/><attribute name=\\\"sprk_eventtype_ref\\\"/><attribute name=\\\"statuscode\\\"/><attribute name=\\\"modifiedon\\\"/><attribute name=\\\"sprk_regardingrecordname\\\"/><attribute name=\\\"sprk_regardingrecordurl\\\"/><attribute name=\\\"sprk_regardingmatter\\\"/><attribute name=\\\"ownerid\\\"/><link-entity name=\\\"sprk_matter\\\" from=\\\"sprk_matterid\\\" to=\\\"sprk_regardingmatter\\\" link-type=\\\"outer\\\" alias=\\\"m\\\"><attribute name=\\\"sprk_mattername\\\"/><attribute name=\\\"ownerid\\\"/></link-entity><filter type=\\\"and\\\"><condition attribute=\\\"sprk_eventtype_ref\\\" operator=\\\"eq\\\" value=\\\"124f5fc9-98ff-f011-8406-7c1e525abd8b\\\"/><condition attribute=\\\"statuscode\\\" operator=\\\"eq\\\" value=\\\"659490001\\\"/><condition attribute=\\\"sprk_duedate\\\" operator=\\\"lt\\\" value=\\\"{{todayUtc}}\\\"/><filter type=\\\"or\\\"><condition entityname=\\\"m\\\" attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/><condition attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/></filter></filter><order attribute=\\\"sprk_duedate\\\" descending=\\\"false\\\"/></entity></fetch>\", \"description\": \"Open Task-type sprk_events (sprk_eventtype_ref = Task GUID 124f5fc9-…, statuscode=Open 659490001) with sprk_duedate before the recipient's today (D-63: sprk_finalduedate is informational and does not decide overdue). Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: sprk_duedate asc (D-73: sprk_finalduedate is informational). Dedupe by sprk_eventid (NOT activityid).\"}"
+    },
+    {
+      "id": "358b6395-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Check Results",
+      "executortype": 30,
+      "executionorder": 4,
+      "outputvariable": "hasOverdue",
+      "isactive": true,
+      "dependsonjson": "[\"348b6395-a171-f111-ab0d-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":30,\"condition\":{\"operator\":\"gt\",\"left\":\"{{overdueQuery.count}}\",\"right\":0},\"trueBranch\":\"Create Notification\",\"description\":\"Check if any overdue tasks were found\"}"
+    },
+    {
+      "id": "0ec2dd90-a171-f111-ab0d-70a8a590c51c",
+      "name": "Create Notification",
+      "executortype": 50,
+      "executionorder": 5,
+      "outputvariable": "notification",
+      "isactive": true,
+      "dependsonjson": "[\"358b6395-a171-f111-ab0d-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":50,\"title\":\"You have {{overdueQuery.count}} overdue task(s)\",\"body\":\"{{#each overdueQuery.items}}{{sprk_eventname}} is overdue (was due {{sprk_duedate}}).\\n{{/each}}\",\"category\":\"tasks-overdue\",\"priority\":300000000,\"actionUrl\":\"/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039\",\"recipientId\":\"{{run.userId}}\",\"regardingType\":\"sprk_event\",\"iterateItems\":true,\"itemNotification\":{\"title\":\"Overdue: {{item.sprk_eventname}}\",\"body\":\"{{item.sprk_eventname}} was due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})\",\"category\":\"tasks-overdue\",\"priority\":300000000,\"actionUrl\":\"/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}\",\"recipientId\":\"{{run.userId}}\",\"regardingId\":\"{{item.sprk_eventid}}\",\"regardingType\":\"sprk_event\",\"dueDate\":\"{{item.sprk_duedate}}\",\"regardingName\":\"{{item.sprk_eventname}}\",\"sourceEntityType\":\"sprk_event\",\"sourceId\":\"{{item.sprk_eventid}}\",\"sourceModifiedOn\":\"{{item.modifiedon}}\",\"sourceOwningUser\":\"{{item.ownerid}}\",\"viaMatterId\":\"{{item.sprk_regardingmatter}}\",\"viaMatterName\":\"{{item.m_sprk_mattername}}\",\"viaMatterMembershipsVariable\":\"myMatters\"},\"deduplication\":{\"enabled\":true,\"key\":\"tasks-overdue:{{run.userId}}:{{item.sprk_eventid}}\"}}"
+    }
+  ]
+}

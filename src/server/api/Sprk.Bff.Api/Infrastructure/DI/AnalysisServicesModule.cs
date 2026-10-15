@@ -1408,6 +1408,10 @@ public static class AnalysisServicesModule
         // IOpenAiClient.GetStructuredCompletionAsync<T> (reuses the guaranteed-valid-JSON primitive the
         // Finance classification path uses; no new LLM runner). Null peer (NullCommunicationClassificationAi)
         // is registered in AddNullObjectsForCompoundOff. Scoped to match IOpenAiClient's transitive lifetime.
+        // Ontology D-117(b): it reads the editable sprk_triagecategory taxonomy through LookupChoicesResolver.
+        // AddToolFramework registers that resolver too, but skips it when ToolFramework:Enabled=false; the
+        // idempotent TryAdd keeps the facade resolvable then (no asymmetric registration, §10 F.1).
+        services.TryAddScoped<LookupChoicesResolver>();
         services.AddScoped<ICommunicationClassificationAi, CommunicationClassificationAi>();
 
         // ICommunicationTriageAi → CommunicationTriageAi (email-communication-intelligence-r1 task 023 /

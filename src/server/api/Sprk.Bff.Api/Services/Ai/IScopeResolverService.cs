@@ -388,6 +388,36 @@ public interface IScopeResolverService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// As <see cref="QueryLookupValuesAsync(string, string, CancellationToken)"/> but ANDs
+    /// <paramref name="additionalFilter"/> (an OData predicate, e.g. <c>sprk_enabled eq true</c>) onto the
+    /// active-row filter. The filter is supplied per taxonomy, never globally: a column that does not exist on
+    /// another entity would be a 400, which this method swallows into an empty result.
+    /// </summary>
+    Task<string[]> QueryLookupValuesAsync(
+        string entitySetName,
+        string fieldName,
+        string? additionalFilter,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Query the classifier-guidance text authored alongside a lookup taxonomy (e.g.
+    /// <c>sprk_triagecategories.sprk_classifierguidance</c>), keyed by the lookup's name field.
+    /// Same active-row filter as <see cref="QueryLookupValuesAsync"/> so prompt guidance and the
+    /// constrained-decoding enum are bound to the same Dataverse rows at run time.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="QueryLookupValuesAsync"/> this does NOT swallow read failures: it throws, so the caller
+    /// can emit the failure to telemetry and degrade to bare names (spaarke-ontology-platform-r1 task 072).
+    /// </remarks>
+    /// <returns>Name → guidance text for rows that have non-blank guidance (case-insensitive keys).</returns>
+    Task<IReadOnlyDictionary<string, string>> QueryLookupGuidanceAsync(
+        string entitySetName,
+        string nameField,
+        string guidanceField,
+        string? additionalFilter,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Query option set (picklist) or multi-select picklist labels from Dataverse entity metadata.
     /// Used by <c>$choices</c> resolution to load choice field values
     /// (e.g., status options from <c>sprk_matter.sprk_status</c>).

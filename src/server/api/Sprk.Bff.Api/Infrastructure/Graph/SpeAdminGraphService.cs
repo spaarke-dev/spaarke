@@ -2386,25 +2386,34 @@ public sealed class SpeAdminGraphService
     /// grant. Conflating the two is what made the original failure unreadable.
     /// </para>
     /// </remarks>
-    private static async Task<string?> ResolveUserObjectIdAsync(
-        GraphServiceClient client, string userPrincipalName, CancellationToken ct)
+    private static Task<string?> ResolveUserObjectIdAsync(
+        GraphServiceClient client, string userPrincipalName, CancellationToken ct) =>
+        ReadUserPropertyAsync(client, userPrincipalName, "id", ct);
+
+    /// <summary>
+    /// Reads one string property of a user addressed by object id or UPN (<c>GET /users/{key}</c>), or
+    /// null when no user matches. Used both ways: UPN → id for container-TYPE grants, id → UPN for
+    /// CONTAINER grants — Graph keys the two by different identifiers.
+    /// </summary>
+    private static async Task<string?> ReadUserPropertyAsync(
+        GraphServiceClient client, string userKey, string property, CancellationToken ct)
     {
         // Base address derived from the client about to issue the request, never hardcoded — task
         // 020's lesson. A hardcoded host would also make every contract test reach the REAL Graph
         // instead of the fixture, which is a far worse failure than a wrong version. `/users` exists
         // on both v1.0 and beta, so either base resolves it.
         var url = ResolveGraphBaseUrl(client) + "/users/" +
-                  Uri.EscapeDataString(userPrincipalName) + "?$select=id";
+                  Uri.EscapeDataString(userKey) + "?$select=" + property;
         try
         {
             using var json = await SendGraphJsonAsync(client, HttpMethod.Get, url, body: null, ct)
                 .ConfigureAwait(false);
 
             if (json is not null &&
-                json.RootElement.TryGetProperty("id", out var id) &&
-                id.ValueKind == JsonValueKind.String)
+                json.RootElement.TryGetProperty(property, out var value) &&
+                value.ValueKind == JsonValueKind.String)
             {
-                return id.GetString();
+                return value.GetString();
             }
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
@@ -4060,15 +4069,35 @@ public sealed class SpeAdminGraphService
             "Granting '{Role}' to (userId={UserId}, groupId={GroupId}) on container {ContainerId}",
             role, userId, groupId, containerId);
 
-        // Build the Graph SDK permission payload for SPE container permissions.
-        // SPE uses grantedToV2 with SharePointIdentitySet.
+        /*
+         * 🔑 A CONTAINER grant names the user by userPrincipalName — the opposite of a container-TYPE
+         * grant, which takes only the object id (AddContainerTypeOwnerAsync). Sending { id } here is
+         * refused with `400 'userPrincipalName' is required` (UAT 2026-10-07: Add Permission failed
+         * every time). The page sends the object id from its user picker, so it is resolved to a UPN
+         * first; an identifier that already looks like a UPN is used as given. An id that resolves to
+         * no user is reported as that, not as Graph's generic 400.
+         */
+        string? userPrincipalName = null;
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            userPrincipalName = userId.Contains('@', StringComparison.Ordinal)
+                ? userId
+                : await ReadUserPropertyAsync(graphClient, userId, "userPrincipalName", ct).ConfigureAwait(false)
+                  ?? throw new UserNotResolvedException(userId);
+        }
+
+        // SPE uses grantedToV2 with SharePointIdentitySet. Graph SDK 5.x has no typed UPN property on
+        // SharePointIdentity, so it travels in AdditionalData — as SpeContainerMembershipService sends it.
         var permissionRequest = new Microsoft.Graph.Models.Permission
         {
             Roles = new List<string> { role.ToLowerInvariant() },
             GrantedToV2 = new Microsoft.Graph.Models.SharePointIdentitySet
             {
-                User = !string.IsNullOrWhiteSpace(userId)
-                    ? new Microsoft.Graph.Models.SharePointIdentity { Id = userId }
+                User = userPrincipalName is not null
+                    ? new Microsoft.Graph.Models.SharePointIdentity
+                    {
+                        AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = userPrincipalName },
+                    }
                     : null,
                 Group = !string.IsNullOrWhiteSpace(groupId)
                     ? new Microsoft.Graph.Models.SharePointIdentity { Id = groupId }
@@ -6575,6 +6604,18 @@ public sealed class SpeAdminGraphService
             "to it. Register the container type in this tenant first (SharePoint admin center).")
     {
         public string ContainerTypeId { get; } = containerTypeId;
+    }
+
+    /// <summary>
+    /// A container permission named a user Microsoft Entra could not resolve. A distinct type so the endpoint
+    /// answers "no such user" (400) rather than a generic 500 — the two mean different things to the admin.
+    /// </summary>
+    public sealed class UserNotResolvedException(string userKey)
+        : InvalidOperationException(
+            $"No user was found for '{userKey}'. A container permission can only be granted to a user " +
+            "Microsoft Entra can resolve.")
+    {
+        public string UserKey { get; } = userKey;
     }
 
     /// <summary>

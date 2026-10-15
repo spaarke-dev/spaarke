@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Daily Briefing reads sprk_duedate as the event due date (sprk_finalduedate informational)</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>098 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which events a shipped user surface reports as overdue or due soon.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Column swap in one collector with its tests, located by line.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>098</deps>
+    <tags>bff-api,briefing,events</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make DailyBriefingCollector use sprk_event.sprk_duedate as the due date everywhere it now prefers sprk_finalduedate, so the Briefing, the Do lane and Reschedule agree, and list (without changing) every other reader of sprk_finalduedate.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>The Briefing's upcoming and overdue task sections filter, order and display by sprk_duedate; a reschedule (which writes sprk_duedate) moves the item in the Briefing.</goal>
+
+  <context>
+    <background>D-27 (spec section 9): the Do lane and Reschedule use sprk_duedate always; the Daily Briefing changes to match; sprk_finalduedate becomes informational. Today the collector uses sprk_finalduedate first with sprk_duedate as fallback (DailyBriefingCollector.cs ~:466-474, ~:783-809, ~:843-850), so a rescheduled task (sprk_duedate) keeps its old place in the Briefing (v4-prototype-vs-solution #2, current-task owner question 4). Task 098 made the six event date columns Date Only and moved the Briefing to the user's local today; this task follows it to avoid editing the same lines twice.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-27): in DailyBriefingCollector only, replace the finalduedate-first logic with sprk_duedate for filtering, ordering and display; sprk_finalduedate may still be selected for display as informational but never decides membership or order.</constraint>
+    <constraint source="project">Scope: do NOT change other readers of sprk_finalduedate (VisualHost DueDateCard/DueDateCardList/CalendarVisual, TaskReconcileTab, EventDetailSidePane, TaskActionCore, CommunicationRiActionService, CommunicationRuleGate, CommsPolicyOptions, workAssignmentService). List them with file:line in notes for the owner.</constraint>
+    <constraint source="project">Scope: keep task 098's user-local "today" handling unchanged.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: a test asserting the column must be paired with a live read of a real event whose two due dates differ.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Briefing collector</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/daily-briefing-ontology-fit.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Locate every finalduedate use in the collector; switch membership, order and display to sprk_duedate.</step>
+    <step order="2">Tests: an event with differing dates is placed by sprk_duedate; a live read confirms the columns.</step>
+    <step order="3">Inventory other sprk_finalduedate readers into notes.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/065-finalduedate-readers.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an open task event with sprk_duedate yesterday and sprk_finalduedate next week, when the Briefing collects, then the event is overdue (by the configured threshold) and ordered by sprk_duedate.</criterion>
+    <criterion testable="true">Given a reschedule that changes sprk_duedate, when the Briefing collects, then the event moves accordingly.</criterion>
+    <criterion testable="true">Negative: no file other than the collector and its tests changed; the other readers are listed in notes with file:line.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-61; D-27.</notes>
+  <completion>COMPLETED 2026-10-07, FOLDED INTO TASK 098 (PR #1359) on the coordinator's instruction. DailyBriefingCollector reads sprk_duedate ALWAYS: High Priority sprk_event spec (sprk_duedate, no finalduedate fallback), Upcoming/Overdue task filters (NextXDays / OnOrBefore on sprk_duedate only), channel order (sprk_duedate asc, sprk_eventid) and the displayed due date; sprk_finalduedate is no longer selected. Task 098's user-local today unchanged. Tests: DailyBriefingCollectorTests CollectHighPriorityAsync_ClassifiesAndOrdersTaskEventsBySprkDuedate_NotTheFinalDueDate and CollectAsync_TaskChannels_SelectOrderAndShowBySprkDuedate_NotTheFinalDueDate both fail on the previous collector. Live (spaarkedev1, EventRoutesLiveTests.LiveMode_DailyBriefing_JudgesTasksBySprkDuedate_NotTheFinalDueDate): two real Open Task events with differing dates, read back, then the production collector as the operator: due 09-29/final 10-09 in Overdue, rescheduled due 10-09/final 09-29 in Upcoming (High Priority Overdue / DueSoon); the previous collector put both in Upcoming and none in Overdue; 0 records left. Other sprk_finalduedate readers listed with file:line in notes/065-finalduedate-readers.md (unchanged; comments that described the old precedence corrected). OPEN for the owner: the live Dataverse playbook node "Query Overdue Tasks" (348b6395-...) still ORs sprk_finalduedate lt today (not changed: Dataverse data, outside 098's approval). TASK-INDEX.md left to the coordinator.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

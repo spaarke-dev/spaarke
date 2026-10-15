@@ -178,6 +178,80 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // PATCH /api/v1/events/{id}/due-assignee - the event's due date and/or assignee (ontology platform R1 task 044; #29).
+        // The ONE narrow event write, in #1312's one-route-per-table family: after task 159 deleted the general PUT nothing
+        // wrote sprk_duedate or sprk_assignedto. Shape first (no I/O); then the as-caller Write on the event; then the write
+        // itself runs AS THE CALLER (EventDueAssigneeWrite). Never sprk_finalduedate (D-27).
+        group.MapPatch("/{id:guid}/due-assignee", UpdateDueAssigneeAsync)
+            .AddEndpointFilter(ValidateDueAssigneeRequestAsync)
+            .AddRecordRouteAccessAuthorizationFilter("write", EventEntitySet, "id")
+            .WithName("UpdateEventDueAssignee")
+            .WithSummary("Reschedule and/or reassign an event")
+            .WithDescription("Writes the event's due date (sprk_duedate) and/or its assignee contact (sprk_assignedto, statuscode " +
+                "Reassigned, reassigned-by) as the caller. Only open work can be changed. An event the caller cannot read gets " +
+                "the same 404 as one that does not exist; Read without Write is a 403.")
+            .Produces<UpdateEventDueAssigneeResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    // =============================================================================================================
+    // PATCH /{id}/due-assignee — the event's due date and assignee (task 044)
+    // =============================================================================================================
+
+    /// <summary>The request's SHAPE (no I/O), BEFORE the authorization filter, so a 400 never becomes a 403.</summary>
+    internal static async ValueTask<object?> ValidateDueAssigneeRequestAsync(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var request = context.Arguments.OfType<UpdateEventDueAssigneeRequest>().FirstOrDefault();
+        return EventDueAssigneeWrite.ShapeProblem(request) is { } problem
+            ? Results.ValidationProblem(new Dictionary<string, string[]> { ["body"] = [problem] })
+            : await next(context);
+    }
+
+    /// <summary>PATCH /{id}/due-assignee. The filter has established Write; the write is the caller's own.</summary>
+    internal static async Task<IResult> UpdateDueAssigneeAsync(
+        Guid id,
+        [FromBody] UpdateEventDueAssigneeRequest request,
+        [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+        ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContact = await ResolveActingUserContactAsync(callerResolver, identity, httpContext, logger, ct);
+        var result = await EventDueAssigneeWrite.ApplyAsync(
+            user, id, request, callerContact,
+            (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow(), ct);
+
+        switch (result.Outcome)
+        {
+            case EventDueAssigneeOutcome.Written:
+                logger.LogInformation(
+                    "Event due date/assignee written as the caller. EventId={EventId}, Rescheduled={Rescheduled}, Reassigned={Reassigned}",
+                    id, request.DueDate is not null, request.AssigneeContactId is not null);
+                return TypedResults.Ok(new UpdateEventDueAssigneeResponse(
+                    id, request.DueDate, request.AssigneeContactId, request.AssigneeContactId is not null));
+            case EventDueAssigneeOutcome.NotFound:
+                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            case EventDueAssigneeOutcome.InvalidState:
+                return Results.Problem(detail: result.Detail, statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Status Transition", type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            case EventDueAssigneeOutcome.Denied:
+                return ProblemDetailsHelper.Forbidden(
+                    RecordRouteAccessAuthorizationFilter.InsufficientRightsReasonCode,
+                    RecordRouteAccessAuthorizationFilter.InsufficientRightsDetail, httpContext.TraceIdentifier);
+            default:
+                logger.LogError("Event due date/assignee write failed. EventId={EventId}, Status={Status}", id, result.DataverseStatus);
+                return Results.Problem(detail: "An error occurred while updating the event",
+                    statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
     }
 
     // =============================================================================================================
@@ -773,7 +847,7 @@ public static class EventEndpoints
     /// UAC-r2 task 152: the acting user's LINKED contact (task 141 — <c>PersonIdentity.ContactId</c>), or null when the
     /// caller does not resolve to a systemuser, has no link, or the read fails. Never an email/UPN match.
     /// </summary>
-    private static async Task<Guid?> ResolveActingUserContactAsync(
+    internal static async Task<Guid?> ResolveActingUserContactAsync(
         ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         HttpContext httpContext,

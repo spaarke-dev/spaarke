@@ -3,7 +3,7 @@
   <metadata>
     <title>Document ↔ record multi-association via an intersection entity (owner chose option b, NOT native N:N)</title>
     <phase>0c Secure Documents — upload path decomposition</phase>
-    <status>pending</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Introduces a schema surface and touches the access model's ancestor assumption. Getting the regarding shape wrong is expensive to undo once rows exist.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -131,4 +131,8 @@ lookup" claim.</background>
   </acceptance-criteria>
 
   <notes>NOT STARTED. Gates 094's "Use existing" option.</notes>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 095)">
+    <verdict>DEFERRED TO A NEW PROJECT by owner round 59 item 2. Status set to deferred. Tracked by GitHub issue #1306. This is a new capability, not a defect, so it is not built in UAC-r2.</verdict>
+    <amendment n="1" title="Why">A new capability: today a document has two lookup slots per record type. Needs schema and a product decision on whether a link grants access.</amendment>
+  </amendments>
 </task>

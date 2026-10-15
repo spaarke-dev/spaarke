@@ -71,19 +71,19 @@ import type { EmailCitation } from '../../logic/citations';
 import type { ReconcileRegarding, ProposalOutcome } from './FieldUpdateReconcileTab';
 
 /**
- * `sprk_eventstatus` Choice values — the canonical Events-subsystem status field (the deliberate
- * statecode/statuscode→custom-field migration, events-workspace-apps-UX-r1). Full set 0-7; the
- * reconcile Status dropdown surfaces the reviewer-relevant lifecycle values (owner UAT 2026-08-14
- * — expanded from the prior Open/Completed-only pair). Archived(7)/Reassigned(6) are admin/terminal
- * transitions handled elsewhere (ribbon), so they are omitted from the create/complete form.
+ * `sprk_event.statuscode` values — the one authoritative event status (D-28, ontology-platform-r1 task 066; the
+ * second status column is deprecated and no longer written). The values are the LIVE option set
+ * (Spaarke.Dataverse.EventStatusCode, pinned by the BFF's EventStatusDeprecationTests). The reconcile Status dropdown
+ * surfaces the reviewer-relevant lifecycle values (owner UAT 2026-08-14); Reassigned / No Further Action are
+ * admin/terminal transitions handled elsewhere (ribbon), so they are omitted from the create/complete form.
  */
 export const EVENT_STATUS = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
+  DRAFT: 1,
+  OPEN: 659490001,
+  COMPLETED: 659490002,
+  CLOSED: 659490003,
+  ON_HOLD: 659490006,
+  CANCELLED: 659490004,
 } as const;
 const STATUS_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: EVENT_STATUS.DRAFT, label: 'Draft' },
@@ -104,7 +104,7 @@ export interface TaskFormState {
   dueDate: string;
   finalDueDate: string;
   completedDate: string;
-  status: string; // stringified Choice int | ''
+  status: string; // stringified statuscode int | ''
   assignedTo: string; // systemuser GUID | ''
 }
 
@@ -242,7 +242,7 @@ function buildApplyBody(form: TaskFormState): Record<string, unknown> {
   if (form.baseDate) b.baseDate = form.baseDate;
   if (form.finalDueDate) b.finalDueDate = form.finalDueDate;
   if (form.completedDate) b.completedDate = form.completedDate;
-  if (form.status) b.status = Number(form.status);
+  if (form.status) b.statusCode = Number(form.status); // D-28: the wire field is statusCode (`status` is refused with 422 STATUS_FIELD_RETIRED)
   if (form.assignedTo) b.assignedTo = form.assignedTo;
   return b;
 }
@@ -415,7 +415,7 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
     [forms, regarding, communicationId, post, authenticatedFetch, onTaskResolved]
   );
 
-  // B2.2: undo a just-created task — soft-cancel it server-side (sprk_eventstatus=Cancelled), then flip the row to a
+  // B2.2: undo a just-created task — soft-cancel it server-side (statuscode=Cancelled), then flip the row to a
   // terminal "Undone" state. Only available when the create returned a task id.
   const handleUndoTask = React.useCallback(
     async (p: CreateTaskProposal) => {

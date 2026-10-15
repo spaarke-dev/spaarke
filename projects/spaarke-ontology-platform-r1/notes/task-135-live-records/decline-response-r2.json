@@ -1,0 +1,20 @@
+{
+  "artifact": null,
+  "decline": {
+    "reason": "insufficient-evidence",
+    "explanation": "Insufficient data is available to provide Insights Analysis: only 0 KPI assessments are available for this Matter (need 2 per rule 'kpiAssessments.min' from queryKpiAssessments). Add at least 2 assessments per Performance Area to enable diagnostic Insights.",
+    "minimumEvidenceNeeded": {
+      "kpiAssessments": {
+        "have": 0,
+        "need": 2,
+        "from": "assessments",
+        "reason": "Upstream 'assessments' had 0 item(s); minCount=2."
+      }
+    },
+    "suggestedActions": [
+      "Add KPI assessments for the Guideline Compliance, Budget Compliance, and Outcomes Achievement Performance Areas (per FR-13)",
+      "Ensure each assessment's Notes field is populated with substantive evaluator commentary (the synthesis prompt's themes/inflection dimensions require Notes text)"
+    ],
+    "confidenceInDecline": 0.95
+  }
+}

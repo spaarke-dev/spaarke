@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — Safe worktree removal + cross-worktree link guard (FAILURE-MODES G-20)
+
+Incident 2026-10-13: a bulk worktree cleanup deleted through `node_modules` junctions that agents had pointed at another worktree, emptying 70 tracked files in the uac-r2 worktree.
+
+- **`scripts/worktree/Remove-WorktreeSafe.ps1`** (new): unlinks junctions/symlinks as links, then `git worktree remove`; never a recursive-delete fallback. Pester: `tests/scripts/Remove-WorktreeSafe.Tests.ps1`.
+- **`.claude/settings.json`**: new `PreToolUse` hook on `Bash|PowerShell`, `scripts/quality/guard-worktree-links.py`. It denies a link into another worktree and a recursive delete or `git worktree remove` of a worktree root. Controls: `scripts/quality/tests/test_guard_worktree_links.py`.
+- **CI**: `ci-standalone-checks.yml` job `agent-guard-tests` (windows-latest) now runs all `scripts/quality/tests` hook controls (previously run by hand only) and the Pester file.
+- **`worktree-setup` skill + command, `docs/procedures/parallel-claude-sessions.md`**: removal examples use the script; new failure-mode row.
+- **`.claude/FAILURE-MODES.md`**: G-20.
+- **Root `CLAUDE.md`** §16 hooks bullet: one sentence (+403 bytes, no new lines).
+
+---
 ###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
 
 Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.
@@ -692,6 +704,26 @@ decide whether to merge [PR #1283](https://github.com/spaarke-dev/spaarke/pull/1
 
 PR: #1283. See `projects` memory note `project_portfolio-board-hygiene-and-ai-cost-tracking.md` for full
 continuity context.
+
+###### 2026-10-03 — ADR-040 amended: a durable decision ledger is a SIBLING of `SessionGate` (spaarke-ontology-platform-r1 task 003)
+
+`.claude/adr/ADR-040-session-ledger.md` and `docs/adr/ADR-040-session-ledger.md` now name **`SessionGate` and
+`sprk_decisionrecord` as siblings over one decision**, linked by **`sprk_decisionrecord.sprk_gatesessionid` →
+`SessionGate.GateId`** (nullable by design — most Decision Records originate in the worklist, not in chat).
+`SessionGate` owns the gate **state machine** (session-scoped, Redis→Cosmos TTL); the Decision Record owns
+decision **authority** (`sprk_authority`, `sprk_policyversion`, `sprk_factsnapshot`, `sprk_confirmedby`,
+`sprk_recordclass` — matter-scoped, durable). Two new MUSTs (authority goes to the durable record, never to
+`SessionGate`, which has no field for it; set `sprk_gatesessionid` when a gate did originate the decision) and
+two new MUST NOTs (never read the Decision Record as session context — `ledger_resolution` does not reach it;
+the existing "no second session-state store" rule governs **session** state and does not reach matter state).
+**Deliberately narrow**: `SessionGate` does not become durable, no field is added to any ledger entry type,
+and storage-precedes-rendering / addressability / `disposition` / the 128 KB cap / the ADR-015 tier mapping are
+untouched. Blast radius is documentation, not migration, because **no consumer depended on `SessionGate` being
+the only record of a decision — `sprk_emailreviewlog` already is a durable per-decision authority record in
+production.** Path **B** per root `CLAUDE.md` §6.5, chosen by the owner as **D-9** after deferring it on
+2026-09-30 until the Decision Record's shape (D-2) was settled. The paired **ADR-039** tension took path **A**
+(project-scoped exception — Policy decides whether a claim is *true*, Binding decides what *executes*);
+**ADR-039 is NOT amended.** Record: `projects/spaarke-ontology-platform-r1/spec.md` §6.
 
 ---
 ###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (C-19)

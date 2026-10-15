@@ -270,14 +270,12 @@ public class ScheduledJobHostTests
         // records Success=false + "Cancelled", while one that sat out the 3s ShutdownDrainTimeout
         // would not. The behaviour is the assertion; elapsed wall-clock never was.
         //
-        // The dispatched run, not just any 'slow' record: a later every-second occurrence that fires while 'slow'
-        // still holds the lease is recorded as Skipped (Success=true, ADR-036 A1 rule 1), and RunRecords is a
-        // ConcurrentDictionary snapshot with no order — so FirstOrDefault picked the Skipped record at random
-        // (master 2026-10-15, quality alert #1898).
-        var slowRun = store.RunRecords.Should()
-            .ContainSingle(r => r.JobId == "slow" && (r.Result == null || !r.Result.Skipped),
-                "the lease admits exactly one dispatch of 'slow'; later occurrences are recorded as Skipped")
-            .Subject;
+        // #1898: exclude skipped-tick records. If the clock steps past a second occurrence while
+        // 'slow' is still in flight, the host records that tick as Skipped (Success=true, by
+        // design — see RecordUndispatchedTickAsync), and RunRecords is unordered, so FirstOrDefault
+        // could pick the skip record instead of the cancelled run.
+        var slowRun = store.RunRecords.Where(r => r.JobId == "slow" && r.Result?.Skipped != true)
+            .Should().ContainSingle("exactly one dispatched run of 'slow' was in flight at stop").Subject;
         slowRun.Result.Should().NotBeNull();
         slowRun.Result!.Success.Should().BeFalse();
         slowRun.Result.ErrorMessage.Should().Contain("Cancelled");

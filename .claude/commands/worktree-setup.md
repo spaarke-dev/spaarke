@@ -80,7 +80,7 @@ git worktree add ..\spaarke-wt-{name} work/{name}
 **Remove completed:**
 ```powershell
 cd C:\code_files\spaarke
-git worktree remove ..\spaarke-wt-{name}
+pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path ..\spaarke-wt-{name}
 git branch -d work/{name}
 ```
 
