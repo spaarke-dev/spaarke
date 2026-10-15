@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Repair the false association reason string</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One interpolation fix plus a test; small but it is runtime-generated prose asserting something false.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A one-line fix with a clear root cause.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,bug</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the reason string that reports a confidence outside the band it names.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>The band and the confidence in the message come from the same variable.</goal>
+
+  <context>
+    <background>It reports Reinforced confidence 0.97 in [0.50, 0.85) and 0.97 is not in that band. The band is computed from topDeterministicConfidence while the message interpolates topConfidence. This is AP-12 in runtime-generated prose, and it is the same class of error as section 0.3.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordMatching</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: fix the INTERPOLATION so both values come from the same variable. Do not widen the band to make the message true, which would change behavior to fit a message.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Runtime-generated prose correctness</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Locate the reason string construction and confirm the two variables.</step>
+    <step order="2">Interpolate the same variable the band was computed from.</step>
+    <step order="3">Add a test asserting the reported confidence falls inside the reported band for several inputs.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordMatching</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/RecordMatching</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given any association outcome, when the reason string is produced, then the reported confidence falls inside the reported band.</criterion>
+    <criterion testable="true">Negative: the band bounds were not widened to make the message true.</criterion>
+    <criterion testable="true">A test asserts band containment across several inputs.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-44. AP-12 in runtime-generated prose; the same error class as section 0.3.
+
+  Completed. The bug lives in src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs
+  (NOT Services/RecordMatching, which the POML's relevant-files/outputs named incorrectly — see
+  notes/task-083-reason-string-deviations.md). BuildSuggestedReason's generic fallback asserted
+  "Reinforced confidence {topFull} in [SuggestFloor, Threshold)" whenever topDet &lt; Threshold, but topFull can
+  independently clear Threshold (e.g. C-1-narrowed rung 2/3, or a surface-only rung) while aiInvolved is false,
+  so the band claim was false exactly when FR-44 describes. Fix adds the missing branch for
+  topDet &lt; threshold &amp;&amp; topFull &gt;= threshold &amp;&amp; !aiInvolved, reporting "&gt;= threshold" (what was
+  actually tested) instead of a false band claim; the band was NOT widened. 8 new test cases added to
+  tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationStatusMapperTests.cs (3 theory + 4 theory + 1
+  fact) proving band containment across several inputs and proving the old false-band text never reappears.
+  43/43 tests pass in that file; BFF builds clean. code-review + adr-check run per the TEST-MODIFYING override
+  (root CLAUDE.md §8) despite STANDARD rigor: 0 Critical, 0 blocking Warnings.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

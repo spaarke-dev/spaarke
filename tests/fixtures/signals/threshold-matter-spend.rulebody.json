@@ -1,0 +1,5 @@
+{
+  "type": "Threshold",
+  "subject": "sprk_matter",
+  "threshold": { "field": "sprk_totalspendtodate", "operator": ">=", "value": 20000 }
+}

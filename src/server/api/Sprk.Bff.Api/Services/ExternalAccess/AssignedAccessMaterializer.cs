@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -77,6 +78,9 @@ public static class AssignedAccessAction
 }
 
 /// <summary>One subject's result.</summary>
+/// <param name="Invite">Task 185 (§12 I-9): what a contact grant this pass wrote did about the contact's CIAM invite —
+/// ADDITIVE, <c>null</c> when no invite was considered (no grant written, an organization, or a pass with no internal actor).
+/// Never carries the code.</param>
 public sealed record AssignedAccessEntryOutcome(
     string SubjectKind,
     Guid SubjectId,
@@ -84,7 +88,8 @@ public sealed record AssignedAccessEntryOutcome(
     Guid? SystemUserId,
     string State,
     string? Reason,
-    string Action);
+    string Action,
+    GrantInviteResult? Invite = null);
 
 /// <summary>Something a pass could not do or could not confirm. Never reported as done.</summary>
 public sealed record AssignedAccessFailure(string? SubjectKind, Guid? SubjectId, string Kind, string Message);
@@ -213,6 +218,13 @@ public sealed class AssignedAccessMaterializer
     private readonly ILogger<AssignedAccessMaterializer> _logger;
     private readonly IServiceScopeFactory? _scopes;
 
+    /// <summary>Task 185 (§12 I-9): the ONE invite core the grant flows share — an internal assignment of an unbound
+    /// contact with an email sends the invite, as <c>/grant</c> does.</summary>
+    private readonly ExternalInviteService _invites;
+
+    /// <summary>Task 185 (§12 I-9, I-4/I-7): a partner contact's assignment tells an internal user the colleague needs an invite.</summary>
+    private readonly GrantAccessNotifier _notifier;
+
     /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
     /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
     /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
@@ -233,9 +245,14 @@ public sealed class AssignedAccessMaterializer
         IConfiguration configuration,
         TimeProvider timeProvider,
         ILogger<AssignedAccessMaterializer> logger,
+        ExternalInviteService invites,
+        GrantAccessNotifier notifier,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
+        // Both Scoped and unconditionally registered beside this class (ExternalAccessModule); neither depends on it.
+        _invites = invites ?? throw new ArgumentNullException(nameof(invites));
+        _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _store = store;
         _dataverse = dataverse;
         _participations = participations;
@@ -1127,8 +1144,166 @@ public sealed class AssignedAccessMaterializer
         await EnsureRowsAsync(run, subject, byField,
             new AssignedAccessLedgerWrite(AssignedAccessState.Granted, reason, outcome.AccessRecordId, null,
                 (int)ExternalAccessLevel.Collaborate, survivorExpiry), ct).ConfigureAwait(false);
+
+        // Task 185 (§12 I-9): the grant is written; an unbound contact still needs the invite to sign in. Only here — the
+        // fresh grant an assignment gives — never on a renewal or a restore of an existing grant.
+        var invite = subject.Kind == AssignedSubjectKind.Contact
+            ? await InviteAfterGrantAsync(run, subject, outcome.AccessGained, ct).ConfigureAwait(false)
+            : null;
+
         run.Entry(subject, fields, null, AssignedAccessState.Granted, reason,
-            prior is null ? AssignedAccessAction.Granted : AssignedAccessAction.Raised);
+            prior is null ? AssignedAccessAction.Granted : AssignedAccessAction.Raised, invite);
+    }
+
+    // =========================================================================================
+    // Task 185 (§12 I-9): the invite after an assignment's grant
+    // =========================================================================================
+
+    /// <summary>Who made the assignment a pass materializes (task 185 §12 I-9).</summary>
+    private enum ActorKind
+    {
+        /// <summary>No person: the job, or an inline pass with no caller (the secure-root inheritance, a field mapping).</summary>
+        None,
+
+        /// <summary>The caller's oid is a systemuser's: an internal user's write or sync.</summary>
+        Internal,
+
+        /// <summary>The caller's oid is a contact's (a partner, task 140 / I-4): contacts never invite.</summary>
+        Partner,
+
+        /// <summary>The caller's oid is neither a systemuser's nor a contact's, or could not be read: no invite.</summary>
+        Unresolved,
+    }
+
+    /// <summary>
+    /// After this pass wrote a contact grant: the round 98 rule the grant flows apply (§11 option (c), §12 I-1 to I-4,
+    /// I-7, I-9), keyed on who made the assignment.
+    /// <list type="bullet">
+    /// <item>An INTERNAL user's write or sync (the request's oid resolves to a systemuser): the ONE invite core
+    /// (<see cref="ExternalInviteService.InviteOnGrantAsync"/>) — an unbound contact with an email is invited, a current
+    /// marker is <c>AlreadyPending</c> (I-2), a bound contact is <c>NotNeeded</c>, a failure is <c>Failed</c> and the grant
+    /// stands (I-1, logged at Warning without the code by the core).</item>
+    /// <item>A PARTNER contact's write (the oid is a contact's): no invite (I-4); an unbound colleague with an email is
+    /// <c>NeedsInternalInvite</c> and one internal user is told (<see cref="GrantAccessNotifier.NotifyInviteNeededAsync"/>,
+    /// the I-7 fallback order, the partner's own granters first).</item>
+    /// <item>No person (the reconciliation job, or an inline pass with no caller), or an oid that resolves to nobody: no
+    /// invite, logged. A background pass never invites: it would replace a code each time it re-decides a subject.</item>
+    /// </list>
+    /// The materializer sends no "you were given access" email, so the invite is the contact's only email (I-3). Never throws.
+    /// </summary>
+    private async Task<GrantInviteResult?> InviteAfterGrantAsync(
+        Run run, AssignedSubject subject, bool accessGained, CancellationToken ct)
+    {
+        try
+        {
+            var (actor, partnerContactId) = await ResolveActorAsync(run, ct).ConfigureAwait(false);
+            switch (actor)
+            {
+                case ActorKind.Internal:
+                    return await _invites.InviteOnGrantAsync(subject.Id).ConfigureAwait(false);
+
+                case ActorKind.Partner:
+                    {
+                        var assessment = await _invites.AssessAsync(subject.Id, CancellationToken.None).ConfigureAwait(false);
+                        var invite = assessment.Final ?? new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite);
+                        if (invite.Status == GrantInviteStatus.NeedsInternalInvite && accessGained)
+                        {
+                            var granters = await PartnerGrantersAsync(run, partnerContactId!.Value).ConfigureAwait(false);
+                            await _notifier.NotifyInviteNeededAsync(
+                                run.Request.RootType, run.RootId, subject.Id, new ClaimsPrincipal(new ClaimsIdentity()), granters)
+                                .ConfigureAwait(false);
+                        }
+
+                        return invite;
+                    }
+
+                default:
+                    _logger.LogInformation(
+                        "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: contact {ContactId} was granted with no internal user " +
+                        "behind the pass ({Actor}); no invite is sent. An internal user's Invite sends it.",
+                        run.Request.Trigger, run.Logical, run.RootId, subject.Id, actor);
+                    return null;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // I-1: the grant stands. Nothing here carries the code (it exists only inside the invite core).
+            _logger.LogWarning(ex,
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the invite after the grant to contact {ContactId} failed. The grant stands; " +
+                "retry with Invite.", run.Logical, run.RootId, subject.Id);
+            return new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode);
+        }
+    }
+
+    /// <summary>
+    /// Who is behind this pass, resolved once per run. The job is never a person. Otherwise the request's oid: a systemuser's
+    /// (the read <c>sprk_grantedby</c> already uses) is internal; a contact's (bound to it) is a partner; anything else —
+    /// no oid, an unknown oid, a read that failed — invites nobody (fail closed).
+    /// </summary>
+    private async Task<(ActorKind Kind, Guid? PartnerContactId)> ResolveActorAsync(Run run, CancellationToken ct)
+    {
+        if (run.Actor is { } known)
+            return known;
+
+        (ActorKind, Guid?) resolved = (ActorKind.None, null);
+        if (run.Request.Trigger != AssignedAccessTrigger.Job
+            && Guid.TryParse(run.Request.GrantorOid?.Trim(), out var oid) && oid != Guid.Empty)
+        {
+            // The read sprk_grantedby resolution makes (ResolveGrantedBySystemUserIdAsync), made here so that a FAILED read
+            // is told apart from "no systemuser" — a fault must never turn an internal user into a partner.
+            List<GrantExternalAccessEndpoint.SystemUserRow>? users;
+            try
+            {
+                users = await _dataverse.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
+                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid", top: 1,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[ASSIGNED-ACCESS] {Type} {RootId}: who made the assignment could not be read; no invite is sent this pass.",
+                    run.Logical, run.RootId);
+                users = null;
+            }
+
+            if (users is null)
+            {
+                resolved = (ActorKind.Unresolved, null);
+            }
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            {
+                resolved = (ActorKind.Internal, null);
+            }
+            else
+            {
+                var contacts = await _identities.FindContactsByOidAsync(oid, ct).ConfigureAwait(false);
+                resolved = contacts.Status == LookupStatus.Read && contacts.Rows.Count == 1 && contacts.Rows[0].IsActive
+                    ? (ActorKind.Partner, contacts.Rows[0].ContactId)
+                    : (ActorKind.Unresolved, null);
+            }
+        }
+
+        run.Actor = resolved;
+        return resolved;
+    }
+
+    /// <summary>I-7: the internal users who granted the partner contact its own access here (<c>sprk_grantedby</c>); best effort.</summary>
+    private async Task<IReadOnlyList<Guid>> PartnerGrantersAsync(Run run, Guid partnerContactId)
+    {
+        try
+        {
+            var rows = await ExternalGrantLifecycle.QueryActiveRowsAsync(
+                _dataverse, ExternalGrantKey.ForContact(run.Request.RootType, run.RootId, partnerContactId), CancellationToken.None)
+                .ConfigureAwait(false);
+            return ContactGrantEndpoints.GrantersOf(rows, partnerContactId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grants of partner contact {ContactId} could not be read; the record's " +
+                "owner or creator is told instead.", run.Logical, run.RootId, partnerContactId);
+            return Array.Empty<Guid>();
+        }
     }
 
     private async Task FreshShareAsync(
@@ -2151,11 +2326,14 @@ public sealed class AssignedAccessMaterializer
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();
 
+        /// <summary>Task 185 (§12 I-9): who is behind this pass, resolved at the first contact grant and kept for the run.</summary>
+        public (ActorKind Kind, Guid? PartnerContactId)? Actor { get; set; }
+
         public void Entry(AssignedSubject subject, IReadOnlyList<string> fields, Guid? user, AssignedAccessState state,
-            string? reason, string action)
+            string? reason, string action, GrantInviteResult? invite = null)
             => Entries.Add(new AssignedAccessEntryOutcome(
                 subject.Kind == AssignedSubjectKind.Contact ? "contact" : "organization", subject.Id, fields.ToList(), user,
-                state.ToString(), reason, action));
+                state.ToString(), reason, action, invite));
 
         public void Fail(AssignedSubject? subject, string kind, string message)
             => Failures.Add(new AssignedAccessFailure(

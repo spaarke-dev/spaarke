@@ -342,6 +342,10 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + "&$select=sprk_eventid,sprk_eventname,sprk_duedate,statuscode,createdon,_sprk_regardingproject_value"
             + ",_sprk_regardingmatter_value,_sprk_regardingworkassignment_value"
             + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+            // Task 187: the event's other parents, whose LIVE roots the rule takes in.
+            + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
+            + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
+            + ",_sprk_regardingreportcard_value"
             + "&$orderby=sprk_duedate asc,sprk_eventid asc");
     }
 
@@ -452,6 +456,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>Every request URL (unescaped). A denied request leaves this empty.</summary>
         public ConcurrentQueue<string> Urls { get; } = new();
 
+        /// <summary>Task 187: every request as "METHOD url" (unescaped), so a test can assert nothing was written.</summary>
+        public ConcurrentQueue<string> Requests { get; } = new();
+
         /// <summary>When set, every request answers with this status.</summary>
         public HttpStatusCode? Fault { get; set; }
 
@@ -492,10 +499,29 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                     {
                         return new EntityCollection(_filing
                             .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
-                            .Select(kv => kv.Value)
+                            .Select(kv => Projected(kv.Value, query.ColumnSet))
                             .ToList());
                     }
                 });
+        }
+
+        /// <summary>
+        /// Task 187 fix round 1 (R5): a stored row as the SDK returns it for <paramref name="columns"/>: only the requested
+        /// attributes (and the id). A walk whose select leaves a filing lookup out reads it as "not filed", so a test fails.
+        /// </summary>
+        private static Entity Projected(Entity stored, ColumnSet? columns)
+        {
+            if (columns is null || columns.AllColumns)
+                return stored;
+
+            var row = new Entity(stored.LogicalName, stored.Id);
+            foreach (var column in columns.Columns)
+            {
+                if (stored.Attributes.TryGetValue(column, out var value))
+                    row[column] = value;
+            }
+
+            return row;
         }
 
         // ---- The filing world (effective secure status: a work assignment filed under a secure matter is secure) ----
@@ -520,6 +546,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             lock (_sets) _sets.Clear();
             lock (_filing) { _filing.Clear(); _recordTypes.Clear(); }
             Urls.Clear();
+            Requests.Clear();
             FilingReadLog.Clear();
             Fault = null;
             FlagFault = null;
@@ -620,6 +647,28 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         }
 
         private readonly Dictionary<string, Guid> _recordTypes = new();
+
+        /// <summary>
+        /// Task 187: a record in the FILING world (what the live-parent walk reads app-only), filed through each
+        /// <paramref name="lookups"/> entry (column, target table, id), e.g. a communication whose <c>sprk_regardingmatter</c>
+        /// names a matter. The HTTP side is unaffected. A record not added here is one the walk's read does not return.
+        /// </summary>
+        public void AddFilingRow(string table, Guid id, params (string Column, string Target, Guid Id)[] lookups)
+        {
+            var row = new Entity(table, id);
+            foreach (var (column, target, targetId) in lookups)
+                row[column] = new EntityReference(target, targetId);
+            lock (_filing) _filing[(table, id)] = row;
+        }
+
+        /// <summary>Task 187: sets one column of a seeded HTTP-side row (e.g. a to-do's <c>_sprk_regardingcommunication_value</c>).</summary>
+        public void SetColumn(string set, string idColumn, string id, string column, object? value)
+        {
+            lock (_sets)
+            {
+                _sets[set].Single(r => string.Equals(r[idColumn] as string, id, StringComparison.OrdinalIgnoreCase))[column] = value;
+            }
+        }
 
         /// <summary>
         /// Seeds a root record (project, matter, work assignment) with its <c>sprk_issecure</c>. A <c>null</c> flag is OMITTED
@@ -735,6 +784,22 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         }
 
         /// <summary>
+        /// Task 187 fix round 1 (R1): <see cref="AddTodo"/> with extra raw columns set at seed time (e.g. a parent lookup
+        /// <c>_sprk_regardingcommunication_value</c>), so a page of thousands of rows is seeded without a scan per row.
+        /// </summary>
+        public string AddTodoWith(string segment, Guid record, string name, params (string Column, string Value)[] columns)
+        {
+            var id = AddTodo(segment, record, name);
+            lock (_sets)
+            {
+                var row = _sets["sprk_todos"][^1];
+                foreach (var (column, value) in columns) row[column] = value;
+            }
+
+            return id;
+        }
+
+        /// <summary>
         /// Seeds a document filed to <paramref name="segment"/>'s record <paramref name="record"/> through that root's typed
         /// lookup, plus any <paramref name="extra"/> link columns (e.g. <c>_sprk_matter_value</c>, <c>_sprk_relatedmatter_value</c>).
         /// </summary>
@@ -764,14 +829,23 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             return id;
         }
 
-        /// <summary>Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads).</summary>
-        public void AddInvoice(Guid id, Guid? matter, Guid? project) =>
+        /// <summary>
+        /// Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads), and the same
+        /// record in the filing world (task 187 D4: an invoice route walks its own invoice, so both reads see one record).
+        /// </summary>
+        public void AddInvoice(Guid id, Guid? matter, Guid? project)
+        {
             Seed("sprk_invoices", new Dictionary<string, object?>
             {
                 ["sprk_invoiceid"] = id.ToString(),
                 ["_sprk_matter_value"] = matter?.ToString(),
                 ["_sprk_project_value"] = project?.ToString(),
             });
+            var lookups = new List<(string Column, string Target, Guid Id)>();
+            if (matter is { } m) lookups.Add(("sprk_matter", "sprk_matter", m));
+            if (project is { } p) lookups.Add(("sprk_project", "sprk_project", p));
+            AddFilingRow("sprk_invoice", id, lookups.ToArray());
+        }
 
         /// <summary>Seeds a service request with its requester contact (what <c>GetServiceRequestRequesterAsync</c> reads).</summary>
         public void AddServiceRequest(Guid id, Guid requester) =>
@@ -798,6 +872,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         {
             var url = Uri.UnescapeDataString(request.RequestUri!.ToString());
             Urls.Enqueue(url);
+            Requests.Enqueue($"{request.Method} {url}");
 
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));

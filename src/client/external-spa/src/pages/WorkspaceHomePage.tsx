@@ -41,7 +41,12 @@ import {
   isEntitledToWidgetId,
 } from '../registry/widgetRegistry';
 import { PlaceholderWidgetBody } from '../registry/PlaceholderWidgetBody';
-import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../components/auth/BffAccessState';
+import {
+  BffAccessState,
+  accessFailureOf,
+  deniedDetailOf,
+  type BffAccessFailure,
+} from '../components/auth/BffAccessState';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 },
@@ -82,6 +87,8 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   const [me, setMe] = React.useState<MeEntitlementsResponse | null>(null);
   const [meError, setMeError] = React.useState<string | null>(null);
   const [meAccessFailure, setMeAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  // Task 185 (Q9): the server's guidance for a sign-in with no matching invite, shown in the denied state.
+  const [meDeniedDetail, setMeDeniedDetail] = React.useState<string | null>(null);
   React.useEffect(() => {
     let cancelled = false;
     fetchMeEntitlements(teamsHost)
@@ -91,6 +98,7 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
       .catch((err: unknown) => {
         if (cancelled) return;
         const failure = accessFailureOf(err);
+        setMeDeniedDetail(deniedDetailOf(err));
         if (failure) setMeAccessFailure(failure);
         else setMeError(err instanceof Error ? err.message : 'Unable to load your access.');
       });
@@ -183,7 +191,10 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
         <BffAccessState
           failure={meAccessFailure}
           teamsHost={teamsHost}
-          deniedMessage="You do not have access to this workspace. If you believe this is an error, please contact your Spaarke administrator."
+          deniedMessage={
+            meDeniedDetail ??
+            'You do not have access to this workspace. If you believe this is an error, please contact your Spaarke administrator.'
+          }
         />
       </div>
     );

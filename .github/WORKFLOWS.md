@@ -1,6 +1,6 @@
 # GitHub Actions Workflows — Spaarke Repository
 
-> **Last updated**: 2026-09-10 — corrected "Required-status-checks on master" (live ruleset 21824191 requires exactly ONE check, `Router`; classic branch protection listing 4 contexts was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` entries. Originally 2026-06-01 (github-actions-rationalization-r1)
+> **Last updated**: 2026-10-14 — retired `sdap-ci.yml` / `sdap-ci-docs-only.yml` (task CICD-077; archived at `docs/archive/workflows/`), added `ci-standalone-checks.yml` and `master-ci-alert.yml`. Earlier: 2026-09-10 — corrected "Required-status-checks on master" (live ruleset 21824191 requires exactly ONE check, `Router`; classic branch protection listing 4 contexts was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` entries. Originally 2026-06-01 (github-actions-rationalization-r1)
 > **Purpose**: Per-workflow operator reference. Triggers, owners, SLAs, common failures.
 > **Companion runbook**: [`docs/procedures/workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md) — "a workflow failed, what now?"
 > **Weekly health report**: [CI Health Report issue](https://github.com/spaarke-dev/spaarke/issues?q=is%3Aissue+%22CI+Health+Report%22) (updated weekly by `report-workflow-health.yml` per D-02)
@@ -15,8 +15,10 @@ This document is the operator-facing index of every workflow in `.github/workflo
 | `deploy-bff-api.yml` | Build + test + deploy BFF API to Azure App Service via staging slot + swap | `push` on master (`src/server/api/**`), `workflow_dispatch` | Platform | Same-day deploy |
 | `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | Lint every Bicep file + compile `customer.bicep` and the remaining `stacks/*.bicep`. **Deploys nothing** — customer stamps are deployed only by the L2 control plane (H2a) | `pull_request` + `push` on master (`infrastructure/bicep/**`), `workflow_dispatch` (no inputs) | Platform | Per-PR (validation only) |
 | `deploy-office-addins.yml` | Build + deploy Office Add-ins to Azure Static Web App | `push` on master (`src/client/office-addins/**`), `workflow_dispatch` | Apps | Same-day deploy |
-| `deploy-promote.yml` | Multi-stage promotion dev→staging→prod with smoke tests + manual gate | `workflow_dispatch`, `workflow_run` after SDAP CI success on master | Platform | Manual + ~10 min |
-| `sdap-ci.yml` | Primary CI: security scan, build/test matrix (Debug+Release), client quality, ADR checks | `pull_request`, `push` on master | Platform | Per-PR ~15 min |
+| `deploy-promote.yml` | Multi-stage promotion dev→staging→prod with smoke tests + manual gate | `workflow_dispatch` only (downloads `deployment-packages` from a `ci-standalone-checks.yml` run) | Platform | Manual + ~10 min |
+| `ci-standalone-checks.yml` ("CI Standalone Checks", added 2026-10-14; NOT a required check) | Checks the legacy `sdap-ci.yml` ran that have no Router equivalent: dependency audit, Release build + BFF publish (`deployment-packages` artifact, master pushes only), Compose client gate, shared-lib/AI.Widgets `tsc`, PCF ESLint, unit tests the Router `bff` filter misses (ControlPlane/Core/Scheduling/IntegrationTests), changed seam/contract test classes, the master-verdict Pester tests, per-change Trivy SARIF | `pull_request` (docs-only paths ignored), `push` on master, `workflow_dispatch` | Platform | Per-PR; failures on master raise quality alerts |
+| `master-ci-alert.yml` (added 2026-10-14) | Raises/clears the `router-master` and `tier2-master/full-unit-tests` quality alerts when the `CI` workflow (Router) finishes on master | `workflow_run` on `CI` (master) | Platform | Per master push |
+| ~~`sdap-ci.yml`~~ / ~~`sdap-ci-docs-only.yml`~~ | **Retired 2026-10-14** (task CICD-077). Archived at `docs/archive/workflows/`; they no longer run. Jobs moved to `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml`, `ci-standalone-checks.yml`, `nightly-health.yml` (map: `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`) | none | Platform | n/a |
 | `workflows-validate.yml` | `actionlint` pre-merge validation (FR-07) | `pull_request` on `.github/workflows/**` | DevOps | Per-PR <5 sec |
 | `report-workflow-health.yml` | Weekly per-workflow success-rate snapshot to "CI Health Report" issue (FR-11) | `schedule` (Monday 09:00 UTC), `workflow_dispatch` | DevOps | Weekly |
 | `office-addins-tests.yml` (added 2026-09-10) | Runs the `src/client/office-addins` jest suite on every PR touching that package; **reports** pass/fail but does NOT block merge (not in the required-check list — see "Required-status-checks on master" below). Suite allow-list: `src/client/office-addins/ci-gated-suites.txt` | `pull_request` on `src/client/office-addins/**` | Apps | Per-PR (report-only) |
@@ -32,11 +34,12 @@ gh api repos/spaarke-dev/spaarke/rules/branches/master
 gh api repos/spaarke-dev/spaarke/rulesets/21824191
 ```
 
-Ruleset `21824191` ("master: require CI Router") requires exactly **ONE** status check to pass before merge:
+Ruleset `21824191` ("master: require CI Router") requires **two** status checks to pass before merge (re-verified 2026-10-14):
 
-- `Router`
+- `Router` (from `ci-router.yml`)
+- `Client lint (type-aware ratchet)` (from `client-lint.yml`)
 
-It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `pull_request` rule (0 required approving reviews, all merge methods allowed). `current_user_can_bypass: "never"` — no bypass actors configured. `sdap-ci.yml`'s individual jobs (`Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`) and `workflows-validate.yml`'s `actionlint` job are NOT themselves required contexts — `Router` (from `ci-router.yml`) is the single gate; it fans out to the tiered workflows and reports the aggregate result as one check. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for background, noting that document may also predate the ruleset migration.
+It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `pull_request` rule (0 required approving reviews, all merge methods allowed). `current_user_can_bypass: "never"` — no bypass actors configured. The Tier 1/Tier 2 jobs, `ci-standalone-checks.yml`'s jobs and `workflows-validate.yml`'s `actionlint` job are NOT themselves required contexts (the retired `sdap-ci.yml` jobs `Build & Test (Debug)`, `Build & Test (Release)` and `Code Quality` were not either). `Router` is the CI gate: it fans out to the tiered workflows and reports the aggregate result as one check; `Client lint` is the only other required check. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for background, noting that document may also predate the ruleset migration.
 
 ## Per-workflow detail
 
@@ -71,21 +74,31 @@ It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `p
 
 ### deploy-promote.yml
 
-- **Purpose**: dev → staging → prod promotion gate. Downloads deployment artifact from upstream SDAP CI run, redeploys per env with smoke tests. Prod requires reviewer approval via GitHub environment `prod`. Wave-B artifact-contract verification + Wave-D `url:` removal applied (per D-02).
-- **Triggers**: `workflow_dispatch` (env input + artifact run id + skip-smoke-tests bool); `workflow_run` after `SDAP CI` completes on master.
-- **Common failures**: upstream SDAP CI artifact missing or mis-named, OIDC federated credential mismatch for the target env (see [D-11](../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) — AADSTS700213 on first post-merge run 2026-06-01; owner action pending), missing `PROD_APP_NAME` secret + unverified production App Service (see [D-12](../projects/github-actions-rationalization-r1/decisions/D-12-deploy-promote-prod-app-name-secret-and-app-service-gap.md)), smoke test failure post-deploy.
+- **Purpose**: dev → staging → prod promotion gate. Downloads the `deployment-packages` artifact from a `ci-standalone-checks.yml` run (`release-build` job; uploaded on master pushes only), redeploys per env with smoke tests. Prod requires reviewer approval via GitHub environment `prod`. Wave-B artifact-contract verification + Wave-D `url:` removal applied (per D-02).
+- **Triggers**: `workflow_dispatch` only (env input + artifact run id + skip-smoke-tests bool). The earlier `workflow_run` trigger was removed 2026-08-11.
+- **Common failures**: `deployment-packages` artifact missing or mis-named (it comes from `ci-standalone-checks.yml` master runs), OIDC federated credential mismatch for the target env (see [D-11](../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) — AADSTS700213 on first post-merge run 2026-06-01; owner action pending), missing `PROD_APP_NAME` secret + unverified production App Service (see [D-12](../projects/github-actions-rationalization-r1/decisions/D-12-deploy-promote-prod-app-name-secret-and-app-service-gap.md)), smoke test failure post-deploy.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
-### sdap-ci.yml
+### sdap-ci.yml (retired 2026-10-14)
 
-- **Purpose**: Canonical CI pipeline. Jobs: Security Scan (Trivy SARIF) → Build & Test matrix (Debug + Release) → Client Quality (Prettier + ESLint) → Code Quality (Format + ADR). Provides the 3 build/test/quality required-status contexts. Risk R1 (post-PR-#314 master Build + Prettier failure) DEFERRED per D-01.
-- **Triggers**: `pull_request`; `push` on master. Concurrency-cancel-in-progress per ref.
-- **Common failures**: real C# compile errors (Build), Prettier format diff (Client Quality), unit/integration test fail, `dotnet format` diff (Code Quality).
+- **Status**: Retired by task CICD-077 together with `sdap-ci-docs-only.yml`. Both are archived at `docs/archive/workflows/` (GitHub does not execute them there). The required checks are `Router` (`ci-router.yml`) and `Client lint (type-aware ratchet)` (`client-lint.yml`). Job-by-job mapping: `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`.
+
+### ci-standalone-checks.yml
+
+- **Purpose**: Checks the legacy `sdap-ci.yml` ran that have no Router/nightly equivalent: `dependency-audit` (per-push CVE gate), `release-build` (Release build of the solution + BFF publish; uploads `deployment-packages` on master pushes, consumed by `deploy-promote.yml`), `compose-client-gate`, `client-typecheck` (shared-lib `tsc` + `Spaarke.AI.Widgets` `tsc --noEmit`), `pcf-eslint` (PCF ESLint, which Tier 2 runs only on SpaarkeAi/BFF changes), `unit-tests-outside-router` (ControlPlane, Core, Scheduling, Bff.Api.IntegrationTests and Spe.Integration tests, which no Router-filtered Tier 2 run reaches), `bff-seam-contract-tests` (test classes in changed `tests/integration/{seam,contract,tenant,Shared}` / `tests/unit/domain` files), `verdict-script-tests` (Pester must-fire controls for `master-ci-verdict.ps1`), `trivy-fs` (per-change repo scan, SARIF to the Security tab; reports only, alerts only if the scan errors).
+- **Triggers**: `pull_request` (docs-only paths ignored), `push` on master, `workflow_dispatch`. NOT a required check; no job uses `continue-on-error`.
+- **Common failures**: a new HIGH CVE outside the accepted-risk list (`dependency-audit`), compile error under Release (`release-build`), TypeScript error in a shared library (`client-typecheck`). On master each failing job raises a `ci-standalone/<job>` quality alert and clears it on the next green run.
+- **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
+
+### master-ci-alert.yml
+
+- **Purpose**: When the `CI` workflow (Router) completes on a master push, raises or clears the `router-master` alert (Router or a Tier 1 job red/cancelled) and the `tier2-master/full-unit-tests` alert (a Tier 2 shard did not pass), each judged from its most recent execution in the newest 100 master runs (a job the open alert lists as failing that is absent from the window stays failing, not recovered; a newer queued/running master run holds `ok` back); raises `master-ci-alert/evaluation` if the evaluation itself fails. Logic: `scripts/ci/master-ci-verdict.ps1`.
+- **Triggers**: `workflow_run` on `CI` (master); `workflow_dispatch` (dry-run unless on the default branch).
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### workflows-validate.yml
 
-- **Purpose**: `actionlint` validation on every PR that touches `.github/workflows/**`. Catches duplicate YAML keys, undefined vars, invalid runner labels, malformed expressions — the P1-class bugs that broke `sdap-ci.yml` before PR #314. shellcheck integration is disabled (`-shellcheck=`) by design (per D-01 / FR-07 — pre-existing SC2086/SC2129 nits exceed NFR-02 50% repair threshold).
+- **Purpose**: `actionlint` validation on every PR that touches `.github/workflows/**`. Catches duplicate YAML keys, undefined vars, invalid runner labels, malformed expressions — the P1-class bugs that broke the (now retired) `sdap-ci.yml` before PR #314. shellcheck integration is disabled (`-shellcheck=`) by design (per D-01 / FR-07 — pre-existing SC2086/SC2129 nits exceed NFR-02 50% repair threshold).
 - **Triggers**: `pull_request` scoped to `.github/workflows/**`.
 - **Common failures**: real actionlint violations (working-as-intended), `download-actionlint.bash` upstream availability (very rare).
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
@@ -157,7 +170,7 @@ Per D-05 (see [`projects/github-actions-rationalization-r1/design.md`](../projec
 
 1. Trigger a workflow failure (or wait for one to occur):
    ```bash
-   gh workflow run sdap-ci.yml --ref work/github-actions-rationalization-r1
+   gh workflow run ci-standalone-checks.yml --ref work/github-actions-rationalization-r1
    ```
 2. Within 5 minutes, confirm `dev@spaarke.com` receives the GitHub Actions notification.
 3. If the notification doesn't arrive:

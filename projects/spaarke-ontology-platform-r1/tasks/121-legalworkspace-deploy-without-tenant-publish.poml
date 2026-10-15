@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-81: ship and verify task 106's LegalWorkspace date-filter fixes on dev with no tenant-wide publish; settle the LegalWorkspace deploy path and a scoped solution-import procedure</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable (fact-finding); any import needs owner approval</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment to a shared environment plus a deploy-script change; the premise of the original hand-off is unverified.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only fact-finding plus a scripted, scoped deploy with explicit trip-wires.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>May deploy to spaarkedev1; never concurrent with another deploy (111, 114, 120, 122, 129).</parallel-reason>
+    <deps>none</deps>
+    <tags>deploy,dataverse,frontend,separate-pr</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Get task 106's three LegalWorkspace date-filter changes (quickSummaryConfig.ts, useActivityFeedFilters.ts, services/queryHelpers.ts under src/solutions/LegalWorkspace/src) proven live on spaarkedev1, without ever publishing all customizations. First establish which live surface actually serves that code; deploy only if a surface is stale; then fix the LegalWorkspace deploy script so it can never run a tenant-wide publish again.</prompt>
+  <role>SPAARKE platform engineer. Establish facts before acting; a deploy that publishes everything is a failure even if the page works.</role>
+  <goal>(1) A recorded answer to "which live surfaces render src/solutions/LegalWorkspace/src, and do they carry 73d3b970e's changes"; (2) the 106 LegalWorkspace date filters verified live; (3) scripts/Deploy-LegalWorkspaceCustomPage.ps1 contains no --publish-changes and no publish-all (retired or converted per the owner); (4) a scoped import-then-PublishXml procedure that task 114 and task 129 reuse.</goal>
+
+  <context>
+    <background>D-81 (owner, 2026-10-08): the LegalWorkspace deploy is this project's task and must not publish tenant-wide. deploy-log.md (D-75 section) says LegalWorkspace was not deployed because Deploy-LegalWorkspaceCustomPage.ps1 imports a solution with --publish-changes and then runs `pac solution publish-all`.
+Facts found while creating this task (2026-10-08, origin/master 6cd5d9a47) — VERIFY each, do not trust them:
+(a) The standalone web resource sprk_corporateworkspace was RETIRED 2026-05-26 (OC-R4-05; docs/architecture/LEGALWORKSPACE-RETIREMENT.md; scripts/Deploy-CorporateWorkspace.ps1 exits early).
+(b) LegalWorkspace source is compiled INTO the Console bundle: src/solutions/SpaarkeAi/vite.config.ts includes ../LegalWorkspace/src and the @spaarke/legal-workspace barrel (embedded LegalWorkspaceApp). D-75 deployed sprk_spaarkeai from 73d3b970e (which contains the 106 LegalWorkspace changes) at 2026-10-08 17:19Z, byte-verified. So the fixes are probably ALREADY live in the Console.
+(c) Deploy-LegalWorkspaceCustomPage.ps1 imports solution SpaarkeLegalWorkspace built from src/client/pcf/LegalWorkspace, but that PCF source was removed from master in commit 5557abaa80. The script is likely dead; whether the Custom Page sprk_LegalOperationsWorkspace still exists in spaarkedev1 is unknown.
+(d) No generic scoped-publish helper exists: scripts have per-script inline Publish* functions (e.g. Add-RegardingFilingPickerToForms.ps1 Publish-Table) and Deploy-SpaarkeAi.ps1 publishes one web resource via PublishXml. The pcf-deploy / dataverse-deploy skills prescribe --publish-changes (project CLAUDE.md section 6 gotcha 2026-10-08).</background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-LegalWorkspaceCustomPage.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-CorporateWorkspace.ps1 (retirement guard pattern)</file>
+      <file role="canonical-reference">scripts/Deploy-SpaarkeAi.ps1 (PublishXml for exactly one component, ~line 105)</file>
+      <file role="read">docs/architecture/LEGALWORKSPACE-RETIREMENT.md, docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file role="read">git show 73d3b970e -- src/solutions/LegalWorkspace (the three changed files)</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-81 / project CLAUDE.md section 5: NO tenant-wide publish in any form: no PublishAllXml, no `pac solution import --publish-changes`, no `pac solution publish-all`, in any command this task runs or any script it leaves behind. If a component can only be published by a publish-all, STOP and escalate.</constraint>
+    <constraint source="owner">Owner approval required before ANY solution import or web-resource write in spaarkedev1. D-81 assumed a custom-page solution deploy; facts (a)-(c) may make it unnecessary. Present the step 1-2 findings and the exact command(s) and wait.</constraint>
+    <constraint source="owner">Owner decision required for the script: retire Deploy-LegalWorkspaceCustomPage.ps1 with an early-exit guard copied from Deploy-CorporateWorkspace.ps1 (if its PCF source is gone and nothing live uses the Custom Page), OR convert it to the scoped path. Recommend one with evidence.</constraint>
+    <constraint source="project">Scoped path (the procedure this task records for 114 and 129): `pac solution import --path ZIP --force-overwrite` WITHOUT --publish-changes; then query that solution's components (solutioncomponents filtered by the solution id) and call PublishXml with a ParameterXml naming exactly those components (webresources, entities, optionsets, sitemaps, appmodules as present); read each back. Record whether an imported PCF custom control serves its new version without any publish (check customcontrol version after import), because that decides whether PCF imports need PublishXml at all.</constraint>
+    <constraint source="project">Section 11 justification is required before adding any new script (e.g. a generic Import-SolutionScoped.ps1): existing = the inline Publish* functions and Deploy-SpaarkeAi.ps1's PublishXml; extend one if possible. Script changes go in a NEW worktree off origin/master (git worktree add C:\wts-121 -b fix/legalworkspace-deploy-121 origin/master), own PR, do not merge. Never use --no-verify or bare git stash; never commit secrets. You cannot write .claude/: report the exact amendment text for .claude/skills/pcf-deploy and dataverse-deploy (replace --publish-changes with the scoped path) and the main session applies it.</constraint>
+    <constraint source="project">Test rows are prefixed zz-121-, created only with owner approval for the live check, deleted afterwards and confirmed gone by query. No other environment.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the files in relevant-files.</step>
+    <step order="1">Read-only, repo: confirm (b) by the import graph from src/solutions/SpaarkeAi to the three 106 files, and confirm one distinctive string literal or expression from each changed file appears in a SpaarkeAi build of 73d3b970e (vite build in a clean worktree at 73d3b970e).</step>
+    <step order="2">Read-only, spaarkedev1: download the live sprk_spaarkeai content and search it for the step-1 markers; query canvasapps for sprk_LegalOperationsWorkspace, solutions for SpaarkeLegalWorkspace, webresourceset for sprk_corporateworkspace (and its modifiedon), and any appmodule/sitemap that references them. Record every result in deploy-log.md.</step>
+    <step order="3">Report findings and a recommendation to the main session (STOP): no deploy needed / which surface is stale and the exact scoped commands; and the script decision (retire vs convert).</step>
+    <step order="4">Only after owner approval: run the approved scoped deploy (if any), read back each component, and record the commands and results.</step>
+    <step order="5">Implement the owner's script decision in the worktree; PR with CI green; do not merge.</step>
+    <step order="6">Live check (a human in the browser; if the session has no browser tool, write the checklist into deploy-log.md and ask the owner): in the Console's embedded workspace with zz-121- To Dos created with owner approval: due today is not overdue after 20:00 local; due yesterday is overdue; the Quick Summary overdue count and the Activity Feed Overdue filter agree with that. Delete the rows.</step>
+    <step order="7">Record the scoped-import procedure (commands, PublishXml ParameterXml shape, PCF finding) in projects/spaarke-ontology-platform-r1/notes/scoped-solution-import.md for tasks 114 and 129.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="LegalWorkspace To Do date filters in the Console">
+      <steps>
+        <step>Open the Console workspace tab that embeds LegalWorkspace, after 20:00 local, with zz-121- To Dos due today and due yesterday</step>
+      </steps>
+      <expected>Due today is not overdue; due yesterday is overdue; Quick Summary overdue count and the Activity Feed Overdue filter agree.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat in dark mode</step>
+      </steps>
+      <expected>Badges and filters are themed; no hard-coded colours.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">deploy-log.md records, with query evidence: whether the live sprk_spaarkeai carries the three 106 LegalWorkspace changes; whether sprk_LegalOperationsWorkspace, SpaarkeLegalWorkspace and sprk_corporateworkspace exist in spaarkedev1 and whether anything links to them.</criterion>
+    <criterion testable="true">The 106 LegalWorkspace date filters are verified live (step 6) by a human, or the checklist is handed to the owner with the task left in-progress; zz-121- rows: 0 remain.</criterion>
+    <criterion testable="true">Deploy-LegalWorkspaceCustomPage.ps1 on the PR branch contains no `--publish-changes`, no `publish-all` and no PublishAllXml (git grep in the PR body), and implements the owner's retire-or-convert decision.</criterion>
+    <criterion testable="true">notes/scoped-solution-import.md exists with the import command, the component query, the PublishXml ParameterXml shape and the PCF-without-publish finding; the .claude skill amendment text is in the task report.</criterion>
+    <criterion testable="true">Negative: no import or web-resource write happened without a recorded owner approval; no tenant-wide publish was run; no environment other than spaarkedev1 was touched; no secret was committed.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any step would need a publish-all (a component type PublishXml cannot publish), STOP and escalate; never fall back to PublishAllXml.</trigger>
+    <trigger>If the live Console does NOT carry the 106 LegalWorkspace changes although D-75 deployed 73d3b970e, STOP and report: that means the Console build excludes code believed to be embedded.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81). Task 114 depends on this task for the deploy path; task 129 reuses the scoped-import procedure for the VisualHost PCF.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

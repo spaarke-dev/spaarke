@@ -21,9 +21,9 @@
  * - On Hold: Put selected events on hold
  * - Archive: Archive selected events
  *
- * Event Status Values (sprk_eventstatus):
- * - 0: Draft, 1: Open, 2: Completed, 3: Closed, 4: On Hold
- * - 5: Cancelled, 6: Reassigned, 7: Archived
+ * Event Status Values (sprk_event.statuscode - D-28, task 066; the second status column is deprecated):
+ * - 1: Draft, 659490001: Open, 659490002: Completed, 659490003: Closed, 659490006: On Hold
+ * - 659490004: Cancelled, 659490007: Reassigned, 2: No Further Action (Archive), 659490005: Transferred
  *
  * Event History is stored as a JSON array in sprk_eventhistory field (Multiline Text).
  *
@@ -78,18 +78,20 @@ Spaarke.Event._parseDateOnly = function(value) {
 };
 
 /**
- * Event Status values (sprk_eventstatus custom field)
- * Replaces OOB statecode/statuscode for better control
+ * Event Status values = sprk_event.statuscode (the LIVE option set; D-28, task 066: the second status column,
+ * is deprecated and is no longer read or written). Pinned by the BFF test
+ * EventStatusDeprecationTests against Spaarke.Dataverse.EventStatusCode and the live-verified data model.
  */
 Spaarke.Event.EventStatus = {
-    DRAFT: 0,
-    OPEN: 1,
-    COMPLETED: 2,
-    CLOSED: 3,
-    ON_HOLD: 4,
-    CANCELLED: 5,
-    REASSIGNED: 6,
-    ARCHIVED: 7
+    DRAFT: 1,
+    OPEN: 659490001,
+    COMPLETED: 659490002,
+    CLOSED: 659490003,
+    ON_HOLD: 659490006,
+    REASSIGNED: 659490007,
+    ARCHIVED: 2, // "No Further Action" - the status the Archive commands set
+    CANCELLED: 659490004,
+    TRANSFERRED: 659490005
 };
 
 /**
@@ -98,6 +100,48 @@ Spaarke.Event.EventStatus = {
 Spaarke.Event.StateCode = {
     ACTIVE: 0,
     INACTIVE: 1
+};
+
+/**
+ * The statecode each statuscode belongs to. Dataverse rejects a status change that leaves the pair inconsistent;
+ * Completed and Closed are ACTIVE, Cancelled / Transferred / No Further Action are INACTIVE.
+ */
+Spaarke.Event.StateOfStatus = {};
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.DRAFT] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.OPEN] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.COMPLETED] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.CLOSED] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.ON_HOLD] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.REASSIGNED] = Spaarke.Event.StateCode.ACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.ARCHIVED] = Spaarke.Event.StateCode.INACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.CANCELLED] = Spaarke.Event.StateCode.INACTIVE;
+Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.TRANSFERRED] = Spaarke.Event.StateCode.INACTIVE;
+
+/**
+ * The PATCH body that sets an event's status: statuscode plus the statecode it belongs to.
+ * @param {number} status - A Spaarke.Event.EventStatus value
+ * @returns {Object}
+ */
+Spaarke.Event._statusPayload = function(status) {
+    return { statuscode: status, statecode: Spaarke.Event.StateOfStatus[status] };
+};
+
+/**
+ * Save the form (dates, owner, history), then set the event's status with a statuscode + statecode PATCH, then
+ * refresh the form. statuscode is not an attribute of the main form (only the statecode header is), so the status is
+ * written through the Web API rather than formContext.getAttribute(...).setValue(...).
+ * @param {Object} formContext - The form context
+ * @param {number} status - A Spaarke.Event.EventStatus value
+ * @returns {Promise}
+ * @private
+ */
+Spaarke.Event._saveThenSetStatus = function(formContext, status) {
+    var eventId = formContext.data.entity.getId().replace(/[{}]/g, '');
+    return formContext.data.save().then(function() {
+        return Xrm.WebApi.updateRecord("sprk_event", eventId, Spaarke.Event._statusPayload(status));
+    }).then(function() {
+        return formContext.data.refresh(false);
+    });
 };
 
 /**
@@ -178,7 +222,7 @@ Spaarke.Event._appendHistoryEntry = function(formContext, action, details) {
 
 /**
  * Check if the current event is in an active state (can be completed/cancelled)
- * Active states: Draft, Open, On Hold
+ * Active states: Draft, Open, On Hold, Reassigned
  * @param {Object} formContext - The form context (PrimaryControl)
  * @returns {boolean} True if event is active and can be modified
  */
@@ -187,19 +231,20 @@ Spaarke.Event.IsEventActive = function(formContext) {
         return false;
     }
 
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (!eventStatusAttr) {
-        // Fallback: check statecode if sprk_eventstatus not on form
+    var statusAttr = formContext.getAttribute("statuscode");
+    if (!statusAttr) {
+        // statuscode is not on the form: fall back to the header statecode
         var stateCode = formContext.getAttribute("statecode");
         return stateCode && stateCode.getValue() === Spaarke.Event.StateCode.ACTIVE;
     }
 
-    var currentStatus = eventStatusAttr.getValue();
-    // Active states that allow completion/cancellation
+    var currentStatus = statusAttr.getValue();
+    // Open work (the BFF's EventStatusCode.IsOpenWork): Draft, Open, On Hold, Reassigned
     var activeStatuses = [
         Spaarke.Event.EventStatus.DRAFT,
         Spaarke.Event.EventStatus.OPEN,
-        Spaarke.Event.EventStatus.ON_HOLD
+        Spaarke.Event.EventStatus.ON_HOLD,
+        Spaarke.Event.EventStatus.REASSIGNED
     ];
     return activeStatuses.indexOf(currentStatus) !== -1;
 };
@@ -277,12 +322,6 @@ Spaarke.Event._executeComplete = function(formContext, completedDateStr, notes) 
     // of UTC). setValue on a Date Only attribute stores the Date's local calendar day.
     var completedDate = Spaarke.Event._parseDateOnly(completedDateStr) || Spaarke.Event._parseDateOnly(Spaarke.Event._toDateOnly(new Date()));
 
-    // Update Event Status (custom field)
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.COMPLETED);
-    }
-
     // Set completed date
     var completedDateAttr = formContext.getAttribute("sprk_completeddate");
     if (completedDateAttr) {
@@ -298,7 +337,7 @@ Spaarke.Event._executeComplete = function(formContext, completedDateStr, notes) 
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.COMPLETED).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2, // Success
             level: 1,
@@ -341,12 +380,6 @@ Spaarke.Event.CancelEvent = function(formContext) {
  * @private
  */
 Spaarke.Event._executeCancel = function(formContext, reason) {
-    // Update Event Status (custom field)
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.CANCELLED);
-    }
-
     // Add history entry
     Spaarke.Event._appendHistoryEntry(
         formContext,
@@ -355,7 +388,7 @@ Spaarke.Event._executeCancel = function(formContext, reason) {
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.CANCELLED).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
@@ -478,12 +511,6 @@ Spaarke.Event._executeReassign = function(formContext, newOwner) {
         details = "Reassigned from " + currentOwner[0].name + " to " + newOwner.name;
     }
 
-    // Update Event Status to Reassigned
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.REASSIGNED);
-    }
-
     // Update owner
     if (ownerAttr) {
         ownerAttr.setValue([{
@@ -501,7 +528,7 @@ Spaarke.Event._executeReassign = function(formContext, newOwner) {
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.REASSIGNED).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
@@ -587,12 +614,6 @@ Spaarke.Event.CloseEvent = function(formContext) {
  * @private
  */
 Spaarke.Event._executeClose = function(formContext) {
-    // Update Event Status
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.CLOSED);
-    }
-
     // Add history entry
     Spaarke.Event._appendHistoryEntry(
         formContext,
@@ -601,7 +622,7 @@ Spaarke.Event._executeClose = function(formContext) {
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.CLOSED).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
@@ -640,18 +661,10 @@ Spaarke.Event.ArchiveEvent = function(formContext) {
 
 /**
  * Internal: Execute the archive action
- * Sets both sprk_eventstatus to Archived AND statecode to Inactive
+ * Sets statuscode to No Further Action AND statecode to Inactive
  * @private
  */
 Spaarke.Event._executeArchive = function(formContext) {
-    var eventId = formContext.data.entity.getId().replace(/[{}]/g, '');
-
-    // Update Event Status
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.ARCHIVED);
-    }
-
     // Add history entry before deactivating
     Spaarke.Event._appendHistoryEntry(
         formContext,
@@ -659,22 +672,14 @@ Spaarke.Event._executeArchive = function(formContext) {
         "Archived"
     );
 
-    // Save first, then deactivate (SetState)
-    formContext.data.save().then(function() {
-        // Use SetState request to deactivate the record
-        return Xrm.WebApi.updateRecord("sprk_event", eventId, {
-            statecode: Spaarke.Event.StateCode.INACTIVE,
-            statuscode: 2 // Inactive status code (may need adjustment based on entity config)
-        });
-    }).then(function() {
+    // Save (history), then set statuscode = No Further Action with statecode = Inactive in ONE update
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.ARCHIVED).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
             message: "Event archived",
             showCloseButton: true
         });
-        // Refresh form to show inactive state
-        formContext.data.refresh(false);
     }).catch(function(error) {
         console.error("[Event Commands] Archive failed:", error);
         Xrm.Navigation.openAlertDialog({
@@ -710,12 +715,6 @@ Spaarke.Event.PutOnHold = function(formContext) {
  * @private
  */
 Spaarke.Event._executePutOnHold = function(formContext) {
-    // Update Event Status
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.ON_HOLD);
-    }
-
     // Add history entry
     Spaarke.Event._appendHistoryEntry(
         formContext,
@@ -724,7 +723,7 @@ Spaarke.Event._executePutOnHold = function(formContext) {
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.ON_HOLD).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
@@ -746,12 +745,6 @@ Spaarke.Event._executePutOnHold = function(formContext) {
  * @param {Object} formContext - The form context (PrimaryControl)
  */
 Spaarke.Event.ResumeEvent = function(formContext) {
-    // Update Event Status
-    var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
-    if (eventStatusAttr) {
-        eventStatusAttr.setValue(Spaarke.Event.EventStatus.OPEN);
-    }
-
     // Add history entry
     Spaarke.Event._appendHistoryEntry(
         formContext,
@@ -760,7 +753,7 @@ Spaarke.Event.ResumeEvent = function(formContext) {
     );
 
     // Save the form
-    formContext.data.save().then(function() {
+    Spaarke.Event._saveThenSetStatus(formContext, Spaarke.Event.EventStatus.OPEN).then(function() {
         Xrm.App.addGlobalNotification({
             type: 2,
             level: 1,
@@ -820,7 +813,8 @@ Spaarke.Event._executeBulkComplete = function(eventIds, gridControl) {
     var now = Spaarke.Event._toDateOnly(new Date());
     var promises = eventIds.map(function(eventId) {
         return Xrm.WebApi.updateRecord("sprk_event", eventId, {
-            sprk_eventstatus: Spaarke.Event.EventStatus.COMPLETED,
+            statuscode: Spaarke.Event.EventStatus.COMPLETED,
+            statecode: Spaarke.Event.StateOfStatus[Spaarke.Event.EventStatus.COMPLETED],
             sprk_completeddate: now
             // Note: Cannot append to sprk_eventhistory JSON via WebApi without read-modify-write
             // For bulk history entries, consider a Power Automate flow triggered on status change
@@ -978,7 +972,7 @@ Spaarke.Event.Homepage.OnHoldSelected = function(selectedIds, entityName) {
 
 /**
  * Archive selected events from HomepageGrid
- * Sets both sprk_eventstatus=Archived AND statecode=Inactive
+ * Sets statuscode=No Further Action AND statecode=Inactive
  * @param {string[]} selectedIds - Array of selected event GUIDs
  * @param {string} entityName - Entity type name
  */
@@ -1006,15 +1000,13 @@ Spaarke.Event.Homepage.ArchiveSelected = function(selectedIds, entityName) {
 /**
  * Internal: Execute bulk status update for HomepageGrid
  * @param {string[]} eventIds - Array of event GUIDs
- * @param {number} newStatus - New sprk_eventstatus value
+ * @param {number} newStatus - New statuscode value (a Spaarke.Event.EventStatus)
  * @param {string} statusLabel - Status label for notification message
  * @param {Object} additionalFields - Optional additional fields to update
  * @private
  */
 Spaarke.Event.Homepage._executeBulkStatusUpdate = function(eventIds, newStatus, statusLabel, additionalFields) {
-    var updateData = {
-        sprk_eventstatus: newStatus
-    };
+    var updateData = Spaarke.Event._statusPayload(newStatus);
 
     // Merge additional fields if provided
     if (additionalFields) {
@@ -1058,7 +1050,7 @@ Spaarke.Event.Homepage._executeBulkStatusUpdate = function(eventIds, newStatus, 
 
 /**
  * Internal: Execute bulk archive for HomepageGrid
- * Sets both sprk_eventstatus=Archived AND statecode=Inactive
+ * Sets statuscode=No Further Action AND statecode=Inactive
  * @param {string[]} eventIds - Array of event GUIDs
  * @private
  */
@@ -1068,22 +1060,9 @@ Spaarke.Event.Homepage._executeBulkArchive = function(eventIds) {
         return id.replace(/[{}]/g, '');
     });
 
-    // For archive, we need to:
-    // 1. Set sprk_eventstatus to Archived
-    // 2. Set statecode to Inactive (deactivate)
-    // This requires two operations: update then SetState (or use updateRecord with statecode)
-
+    // Archive = ONE update: statuscode No Further Action + its paired statecode Inactive.
     var promises = cleanIds.map(function(eventId) {
-        // First update the custom status, then deactivate
-        return Xrm.WebApi.updateRecord("sprk_event", eventId, {
-            sprk_eventstatus: Spaarke.Event.EventStatus.ARCHIVED
-        }).then(function() {
-            // Deactivate the record
-            return Xrm.WebApi.updateRecord("sprk_event", eventId, {
-                statecode: Spaarke.Event.StateCode.INACTIVE,
-                statuscode: 2 // Inactive status code
-            });
-        });
+        return Xrm.WebApi.updateRecord("sprk_event", eventId, Spaarke.Event._statusPayload(Spaarke.Event.EventStatus.ARCHIVED));
     });
 
     Promise.all(promises)

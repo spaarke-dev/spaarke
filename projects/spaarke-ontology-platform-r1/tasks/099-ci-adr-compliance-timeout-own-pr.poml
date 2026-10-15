@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>CI: Tier 2 ADR Compliance (NetArchTest) timeout 3 to 5 minutes, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One-line workflow change on a shared CI file (ci-workflows hot path).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single value change with a proof run.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and PR off master; no overlap with the ontology branch.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd,separate-pr</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>In its own worktree and PR off master, raise the Tier 2 advisory "ADR Compliance (NetArchTest)" job's timeout-minutes from 3 to 5, and prove it completes.</prompt>
+  <role>SPAARKE engineer.</role>
+  <goal>The adr-compliance job in .github/workflows/ci-tier2-advisory.yml has timeout-minutes 5 and a PR run shows it completing rather than being cancelled.</goal>
+
+  <context>
+    <background>D-29 (spec section 9): Tier 2 ADR Compliance timeout to 5 min, its own small PR. The arch suite grew to ~806 tests with #1312 and runs 2m52s-3m24s, so the 3-minute limit intermittently cancels it (master d254d7166 cancelled, dc469d4a2 passed; current-task.md). The job is at .github/workflows/ci-tier2-advisory.yml (adr-compliance, timeout-minutes: 3, ~:521-526). A timeout-minutes kill reports CANCELLED, not failure (the file's own comment ~:218).</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/ci-tier2-advisory.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-29): change only the adr-compliance job's timeout-minutes from 3 to 5. No other job, step or workflow changes.</constraint>
+    <constraint source="project">Scope: own worktree and PR off master (like tasks 084-098), not the ontology branch. This touches the ci-workflows hot path, which this project's hot-path declaration lists as N: say so in the PR and run /conflict-check against the CI owner's open PRs first.</constraint>
+    <constraint source="project">Scope: never --no-verify, never bare git stash.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI workflows</topic>
+    <files>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Create a worktree off origin/master; edit the one value.</step>
+    <step order="2">Open the PR; confirm the adr-compliance job completes (success or failure, not cancelled) on the PR run.</step>
+    <step order="3">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/ci-tier2-advisory.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the PR diff, when read, then exactly one line changes: the adr-compliance job's timeout-minutes from 3 to 5.</criterion>
+    <criterion testable="true">Given the PR's CI run, when the Tier 2 adr-compliance job finishes, then its conclusion is not cancelled.</criterion>
+    <criterion testable="true">The PR notes the ci-workflows hot-path touch and the conflict-check result.</criterion>
+  </acceptance-criteria>
+
+  <notes>D-29. Not an ontology FR; scheduled here because the owner decided it in the same round.</notes>
+  <completion>COMPLETED 2026-10-07 (recorded by main session). PR #1346 merged as dbc58d139 (owner-approved): ci-tier2-advisory.yml ADR Compliance (NetArchTest) timeout-minutes 3 to 5 with a dated rationale comment; the job then passed in 2m58s. No other job changed.</completion>
+
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

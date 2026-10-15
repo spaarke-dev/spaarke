@@ -43,6 +43,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 - Stamps are keyless (D13). Stamp Redis is Azure Managed Redis, Microsoft Entra only (D12). See `provisioning.md` "Stamp resources are keyless" and "Stamp Redis".
 - SPE: one container type per model and one root container per customer. Never propose a container type per customer (D28). SPE Admin on a stamp reaches only that stamp's containers (D29). Container-type creation is delegated-only, an operator one-time step (topology doc §R5).
 - Model 1 users are B2B guests in the environment security group `sprk-{customerId}-users`. Spaarke pays pay-as-you-go on the customer's stamp subscription; guest access must be on (D2, owner 2026-10-07; `provisioning.md` "Model 1 users").
+- ADR-028 A9 (owner 2026-10-13): Model 1 LICENSED users are B2B guests (H11 invites them). Workforce contacts sign in at their home directory through the shared multitenant workforce SPA client and are never invited. Partners use CIAM (T240d, option 2). "Spaarke tenant" means Spaarke's directory and "customer's home directory" means the customer's own; never write a bare "tenant" for the latter. Provisioning work: `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`; publisher verification ISS-026.
 - The customer's subscription and Dataverse environment are operator prerequisites; H5 adopts, never creates (D4, T228). Cost: one envelope per dedicated stamp (T229).
 
 **Credentials and Key Vault**
@@ -86,7 +87,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 **How to work**
 - Build the process, not the environment (2026-08-23). Never `pac admin copy` from another environment as a shortcut; every gap found is fixed here.
 - End state: provisioning runs E2E with no human interaction (2026-09-01). L2 has no web UI in r1.
-- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30). Its purpose: build a brand-new environment to execute, test and confirm the end-to-end process (owner 2026-10-08).
+- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30). Its purpose: build a brand-new environment to execute, test and confirm the end-to-end process (owner 2026-10-08). The run must leave a fully documented, repeatable process: record every step, special instruction and surprise in `notes/t186-acme-run-log.md` as it happens, and carry each lesson into the operator documents before T186 closes (owner 2026-10-14). Customer: `acme`, "ACME Corporation" (D35).
 - T218 defines the complete solution package and is a hard blocker for T186 (2026-09-28). All solutions ship to every customer (2026-09-01).
 - Every environment, Spaarke's own included, imports only the canonical SpaarkeMaster built by CI from git — never solutions the dev team creates or manages by hand (owner 2026-10-08, #1401 → T218f).
 - Every defect found is fixed in scope, or filed and reported. Review limits cap ceremony, never fixing (2026-10-06; task-execute Step 9.5).
@@ -167,6 +168,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - `az ad app permission admin-consent` fails ("Consent validation failed"). Consent Graph app roles with `POST /servicePrincipals/{graph}/appRoleAssignedTo` (2026-10-02).
 - Granting an MI on an SPE container-type registration: Graph v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}` via `Connect-MgGraph -Scopes FileStorageContainerTypeReg.Manage.All`. `Set-SPOApplicationPermission` fails for an MI (2026-10-06).
 - `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt. Run it in-process with `-Confirm:$false`; `-SkipBuild` reuses a build (2026-10-04).
+- From Git Bash, `pwsh` resolves `pac` to the bash shim `~/bin/pac`, which PowerShell cannot run. `Export-SpaarkeMasterSource.ps1` then fails with "Failed (exit )". Prepend `/c/Users/RalphSchroeder/AppData/Local/Microsoft/PowerAppsCLI` to `PATH` first (2026-10-13).
 
 - The Dataverse MCP `read_query` returns at most 20 rows unless you pass `top`. Two wrong conclusions on 2026-10-07 ("the Console is in no Spaarke solution", "no Spaarke Basic User role") came from capped results. Pass `top`, or use the solution-authoring scripts (2026-10-07).
 - The session's primary working directory can switch to the main repo (`C:\code_files\spaarke`) mid-session. Use absolute worktree paths in every command (2026-10-07).

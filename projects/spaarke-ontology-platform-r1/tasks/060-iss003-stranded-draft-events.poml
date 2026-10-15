@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-003: resolve the sprk_event rows stranded in Draft</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Data correctness in another domain that this project depends on; the Do lane under-reports without it.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Diagnosis is already recorded; the fix is scoped.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,dataverse,bug</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve the 48 sprk_event rows stranded in Draft, so the Do lane does not silently under-report.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>No task created by the platform is invisible to the surface that exists to surface it.</goal>
+
+  <context>
+    <background>TaskActionCore did not set statuscode Open, so every task the platform created was invisible to the briefing. 48 rows remain stranded in Draft (re-measured live 2026-10-02; was 49). The code fix landed in PR #1032; the DATA remains stranded. A due-date rule is only as good as the task data under it.</background>
+    <relevant-files>
+      <file role="modify">Dataverse: sprk_event rows (spaarkedev1)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-74 (2026-10-08, SUPERSEDES D-57): the Daily Briefing task channels stay OPEN ONLY (statuscode Open), as on master; PR #1384 (IsOpenWork) is closed unmerged. This task returns to its original data remediation: classify each Draft sprk_event row, move the ones that are really live work to Open in spaarkedev1 (approved dev data change), leave the legitimately Draft ones, and record every id and reason. Draft keeps meaning "not ready".</constraint>
+    <constraint source="project">Scope: this is a DATA remediation, not a code change. The code fix (TaskActionCore setting statuscode Open) already landed in PR #1032 and is in master.</constraint>
+    <constraint source="project">Scope: a domain owner must review the PR #1032 semantics, in particular TaskActionCore now setting statuscode Open for EVERY consumer. Do not widen that behaviour here.</constraint>
+    <constraint source="project">Scope: re-count before and after. The number was 49 then 48; quoting a stale count is the same error class as quoting a stale publish-size baseline.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Data remediation</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Re-count the stranded rows and record the current number.</step>
+    <step order="2">Determine which of them SHOULD be Open versus legitimately Draft; do not blanket-update.</step>
+    <step order="3">Update the ones that should be Open, recording the ids.</step>
+    <step order="4">Re-count and confirm the remainder is explained.</step>
+    <step order="5">Close GitHub issue 1050 with the before and after counts.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If some stranded rows cannot be classified as either legitimately Draft or wrongly Draft, STOP and escalate to the communication-intelligence domain owner rather than blanket-updating. A blanket update would make 48 tasks suddenly appear in users briefings.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: corrected sprk_event rows</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the stranded rows, when re-counted after the fix, then the remaining count is zero or every remainder is explained in writing.</criterion>
+    <criterion testable="true">Given the corrected rows, when the briefing collector runs, then they are visible to it.</criterion>
+    <criterion testable="true">Negative: no row was updated that was legitimately Draft.</criterion>
+    <criterion testable="true">GitHub issue 1050 is closed with before and after counts.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md section 8.1 step 4 dependency. ISS-003. This BLOCKS the Do lane: shipping the lane first makes it under-report silently.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <status>completed</status>
+    <date>2026-10-08</date>
+    <d74-final>2026-10-08 FINAL (D-74, owner decision on the 4 escalated rows): set ONLY 8a6b371f-8a96-f111-b8db-0022482fb5a7 to Open (statecode 0, statuscode Draft 1 -> Open 659490001; read back). Left Draft: cbaa61fa-6f96-f111-b8dc-7ced8ddc4a05, 9c9de352-3b7a-f111-ab0e-70a8a590c51c, 007b8ac2-7a80-f111-ab0f-7ced8ddc4a05 and the 45 person-created rows. Draft count 49 -> 48. Opened row passes the collector filter (Task, Open, due 2026-08-21 before today) and shows as Overdue. FINDING: 0 rows were platform-created; the #1032 bug existed but left no stranded data in dev. Issue 1050 closed. sprk_eventstatus vs statuscode mismatch passed to task 066. Details: notes/060-draft-classification.md.</d74-final>
+    <d74-update>2026-10-08 (D-74 pass): live re-count 49 Draft (statuscode 1) in spaarkedev1. Classified all 49 read-only, see notes/060-draft-classification.md. Wrongly-Draft platform rows: 0. All 10 BFF-created (mi-bff-api-dev) sprk_event rows are already Open; all 49 Draft rows were created by a person (Ralph Schroeder), none has source/communication fields set, and TaskActionCore wrote sprk_event only from 2026-08-06. Person-created, leave Draft: 45. Unresolved, ESCALATED per binding rule: 4 (8a6b371f-8a96-f111-b8db-0022482fb5a7, cbaa61fa-6f96-f111-b8dc-7ced8ddc4a05, 9c9de352-3b7a-f111-ab0e-70a8a590c51c, 007b8ac2-7a80-f111-ab0f-7ced8ddc4a05), all Task-typed so they would enter the Briefing. NO Dataverse writes made; counts before = after = 49. Issue 1050 NOT closed. Only 20 of the 49 are Task-typed (the only ones the Briefing's task channels can see). Needs owner/domain-owner decision per U row (open / leave / delete); then apply and re-count, close 1050, set completed + TASK-INDEX marker together.</d74-update>
+    <summary>2026-10-08: owner decision D-74 supersedes D-57 below. PR #1384 closed unmerged; the Briefing stays Open-only; do steps 1-5 (classify and fix the Draft rows). HISTORY (superseded): RE-SCOPED by owner decision D-57 (2026-10-07): NO Dataverse data changes; the data-fix part is closed as not needed. The 49 Draft events (live re-count) are open work under EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned). Replacement deliverable: DailyBriefingCollector's Upcoming/Overdue task channels now filter statuscode by IsOpenWork instead of Open alone (the only briefing reader filtering events on Open; TodoGenerationService already used IsOpenWork). Shipped as its own PR #1384 to master (branch fix/briefing-open-work-060). New test CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses fails on the old filter. Live on spaarkedev1: zz-060- Draft/OnHold/Completed events, old filter returned [], new filter returned draft + onhold, Completed excluded, all test rows deleted. Publish size master 36.22 MB vs branch 36.22 MB (delta 0.00, 192 files each, Compress-Archive); no vulnerable packages. Issue 1050 to be closed on merge with the re-scope note.</summary>
+    <needs>none</needs>
+  </completion>
+</task>

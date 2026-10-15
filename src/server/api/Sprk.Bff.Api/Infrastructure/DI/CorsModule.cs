@@ -124,6 +124,10 @@ public static class CorsModule
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
+                          // Task 185: the external SPA carries the invite code to the CIAM plane's E11 bind
+                          // (CiamContactPrincipalStrategy.InviteCodeHeader). The SPA is cross-origin, so the
+                          // preflight would refuse the header without this entry.
+                          "X-Spaarke-Invite-Code",
                           // KEEP. Task 059 stopped the BFF from READING this header, but the browser
                           // SSE path (useSseStream.ts readSseStream) still SENDS it. Dropping it here
                           // would make the CORS preflight reject the request outright — turning an

@@ -36,7 +36,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// token, as the production type is. <see cref="ThrowingRightsToken"/> makes the probe throw, for the
 /// fail-closed-on-error path.</para>
 /// </remarks>
-public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
+public class DelegationRuleTestFixture : WorkspaceTestFixture
 {
     /// <summary>A bearer token that makes the stub probe throw — exercises the error path.</summary>
     public const string ThrowingRightsToken = "rights=THROW";
@@ -96,29 +96,38 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>
-    /// Adds the CIAM + portal keys the invite routes' singletons need at CONSTRUCTION time.
+    /// Task 185 slice F: <c>false</c> builds a host with NO <c>Ciam:*</c> configuration (only the portal URL) — a stamp
+    /// without CIAM (<see cref="NoCiamHostInviteTests"/>).
+    /// </summary>
+    protected virtual bool IncludeCiamConfiguration => true;
+
+    /// <summary>
+    /// Adds the CIAM + portal keys the invite routes need.
     /// </summary>
     /// <remarks>
-    /// Not cosmetic, and worth stating plainly: Minimal API resolves a handler's DI arguments BEFORE
-    /// the endpoint-filter pipeline runs. <c>CiamUserProvisioningService</c>'s constructor throws
-    /// without <c>Ciam:Domain</c>, so <c>/invite</c> and <c>/invite-and-grant</c> answered 500 before
-    /// the delegation filter was ever invoked — which would have made a 403 assertion on those two
-    /// routes untestable, and (worse) a PASSING 403-free assertion look like evidence of anything.
-    /// Values mirror <c>ExternalAccessContractTests</c>, the proven set for this endpoint group.
+    /// Not cosmetic, and worth stating plainly: <c>/invite</c> and <c>/invite-and-grant</c> need CIAM for
+    /// every request. Until task 185 slice F, <c>CiamUserProvisioningService</c>'s constructor threw
+    /// without <c>Ciam:Domain</c> and Minimal API resolves a handler's DI arguments BEFORE the
+    /// endpoint-filter pipeline runs, so both routes answered 500 before the delegation filter was ever
+    /// invoked. Since slice F the handler answers that 500 itself (the configuration is validated at
+    /// first use), after the filters — either way, without these keys a passing authorized request is
+    /// untestable. Values mirror <c>ExternalAccessContractTests</c>, the proven set for this endpoint group.
     /// </remarks>
     protected override Microsoft.Extensions.Hosting.IHost CreateHost(Microsoft.Extensions.Hosting.IHostBuilder builder)
     {
-        builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.spaarke.test" };
+        if (IncludeCiamConfiguration)
         {
-            ["Ciam:Instance"] = "https://spaarketest.ciamlogin.com",
-            ["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1",
-            ["Ciam:ClientId"] = "ciam-api-client-id",
-            ["Ciam:Audience"] = "api://ciam-api-client-id",
-            ["Ciam:Domain"] = "spaarketest.onmicrosoft.com",
-            ["Ciam:GraphProvisioner:ClientId"] = "ciam-graph-provisioner-id",
-            ["Ciam:GraphProvisioner:CertificateName"] = "ciam-graph-cert",
-            ["ExternalAccess:PortalUrl"] = "https://external.spaarke.test"
-        }));
+            settings["Ciam:Instance"] = "https://spaarketest.ciamlogin.com";
+            settings["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1";
+            settings["Ciam:ClientId"] = "ciam-api-client-id";
+            settings["Ciam:Audience"] = "api://ciam-api-client-id";
+            settings["Ciam:Domain"] = "spaarketest.onmicrosoft.com";
+            settings["Ciam:GraphProvisioner:ClientId"] = "ciam-graph-provisioner-id";
+            settings["Ciam:GraphProvisioner:CertificateName"] = "ciam-graph-cert";
+        }
+
+        builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(settings));
 
         return base.CreateHost(builder);
     }

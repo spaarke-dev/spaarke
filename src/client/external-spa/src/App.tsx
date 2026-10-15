@@ -13,6 +13,7 @@ import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/
 import { APP_VERSION } from './config';
 import { isDevMockEnabled } from './dev-mock';
 import { clearStoredRealm } from './auth/realm';
+import { clearInviteCode } from './auth/invite-code';
 import { clearActiveBackend } from './auth/backend-selection';
 import { accountsForActivePlane } from './auth/msal-auth';
 import { AppHeader } from './components/AppHeader';
@@ -236,6 +237,7 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   const handleSignOut = React.useCallback(() => {
     if (isDevMockEnabled()) return;
     clearStoredRealm();
+    clearInviteCode(); // task 185: the invite code is per tab and per sign-in
     // The tab's active customer key goes with the realm, so the next sign-in re-selects the customer (task 041).
     clearActiveBackend();
     void instance.logoutRedirect();

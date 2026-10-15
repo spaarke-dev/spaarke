@@ -37,7 +37,7 @@
     One or more Dataverse environment URLs or environment names from config/environments.json.
     Drives Phases 1/2/3/5 (build, BFF API, solutions, validation). Phase 4 target is
     resolved separately via -CustomerId + registry lookup (Gap 2 / FR-28).
-    Examples: "https://{tenant}.crm.dynamics.com", "dev", "demo"
+    Examples: "https://{tenant}.crm.dynamics.com", "dev"
 
 .PARAMETER CustomerId
     Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$ (T237). MANDATORY.
@@ -77,18 +77,18 @@
     # Resources) targets whatever env the acme customer registry row points at.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, demo -CustomerId acme -Version v2.1.0
-    # Phases 1/2/3/5 loop dev then demo; Phase 4 targets acme's registry-resolved env
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, https://myenv.crm.dynamics.com -CustomerId acme -Version v2.1.0
+    # Phases 1/2/3/5 loop dev then the second environment; Phase 4 targets acme's registry-resolved env
     # (idempotent — same customer env each iteration). Tags as v2.1.0.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme `
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl https://myenv.crm.dynamics.com -CustomerId acme `
         -SkipBuild -SkipPhase BffApi,Solutions,Validation
     # H9 handler invocation pattern: only Phase 4 runs; target env comes from
     # the acme registry lookup; other phases skipped.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme -WhatIf
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl https://myenv.crm.dynamics.com -CustomerId acme -WhatIf
     # Preview the full release pipeline without executing anything.
 
 .NOTES

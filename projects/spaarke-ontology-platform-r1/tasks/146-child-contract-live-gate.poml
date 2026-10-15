@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="146" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract live gate (contract §5, 11 items) on spaarkedev1</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 140-145 done; uac-r2 lineage + census PR deployed; BFF with 141-145 deployed to dev (035 or an approved dev deploy per D-126); Redis key sdap:dv:entitymetadata:sprk_decisionrecord expired or evicted with owner approval</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live security verification of secure-family isolation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted verification against a closed acceptance list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live dev data; runs alone.</parallel-reason>
+    <deps>140,141,142,143,144,145</deps>
+    <tags>integration-test,security,dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove the 11 acceptance items of the child-record contract live on dev with a BU member (U-BU) and a secure-root sharee (U-S), using zz- test rows that are cleaned up.</prompt>
+  <role>SPAARKE engineer running a live security gate.</role>
+  <goal>Each of the 11 items has a recorded pass with evidence (row ids, owner ids, caller results); failures are fixed or filed before 035 completes.</goal>
+
+  <context>
+    <background>Contract §5 (git show origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md). Live seam test conventions: SIGNALS_LIVE_DATAVERSE_URL / SIGNALS_LIVE_CALLER_ID (current-task.md), AzureCliCredential, zz- prefix cleanup.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dev data writes are limited to zz- rows created and deleted by the gate (owner approval for the run is required before starting). No role or schema changes. Record results in notes/146-live-gate.md and hand them to the main session for uac-r2's batch5 live-gates note.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm every gate precondition in metadata; if any is unmet, STOP.</step>
+    <step order="2">Run items 1-11 in order; capture evidence per item.</step>
+    <step order="3">Clean up zz- rows; verify counts are 0.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any item failing on a real leak (a caller reads a row they must not) → STOP, record, escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Items 1-11 of contract §5 each recorded as pass with evidence.</criterion>
+    <criterion testable="true">uac-r2 K-c (#1665): the writer identity's AppendTo on contact lets a DR with sprk_assignedtointernal be written live (evidence: row id + writer identity).</criterion>
+    <criterion testable="true">#1780 K1: notes/146-live-gate.md and deployment guide §10.5 state that the 140 schema (DR sprk_regarding* columns) must reach an environment before any BFF containing UAC 182's DR lineage row; SecureChildShareSynchronizer / SecureChildReconciliationJob select those columns without a probe, so a missing column fails the whole secure-child load.</criterion>
+    <criterion testable="true">All zz- rows removed (query shows 0).</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

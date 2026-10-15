@@ -689,6 +689,104 @@ public class ExternalDataServiceTests
         handler.GetUrls.Should().BeEmpty();
     }
 
+    // =========================================================================
+    // Task 064 (owner check 3, item 1): sprk_documenttype is a CHOICE column. Dataverse sends its NUMBER, so the row
+    // used to be typed string? and ONE typed document failed the whole page ("could not be converted to System.String
+    // ... token type 'Number'"), flagging the list truncated. The wire DTO still carries the LABEL, read from the
+    // OData formatted-value annotation.
+    // =========================================================================
+
+    private const string DocumentTypeAnnotation = "sprk_documenttype@OData.Community.Display.V1.FormattedValue";
+
+    private static readonly Guid DocumentRoot = Guid.Parse("06400000-0000-0000-0000-000000000001");
+
+    private static readonly CallerPrincipal DocumentReader = new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.Parse("06400000-0000-0000-0000-0000000000c0"),
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(DocumentRoot, ExternalAccessLevel.ViewOnly) },
+    };
+
+    private static string DocumentRowJson(string id, string typeJson)
+    {
+        var typeProps = typeJson.Length == 0 ? "" : "," + typeJson;
+        return $"{{\"sprk_documentid\":\"{id}\",\"sprk_documentname\":\"Doc {id}\",\"_sprk_project_value\":\"{DocumentRoot}\"{typeProps}}}";
+    }
+
+    private static HttpResponseMessage DocumentsOnly(string url, string body) =>
+        Decoded(url).Contains("/sprk_documents?") ? JsonOk(body) : JsonOk("{\"value\":[]}");
+
+    [Fact]
+    public async Task DocumentList_ARowWithANumericType_IsReturnedWithTheFormattedLabel_AndTheListIsNotTruncated()
+    {
+        var (service, handler) = NewService();
+        var typed = Guid.NewGuid().ToString();
+        var untyped = Guid.NewGuid().ToString();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":["
+            + DocumentRowJson(typed, $"\"sprk_documenttype\":100000006,\"{DocumentTypeAnnotation}\":\"Email\"") + ","
+            + DocumentRowJson(untyped, "\"sprk_documenttype\":null") + "]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        list.Truncated.Should().BeFalse("a typed document is no longer a failed page");
+        list.Value.Should().HaveCount(2);
+        list.Value.Single(d => d.SprkDocumentid == typed).SprkDocumenttype.Should().Be("Email");
+        list.Value.Single(d => d.SprkDocumentid == untyped).SprkDocumenttype.Should().BeNull("an unset type is null");
+    }
+
+    [Fact]
+    public async Task DocumentList_ARowWithNoTypeProperty_ReturnsANullType()
+    {
+        var (service, handler) = NewService();
+        var id = Guid.NewGuid().ToString();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":[" + DocumentRowJson(id, "") + "]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        list.Truncated.Should().BeFalse();
+        list.Value.Should().ContainSingle().Which.SprkDocumenttype.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DocumentList_ANumberWithNoAnnotation_IsNull_NeverTheNumber()
+    {
+        var (service, handler) = NewService();
+        var id = Guid.NewGuid().ToString();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":[" + DocumentRowJson(id, "\"sprk_documenttype\":100000006") + "]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        list.Truncated.Should().BeFalse("the row itself is readable");
+        list.Value.Should().ContainSingle().Which.SprkDocumenttype.Should().BeNull("the number is never shown as a label");
+    }
+
+    [Fact]
+    public async Task EveryCollectionPage_AsksForServerPaging_AndTheFormattedValueAnnotations()
+    {
+        var (service, handler) = NewService();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":[]}");
+
+        await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        var documentReads = handler.GetPrefers.Where(p => p.Url.Contains("/sprk_documents?")).ToList();
+        documentReads.Should().NotBeEmpty();
+        documentReads.Should().OnlyContain(p =>
+            p.Prefer.Contains($"odata.maxpagesize={ExternalDataService.CollectionPageSize}")
+            && p.Prefer.Contains("odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\""));
+    }
+
+    [Fact]
+    public async Task DocumentList_ANon2xxPage_StillReturnsEmptyFlaggedTruncated()
+    {
+        var (service, handler) = NewService();
+        handler.GetResponder = url => Decoded(url).Contains("/sprk_documents?") ? ServerError() : JsonOk("{\"value\":[]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        list.Value.Should().BeEmpty();
+        list.Truncated.Should().BeTrue("a genuine Dataverse failure is unchanged: empty and flagged, never an empty list");
+    }
+
     private static (ExternalDataService Service, CapturingHandler Handler) NewService()
     {
         var handler = new CapturingHandler();
@@ -710,6 +808,9 @@ public class ExternalDataServiceTests
 
         /// <summary>The absolute URL of every GET, in order (task 037 review F3-b: the feed reads assert their queries).</summary>
         public List<string> GetUrls { get; } = new();
+
+        /// <summary>The URL and <c>Prefer</c> header value of every GET (task 064: the collection reads' Prefer is asserted).</summary>
+        public List<(string Url, string Prefer)> GetPrefers { get; } = new();
 
         /// <summary>When set, answers each GET (by its absolute URL); otherwise a GET is an empty collection.</summary>
         public Func<string, HttpResponseMessage>? GetResponder { get; set; }
@@ -736,6 +837,7 @@ public class ExternalDataServiceTests
             {
                 var url = request.RequestUri!.AbsoluteUri;
                 GetUrls.Add(url);
+                GetPrefers.Add((url, request.Headers.TryGetValues("Prefer", out var prefer) ? string.Join(",", prefer) : ""));
                 if (GetResponder is { } responder)
                     return responder(url);
             }

@@ -120,7 +120,7 @@ Container Type Owner:  BFF API app registration for that environment
 Container Display:     {BusinessUnit} Documents           e.g., "Root BU Documents"
 ```
 
-| SPE Resource | Pattern | Dev Example | Demo Example |
+| SPE Resource | Pattern | Dev Example | Former Demo Example (retired 2026-10-14) |
 |-------------|---------|-------------|--------------|
 | Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` (legacy) | `Spaarke Demo Documents` |
 | Container Type Owner | BFF API app for that env | `170c98e1-...` (legacy PCF app) | `{demo-bff-app-id}` |
@@ -157,7 +157,7 @@ sprk-{env}:{area}:{key}     e.g., sprk-demo:graph:token:{hash}
 
 Each environment gets its **own app registrations** to ensure credential and scope isolation.
 
-| Registration | Pattern | Dev | Demo |
+| Registration | Pattern | Dev | Former Demo (retired 2026-10-14) |
 |-------------|---------|-----|------|
 | BFF API | `Spaarke BFF API - {Env}` | `spe-bff-api` (legacy) | `Spaarke BFF API - Demo` |
 | UI SPA (MSAL) | `Spaarke UI - {Env}` | _(existing)_ | `Spaarke UI - Demo` |
@@ -171,7 +171,7 @@ Each environment gets its **own app registrations** to ensure credential and sco
 
 Each environment gets **one resource group** containing ALL its resources. No shared platform resources across environments — each environment is fully self-contained for data separation.
 
-| Resource Type | Max Length | Pattern | Demo Example | Prod Example |
+| Resource Type | Max Length | Pattern | Former Demo Example (retired 2026-10-14) | Prod Example |
 |--------------|------------|---------|--------------|--------------|
 | Resource Group | 90 | `rg-spaarke-{env}` | `rg-spaarke-demo` | `rg-spaarke-prod` |
 | Key Vault | 24 | `sprk-{env}-kv` | `sprk-demo-kv` | `sprk-prod-kv` |
@@ -197,13 +197,17 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | Managed Identity (User-Assigned) | 128 | `mi-{purpose}-{env}` | `mi-bff-api-demo` | `mi-bff-api-prod` |
 | Cosmos DB account (Serverless, SQL API) | 44 | `spaarke-cosmos-{purpose}-{env}` | `spaarke-cosmos-demo-ai` | `spaarke-cosmos-prod-ai` |
 
+> **The old demo environment was retired and deleted on 2026-10-14.** The "Former Demo Example" column keeps the pattern readable by showing the names the old demo used; those App Service, OpenAI, Document Intelligence, Service Bus, Cosmos, Redis, App Insights, Log Analytics, managed identity and app-registration resources no longer exist. The demo is now the dedicated customer stamp **ACME Corporation** (`customerId` `acme`), produced by the provisioning control plane (T186), not a hand-named per-env stack.
+
 **API Scope URI**: Always use the Application ID GUID, not a friendly name. This avoids coupling scope URIs to human-readable names.
 
 **Managed Identity + Cosmos DB**: User-Assigned Managed Identities (UAMI) follow `mi-{purpose}-{env}` (e.g., `mi-bff-api-dev`, `mi-bff-api-demo`). Cosmos DB accounts use Serverless + SQL API; the database is named `spaarke-ai` with 5 containers (`sessions`, `prompts`, `audit`, `memory`, `feedback`) partitioned on `/tenantId`. See [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 5 task 060 (demo prep) for the canonical step-by-step provisioning of a new environment, including Graph app-role grants, Cosmos data-plane RBAC, and the full App Settings configuration block.
 
 ---
 
-### Demo Environment Full Resource Inventory (`rg-spaarke-demo`)
+### Former Demo Environment Resource Inventory (`rg-spaarke-demo`) — retired 2026-10-14
+
+> The old demo environment was retired on 2026-10-14. These resources were deleted: App Service Plan `spaarke-demo-plan`, App Service `spaarke-bff-demo`, Azure OpenAI `spaarke-openai-demo`, Document Intelligence `spaarke-docintel-demo`, Service Bus `spaarke-demo-sbus`, Redis `spaarke-bff-redis-demo`, App Insights `spaarke-demo-insights`, Log Analytics `spaarke-demo-logs`, Cosmos `spaarke-cosmos-demo-ai` and managed identity `mi-bff-api-demo`. The resource group stays for the website function apps, `WestUS2Plan`, storage `sprkdemosa`, key vault `sprk-demo-kv` and the Syntex account. The demo is now the ACME stamp built by provisioning (T186). The table is kept as the record of what the old naming produced.
 
 | Resource Type | Name | Purpose |
 |--------------|------|---------|
@@ -339,7 +343,7 @@ at runtime (`CustomerIdResolver`).
 
 ### SharePoint Embedded (SPE) Resources
 
-| SPE Resource | Pattern | Dev (Legacy) | Demo |
+| SPE Resource | Pattern | Dev (Legacy) | Former Demo (retired 2026-10-14) |
 |-------------|---------|--------------|------|
 | Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` | `Spaarke Demo Documents` |
 | Container Type Owner | BFF API app for env | `170c98e1-...` (legacy) | Demo BFF API app ID |
@@ -357,7 +361,7 @@ Each environment gets its **own Container Type** owned by that environment's BFF
 | Environment | URL Pattern | Dataverse Type | Purpose |
 |-------------|-------------|----------------|---------|
 | Dev | `spaarkedev1.crm.dynamics.com` | Sandbox | Development/testing (legacy name) |
-| Demo | `spaarke-demo.crm.dynamics.com` | Production | Beta testers, demos |
+| Demo (retired 2026-10-14) | `spaarke-demo.crm.dynamics.com` (deleted) | — | Replaced by the ACME customer stamp built by provisioning (T186) |
 | Prod | `spaarke-prod.crm.dynamics.com` | Production | Paying customers (future) |
 | Customer | `spaarke-{customer}.crm.dynamics.com` | Production | Dedicated customer (future) |
 
@@ -366,6 +370,8 @@ Each environment gets its **own Container Type** owned by that environment's BFF
 ## Current State & Migration Plan
 
 ### Existing Resources (R1 Deployment — March 2026)
+
+> Historical (March 2026). The demo resources named in the migration tables below were later created and then retired on 2026-10-14; see the retirement note above.
 
 R1 created resources using v2 naming with `-prod` suffix. These need to be migrated to v3 naming.
 

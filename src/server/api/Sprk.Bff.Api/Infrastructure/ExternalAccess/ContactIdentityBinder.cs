@@ -106,6 +106,24 @@ public sealed record InviteContactResolution(
     string? ReasonCode,
     string? Message);
 
+/// <summary>
+/// Task 185 — how the invite's marker write ended (<see cref="ContactIdentityBinder.MarkInviteSentAsync"/>), and, only when
+/// it was <see cref="StoreWriteStatus.Written"/>, the new invite code for the invite email's link.
+/// </summary>
+/// <param name="Write">The marker-and-hash write's result.</param>
+public sealed record InviteMarkResult(StoreWriteResult Write)
+{
+    /// <summary>The write's status.</summary>
+    public StoreWriteStatus Status => Write.Status;
+
+    /// <summary>
+    /// The plaintext invite code whose hash was just stored, or null when the write did not land. It goes ONLY into the
+    /// invite email's link: never stored, never logged, never in an API response. INTERNAL so the compiler-generated
+    /// <see cref="object.ToString"/> of this record never prints it (CLAUDE.md §9).
+    /// </summary>
+    internal string? InviteCode { get; init; }
+}
+
 /// <summary>Runs the binding decision and performs its writes. See the file header.</summary>
 public sealed class ContactIdentityBinder
 {
@@ -200,14 +218,24 @@ public sealed class ContactIdentityBinder
     // ── CIAM token plane ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a CIAM (external) caller. By oid; the email bind survives ONLY as the repair path for an
-    /// invite whose oid write failed after the CIAM account was created. The CIAM plane never creates a
+    /// Resolves a CIAM (external) caller. By oid; the email bind survives for an invited contact that carries no oid yet —
+    /// an invite whose oid write failed after the CIAM account was created, or an invite of a person who already had a
+    /// CIAM account (task 184, "ExistingAccount") — and binds only on THIS environment's own invite, proved by its code
+    /// (E11's marker leg, task 185): the bind then consumes the code in the same write. The CIAM plane never creates a
     /// contact — external users arrive by invitation.
     /// </summary>
-    public async Task<ContactBindingResult> ResolveCiamCallerAsync(string? oidClaim, string? email, CancellationToken ct)
+    /// <param name="inviteCode">
+    /// The invite code the caller presented (task 185), or null for none. Never logged. Slice C reads it from the
+    /// <c>X-Spaarke-Invite-Code</c> header.
+    /// </param>
+    public async Task<ContactBindingResult> ResolveCiamCallerAsync(
+        string? oidClaim, string? email, string? inviteCode, CancellationToken ct)
     {
         var oid = Guid.TryParse(oidClaim?.Trim(), out var parsed) ? parsed : Guid.Empty;
-        var request = new BindingRequest(BindingPlane.CiamToken, oid, email, BindingEligibility.EmailBindOnly);
+        var request = new BindingRequest(BindingPlane.CiamToken, oid, email, BindingEligibility.EmailBindOnly)
+        {
+            InviteCode = inviteCode,
+        };
         var result = await RunUnlinkedAsync(request, details: null, ct).ConfigureAwait(false);
         Log(request, result, "ciam");
         return result;
@@ -365,7 +393,13 @@ public sealed class ContactIdentityBinder
     /// invite just CREATED has no version yet, so it is re-read, and bound only if it is still active and unbound
     /// (a concurrent first sign-in may have bound it in between; that binding is never overwritten).
     /// </summary>
-    public async Task<StoreWriteResult> BindInvitedContactAsync(Guid contactId, string? etag, Guid ciamOid, CancellationToken ct)
+    /// <param name="consumeInviteCode">
+    /// Task 185 (owner Q5): true when this invite's marker-and-hash write landed, so the bind PATCH also clears the
+    /// now-inert code hash in the same request. False when the columns are not provisioned here: the bind payload is then
+    /// exactly the plain bind (a null for a missing column would fail it).
+    /// </param>
+    public async Task<StoreWriteResult> BindInvitedContactAsync(
+        Guid contactId, string? etag, Guid ciamOid, bool consumeInviteCode, CancellationToken ct)
     {
         if (await MaskedAsync(ct).ConfigureAwait(false))
         {
@@ -392,7 +426,45 @@ public sealed class ContactIdentityBinder
             etag = row.ETag;
         }
 
-        return await _store.BindOidAsync(contactId, etag, ciamOid, IdentityPlaneMarker.External, ct).ConfigureAwait(false);
+        return consumeInviteCode
+            ? await _store.BindOidAndConsumeInviteAsync(contactId, etag, ciamOid, IdentityPlaneMarker.External, ct)
+                .ConfigureAwait(false)
+            : await _store.BindOidAsync(contactId, etag, ciamOid, IdentityPlaneMarker.External, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Tasks 184 and 185 — creates a NEW invite code and stamps the pending-invite marker
+    /// (<c>contact.sprk_externalinvitedon</c> = now, UTC) together with the code's stored hash
+    /// (<c>sprk_externalinvitecodehash</c>) on the invited contact, in ONE write, BEFORE the invite creates the CIAM account.
+    /// A first CIAM sign-in that has to email-bind (a failed oid write, or a person who already had a CIAM account) then
+    /// binds only by presenting this code. A re-invite replaces both, so every earlier code stops matching (superseded);
+    /// nothing clears the marker. Conditional on <paramref name="etag"/> (the version the invite decided on) when there is
+    /// one. Writes only those two columns.
+    /// </summary>
+    /// <returns>
+    /// The write's result and, only when it was written, the plaintext code for the invite email's link. The code is
+    /// returned to the caller only: it is never stored and never logged.
+    /// </returns>
+    public async Task<InviteMarkResult> MarkInviteSentAsync(Guid contactId, string? etag, CancellationToken ct)
+    {
+        var (code, storedValue) = InviteCode.Create(contactId);
+        var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), storedValue, ct).ConfigureAwait(false);
+        if (write.Status == StoreWriteStatus.ColumnMissing)
+        {
+            _logger.LogError(
+                "[ID-BIND] {Marker} or {Hash} is not provisioned in this environment, so contact {ContactId} carries no "
+                + "pending invite. A new-account invite still binds its oid in the same request; any other first CIAM sign-in "
+                + "onto it is denied until it is re-invited. Apply scripts/Set-ExternalInviteMarkerSchema.ps1 and "
+                + "scripts/Set-ExternalInviteCodeHashSchema.ps1.",
+                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn, contactId);
+        }
+        else if (write.Status != StoreWriteStatus.Written)
+        {
+            _logger.LogWarning("[ID-BIND] Pending-invite marker on contact {ContactId} not written ({Status}): {Error}",
+                contactId, write.Status, write.Error);
+        }
+
+        return new InviteMarkResult(write) { InviteCode = write.Status == StoreWriteStatus.Written ? code : null };
     }
 
     /// <summary>The human message carried in a refusal's ProblemDetails.</summary>
@@ -413,6 +485,9 @@ public sealed class ContactIdentityBinder
             + "correct it before the contact can be invited.",
         ContactBindingDecision.InviteContactLookupFailed =>
             "The contact for this email could not be looked up. Nothing was created; try again.",
+        ContactBindingDecision.InviteMarkerNotWritten =>
+            "The invite could not be recorded on the contact, so the person could not sign in from it. No email was "
+            + "sent; try again. If this environment is still receiving its schema update, try again after it completes.",
         _ => null,
     };
 
@@ -451,8 +526,14 @@ public sealed class ContactIdentityBinder
                     }
 
                     var target = known[decision.ContactId!.Value];
-                    var write = await _store.BindOidAsync(target.ContactId, target.ETag, request.CallerOid,
-                        request.CallerPlane, ct).ConfigureAwait(false);
+
+                    // Task 185 — E11's marker leg binds only with the invite code, and consumes it in the SAME conditional
+                    // write as the oid (single-use). Every other email bind (the workforce plane) is the plain bind.
+                    var write = decision.ConsumeInviteCode
+                        ? await _store.BindOidAndConsumeInviteAsync(target.ContactId, target.ETag, request.CallerOid,
+                            request.CallerPlane, ct).ConfigureAwait(false)
+                        : await _store.BindOidAsync(target.ContactId, target.ETag, request.CallerOid,
+                            request.CallerPlane, ct).ConfigureAwait(false);
                     if (write.Status == StoreWriteStatus.Written)
                     {
                         _logger.LogInformation(
@@ -521,6 +602,19 @@ public sealed class ContactIdentityBinder
                 }
 
                 default:
+                    // Task 185 (pass 1 F1): the contact row and its version were read BEFORE the marker and the hash. A
+                    // concurrent sign-in carrying the same code can bind in between (the SPA's first load sends
+                    // /me/entitlements and the bell poll together); this call then sees the hash already cleared and never
+                    // reaches the 412 retry. Re-decide ONCE against fresh rows: the oid lookup finds the now-bound contact
+                    // (D4), or the email row is bound to another oid (E7). A wrong code fails the match again, so the
+                    // re-run never turns it into a bind.
+                    if (attempt == 0
+                        && decision.DenyCode == ContactBindingDecision.DenyContactNotInvited
+                        && request.InviteCode is not null)
+                    {
+                        continue;
+                    }
+
                     return ContactBindingResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactNotFound);
             }
         }
@@ -541,10 +635,39 @@ public sealed class ContactIdentityBinder
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup);
         }
 
+        ReferenceLookup? refs = null;
         if (decision.Action == BindingAction.NeedReferenceLookup && decision.ContactId is { } candidate)
         {
-            var refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
+            refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs);
+        }
+
+        // Tasks 184 and 185 — the CIAM plane's E11 binds only on this environment's own invite: a pending marker and its
+        // code (no grant is read). A read that throws is a fault, never "no intent" and never intent: the decision denies.
+        if (decision.Action == BindingAction.NeedIntentLookup && decision.ContactId is { } invitee)
+        {
+            BindIntentLookup intent;
+            try
+            {
+                intent = await _store.FindBindIntentAsync(invitee, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ID-BIND] The bind-intent read for contact {ContactId} threw — denied", invitee);
+                intent = BindIntentLookup.Failed(invitee);
+            }
+
+            // The marker's age is measured at the decision time, from this binder's clock (owner round 97: 30 days).
+            var asOf = intent with { AsOf = _time.GetUtcNow() };
+            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs, asOf);
+
+            // Design note §5.1: an operator-only, non-secret reason for a not-invited deny (never the code or the hash).
+            if (decision.DenyCode == ContactBindingDecision.DenyContactNotInvited
+                && ContactBindingDecision.NotInvitedReason(request, asOf, invitee) is { } reason)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] Contact {ContactId} is not invited for this sign-in: {NotInvitedReason}.", invitee, reason);
+            }
         }
 
         return (decision, emailLookup);

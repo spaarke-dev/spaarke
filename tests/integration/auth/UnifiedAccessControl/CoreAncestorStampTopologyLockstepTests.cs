@@ -42,9 +42,19 @@ public class CoreAncestorStampTopologyLockstepTests
     [Fact(DisplayName = "Task 156 lockstep: on every table that carries a copy, the resolver's compared intermediates ARE the restamper's sources")]
     public void StampSourceColumns_MatchTheResolversIntermediates()
     {
+        // Ontology task 144 (uac-r2 option A): the one named exemption, pinned both ways.
+        StampedOutsideAccessTaxonomyPin.AssertPinned();
+
         foreach (var (table, sources) in CoreAncestorResolver.StampSourceColumns)
         {
             var links = RecordContainerResolver.ChildAncestorLinks.For(table);
+            if (CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(table))
+            {
+                // The storage resolver is never asked about it, so it has no links to compare (and must not grow any).
+                links.Should().BeNull(CoreAncestorResolver.StampedOutsideAccessTaxonomyReason);
+                continue;
+            }
+
             links.Should().NotBeNull();
 
             links!.IntermediateColumns

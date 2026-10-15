@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deploy the Console and shared components to dev</title>
+    <phase>5 The worklist surface</phase>
+    <gate>059, 043, 035 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment to a shared environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted deploy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
+    <deps>059, 043, 035</deps>
+    <tags>deploy,frontend</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build and deploy the SpaarkeAi code page and the shared component packages to dev, then verify the worklist renders against real Dataverse.</prompt>
+  <role>SPAARKE platform engineer.</role>
+  <goal>The worklist renders in the dev Console against real Dataverse data, not a mock.</goal>
+
+  <context>
+    <background>A mock passing proves nothing about real Dataverse schema. The R4 UAT rounds burned multiple deploy cycles because a prototype harness mocked a sprk_contact entity that does not exist in real Dataverse.</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-SpaarkeAi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: MERGE MASTER FIRST.</constraint>
+    <constraint source="project">Scope: PCF packages build with npm run build:prod, NOT npm run build.</constraint>
+    <constraint source="project">Scope: verify against REAL Dataverse with at least one create plus read. A mock or prototype harness is NOT sufficient.</constraint>
+    <constraint source="project">Scope: for Vite solutions use npm install --legacy-peer-deps --no-audit --no-fund, not npm ci, which fails on most of them.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">Carried from task 010 (2026-10-04): task 010 deleted dead Daily Briefing hooks; its criterion 5 (the Daily Briefing widget still renders with no console errors) can only be checked once a Console built from this branch is deployed. The owner confirmed the widget renders on the CURRENT dev build (the baseline).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17, D-15, D-26): the BFF carrying the Signal read route (038) and the commit route (043) must be deployed first: if the dev BFF does not yet carry them, deploy it in this task with the bff-deploy skill (merge master first, hash-verify, record it) before the code page; the Console reads Signals only through the BFF and records decisions only through the commit route, and the decision wizard opens in-app (no navigateTo).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code page deployment</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Merge origin/master and confirm 0 behind.</step>
+    <step order="2">Build the shared component packages, then the SpaarkeAi code page.</step>
+    <step order="3">Deploy via the deployment script.</step>
+    <step order="4">Open the dev Console and confirm the worklist renders the seeded positive matter from REAL Dataverse.</step>
+    <step order="5">Exercise one full wizard review end to end: on the seeded Path B matter take two actions (Send budget inquiry and Revise budget) and add one Next step (Add To Do), Record decision, then confirm in Dataverse exactly one Decision Record listing all offered actions and the To Do id, the budget revision, the To Do, and the Signal closed as Acted.</step>
+    <step order="6">Record the verification in notes/deploy-log.md, naming the environment.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the worklist renders only against a mock and cannot be exercised against real Dataverse in dev, STOP and escalate rather than declaring it verified. That is precisely the failure the real-Dataverse gate exists to catch.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Worklist renders from real Dataverse">
+      <steps>
+        <step>Open the dev Console</step>
+        <step>Open the worklist</step>
+      </steps>
+      <expected>The seeded positive matter appears, read from real Dataverse.</expected>
+    </test>
+    <test name="End-to-end action writes a record">
+      <steps>
+        <step>Act on a Work Item and confirm</step>
+        <step>Query sprk_decisionrecord in Dataverse</step>
+      </steps>
+      <expected>A Decision Record row exists for that action.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the client packages (build:prod for PCF)</tool>
+    <tool name="pwsh">Run the deployment script</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the dev Console, when the worklist opens, then the seeded matter renders from real Dataverse.</criterion>
+    <criterion testable="true">Given one full wizard review (two actions + one Next step) in the dev Console, when Dataverse is queried, then exactly one Decision Record lists the offered actions and the Next step id, the revision and the To Do exist, and the Signal is Acted with the record set.</criterion>
+    <criterion testable="true">Given the browser network log during the review, when inspected, then no request writes sprk_signal or sprk_decisionrecord directly (only the BFF routes are called).</criterion>
+    <criterion testable="true">Negative: verification was NOT performed against a mock or prototype harness; the environment is named in the log.</criterion>
+    <criterion testable="true">The branch was merged up to master before deploying.</criterion>
+    <criterion testable="true">No console errors on load.</criterion>
+    <criterion testable="true">After this deploy, the Daily Briefing widget renders its sections with no console errors (task 010 criterion 5).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-24 through FR-29, FR-51, FR-54, FR-55. push-to-github Step 1.7 requires the real-Dataverse confirmation for Dataverse-querying UI changes. Amended 2026-10-07 per reconciliation B.2 row 055: deps 059 + 043 (and the BFF deploy); one full wizard review verified live. Task 049 (remove Console User Write on sprk_signal) follows this deploy.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

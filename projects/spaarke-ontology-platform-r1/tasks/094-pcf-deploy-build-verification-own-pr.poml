@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>PCF deploy procedures verify the real build result, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes build/deploy procedure or test code; quality gates apply.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Narrow, well-specified fix.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills: main session only (sub-agent write boundary).</parallel-reason>
+    <deps>none</deps>
+    <tags>pcf,deploy,skill-directive,separate-pr</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Main session. Worktree C:\wt094, branch fix/pcf-deploy-verify-build (off origin/master). Make every PCF deploy procedure check the build OUTPUT, not the exit code.</prompt>
+  <role>SPAARKE engineer. A failed build or a flaky test must never look like success.</role>
+  <goal>No documented PCF deploy path can package or import a bundle after a failed build.</goal>
+
+  <context>
+    <background>Found 2026-10-04 by task 093b: pcf-scripts build exits 0 when webpack fails (taskRunner.js logs [build] Failed and [pcf-1033] without rethrowing). .claude/skills/pcf-deploy/SKILL.md (Step 2 Build Fresh, then Step 3 copies bundle.js with only a size heuristic) and .claude/skills/dataverse-deploy/SKILL.md (several build:prod then pack.ps1 then pac solution import chains) trust the exit code, so a failed build can deploy a stale bundle. docs/guides/PCF-DEPLOYMENT-GUIDE.md (around lines 89 and 239) still says pcf-scripts has no build:prod and to use npm run build, contradicting the skill and root CLAUDE.md section 12. scripts/Deploy-PCFWebResources.ps1 deploys a pre-built bundle from a legacy path (src/controls/UniversalQuickCreate/out), which looks dead.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: own PR, not the ontology PR. Every .claude/ change needs a .claude/CHANGELOG.md entry.</constraint>
+    <constraint source="project">Scope: use the same rule as the nightly workflow (PR #1285): fail if the output contains [build] Failed, a 'compiled with N error' line or [pcf-1033], or if the exit code is non-zero; pass only when [build] Succeeded is present. Prefer one small shared script (e.g. scripts/Invoke-PcfBuildProd.ps1) that the skills call over prose each skill must remember.</constraint>
+    <constraint source="project">Scope: before deleting or changing scripts/Deploy-PCFWebResources.ps1, grep for every caller and doc reference; delete only if nothing live uses it, otherwise fix its path. Record the evidence in the PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify or bare git stash.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Write the shared build-verification script and demonstrate it on one PCF that builds and one that fails.</step>
+    <step order="2">Change pcf-deploy and dataverse-deploy SKILL.md to call it at every build:prod before packaging or importing.</step>
+    <step order="3">Correct PCF-DEPLOYMENT-GUIDE.md to build:prod plus the same verification.</step>
+    <step order="4">Resolve Deploy-PCFWebResources.ps1 with evidence.</step>
+    <step order="5">Add the CHANGELOG entry, open the PR, record completion in this POML and TASK-INDEX.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every build:prod step in pcf-deploy and dataverse-deploy SKILL.md is followed by a check that fails on [build] Failed, compiled-with-errors, [pcf-1033] or a non-zero exit.</criterion>
+    <criterion testable="true">The shared script returns non-zero for a PCF whose webpack build fails and zero for one that succeeds (both demonstrated).</criterion>
+    <criterion testable="true">PCF-DEPLOYMENT-GUIDE.md no longer instructs npm run build for production.</criterion>
+    <criterion testable="true">Negative: no deploy procedure in the repo still trusts the build:prod exit code alone (grep evidence).</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-04 from the task 093b report, under the owner fix-now rule.</notes>
+
+  <completion>COMPLETED 2026-10-04 (main session). PR #1286 (fix/pcf-deploy-verify-build), MUST MERGE AFTER #1123. scripts/PcfBuildResult.psm1 (rule from output, ANSI stripped; same as nightly workflow #1285) + scripts/Invoke-PcfBuildProd.ps1. pcf-deploy, dataverse-deploy, task-execute, project-pipeline, script-aware skills and .claude/commands/dataverse-deploy.md use it; no procedure suggests pac pcf push. PCF-DEPLOYMENT-GUIDE.md AP-1 contradiction fixed. MatterHeader/RecordHeader pack.ps1 and Build-AllClientComponents.ps1 judge the build from output. Deploy-PCFWebResources.ps1 deleted (pushed the deleted UniversalQuickCreate from a nonexistent path). Proven: VisualHost real failing build npm exit 0 -&gt; script 1; SpaarkeGridCustomizer pass -&gt; 0; fake builds in PS 5.1 and 7 with spaces/brackets. Independent review pass-with-findings, all mandatory fixed (incl. my own broken working-folder edit). Finding: Build-AllClientComponents PCF step FAILS on a clean checkout (TS5083: 18 of 19 PCF tsconfigs extend ./node_modules/pcf-scripts/tsconfig_base.json); release Phase 1 had been passing on a failed build. Fix routed to task 092 / PR #1123, hence the merge order.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

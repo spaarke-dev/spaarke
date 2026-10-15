@@ -1,0 +1,17 @@
+{
+  "type": "Existence",
+  "subject": "sprk_matter",
+  "when": {},
+  "all": [
+    {
+      "exists": "sprk_communication",
+      "path": "sprk_regardingmatter",
+      "filter": {
+        "sprk_triagecategory": ["8b62dd84-1fbc-f111-aaaf-3833c5e9614d", "8d62dd84-1fbc-f111-aaaf-3833c5e9614d"],
+        "sprk_receiveddate": { ">=": "now-30d" },
+        "sprk_reviewoutcome": { "<>": 100000003 }
+      }
+    },
+    { "notExists": "sprk_budgetrevision", "path": "sprk_matter", "filter": { "sprk_revisedon": { ">=": "now-30d" } } }
+  ]
+}

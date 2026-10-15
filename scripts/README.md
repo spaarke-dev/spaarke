@@ -223,20 +223,20 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Command:**
 ```powershell
+# -EnvironmentUrl is required: the old demo environment was retired 2026-10-14 and the demo is now the
+# ACME stamp built by the provisioning control plane (no static default URL).
+
 # Preview what would be created (recommended first)
-.\Load-DemoSampleData.ps1 -DryRun
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
 
 # Load all sample data
-.\Load-DemoSampleData.ps1
-
-# Load into a different environment
 .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
 
 # Skip optional steps
-.\Load-DemoSampleData.ps1 -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
 
 # Force recreate existing records
-.\Load-DemoSampleData.ps1 -Force
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Force
 ```
 
 **Data Sources:**
@@ -1176,7 +1176,17 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind '<containerId>=<buId>' -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify   # must exit 0
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <Customer__Id>          # issue #1889: also mark pre-marker containers (dry run; then -Apply -MaxWritesPerRun 1, -Apply, -Verify)
 ```
+
+`-CustomerId` (issue #1889) adds the customer-marker pass. It takes the BFF's `Customer__Id` (or, when that is unset, the id
+the BFF derives from `rg-spaarke-{customerId}-{env}`) and must match `^[a-z][a-z0-9]{2,7}$` (otherwise exit 2, nothing read).
+A container is marked only if it already carried a stamp naming one of this environment's units and its records derive it, or
+an explicit `-Bind` names it; one the run stamps from records alone is listed `MARK-NEXT-RUN` and marked by the NEXT run
+(review the dry-run list first: the record claim is customer-writable); a stamped container no record claims is
+`UNMARKED-NO-CLAIM`. A marker is never overwritten (`MARKER-FOREIGN` / `MARKER-MALFORMED` are listed), underivable and
+stamp-disputed containers are never marked; `-Verify` also fails on any unmarked one. The guard caches a missing marker for up
+to 10 minutes. Tests: `tests/scripts/Backfill-SpeContainerMarker.Tests.ps1`.
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
 `Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,
@@ -1356,17 +1366,19 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../p
 ```
 
 ### `Set-ExternalFlagForB2BGuests.ps1`
-**Purpose:** One-off data step: every B2B guest system user (`#EXT#` in its user name, `systemuser.domainname`) gets `sprk_isexternal = Yes`; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so guests must be marked explicitly. JSON report of every user listed.
-**Usage:** 🛑 **Do NOT run this on a Model 1 customer stamp** (#1564): every customer employee there is a B2B guest (`#EXT#`) in Spaarke's tenant, so it would mark every customer employee external. Wait for unified-access-control-r2 to decide the rule (customer deployment guide §7.7 / §12.2 Phase 7b). For other environments: 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
-**Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003)
-**Dependencies:** Azure CLI (`az login`, Write on systemuser), PowerShell 7+
+**Purpose:** Data step that sets `sprk_isexternal = Yes` on B2B guest system users (`#EXT#` in `systemuser.domainname`) who are outsiders; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so outsider guests must be marked explicitly. JSON report of every guest with its class, home directory and action.
+**Modes (one is required):** `-CustomerTenantIds <guid[]>` on a **Model 1** stamp (spaarkeai-word-add-in-r1 task 126, owner 2026-10-13; ADR-028 A8/A9) — the stamp's `WorkforceIdentity__CustomerTenantIds__N` list. Each guest's email domain is resolved with Graph `findTenantInformationByDomainName` (the operator's `az login` Graph token); the customer's own staff (a listed directory, or a `systemuserid` in `-InternalUserIds`) are never written, a guest of another directory not already Yes is set to Yes (No is the column default, not a decision), and an unresolvable or inconsistent guest is reported as "review" and never written. Guards: the stamp's own directory or an empty id is refused as a customer directory; `-Apply` is refused when guests resolve to other directories but none to the customer's. Each PATCH uses the row's ETag. `-AllGuestsExternal` where every guest is an outsider (the task 114 behaviour: every guest still blank or No is set).
+**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §7.7 / §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0 only when nothing is left to set or to review). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
+**Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003; Model 1 mode 2026-10-13 by `spaarkeai-word-add-in-r1` task 126)
+**Dependencies:** Azure CLI (`az login`, Write on systemuser; a Graph token for `-CustomerTenantIds`), PowerShell 7+. Tests: `tests/scripts/Set-ExternalFlagForB2BGuests.Tests.ps1` (Pester 3.4).
 **Owner:** `unified-access-control-r2`
-**Last Used:** never run (written, not executed — task 114).
+**Last Used:** 2026-10-13, dry run only on spaarkedev1 with `-CustomerTenantIds` (task 126): 0 to set, 0 to review. Never applied.
 
 ```powershell
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"            # dry run (list)
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply     # PATCH If-Match:*, report
-.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = every guest is Yes
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>"           # Model 1 dry run (report)
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>" -Apply    # PATCH If-Match:<row ETag>, report
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -CustomerTenantIds "<customer-tenant-guid>" -Verify   # exit 0 = nothing to set or review
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -AllGuestsExternal                                                             # not Model 1: every guest is an outsider
 ```
 
 ### `Set-SecureFlagFieldSecurity.ps1`

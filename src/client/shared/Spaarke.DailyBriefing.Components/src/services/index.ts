@@ -10,9 +10,16 @@
  * Populated by R2 task 012 (FR-09): hoisted `briefingService` (the BFF
  * `/summarize` + `/narrate` clients).
  *
- * Populated by R2 task 015 (FR-07): hoisted `notificationService` and
- * `preferencesService` from the standalone DailyBriefing solution so the
- * package no longer reaches back across the solution boundary.
+ * Populated by R2 task 015 (FR-07): hoisted `preferencesService` from the
+ * standalone DailyBriefing solution so the package no longer reaches back
+ * across the solution boundary.
+ *
+ * ontology-platform-r1 task 010 / C-1 (2026-10-03): `notificationService`
+ * (and the `useBriefingNotifications` / `useBriefingNarration` /
+ * `useBriefingActions` hooks it existed solely to back) was deleted as dead
+ * code — once those three hooks were removed, nothing in the live `/render`
+ * data path (`briefingService.fetchBriefingLive` → `useBriefingRender`)
+ * called into it.
  */
 
 export {
@@ -26,17 +33,5 @@ export {
   type ChannelNarrationResult,
   type NarrativeBulletResult,
 } from './briefingService';
-
-export {
-  fetchNotifications,
-  fetchAndGroupNotifications,
-  groupByCategory,
-  // R3 task 020 canonical names (FR-4/5/6); task 020's transitional aliases
-  // (markNotificationRead / markAllNotificationsRead) were removed by task 030.
-  markBriefingChecked,
-  markAllBriefingsChecked,
-  markBriefingRemoved,
-  extendBriefingTtl,
-} from './notificationService';
 
 export { fetchDigestPreferences, saveDigestPreferences } from './preferencesService';

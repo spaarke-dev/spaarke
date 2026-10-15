@@ -25,8 +25,9 @@
     entity availability and exits with clear guidance if solutions are missing.
 
 .PARAMETER EnvironmentUrl
-    Target Dataverse environment URL.
-    Default: https://spaarke-demo.crm.dynamics.com
+    Target Dataverse environment URL (required). The old demo environment
+    (spaarke-demo.crm.dynamics.com) was retired on 2026-10-14; the demo is now the ACME stamp built by
+    the provisioning control plane, so there is no static default.
 
 .PARAMETER DataFile
     Path to the JSON file containing demo record definitions.
@@ -58,25 +59,26 @@
     Preview what would be created without making changes.
 
 .EXAMPLE
-    .\Load-DemoSampleData.ps1 -DryRun
+    .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
     # Preview all records that would be created
 
 .EXAMPLE
-    .\Load-DemoSampleData.ps1
-    # Load all sample data into demo environment
+    .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
+    # Load all sample data into the target demo environment
 
 .EXAMPLE
-    .\Load-DemoSampleData.ps1 -SkipAiSeedData -SkipSpeUpload
+    .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload
     # Load only Dataverse records, skip AI seed data and SPE uploads
 
 .EXAMPLE
     .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
-    # Load into a different environment
+    # Load into a specific environment
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$EnvironmentUrl = "https://spaarke-demo.crm.dynamics.com",
+    [Parameter(Mandatory)]
+    [string]$EnvironmentUrl,
 
     [string]$DataFile,
 
@@ -365,7 +367,6 @@ if ($solutionsImported) {
         $record = @{
             "sprk_eventname"        = $event.sprk_eventname
             "sprk_eventdescription" = $event.sprk_eventdescription
-            "sprk_eventstatus"      = $event.sprk_eventstatus
         }
 
         New-DataverseRecord `

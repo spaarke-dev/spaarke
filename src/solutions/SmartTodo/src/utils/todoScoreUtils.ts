@@ -21,63 +21,15 @@
  */
 
 import type { ITodo } from '../types/entities';
-import { parseDueDate } from './dueLabelUtils';
+import { computeTodoScoreBreakdown, type ITodoScoreBreakdown } from '@spaarke/ui-components';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// Task 067 / D-29 (FR-63): the composite score and its urgency component are ONE
+// shared function, `computeTodoScoreBreakdown` in `@spaarke/ui-components`
+// (`utils/dateLocal.ts`), counting CALENDAR days like the due label. This module
+// used to keep a private copy of the weights and the millisecond-based urgency
+// math; it is now only the ITodo-typed entry point existing importers use.
 
-/** Breakdown of the To Do Score components for transparency / debugging. */
-export interface ITodoScoreBreakdown {
-  /** Final composite score (0-100, clamped). */
-  todoScore: number;
-  /** Weighted priority component. */
-  priorityComponent: number;
-  /** Weighted inverted-effort component. */
-  effortComponent: number;
-  /** Weighted due-date urgency component. */
-  urgencyComponent: number;
-}
-
-// ---------------------------------------------------------------------------
-// Weights
-// ---------------------------------------------------------------------------
-
-const W_PRIORITY = 0.50;
-const W_EFFORT   = 0.20;
-const W_URGENCY  = 0.30;
-
-// ---------------------------------------------------------------------------
-// Due-date urgency raw score
-// ---------------------------------------------------------------------------
-
-/**
- * Map days-until-due into a 0-100 raw urgency score.
- *
- *   Overdue     → 100
- *   ≤ 3 days    →  80
- *   ≤ 7 days    →  50
- *   ≤ 10 days   →  25
- *   > 10 days   →   0
- *   No due date →   0
- */
-export function computeDueDateUrgencyRaw(dueDate: Date | null): number {
-  if (!dueDate) return 0;
-
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0) return 100;
-  if (diffDays <= 3) return 80;
-  if (diffDays <= 7) return 50;
-  if (diffDays <= 10) return 25;
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
-// Main computation
-// ---------------------------------------------------------------------------
+export type { ITodoScoreBreakdown };
 
 /**
  * Compute the To Do Score for a `sprk_todo` record.
@@ -86,23 +38,5 @@ export function computeDueDateUrgencyRaw(dueDate: Date | null): number {
  * @returns Breakdown with the final todoScore and per-component values.
  */
 export function computeTodoScore(todo: ITodo): ITodoScoreBreakdown {
-  // Priority: use sprk_priorityscore (0-100), default 50 (Normal)
-  const rawPriority = todo.sprk_priorityscore ?? 50;
-  const priorityComponent = rawPriority * W_PRIORITY;
-
-  // Effort inverted: lower effort → higher score (quick wins)
-  const rawEffort = todo.sprk_effortscore ?? 50;
-  const invertedEffort = 100 - rawEffort;
-  const effortComponent = invertedEffort * W_EFFORT;
-
-  // Due-date urgency
-  const dueDate = parseDueDate(todo.sprk_duedate);
-  const rawUrgency = computeDueDateUrgencyRaw(dueDate);
-  const urgencyComponent = rawUrgency * W_URGENCY;
-
-  // Composite (clamped 0-100)
-  const raw = priorityComponent + effortComponent + urgencyComponent;
-  const todoScore = Math.max(0, Math.min(100, Math.round(raw)));
-
-  return { todoScore, priorityComponent, effortComponent, urgencyComponent };
+  return computeTodoScoreBreakdown(todo);
 }

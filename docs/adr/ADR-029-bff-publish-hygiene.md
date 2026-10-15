@@ -136,7 +136,7 @@ Baseline history: 72.9 MB (2026-05-19 trigger) → **45.65 MB** (Phase 5 close, 
 | `.claude/constraints/azure-deployment.md` Publish & Packaging | Documented MUST rules for PR review |
 | `.claude/constraints/bff-extensions.md` | Binding pre-merge checklist for ALL BFF additions (per root CLAUDE.md §10) — references this ADR's size ceiling |
 | `.claude/skills/bff-deploy/SKILL.md` Publish Hygiene section | Operational guidance for any BFF deploy |
-| Planned CI workflow guard (FR-C1, FR-C2, FR-C3, FR-C5) | Per-PR enforcement of rules 1, 2, 3, 4 in `.github/workflows/sdap-ci.yml` (project task 071) |
+| Planned CI workflow guard (FR-C1, FR-C2, FR-C3, FR-C5) | Per-PR enforcement of rules 1, 2, 3, 4 in `.github/workflows/sdap-ci.yml` (project task 071). Historical: `sdap-ci.yml` was retired 2026-10-14 (archived at `docs/archive/workflows/`); per-push dependency auditing now runs in `ci-standalone-checks.yml` (`dependency-audit`) and the Release build + BFF publish in its `release-build` job |
 | Quarterly publish-hygiene review | Walk the verification table in the concise ADR; record results in `projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md` |
 
 ### Verification commands

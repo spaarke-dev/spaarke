@@ -52,6 +52,35 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task AbsentInviteCodeHash_IsRecordedInTheVerifiedGateEvidence_NotFailed()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);   // SpaarkeMaster 1.2.2.0: no sprk_externalinvitecodehash yet
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var notes = repo.LastWrittenRun!.GateStates[H7bSecureRecordSetupHandler.SetupGateId].Evidence!.Value.GetProperty("notes");
+        notes.GetArrayLength().Should().Be(1);
+        notes[0].GetString().Should().Contain("sprk_externalinvitecodehash").And.Contain("absent");
+    }
+
+    [Fact]
+    public async Task UnsecuredInviteMarker_FailsResumable_WithItsCode()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitedon")] = false;
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InviteMarkerLockIncomplete);
+        failure.Class.Should().Be(FailureClass.Resumable);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ASecondRun_InANewRunRow_WritesNothingToDataverse()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
@@ -300,6 +329,24 @@ public sealed class H7bSecureRecordSetupHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(code);
         failure.Class.Should().Be(FailureClass.Resumable);
+    }
+
+    [Fact]
+    public async Task InviteCodeHashReadFault_FailsResumable_NotSuccess()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var codeHashKey = FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash");
+        dv.ColumnReadFault = key => key.Equals(codeHashKey, StringComparison.OrdinalIgnoreCase)
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "503")
+            : null;
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.DataverseInvocationFailed);
+        failure.Class.Should().Be(FailureClass.Resumable);
+        repo.LastWrittenRun!.CompletedPhases.Should().NotContain(p => p.Phase == "H7b");
     }
 
     [Fact]

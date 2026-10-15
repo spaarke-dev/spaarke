@@ -31,9 +31,26 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 13
-last_updated: 2026-10-09
+manifest_version: 15
+last_updated: 2026-10-14
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 15 (2026-10-14, customer-provisioning-orchestration-r1 T186): the first live run of every recipe against a
+# real customer (acme) found recipes that disagreed with the code they guard. Fixed to mirror it: PRQ-S-00 counts only the
+# rg-spaarke-{id}-{env} groups H1 counts (SubscriptionDedication.cs); PRQ-S-01 reads the quota id from ARM (az account show
+# omits it on az 2.77); PRQ-S-03 lists the providers the stamp template deploys plus H1's (no ContainerRegistry; EventGrid,
+# SignalRService and Communication added, and the same four added to H1's default list); PRQ-T-02 uses the v1.0 Graph
+# containerTypeRegistrations path (the beta path never existed); PRQ-T-03 checks the shared client apps H3 pre-authorizes
+# (the per-host "Outlook/Word Add-in {env}" apps never existed); PRQ-C-08 reads the group through Graph (Connect-ExchangeOnline
+# needs an interactive window); PRQ-C-10 reads the two values robustly (az 2.77 prints a list as two lines). RETIRED (cannot
+# be satisfied before the run, or the run applies the thing itself): PRQ-T-04 (one app serves both hosts - PRQ-T-03), PRQ-E-05
+# (H2a creates the grant), PRQ-E-13 (skill Step 1f creates the row after the prerequisite pass), PRQ-C-06 (H6 applies the
+# org-settings contract before the import).
+# manifest_version 14 (2026-10-10, customer-provisioning-orchestration-r1 T263, owner decision 2026-10-10 #1562): H14m
+# creates the customer's Spaarke-tenant shared mailbox sprk-{customerId}-mail at the intake communicationDefaultMailbox
+# address and adds it to the PRQ-C-08 group. PRQ-C-08: the group's Name MUST be Spaarke-AppAccess-{customerId} (H14m
+# refuses another customer's group), and L2 now adds exactly one member (its own mailbox). PRQ-E-15: H14m needs two
+# more Exchange roles on the admin app (New-Mailbox -Shared; Add-DistributionGroupMember on Spaarke-AppAccess-* groups)
+# - PENDING OWNER DECISION D32; deployment guide section 4.2.1 step 5. Not asserted by the recipe (needs Exchange).
 # manifest_version 13 (2026-10-09, customer-provisioning-orchestration-r1; owner decision 2026-10-09 relayed by
 # spaarke-SPA-external-access-platform-r3, its design.md section 4.6 item 7 / C7): PRQ-C-14 ADDED - the CUSTOMER tenant's
 # cross-tenant access settings allow its users to become B2B guests in Spaarke's tenant (outbound B2B collaboration).
@@ -132,46 +149,65 @@ prereqs:
         body=$(mktemp) || exit 1
         trap 'rm -f "$body"' EXIT
 
-        code=$(curl -sS -o "$body" -D - -H "Authorization: Bearer $tok" "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes/{containerTypeId}/applicationPermissionGrants" | sed -n 1p | tr -d '\r' | awk '{print $2}') || exit 1
+        code=$(curl -sS -o "$body" -D - -H "Authorization: Bearer $tok" "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants" | sed -n 1p | tr -d '\r' | awk '{print $2}') || exit 1
         case "$code" in
-          200) grep -q '"readContent"' "$body" && grep -q '"writeContent"' "$body" || { echo "no applicationPermissionGrant with readContent + writeContent on container type {containerTypeId}"; cat "$body"; exit 1; }
-               echo ok ;;
+          200) # one line per grant: its applicationPermissions array (the body may be pretty-printed)
+               perms=$(tr -d '\r\n' < "$body" | grep -oE '"applicationPermissions": *\[[^]]*\]')
+               if echo "$perms" | grep -q '"full"'; then echo ok; exit 0; fi
+               if echo "$perms" | grep '"readContent"' | grep -q '"writeContent"'; then echo ok; exit 0; fi
+               echo "no applicationPermissionGrant on container type {containerTypeId} carries full, or readContent + writeContent"; cat "$body"; exit 1 ;;
           403) echo "SKIP: HTTP 403 - the operator's Azure CLI token is not consented for container-type reads (T248); H0 SpeOwnerCredential verifies the registration with the L2 credential"; exit 0 ;;
-          404) echo "container type {containerTypeId} not found in this tenant"; exit 1 ;;
+          404) echo "container type {containerTypeId} is not registered in this tenant"; exit 1 ;;
           *)   echo "unexpected HTTP '$code'"; cat "$body"; exit 1 ;;
         esac
-      expect: '`ok` - at least one grant carries `readContent` and `writeContent`. HTTP 403 prints SKIP and exits 0 (see PRQ-T-01); 404 or any other status exits 1'
+      expect: '`ok` - at least one grant in the container type registration (v1.0 `storage/fileStorage/containerTypeRegistrations/{id}/applicationPermissionGrants`) has `full` in its `applicationPermissions`, or both `readContent` and `writeContent`. HTTP 403 prints SKIP and exits 0 (see PRQ-T-01); 404 (not registered in this tenant) or any other status exits 1'
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.4.
 
   - id: PRQ-T-03
-    name: Office add-in Outlook Entra app-reg exists
+    name: Shared client apps H3 pre-authorizes exist (production Office add-in)
     scope: once_per_env
     frequency: once
     owner: Spaarke platform admin
-    consequence_of_absence: Outlook add-in deploy step fails; email intake flows non-functional.
+    consequence_of_absence: H3 pre-authorizes a client app that does not exist in the tenant (a pre-authorization naming an unknown app id is rejected or dangling), so the Office add-in (Outlook and Word - one shared client app, 'Spaarke Office Add-in (Production)') cannot get a token for the customer BFF; email intake and the Word add-in are non-functional for that customer.
     check_recipe:
       cli: |
         set -o pipefail
-        id=$(az ad app list --filter "displayName eq 'Spaarke Outlook Add-in {env}'" --query "[0].appId" -o tsv | tr -d '\r') || exit 1
-        [ -n "$id" ] || { echo "NOT_FOUND: Entra app registration 'Spaarke Outlook Add-in {env}'"; exit 1; }
-        echo "ok $id"
-      expect: non-empty GUID
-    remediation: See `docs/guides/office-addins-deployment-checklist.md` (Appendix B).
+        export MSYS_NO_PATHCONV=1
+        # H3 pre-authorizes every app id in the L2 Worker settings EntraAppRegOptions__PreAuthorizedClientAppIds__N on the customer BFF.
+        names=$(az webapp config appsettings list --name spaarke-provisioning-controlplane-worker-{env} --resource-group rg-spaarke-platform-{env} --query "[].name" -o tsv | tr -d '\r' | grep '^EntraAppRegOptions__PreAuthorizedClientAppIds__') || { echo "no EntraAppRegOptions__PreAuthorizedClientAppIds__N setting on spaarke-provisioning-controlplane-worker-{env} (or the Worker app cannot be read)"; exit 1; }
+        [ -n "$names" ] || { echo "no EntraAppRegOptions__PreAuthorizedClientAppIds__N setting on spaarke-provisioning-controlplane-worker-{env}"; exit 1; }
+        failed=0
+        found=0
+        for nm in $names; do
+          id=$(az webapp config appsettings list --name spaarke-provisioning-controlplane-worker-{env} --resource-group rg-spaarke-platform-{env} --query "[?name=='$nm'].value | [0]" -o tsv | tr -d '\r')
+          [ -n "$id" ] || { echo "setting $nm is empty"; failed=1; continue; }
+          dn=$(az ad sp list --filter "appId eq '$id'" --query "[0].displayName" -o tsv | tr -d '\r')
+          if [ -z "$dn" ]; then echo "pre-authorized client app $id ($nm) has no service principal in this tenant"; failed=1; continue; fi
+          [ "$dn" = "Spaarke Office Add-in (Production)" ] && found=1
+        done
+        [ "$failed" = 0 ] || exit 1
+        [ "$found" = 1 ] || { echo "none of the pre-authorized client apps is 'Spaarke Office Add-in (Production)'"; exit 1; }
+        echo ok
+      expect: "`ok` - at least one `EntraAppRegOptions__PreAuthorizedClientAppIds__N` setting on the L2 Worker, every listed app id resolves to a service principal in the tenant, and one of them is 'Spaarke Office Add-in (Production)' (appId 1958aec2-0218-495e-8e3c-37133e9b8357 - the shared client the Outlook AND Word add-ins use). Setting values are app ids (public); no secret is read"
+    remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (H3 row) and `docs/guides/office-addins-deployment-checklist.md`. A missing service principal - `az ad sp create --id <appId>` in the tenant - or fix the Worker setting (`Deploy-ControlPlane.ps1` / platform-controlplane.bicep owns `EntraAppRegOptions__PreAuthorizedClientAppIds__N`).
+    related_findings: [T186-L13]
 
   - id: PRQ-T-04
-    name: Office add-in Word Entra app-reg exists
+    name: 'RETIRED — Office add-in Word Entra app-reg (one shared client app serves Outlook and Word; covered by PRQ-T-03)'
     scope: once_per_env
-    frequency: once
-    owner: Spaarke platform admin
-    consequence_of_absence: Word add-in deploy step fails.
-    check_recipe:
-      cli: |
-        set -o pipefail
-        id=$(az ad app list --filter "displayName eq 'Spaarke Word Add-in {env}'" --query "[0].appId" -o tsv | tr -d '\r') || exit 1
-        [ -n "$id" ] || { echo "NOT_FOUND: Entra app registration 'Spaarke Word Add-in {env}'"; exit 1; }
-        echo "ok $id"
-      expect: non-empty GUID
-    remediation: See `docs/guides/office-addins-deployment-checklist.md`.
+    status: retired
+    retired_on: 2026-10-14
+    retired_by: customer-provisioning-orchestration-r1 T186
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. There is no 'Spaarke Word Add-in {env}' app registration and never was: ONE shared client app,
+      'Spaarke Office Add-in (Production)' (appId 1958aec2-0218-495e-8e3c-37133e9b8357), serves Outlook and Word, and H3
+      pre-authorizes every app id in the Worker settings EntraAppRegOptions__PreAuthorizedClientAppIds__N. PRQ-T-03
+      now checks exactly that.
+    remediation: |
+      Nothing to do. See PRQ-T-03.
+    related_findings: [T186-L13]
 
   - id: PRQ-T-05
     name: 'RETIRED — Copilot bot Entra app-reg (superseded by the T257 design: one shared OAuth client app, no bot)'
@@ -253,17 +289,19 @@ prereqs:
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (its id is the intake value subscriptionId)
     owner: Spaarke platform admin (Model 1 — in Spaarke's tenant); the customer's admin (Model 2)
-    consequence_of_absence: "POST /api/runs refuses a run without subscriptionId (400 subscription-id-required) — for every model; nothing defaults or shares a subscription (ADR-027, T228). H1 refuses a subscription outside the run's tenant (subready-subscription-unreachable) or one already holding another customer's rg-spaarke-* resource group (subready-subscription-not-dedicated)."
+    consequence_of_absence: "POST /api/runs refuses a run without subscriptionId (400 subscription-id-required) — for every model; nothing defaults or shares a subscription (ADR-027, T228). H1 refuses a subscription outside the run's tenant (subready-subscription-unreachable) or one already holding another customer's stamp resource group rg-spaarke-{id}-{env} (subready-subscription-not-dedicated)."
     check_recipe:
       cli: |
         set -o pipefail
         state=$(az account show --subscription {stampSubscriptionId} --query state -o tsv | tr -d '\r') || exit 1
         [ "$state" = "Enabled" ] || { echo "subscription {stampSubscriptionId} state is '$state', not Enabled"; exit 1; }
         names=$(az group list --subscription {stampSubscriptionId} --query "[].name" -o tsv | tr -d '\r') || exit 1
-        others=$(echo "$names" | grep '^rg-spaarke-' | grep -v '^rg-spaarke-{customerId}-')
-        [ -z "$others" ] || { echo "subscription already holds another customer's rg-spaarke-* group(s):"; echo "$others"; exit 1; }
+        # Mirrors SubscriptionDedication.cs (H1): only a group named rg-spaarke-<id>-<env> counts (id = [a-z][a-z0-9]{2,7}, env = [a-z0-9]+,
+        # case-insensitive) and it is foreign when its id is not the customerId. rg-spaarke-demo and other names are ignored.
+        others=$(echo "$names" | grep -iE '^rg-spaarke-[a-z][a-z0-9]{2,7}-[a-z0-9]+$' | awk -F- -v me="{customerId}" 'tolower($3) != tolower(me)')
+        [ -z "$others" ] || { echo "subscription already holds another customer's stamp resource group(s):"; echo "$others"; exit 1; }
         echo ok
-      expect: "`ok` — the subscription is Enabled and holds no rg-spaarke-* resource group other than this customer's"
+      expect: "`ok` — the subscription is Enabled and holds no stamp resource group `rg-spaarke-{id}-{env}` whose id is not this customer's (exactly H1's rule, SubscriptionDedication.cs: a group such as `rg-spaarke-demo`, which does not match that pattern, is ignored; `rg-spaarke-other-prod` and `rg-spaarke-platform-dev` are foreign)"
     remediation: "Create a NEW subscription for the customer (Model 1: under Spaarke's billing account, in Spaarke's tenant), place it in the `spaarke-customers` management group (PRQ-S-06, ADR-027), grant PRQ-S-04, and enter its id as `subscriptionId` at intake. Never reuse another customer's subscription or the platform subscription."
     related_findings: [T228, ADR-027, G3]
 
@@ -276,7 +314,8 @@ prereqs:
     check_recipe:
       cli: |
         set -o pipefail
-        q=$(az account show --subscription {stampSubscriptionId} --query subscriptionPolicies.quotaId -o tsv | tr -d '\r') || exit 1
+        # az account show omits subscriptionPolicies.quotaId on az 2.77; ARM returns it.
+        q=$(az rest --method get --url "https://management.azure.com/subscriptions/{stampSubscriptionId}?api-version=2022-12-01" --query subscriptionPolicies.quotaId -o tsv | tr -d '\r') || exit 1
         [ -n "$q" ] || { echo "no subscriptionPolicies.quotaId for subscription {stampSubscriptionId}"; exit 1; }
         echo "ok quotaId=$q"
       expect: '`ok quotaId=<id>` - `subscriptionPolicies.quotaId` populated (starts with `MSDN_`, `EnterpriseAgreement_`, `PayAsYouGo_`, `MicrosoftCustomerAgreement_`, ...)'
@@ -302,14 +341,15 @@ prereqs:
     scope: once_per_customer
     frequency: once per sub (fresh subs)
     owner: Spaarke platform admin
-    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success. Microsoft.Cache is for Azure Managed Redis (Microsoft.Cache/redisEnterprise), which every customer stamp deploys (task 242); L2 handler H1 registers it by default.
+    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success. The list is the namespaces infrastructure/bicep/customer.bicep and the modules it composes deploy (Microsoft.Cache is Azure Managed Redis, task 242; Microsoft.OperationalInsights is monitoring; Microsoft.EventGrid and Microsoft.Communication are the ACS chat module and Microsoft.SignalRService the SignalR module, both conditional) and mirrors H1's default RequiredResourceProviders (SubscriptionReadinessOptions.cs) except Microsoft.ManagedServices, which H1 registers for Model 2 Lighthouse only. No customer stamp deploys Microsoft.ContainerRegistry (the platform ACR is in the platform subscription).
     check_recipe:
       cli: |
         set -o pipefail
         failed=0
+        # Mirrors SubscriptionReadinessOptions.RequiredResourceProviders (H1) minus Microsoft.ManagedServices (Model 2 Lighthouse) - change both together.
         for ns in Microsoft.Web Microsoft.Storage Microsoft.KeyVault Microsoft.CognitiveServices Microsoft.Search \
                   Microsoft.ServiceBus Microsoft.Cache Microsoft.DocumentDB Microsoft.OperationalInsights \
-                  Microsoft.Insights Microsoft.ManagedIdentity Microsoft.ContainerRegistry; do
+                  Microsoft.Insights Microsoft.ManagedIdentity Microsoft.EventGrid Microsoft.SignalRService Microsoft.Communication; do
           st=$(az provider show --namespace "$ns" --subscription {stampSubscriptionId} --query registrationState -o tsv | tr -d '\r')
           if [ "$st" != "Registered" ]; then echo "NOT_REGISTERED: $ns='${st:-<none>}'"; failed=1; fi
         done
@@ -458,29 +498,28 @@ prereqs:
       expect: non-empty
     remediation: Wave G-8 Batch 2 / audit-gap-04.
 
-  # Scope corrected 2026-10-01 (T225a): the target is each customer stamp's own BFF App Service
-  # (D-12 — there is no shared Model 1 BFF). It exists only after H2a, and customer.bicep emits the grant,
-  # so this is an H2a POSTCONDITION, not a preflight: nothing runs this recipe automatically (Step 0.5b
-  # skips once_per_customer; H0 runs before the BFF exists). It is here for an operator diagnosing a
-  # H4b Kudu-log fetch failure after H2a. Id kept.
+  # RETIRED 2026-10-14 by customer-provisioning-orchestration-r1 T186. (Scope was corrected 2026-10-01 by T225a: the target is
+  # each customer stamp's own BFF App Service - there is no shared Model 1 BFF.) The grant exists only after H2a creates it
+  # (customer.bicep -> modules/customer-l2-bff-rbac.bicep, from controlPlaneUamiPrincipalId), so no recipe can hold before the
+  # run, and nothing ran it automatically (Step 0.5b skips once_per_customer; H0 runs before the BFF exists). A missing grant
+  # fails visibly in H4b (Kudu log fetch) and H9. The id is retained so that references do not dangle.
   - id: PRQ-E-05
-    name: L2 UAMI has Website Contributor on a Model 1 customer stamp's BFF App Service (for Kudu docker log fetch)
+    name: "RETIRED — L2 UAMI Website Contributor on the customer stamp's BFF App Service (an H2a postcondition; cannot be satisfied before the run)"
     scope: once_per_customer
-    frequency: once per Model 1 customer stamp (emitted by customer.bicep at H2a; Model 2 — not granted, task 249)
-    owner: Spaarke platform admin (Bicep)
-    consequence_of_absence: H4b `KuduContainerLogFetcher` cannot fetch fail-fast diagnostics on BFF boot failure — falls back to generic diagnostic + Kudu URL.
-    check_recipe:
-      cli: |
-        set -o pipefail
-        export MSYS_NO_PATHCONV=1
-        scope="/subscriptions/{stampSubscriptionId}/resourceGroups/rg-spaarke-{customerId}-{stampEnvironment}/providers/Microsoft.Web/sites/sprk-{customerId}-{stampEnvironment}-api"
-        [ -n "$scope" ] || { echo "the stamp's BFF App Service not found (scope token empty)"; exit 1; }
-        r=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "$scope" --include-inherited --query "[?roleDefinitionName=='Website Contributor'].id" -o tsv | tr -d '\r') || exit 1
-        [ -n "$r" ] || { echo "L2 UAMI {l2UamiPrincipalId} lacks 'Website Contributor' on $scope"; exit 1; }
-        echo ok
-      expect: non-empty
-    remediation: "Emitted by `customer.bicep` (`modules/customer-l2-bff-rbac.bicep`) on **Model 1** stamps — H2a sends `controlPlaneUamiPrincipalId` from the Worker setting `ControlPlaneIdentity__PrincipalObjectId` (task 249; before it the parameter was never passed, so the grant was never created). Re-run H2a if missing. Not applicable to Model 2: the stamp is in the customer's tenant, where a role assignment cannot name a Spaarke-tenant principal; L2 reaches it through its Lighthouse delegation."
-    related_findings: [T201-h4b-kudu-rbac-deferred, T225a, T249]
+    status: retired
+    retired_on: 2026-10-14
+    retired_by: customer-provisioning-orchestration-r1 T186
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None as a prerequisite. The role assignment is created BY the run: H2a deploys customer.bicep, whose
+      modules/customer-l2-bff-rbac.bicep grants the L2 UAMI Website Contributor on the stamp's BFF App Service from the
+      controlPlaneUamiPrincipalId parameter (H2a sends it from the Worker setting ControlPlaneIdentity__PrincipalObjectId).
+      The stamp BFF does not exist before H2a, so a pre-run recipe could only fail. If the grant is missing after H2a,
+      H4b's KuduContainerLogFetcher falls back to a generic diagnostic and H9 fails visibly - re-run H2a.
+    remediation: |
+      Nothing to do before the run. After H2a, if H4b/H9 report a missing Kudu/publish permission, re-run H2a (idempotent).
+    related_findings: [T201-h4b-kudu-rbac-deferred, T225a, T249, T186-L13]
 
   # RETIRED 2026-09-30 by customer-provisioning-orchestration-r1 T226.
   #
@@ -650,7 +689,7 @@ prereqs:
     scope: once_per_env
     frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
     owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
-    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4).
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, owner decision D32, applied on the Spaarke tenant 2026-10-13) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
     check_recipe:
       cli: |
         set -o pipefail
@@ -662,8 +701,8 @@ prereqs:
         [ -z "$keys" ] || { echo "app $appid holds a secret or certificate - it must hold none (D24/D25)"; exit 1; }
         echo ok
       expect: '`ok` - the app `Spaarke Exchange Admin` exists, a federated credential names the L2 Worker UAMI principal id, and the app holds NO secret or certificate. NOT asserted here (needs an interactive Exchange Online session, which Step 0.5b must not open): `Exchange.ManageAsApp` consent and, in Exchange, `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` listing `Spaarke App RBAC Admin`, `View-Only Recipients` and the four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments - H14a / H13 T4 fail loudly on first use if they are missing'
-    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role.'
-    related_findings: [T251-G30, D24, D25, D26]
+    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is the exact set the owner approved in decision D32 (applied on the Spaarke tenant 2026-10-13); apply nothing wider.'
+    related_findings: [T251-G30, D24, D25, D26, T263-D32]
 
   - id: PRQ-E-14
     name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257)
@@ -689,25 +728,22 @@ prereqs:
     related_findings: [A38a-secret-free-marker, T225b-G21, T257-registry-columns]
 
   - id: PRQ-E-13
-    name: "`sprk_dataverseenvironment` placeholder record exists for the customer (its record id is the run's `environmentId`)"
-    scope: once_per_customer # per customer being provisioned; created BEFORE POST /api/runs. The E- id is kept for reference stability. (T226: the annotated scope string failed validate.ps1; it already kept the skill from running this check, as once_per_customer does.)
-    frequency: per customer, per new run
-    owner: operator (via skill Step 1 intake — task 203 wires the create step)
-    consequence_of_absence: L2 `POST /api/runs` returns 400 (missing `environmentId`); c6-3-skill-registry-prereq.
-    check_recipe:
-      cli: |
-        set -o pipefail
-        res="{adminDvUrl}"
-        res=$(echo "$res" | sed 's#/$##')
-        tok=$(az account get-access-token --resource "$res" --query accessToken -o tsv | tr -d '\r') || exit 1
-        [ -n "$tok" ] || { echo "no Dataverse token for $res"; exit 1; }
-
-        body=$(curl -sS -f -G -H "Authorization: Bearer $tok" -H "Accept: application/json" --data-urlencode "\$filter=sprk_customerid eq '{customerId}'" --data-urlencode "\$select=sprk_dataverseenvironmentid" "$res/api/data/v9.2/sprk_dataverseenvironments") || { echo "registry query failed on $res"; exit 1; }
-        echo "$body" | grep -Eq '"sprk_dataverseenvironmentid": *"[0-9a-fA-F-]{36}"' || { echo "no sprk_dataverseenvironment row with sprk_customerid '{customerId}' on $res"; exit 1; }
-        echo ok
-      expect: "`ok` - exactly the registry row keyed by `sprk_customerid` exists on the admin env (its `sprk_dataverseenvironmentid` is the run's `environmentId`)"
-    remediation: '`pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).'
-    related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
+    name: 'RETIRED — `sprk_dataverseenvironment` placeholder record exists for the customer (the skill creates it AFTER the prerequisite pass)'
+    scope: once_per_customer
+    status: retired
+    retired_on: 2026-10-14
+    retired_by: customer-provisioning-orchestration-r1 T186
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None as a prerequisite. The /provision-environment skill Step 1f creates the placeholder registry row AFTER the
+      customer prerequisite pass and verifies it by an alternate-key round trip (the row's id is the run's environmentId),
+      so a prerequisite check for it can only fail. POST /api/runs returns 400 for a missing environmentId; the skill's
+      Step 1f guarantees one.
+    remediation: |
+      Nothing to do. See .claude/skills/provision-environment/SKILL.md Step 1f.
+    related_findings:
+      [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed, T186-L13]
 
   # ============================================================================
   # ONCE-PER-CUSTOMER (per customer stamp — validated at Step 2 preflight of each run)
@@ -825,22 +861,23 @@ prereqs:
     related_findings: [D-12, D-13, G2]
 
   - id: PRQ-C-06
-    name: Dataverse org-settings contract satisfied (maxuploadfilesize ≥ 25MB)
+    name: 'RETIRED — Dataverse org-settings contract (maxuploadfilesize ≥ 25MB) — H6 applies it itself before the import'
     scope: once_per_customer
-    frequency: per run (Step 2 preflight OR H6 pre-import)
-    owner: Spaarke platform admin (auto-applied by H6)
-    consequence_of_absence: F14 — SpaarkeMaster solution import fails 5min in on Spaarke.Controls.UniversalDocumentUpload (`Webresource content size too big`).
-    check_recipe:
-      cli: |
-        set -o pipefail
-        res=$(echo "{dvUrl}" | sed 's#/$##')
-        v=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=maxuploadfilesize" --query "value[0].maxuploadfilesize" -o tsv | tr -d '\r') || { echo "cannot read organization.maxuploadfilesize on $res"; exit 1; }
-        [ -n "$v" ] || { echo "organization.maxuploadfilesize is empty on $res"; exit 1; }
-        [ "$v" -ge 25600000 ] 2>/dev/null || { echo "maxuploadfilesize=$v is below 25600000 on $res - pac org update-settings --name maxuploadfilesize --value 25600000"; exit 1; }
-        echo ok
-      expect: '`ok` - `organization.maxuploadfilesize` is a number >= 25600000 (the 5242880 default exits 1)'
-    remediation: 'Nothing to do before the run: H6 applies it before the import (Dataverse Web API `organization` PATCH as its importer identity — T253; no pac on the Worker). By hand: `pac org update-settings --name maxuploadfilesize --value 25600000`.'
-    related_findings: [F14, T253]
+    status: retired
+    retired_on: 2026-10-14
+    retired_by: customer-provisioning-orchestration-r1 T186 (H6 applier, T253)
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. H6SolutionImportHandler applies the org-settings contract (IOrgSettingsContractApplier ->
+      DataverseWebApiOrgSettingsContractApplier: organization GET + PATCH through the Dataverse Web API, maxuploadfilesize
+      = 25600000) on every run BEFORE the solution import (step 7.6, ahead of the importer); a failure stops the run
+      Resumable (OrgSettingsContractFailed). A fresh environment's 5 MB default (F14) therefore never reaches the import,
+      and a pre-run check would fail on every new environment for a value the run sets anyway.
+    remediation: |
+      Nothing to do before the run. By hand, only to unblock an import outside the run:
+      `pac org update-settings --name maxuploadfilesize --value 25600000`.
+    related_findings: [F14, T253, T186-L13]
 
   - id: PRQ-C-07
     name: 'RETIRED — required Power Platform applications (Power BI Extensions, msft_PowerBI_Anchor)'
@@ -860,7 +897,7 @@ prereqs:
     related_findings: [F13, T253]
 
   - id: PRQ-C-08
-    name: Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (H14a)
+    name: Exchange mail-enabled security group `Spaarke-AppAccess-{customerId}` scoping the stamp identity's Exchange mailbox roles (H14a) — H14m adds the customer's shared mailbox to it (T263)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (its id is an intake value — exchangePolicyScopeGroupId)
     owner: Exchange Online admin of the stamp's tenant (the customer's for Model 2; Spaarke's for Model 1)
@@ -868,12 +905,26 @@ prereqs:
     check_recipe:
       cli: |
         set -o pipefail
-        t=$(pwsh -NoProfile -Command "Connect-ExchangeOnline -ShowBanner:\$false -ErrorAction Stop; (Get-DistributionGroup -Identity '{exchangePolicyScopeGroupId}' -ErrorAction Stop).RecipientTypeDetails" | tr -d '\r' | sed -n '$p') || { echo "Exchange Online query for '{exchangePolicyScopeGroupId}' failed"; exit 1; }
-        [ "$t" = "MailUniversalSecurityGroup" ] || { echo "group '{exchangePolicyScopeGroupId}' is '$t', not MailUniversalSecurityGroup"; exit 1; }
+        export MSYS_NO_PATHCONV=1
+        # Microsoft Graph with the operator's token (Connect-ExchangeOnline needs an interactive window, which the skill cannot open).
+        # Exchange's MailUniversalSecurityGroup is, in Graph, mailEnabled=true + securityEnabled=true + no "Unified" in groupTypes.
+        g="{exchangePolicyScopeGroupId}"
+        sel='$select=id,displayName,mailEnabled,securityEnabled,groupTypes'
+        case "$g" in
+          *@*) url="https://graph.microsoft.com/v1.0/groups?\$filter=mail%20eq%20'$g'&$sel" ;;
+          *)   url="https://graph.microsoft.com/v1.0/groups/$g?$sel" ;;
+        esac
+        json=$(az rest --method get --url "$url" -o json | tr -d ' \r\n') || { echo "group '$g' not found in this tenant (or the operator cannot read it - signed in to the stamp's tenant?)"; exit 1; }
+        n=$(echo "$json" | grep -o '"securityEnabled"' | grep -c .)
+        [ "$n" != 0 ] || { echo "group '$g' not found in this tenant"; exit 1; }
+        [ "$n" = 1 ] || { echo "more than one group matches '$g' ($n) - use the object id"; exit 1; }
+        if echo "$json" | grep -q '"groupTypes":\[[^]]*"Unified"'; then echo "group '$g' is a Microsoft 365 (Unified) group - the Exchange RBAC scope needs a mail-enabled security group (MailUniversalSecurityGroup)"; exit 1; fi
+        echo "$json" | grep -q '"mailEnabled":true' || { echo "group '$g' is not mail-enabled - it must be a mail-enabled security group (MailUniversalSecurityGroup)"; exit 1; }
+        echo "$json" | grep -q '"securityEnabled":true' || { echo "group '$g' is not security-enabled - it must be a mail-enabled security group (MailUniversalSecurityGroup)"; exit 1; }
         echo ok
-      expect: "`ok` - RecipientTypeDetails is `MailUniversalSecurityGroup`. Its members being exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox) is the Exchange admin's decision and is not asserted"
-    remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security -Members <mailboxes>` in Exchange Online PowerShell, then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. Membership is the customer''s access decision — which mailboxes the app may use — so L2 never creates or edits it (owner decision 2026-10-01, T245c).'
-    related_findings: [T245c, T4]
+      expect: "`ok` - exactly one group (found by its email address, or by object id), `mailEnabled` = true, `securityEnabled` = true and `Unified` not in `groupTypes` - Microsoft Graph's view of Exchange's `MailUniversalSecurityGroup`. Its Name must be `Spaarke-AppAccess-{customerId}` (H14m refuses any other name - another customer's group - with Drift, nothing changed; T263). Which OTHER mailboxes are members is the customer's decision and is not asserted"
+    remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security` in Exchange Online PowerShell (members optional), then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. The name is binding since T263. H14m adds exactly one member - the customer''s shared mailbox `sprk-{customerId}-mail` at the intake communicationDefaultMailbox address (owner decision 2026-10-10, #1562); L2 never adds any other member and never removes one. Any other mailbox Spaarke may use is still the customer''s decision (owner decision 2026-10-01, T245c).'
+    related_findings: [T245c, T4, T263]
 
   - id: PRQ-C-09
     name: The customer's Dataverse environment exists (the operator creates it) and the L2 Worker identity is its System Administrator application user
@@ -912,8 +963,9 @@ prereqs:
     check_recipe:
       cli: |
         set -o pipefail
-        out=$(az rest --method get --url "https://graph.microsoft.com/v1.0/groups/{environmentSecurityGroupId}?\$select=displayName,securityEnabled" --query "[displayName,securityEnabled]" -o tsv | tr -d '\r') || { echo "cannot read group {environmentSecurityGroupId} (signed in to the stamp's tenant?)"; exit 1; }
-        name=$(echo "$out" | cut -f1); sec=$(echo "$out" | cut -f2 | tr 'A-Z' 'a-z')
+        # az 2.77 prints a list projection as one value per LINE and a dict projection as one tab-separated row: split on both.
+        out=$(az rest --method get --url "https://graph.microsoft.com/v1.0/groups/{environmentSecurityGroupId}?\$select=displayName,securityEnabled" --query "{n:displayName,s:securityEnabled}" -o tsv | tr -d '\r' | tr '\t' '\n') || { echo "cannot read group {environmentSecurityGroupId} (signed in to the stamp's tenant?)"; exit 1; }
+        name=$(echo "$out" | sed -n 1p); sec=$(echo "$out" | sed -n 2p | tr 'A-Z' 'a-z')
         [ "$name" = "sprk-{customerId}-users" ] || { echo "group is '$name', must be sprk-{customerId}-users"; exit 1; }
         [ "$sec" = true ] || { echo "group sprk-{customerId}-users is not security-enabled"; exit 1; }
         echo ok
@@ -935,21 +987,32 @@ prereqs:
     check_recipe:
       cli: |
         set -o pipefail
-        out=$(pac licensing get-environment-billing-policy --environment "{dvUrl}" 2>&1) || { echo "pac licensing failed: $out"; exit 1; }
-        echo "$out" | grep -qi "{stampSubscriptionId}" || { echo "billing policy output does not name the stamp subscription {stampSubscriptionId}:"; echo "$out"; exit 1; }
-        echo "$out" | grep -qw "Enabled" || { echo "billing policy is not shown as Enabled:"; echo "$out"; exit 1; }
-        echo ok
-      expect: "`ok` - the environment's billing policy output names the stamp subscription {stampSubscriptionId} and shows `Enabled` (the output shape of this preview command is not yet verified live - T186; anchor to the status field once it is); cross-check with `pac licensing list-billing-policies`"
+        export MSYS_NO_PATHCONV=1
+        res=$(echo "{dvUrl}" | sed 's#/$##')
+        env=$(az rest --method get --resource https://service.powerapps.com/ --url "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2021-04-01" --query "value[?properties.linkedEnvironmentMetadata.instanceUrl=='$res/'].name | [0]" -o tsv | tr -d '\r') || { echo "cannot list Power Platform environments (is the operator a Power Platform admin?)"; exit 1; }
+        [ -n "$env" ] || { echo "no Power Platform environment has the URL $res/"; exit 1; }
+        ids=$(az rest --method get --resource https://api.powerplatform.com --url "https://api.powerplatform.com/licensing/billingPolicies?api-version=2024-10-01" --query "value[?status=='Enabled' && billingInstrument.subscriptionId=='{stampSubscriptionId}'].id" -o tsv | tr -d '\r') || { echo "cannot list billing policies"; exit 1; }
+        [ -n "$ids" ] || { echo "no Enabled pay-as-you-go billing policy on subscription {stampSubscriptionId}"; exit 1; }
+        for id in $ids; do
+          if az rest --method get --resource https://api.powerplatform.com --url "https://api.powerplatform.com/licensing/billingPolicies/$id/environments/$env?api-version=2024-10-01" -o none 2>/dev/null; then echo ok; exit 0; fi
+        done
+        echo "environment $env ($res) is linked to no Enabled billing policy on subscription {stampSubscriptionId}"; exit 1
+      expect: '`ok` - an Enabled billing policy whose billingInstrument.subscriptionId is the stamp subscription {stampSubscriptionId} has the environment linked (Power Platform API licensing/billingPolicies, api-version 2024-10-01 GA; verified live at T186 2026-10-14). Not `pac licensing`: those commands are preview and absent from pac 1.46.1'
     remediation: |
-      Power Platform admin center → Billing → Billing policies → New billing policy: name `sprk-{customerId}-payg`, the
-      customer's stamp subscription {stampSubscriptionId} and its stamp resource group, region = the environment's
-      region; then add the environment to the policy (Billing policies → the policy → Add environments). Linking makes
-      it a Managed Environment. Meter: Power Apps per app — billed per ACTIVE user per app per month (Microsoft Learn
-      "Pay-as-you-go meters").
+      1. Resource group for the policy's Azure resource (Microsoft.PowerPlatform/accounts), created BEFORE the run — the
+         stamp resource group rg-spaarke-{customerId}-{env} does not exist until H2a, and a policy must not live in a
+         group whose lifecycle is the stamp's: `az group create --name rg-ppbilling-{customerId} --location <stamp
+         region> --subscription {stampSubscriptionId}` (the name is outside the rg-spaarke-* pattern, so the
+         subscription-dedication check ignores it). Microsoft.PowerPlatform must be Registered on the subscription.
+      2. Power Platform admin center → Licensing → Pay-as-you-go plans (older UI: Billing → Billing policies) → New:
+         name `Spaarke{CustomerId}PayG` (e.g. SpaarkeAcmePayG — the admin center refuses `-` in the name, T186); subscription {stampSubscriptionId}; resource group rg-ppbilling-{customerId};
+         region = the environment's region (e.g. United States); select the customer's environment. Linking makes it a
+         Managed Environment. Meter: Power Apps per app — billed per ACTIVE user per app per month (Microsoft Learn
+         "Pay-as-you-go meters").
     related_findings: [T232, D2, G10]
 
   - id: PRQ-C-12
-    name: Guest access is allowed in the customer's Dataverse environment (organization.restrictguestuseraccess = false)
+    name: Guest access is allowed in the customer's Dataverse environment (organization.restrictGuestUserAccess = false)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (new environments default to restricted)
     owner: Spaarke platform admin (System Administrator of the environment)
@@ -958,15 +1021,15 @@ prereqs:
       cli: |
         set -o pipefail
         res=$(echo "{dvUrl}" | sed 's#/$##')
-        v=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv | tr -d '\r' | tr 'A-Z' 'a-z') || { echo "cannot read organization.restrictguestuseraccess on $res"; exit 1; }
-        [ "$v" = false ] || { echo "restrictguestuseraccess='$v' on $res (must be false)"; exit 1; }
+        v=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=restrictGuestUserAccess" --query "value[0].restrictGuestUserAccess" -o tsv | tr -d '\r' | tr 'A-Z' 'a-z') || { echo "cannot read organization.restrictGuestUserAccess on $res"; exit 1; }
+        [ "$v" = false ] || { echo "restrictGuestUserAccess='$v' on $res (must be false)"; exit 1; }
         echo ok
       expect: '`false`'
     remediation: |
       As the operator (System Administrator of the environment), PATCH the organization row:
         res=$(echo "{dvUrl}" | sed 's#/$##')
         org=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=organizationid" --query "value[0].organizationid" -o tsv)
-        az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictguestuseraccess": false}' --headers "Content-Type=application/json"
+        az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictGuestUserAccess": false}' --headers "Content-Type=application/json"
       then re-run the check. L2 never changes it (an environment-wide access decision).
     related_findings: [T232, D2, G10]
 

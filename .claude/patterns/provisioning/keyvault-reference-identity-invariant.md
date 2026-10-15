@@ -17,7 +17,7 @@ Load this pattern when:
 
 1. `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` § F16 / F16b / F16.5 — three sub-facets of the T1 trap.
 2. `projects/customer-provisioning-orchestration-r1/design.md` § 4B trap catalog T1 — the design-level statement of the invariant.
-3. `docs/guides/PROVISIONING-PREREQUISITES.md` PRQ-E-05 (Website Contributor on target BFF App Service), PRQ-E-10 (KV Secrets User on shared KV).
+3. `docs/guides/PROVISIONING-PREREQUISITES.md` PRQ-E-10 (KV Secrets User on shared KV). Website Contributor on the stamp BFF is granted by H2a (`infrastructure/bicep/modules/customer-l2-bff-rbac.bicep`); PRQ-E-05 is retired (T186).
 4. `infrastructure/bicep/modules/app-service.bicep` — post-Phase C UAMI refactor. Must consume `uami.outputs.principalId` for role assignments and `uami.outputs.resourceId` for `keyVaultReferenceIdentity`.
 5. `infrastructure/bicep/modules/app-service-slot.bicep` — slot-level parity; same UAMI + same `keyVaultReferenceIdentity` for both prod and staging slots.
 

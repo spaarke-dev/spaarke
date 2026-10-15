@@ -678,8 +678,8 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
   "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
   "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
-  "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
-  "communicationDefaultMailbox": "legal-comms@acme.example"
+  "exchangePolicyScopeGroupId": "Spaarke-AppAccess-acme@spaarke.onmicrosoft.com",
+  "communicationDefaultMailbox": "acme@spaarke.onmicrosoft.com"
 }
 ```
 
@@ -984,8 +984,8 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case. **`Model1` takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`); this step sets it for a Model 1 run |
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
-| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
-| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run, named `Spaarke-AppAccess-{customerId}` — prerequisite `PRQ-C-08`.** H14m adds exactly one member, the customer's shared mailbox (T263); every other member is the customer's decision. |
+| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`); H14m | `local@domain.tld`, ≤ 254 characters — the address of the Spaarke-tenant shared mailbox H14m CREATES (T263): an accepted domain of Spaarke's tenant (e.g. `acme@spaarke.onmicrosoft.com`), not in use by any other mailbox (that quarantines the run) |
 | `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
 | `customerOutboundB2BAttested` | PRQ-C-14 (skill-local) | B2BGuest: `true` only after the customer's Entra admin confirmed outbound B2B collaboration to Spaarke's tenant; never sent to L2 |
@@ -1117,27 +1117,41 @@ if ($identityPreset -ceq 'B2BGuest') {
   }
 
   # PRQ-C-12: guests may use the environment.
-  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv
-  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictguestuseraccess failed (az output above).'; exit 1 }
+  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictGuestUserAccess" --query "value[0].restrictGuestUserAccess" -o tsv
+  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictGuestUserAccess failed (az output above).'; exit 1 }
   if ($restricted -ne 'false') {
-    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictguestuseraccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
+    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictGuestUserAccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
     exit 1
   }
 
-  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription. The command is preview and its output shape is not yet
-  # verified live (T186), so the text must name the stamp subscription AND `Enabled` (case-sensitive): batch stops when
-  # either is absent; interactive always asks. Anchor to the status field once T186 shows the shape (K3).
-  $billing = pac licensing get-environment-billing-policy --environment $dataverseEnvUrl 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-11): pac licensing failed:`n$billing"; exit 1 }
-  Write-Host "PRQ-C-11 — billing policy of the environment:`n$billing" -ForegroundColor Cyan
-  $stampSub = ([guid]$subscriptionId).ToString('D')   # pac prints the hyphenated form
-  $billingOk = $billing -match [regex]::Escape($stampSub) -and $billing -cmatch '\bEnabled\b'
-  if ($script:SkipInteractiveIntake) {
-    if (-not $billingOk) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy is not shown as Enabled on the stamp subscription $stampSub — link it to an enabled pay-as-you-go policy on that subscription first."; exit 1 }
-  } else {
-    $payg = Read-Host "Is the policy above Enabled and on the stamp subscription $stampSub? (yes/no)"
-    if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to an enabled pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
+  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription — an Enabled billing policy whose billingInstrument is the
+  # stamp subscription has this environment linked. Power Platform API licensing/billingPolicies, api-version 2024-10-01
+  # (GA; verified live at T186 2026-10-14). Not `pac licensing`: preview, and absent from pac 1.46.1 (T186 L12).
+  $stampSub = ([guid]$subscriptionId).ToString('D')
+  $plToken = az account get-access-token --resource 'https://api.powerplatform.com' --query accessToken -o tsv
+  if ($LASTEXITCODE -ne 0 -or -not $plToken) { Write-Error '[skill] HARD STOP (PRQ-C-11): az could not get a Power Platform API token (az output above).'; exit 1 }
+  $plHeaders = @{ Authorization = "Bearer $plToken" }
+  try {
+    $policies = @((Invoke-RestMethod -Headers $plHeaders -Uri 'https://api.powerplatform.com/licensing/billingPolicies?api-version=2024-10-01').value |
+      Where-Object { $_.status -ceq 'Enabled' -and "$($_.billingInstrument.subscriptionId)" -eq $stampSub })
+  } catch {
+    Write-Error "[skill] HARD STOP (PRQ-C-11): listing billing policies failed — $($_.Exception.Message). The operator must be a Power Platform admin."
+    exit 1
   }
+  $linkedPolicy = $null
+  foreach ($p in $policies) {
+    try {
+      Invoke-RestMethod -Headers $plHeaders -Uri "https://api.powerplatform.com/licensing/billingPolicies/$($p.id)/environments/$ppEnvId`?api-version=2024-10-01" | Out-Null
+      $linkedPolicy = $p; break
+    } catch {
+      if ($_.Exception.Response.StatusCode.value__ -ne 404) { Write-Error "[skill] HARD STOP (PRQ-C-11): reading policy $($p.name) failed — $($_.Exception.Message)"; exit 1 }
+    }
+  }
+  if (-not $linkedPolicy) {
+    Write-Error "[skill] HARD STOP (PRQ-C-11): environment $ppEnvId ($dvRes) is linked to no Enabled pay-as-you-go billing policy on the stamp subscription $stampSub ($($policies.Count) Enabled on it). Link it per prereqs.yaml PRQ-C-11, then rerun."
+    exit 1
+  }
+  Write-Host "PRQ-C-11 OK — billing policy '$($linkedPolicy.name)' (Enabled, subscription $stampSub) has the environment linked." -ForegroundColor Green
 }
 
 while ([string]::IsNullOrWhiteSpace($exchangePolicyScopeGroupId)) {
@@ -1192,7 +1206,7 @@ if (-not $SkipStep0_5) {
 }
 ```
 
-Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
+Recipes that need the customer's subscription (PRQ-S-*, PRQ-C-03, PRQ-C-11) run with the operator's az
 sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
 `spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
 "group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
@@ -1201,7 +1215,7 @@ sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-0
 
 The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
 
-**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`, `spaarke-demo` for `environment=demo`. Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
+**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`. No registry env exists for `environment=demo`: the old `spaarke-demo` environment was retired 2026-10-14 (D35), and the demo is now the ACME stamp, which this skill provisions on the dev control plane (registry `spaarkedev1`). Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
 
 **Preferred path — Dataverse MCP** (`mcp__dataverse__create_record`). The payload MUST include the 4 NOT-NULL fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`) OR Dataverse returns 400. Registry columns added in task 023 (deployed 2026-08-26 SESSION 13) + `sprk_customerid` added by companion `scripts/Add-CustomerIdColumn.ps1` (task 199 reconciliation) provide the remaining fields.
 
@@ -1254,7 +1268,7 @@ $environmentId = pac data create --entity sprk_dataverseenvironment `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
-Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — belt-and-suspenders since PRQ-E-13 was deleted from prereqs.yaml; the placeholder-record-exists check now lives here exclusively):
+Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — PRQ-E-13 is retired in prereqs.yaml because this step creates the row after the customer pass (T186 L13), so the placeholder-record-exists check lives here exclusively):
 
 ```powershell
 if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {
@@ -1312,9 +1326,8 @@ INTAKE SUMMARY
   identityPreset:  B2BGuest
   users:           3 entries          (names/emails are NOT printed or written to intake.md)
   env group:       6f1c2b3a-...  sprk-acme-users  (PRQ-C-10; guest access PRQ-C-12 ✓; PAYG PRQ-C-11 confirmed)
-  exchange group:  spaarke-mail-scope@acme.example  (PRQ-C-08)
-  graph resources: communication=users/legal-comms@acme.example/messages  email=(none)
-  default mailbox: legal-comms@acme.example
+  exchange group:  Spaarke-AppAccess-acme@spaarke.onmicrosoft.com  (PRQ-C-08)
+  default mailbox: acme@spaarke.onmicrosoft.com  (H14m creates it as sprk-acme-mail)
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)

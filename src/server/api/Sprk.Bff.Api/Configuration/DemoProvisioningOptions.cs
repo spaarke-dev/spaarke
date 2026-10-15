@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Configuration;
 /// Bound from appsettings.json section "DemoProvisioning".
 /// Per-environment config is resolved via <see cref="DataverseEnvironmentRecord"/> /
 /// DataverseEnvironmentService (sprk_dataverseenvironment Dataverse entity) — see
-/// DemoExpirationService.ResolveDefaultEnvironmentAsync and RegistrationEndpoints.
+/// DemoExpirationService.ResolveTargetEnvironmentAsync and RegistrationEndpoints.
 /// </summary>
 public class DemoProvisioningOptions
 {
@@ -51,7 +51,7 @@ public class DemoEnvironmentConfig
     public required string Name { get; set; }
 
     /// <summary>
-    /// Dataverse environment URL (e.g., "https://spaarke-demo.crm.dynamics.com").
+    /// Dataverse environment URL (e.g., "https://myenv.crm.dynamics.com").
     /// </summary>
     [Required]
     [Url]

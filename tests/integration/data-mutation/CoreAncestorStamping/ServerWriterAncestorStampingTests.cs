@@ -169,6 +169,57 @@ public class ServerWriterAncestorStampingTests
         recordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact(DisplayName = "Task 141 review F1: a sprk_recordtype_ref read that FAULTS is not 'no catalog row' — TaskActionCore creates no task (the degraded-success Guid.Empty its stamp failure already returns), never an untyped one")]
+    public async Task CreateTask_WhenTheRecordTypeCatalogReadFaults_ReturnsEmptyAndNeverCreatesTheEvent()
+    {
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        var recordTypes = new Mock<ICommunicationDataverseService>();
+        recordTypes
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("429: too many requests"));
+
+        var id = await new TaskActionCore(
+                entityService.Object,
+                CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                recordTypes.Object,
+                NullLogger.Instance)
+            .CreateAsync(new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null), CancellationToken.None);
+
+        id.Should().Be(Guid.Empty, "every caller already reads Guid.Empty as 'not created' (422, retry, or a logged degrade)");
+        created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 141 review F1: a caller cancellation during the sprk_recordtype_ref read propagates as itself, not as a degraded Guid.Empty")]
+    public async Task CreateTask_WhenCancelledDuringTheRecordTypeCatalogRead_PropagatesTheCancellation()
+    {
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        using var cts = new CancellationTokenSource();
+        var recordTypes = new Mock<ICommunicationDataverseService>();
+        recordTypes
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                cts.Cancel();
+                return Task.FromException<Entity?>(new OperationCanceledException(cts.Token));
+            });
+
+        var act = async () => await new TaskActionCore(
+                entityService.Object,
+                CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                recordTypes.Object,
+                NullLogger.Instance)
+            .CreateAsync(new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        created.Should().BeEmpty();
+    }
+
     // The regarding NAME is for display only, so reading it must never cost the task (TaskActionCore.ReadRegardingNameAsync,
     // owner round 8 item 2). Each of its three non-happy branches is pinned below.
 

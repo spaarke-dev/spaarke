@@ -250,7 +250,7 @@ Options class: `EmailProcessingOptions` (`Configuration/EmailProcessingOptions.c
 |---------|---------|----------|-------------|
 | `Email:Enabled` | `true` | Env Var | Master switch |
 | `EmailProcessing:DefaultContainerId` | -- | App setting (stamps: H4b, from H8's container — T227c) | SPE container ID for email docs (`Email:DefaultContainerId` was never read) |
-| `SharePointEmbedded:OwnedContainerIds` | -- | App setting (operator; dev/demo only) | Comma-separated SPE containers this environment owns that predate the ownership marker (T227d). App-only SPE calls on any container that is neither configured nor marked `spaarkeCustomerId` = `Customer:Id` are refused (404 `spe_container_not_owned`). Stamps never set it. |
+| `SharePointEmbedded:OwnedContainerIds` | -- | App setting (operator; dev/demo only) | Comma-separated SPE containers this environment owns that predate the ownership marker (T227d). App-only SPE calls on any container that is neither configured nor marked `spaarkeCustomerId` = `Customer:Id` are refused (404 `spe_container_not_owned`). Stamps never set it. Prefer marking the containers with `Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId <Customer:Id>` (issue #1889) to listing their ids here. |
 | `Email:ProcessInbound` | `true` | appsettings | Process received emails |
 | `Email:ProcessOutbound` | `true` | appsettings | Process sent emails |
 | `Email:MaxAttachmentSizeMB` | `25` | appsettings | Max per-attachment size |

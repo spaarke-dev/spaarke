@@ -15,16 +15,15 @@ Requires:
 - powershell-yaml module (auto-installed if missing)
 
 .PARAMETER Environment
-The environment to validate (dev | demo). Defaults to dev.
+The environment to validate (dev). Defaults to dev. The old demo environment was retired 2026-10-14.
 
 .EXAMPLE
 ./scripts/Validate-Manifest.ps1
-./scripts/Validate-Manifest.ps1 -Environment demo
 #>
 
 [CmdletBinding()]
 param(
-    [ValidateSet('dev', 'demo')]
+    [ValidateSet('dev')]
     [string]$Environment = 'dev',
 
     [string]$ManifestPath = 'config/spaarke-resources.yaml'

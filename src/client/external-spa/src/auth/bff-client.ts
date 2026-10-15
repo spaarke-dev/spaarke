@@ -57,6 +57,7 @@
 
 import { acquireActiveBffToken, type BffTokenAcquireOptions } from './msal-auth';
 import { bffRequestUrl, getActiveBackend } from './backend-selection';
+import { INVITE_CODE_HEADER, clearInviteCode, inviteCodeFor } from './invite-code';
 import { ApiError } from '../types';
 import { getMockResponse } from '../mocks/mock-service';
 import { isDevMockEnabled } from '../dev-mock';
@@ -245,16 +246,20 @@ async function authorizedFetch(
   // Passed only when set, so the default call shapes (`acquire(backend)`, `acquire(backend, { forceRefresh: true })`) stay.
   const noInteraction = auth?.noInteraction ? ({ noInteraction: true } as const) : undefined;
 
+  // Task 185: the invite code captured from the invite link (invite-code.ts), sent until the first CIAM-plane 2xx.
+  const inviteCode = inviteCodeFor(backend);
+
   const token = await acquireActiveBffToken(backend, noInteraction);
-  const response = await executeFetch(url, options, token);
+  let response = await executeFetch(url, options, token, inviteCode);
 
   // On 401, force a NETWORK refresh (MSAL redeems the refresh token, or redirects) and retry once. Without
   // `forceRefresh` MSAL would return the cached access token the BFF just refused: the same 401, a sign-in loop.
   if (response.status === 401) {
     const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true, ...noInteraction });
-    return executeFetch(url, options, freshToken);
+    response = await executeFetch(url, options, freshToken, inviteCode);
   }
 
+  if (inviteCode && response.ok) clearInviteCode();
   return response;
 }
 
@@ -266,13 +271,19 @@ async function authorizedFetch(
  * outside `authenticatedFetch.ts` will allowlist this path because the
  * external SPA is out of scope for `@spaarke/auth` (see file header).
  */
-async function executeFetch(url: string, options: RequestInit, token: string): Promise<Response> {
+async function executeFetch(
+  url: string,
+  options: RequestInit,
+  token: string,
+  inviteCode: string | null = null
+): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     // Auth v2 (D-AUTH-7): External SPA uses sessionStorage MSAL (B2B threat
     // model) — opts out of @spaarke/auth's authenticatedFetch. This is the
     // single allowlisted Bearer-literal site for this surface.
     Authorization: `Bearer ${token}`,
+    ...(inviteCode ? { [INVITE_CODE_HEADER]: inviteCode } : {}),
     ...(options.headers as Record<string, string> | undefined),
   };
 

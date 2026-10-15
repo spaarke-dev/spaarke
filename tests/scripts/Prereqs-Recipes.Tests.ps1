@@ -19,6 +19,9 @@ $script:ManifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs
 $script:Validate = Join-Path $repoRoot 'scripts/provisioning-prereqs/validate.ps1'
 $script:Catalog = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/PinnedModelCatalog.cs'
 $script:GraphRoles = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs'
+$script:Dedication = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/SubscriptionDedication.cs'
+$script:ReadinessOptions = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/SubscriptionReadinessOptions.cs'
+$script:CustomerBicep = Join-Path $repoRoot 'infrastructure/bicep/customer.bicep'
 
 if (-not (Get-Module -ListAvailable -Name powershell-yaml)) { Install-Module powershell-yaml -Scope CurrentUser -Force -Confirm:$false | Out-Null }
 Import-Module powershell-yaml
@@ -116,7 +119,66 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
     BeforeEach { $script:Dir = New-FakeTools }
     AfterEach { Remove-Item -Recurse -Force $script:Dir -ErrorAction SilentlyContinue }
 
-    Context 'PRQ-S-03 provider registration (T206: the loop used to exit 0 on a partial registration)' {
+    Context 'PRQ-S-00 dedicated subscription (T186: it refused ANY rg-spaarke-* group; H1 counts only rg-spaarke-{id}-{env} of another id)' {
+        BeforeEach { $script:S00Names = { param($n) Set-Rules $script:Dir az @(@('account show', '0', 'Enabled\r\n'), @('group list', '0', $n)) } }
+        It 'exits 0 for an empty subscription, and for a group that is not rg-spaarke-{id}-{env} (rg-spaarke-demo, unrelated groups)' {
+            & $script:S00Names ''
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 0
+            & $script:S00Names 'rg-spaarke-demo\r\nrg-ppbilling-acme\r\nNetworkWatcherRG\r\nrg-spaarke-ab-dev\r\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 0
+        }
+        It 'exits 0 for the customer''s own stamp group, whatever the case or env' {
+            & $script:S00Names 'rg-spaarke-acme-dev\r\nRG-Spaarke-ACME-prod\r\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 0
+        }
+        It 'exits 1 and names another customer''s stamp group' {
+            & $script:S00Names 'rg-spaarke-demo\r\nrg-spaarke-other-prod\r\n'
+            $r = Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'rg-spaarke-other-prod'
+            $r.Output | Should Not Match 'rg-spaarke-demo'
+        }
+        It 'exits 1 for Spaarke''s own reserved ids (platform, shared, byok) - foreign to any customer' {
+            & $script:S00Names 'rg-spaarke-platform-dev\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 1
+            & $script:S00Names 'rg-spaarke-shared-prod\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 for an id that merely starts with the customerId (acmeco, acme0), as H1 compares the whole id' {
+            & $script:S00Names 'rg-spaarke-acmeco-prod\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 1
+            & $script:S00Names 'rg-spaarke-acme0-dev\n'
+            (Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 when the subscription is not Enabled' {
+            Set-Rules $script:Dir az @(@('account show', '0', 'Disabled\n'), @('group list', '0', ''))
+            $r = Invoke-Recipe 'PRQ-S-00' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not Enabled'
+        }
+    }
+
+    Context 'PRQ-S-01 billing agreement (T186: az account show returns no quotaId on az 2.77; ARM does)' {
+        It 'exits 0 and prints the quotaId read from ARM' {
+            Set-Rules $script:Dir az @(, @('api-version=2022-12-01', '0', 'PayAsYouGo_2014-09-01\r\n'))
+            $r = Invoke-Recipe 'PRQ-S-01' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'ok quotaId=PayAsYouGo_2014-09-01'
+            $calls = Get-Content (Join-Path $script:Dir 'calls.log') -Raw
+            $calls | Should Match 'az rest --method get --url https://management.azure.com/subscriptions/44444444-4444-4444-4444-444444444444\?api-version=2022-12-01 --query subscriptionPolicies.quotaId'
+            $calls | Should Not Match 'account show'
+        }
+        It 'exits 1 when ARM returns no quotaId' {
+            Set-Rules $script:Dir az @(, @('api-version=2022-12-01', '0', ''))
+            (Invoke-Recipe 'PRQ-S-01' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 when the ARM call fails' {
+            Set-Rules $script:Dir az @(, @('api-version=2022-12-01', '1', ''))
+            (Invoke-Recipe 'PRQ-S-01' $script:Common $script:Dir).Exit | Should Be 1
+        }
+    }
+
+    Context 'PRQ-S-03 provider registration (T206: the loop used to exit 0 on a partial registration; T186: the list is the stamp template''s plus H1''s)' {
         It 'exits 0 when every namespace is Registered' {
             Set-Rules $script:Dir az @(, @('provider show', '0', 'Registered\r\n'))
             (Invoke-Recipe 'PRQ-S-03' $script:Common $script:Dir).Exit | Should Be 0
@@ -126,6 +188,19 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
             $r = Invoke-Recipe 'PRQ-S-03' $script:Common $script:Dir
             $r.Exit | Should Be 1
             $r.Output | Should Match 'Microsoft.Cache'
+        }
+        It 'exits 1 for each of EventGrid, SignalRService, Communication and OperationalInsights when it alone is not registered' {
+            foreach ($ns in 'Microsoft.EventGrid', 'Microsoft.SignalRService', 'Microsoft.Communication', 'Microsoft.OperationalInsights') {
+                Set-Rules $script:Dir az @(@("namespace $ns ", '0', 'NotRegistered\n'), @('provider show', '0', 'Registered\n'))
+                $r = Invoke-Recipe 'PRQ-S-03' $script:Common $script:Dir
+                $r.Exit | Should Be 1
+                $r.Output | Should Match ([regex]::Escape("NOT_REGISTERED: $ns"))
+            }
+        }
+        It 'does not ask about Microsoft.ContainerRegistry (no customer stamp deploys it) or Microsoft.ManagedServices (Model 2 Lighthouse)' {
+            Set-Rules $script:Dir az @(@('namespace Microsoft.ContainerRegistry ', '0', 'NotRegistered\n'), @('namespace Microsoft.ManagedServices ', '0', 'NotRegistered\n'), @('provider show', '0', 'Registered\n'))
+            (Invoke-Recipe 'PRQ-S-03' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Not Match 'ContainerRegistry|ManagedServices'
         }
     }
 
@@ -281,25 +356,103 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
-    Context 'PRQ-C-06 maxuploadfilesize (the 5 MB default broke the SpaarkeMaster import, F14)' {
-        It 'exits 1 on the 5 MB default' {
-            Set-Rules $script:Dir az @(, @('maxuploadfilesize', '0', '5242880\n'))
-            (Invoke-Recipe 'PRQ-C-06' $script:Common $script:Dir).Exit | Should Be 1
+    # PRQ-C-06 (maxuploadfilesize >= 25 MB) retired by T186 (2026-10-14): H6 applies the org-settings contract itself before the
+    # import (H6SolutionImportHandler step 7.6; the 'retired entries' Context below proves the entry carries no recipe).
+    # PRQ-C-07 (required applications) retired by T253 (2026-10-08): H6 installs no application;
+    # SpaarkeMasterApplicationDependencyTests guards the package instead.
+
+    Context 'PRQ-C-08 Exchange scope group, read through Microsoft Graph (T186: Connect-ExchangeOnline needs an interactive window)' {
+        BeforeEach {
+            $script:Grp = {
+                param([bool]$MailEnabled = $true, [bool]$SecurityEnabled = $true, [string[]]$Types = @())
+                $o = [ordered]@{ id = '50327bb8-2598-4092-9f90-ba5731df2e42'; displayName = 'Spaarke-AppAccess-acme'; mailEnabled = $MailEnabled; securityEnabled = $SecurityEnabled; groupTypes = @($Types) }
+                ($o | ConvertTo-Json -Compress -Depth 4) -replace ',', ',\r\n  '
+            }
+            $script:WithGroup = { param([string]$Id) $t = $script:Common.Clone(); $t['exchangePolicyScopeGroupId'] = $Id; $t }
+            $script:AsList = { param([string[]]$Groups) '{\r\n  "value": [' + ($Groups -join ',\r\n') + ']\r\n}\r\n' }
         }
-        It 'exits 1 when the value cannot be read' {
-            Set-Rules $script:Dir az @(, @('maxuploadfilesize', '1', ''))
-            (Invoke-Recipe 'PRQ-C-06' $script:Common $script:Dir).Exit | Should Be 1
+        It 'exits 0 for the email address when exactly one mail-enabled security group matches (looked up with $filter=mail eq)' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @(& $script:Grp))))
+            (Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match 'groups\?\$filter=mail%20eq%20''scope@acme.example'''
         }
-        It 'exits 0 at 26214400 and at exactly 25600000' {
-            Set-Rules $script:Dir az @(, @('maxuploadfilesize', '0', '26214400\r\n'))
-            (Invoke-Recipe 'PRQ-C-06' $script:Common $script:Dir).Exit | Should Be 0
-            Set-Rules $script:Dir az @(, @('maxuploadfilesize', '0', '25600000\n'))
-            (Invoke-Recipe 'PRQ-C-06' $script:Common $script:Dir).Exit | Should Be 0
+        It 'exits 0 for the object id (GET groups/{id})' {
+            Set-Rules $script:Dir az @(, @('groups/50327bb8', '0', ((& $script:Grp) + '\r\n')))
+            (Invoke-Recipe 'PRQ-C-08' (& $script:WithGroup '50327bb8-2598-4092-9f90-ba5731df2e42') $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match 'v1.0/groups/50327bb8-2598-4092-9f90-ba5731df2e42\?'
+        }
+        It 'never starts an Exchange Online session' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @(& $script:Grp))))
+            Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir | Out-Null
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Not Match 'pwsh|Connect-ExchangeOnline'
+        }
+        It 'exits 1 when no group has the address' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', '{\r\n  "value": []\r\n}\r\n'))
+            $r = Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not found'
+        }
+        It 'exits 1 when the object id does not exist (Graph 404)' {
+            Set-Rules $script:Dir az @(, @('groups/', '1', ''))
+            $r = Invoke-Recipe 'PRQ-C-08' (& $script:WithGroup '50327bb8-2598-4092-9f90-ba5731df2e42') $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not found'
+        }
+        It 'exits 1 when more than one group has the address' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @((& $script:Grp), (& $script:Grp)))))
+            $r = Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'more than one'
+        }
+        It 'exits 1 for a Microsoft 365 (Unified) group - Exchange RBAC scopes only to a mail-enabled security group' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @(& $script:Grp -Types @('Unified')))))
+            $r = Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'Unified'
+        }
+        It 'exits 1 for a group that is not mail-enabled' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @(& $script:Grp -MailEnabled $false))))
+            $r = Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not mail-enabled'
+        }
+        It 'exits 1 for a group that is not security-enabled (a distribution list)' {
+            Set-Rules $script:Dir az @(, @('groups?', '0', (& $script:AsList @(& $script:Grp -SecurityEnabled $false))))
+            $r = Invoke-Recipe 'PRQ-C-08' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not security-enabled'
         }
     }
 
-    # PRQ-C-07 (required applications) retired by T253 (2026-10-08): H6 installs no application;
-    # SpaarkeMasterApplicationDependencyTests guards the package instead.
+    Context 'PRQ-C-10 environment security group (T186: a list projection prints two LINES on az 2.77)' {
+        It 'exits 0 for the one tab-separated row of the dict projection, and uses that projection' {
+            Set-Rules $script:Dir az @(, @('groups/55555555', '0', 'sprk-acme-users\ttrue\r\n'))
+            (Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match '--query \{n:displayName,s:securityEnabled\}'
+        }
+        It 'exits 0 when az prints the two values on two lines (the shape that made the old recipe refuse the right group)' {
+            Set-Rules $script:Dir az @(, @('groups/55555555', '0', 'sprk-acme-users\r\nTrue\r\n'))
+            (Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir).Exit | Should Be 0
+        }
+        It 'exits 1 for another customer''s group, naming it' {
+            Set-Rules $script:Dir az @(, @('groups/55555555', '0', 'sprk-other-users\ttrue\n'))
+            $r = Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'sprk-other-users'
+        }
+        It 'exits 1 for the right name when the group is not security-enabled, in either output shape' {
+            Set-Rules $script:Dir az @(, @('groups/55555555', '0', 'sprk-acme-users\tfalse\n'))
+            (Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir).Exit | Should Be 1
+            Set-Rules $script:Dir az @(, @('groups/55555555', '0', 'sprk-acme-users\nfalse\n'))
+            $r = Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not security-enabled'
+        }
+        It 'exits 1 when the group cannot be read' {
+            Set-Rules $script:Dir az @(, @('groups/55555555', '1', ''))
+            (Invoke-Recipe 'PRQ-C-10' $script:Common $script:Dir).Exit | Should Be 1
+        }
+    }
 
     Context 'PRQ-C-09 operator-created environment' {
         It 'exits 1 when the L2 identity is not an application user (no parenthesis in the az query)' {
@@ -312,11 +465,37 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-C-11 pay-as-you-go billing (T186 L12: Power Platform API 2024-10-01, not preview pac licensing)' {
+        It 'exits 0 when an Enabled policy on the stamp subscription has the environment linked' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\r\n'), @('billingPolicies?api-version', '0', 'pol-1\r\n'), @('billingPolicies/pol-1/environments/env-1', '0', ''))
+            (Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match "billingInstrument.subscriptionId=='44444444-4444-4444-4444-444444444444'"
+        }
+        It 'exits 1 when no Enabled policy is on the stamp subscription' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\n'), @('billingPolicies?api-version', '0', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'no Enabled pay-as-you-go billing policy'
+        }
+        It 'exits 1 when the policy does not have the environment linked (404)' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\n'), @('billingPolicies?api-version', '0', 'pol-1\n'), @('billingPolicies/pol-1/environments/env-1', '3', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'linked to no Enabled billing policy'
+        }
+        It 'exits 1 when no environment has the URL' {
+            Set-Rules $script:Dir az @(, @('api.bap.microsoft.com', '0', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'no Power Platform environment has the URL'
+        }
+    }
+
     Context 'PRQ-C-12 guest access' {
         It 'exits 1 while guest access is restricted, 0 once it is off' {
-            Set-Rules $script:Dir az @(, @('restrictguestuseraccess', '0', 'True\r\n'))
+            Set-Rules $script:Dir az @(, @('restrictGuestUserAccess', '0', 'True\r\n'))
             (Invoke-Recipe 'PRQ-C-12' $script:Common $script:Dir).Exit | Should Be 1
-            Set-Rules $script:Dir az @(, @('restrictguestuseraccess', '0', 'False\r\n'))
+            Set-Rules $script:Dir az @(, @('restrictGuestUserAccess', '0', 'False\r\n'))
             (Invoke-Recipe 'PRQ-C-12' $script:Common $script:Dir).Exit | Should Be 0
         }
     }
@@ -337,12 +516,111 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
-    Context 'PRQ-T-03 Entra app registration (az returns empty output and exit 0 on a miss)' {
-        It 'exits 1 on empty output and 0 on a GUID' {
-            Set-Rules $script:Dir az @(, @('ad app list', '0', ''))
-            (Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir).Exit | Should Be 1
-            Set-Rules $script:Dir az @(, @('ad app list', '0', '66666666-6666-6666-6666-666666666666\r\n'))
+    # PRQ-T-04 (Word add-in app) retired by T186 (2026-10-14): one shared client app serves Outlook and Word - PRQ-T-03.
+    Context 'PRQ-T-03 shared client apps H3 pre-authorizes (T186: the per-host "Outlook/Word Add-in {env}" apps never existed)' {
+        BeforeEach {
+            $script:OfficeId = '1958aec2-0218-495e-8e3c-37133e9b8357'
+            $script:OtherId = '77777777-7777-7777-7777-777777777777'
+            $script:S0 = 'EntraAppRegOptions__PreAuthorizedClientAppIds__0'
+            $script:S1 = 'EntraAppRegOptions__PreAuthorizedClientAppIds__1'
+            $script:T03 = {
+                param([string]$Names, [string]$Id0, [string]$Id1, [string]$Dn0, [string]$Dn1)
+                Set-Rules $script:Dir az @(
+                    @("ClientAppIds__0'", '0', "$Id0\r\n"), @("ClientAppIds__1'", '0', "$Id1\r\n"),
+                    @("appId eq '$script:OfficeId'", '0', "$Dn0\r\n"), @("appId eq '$script:OtherId'", '0', "$Dn1\r\n"),
+                    @('appsettings list', '0', $Names))
+            }
+            $script:Both = "$($script:S0)\r\n$($script:S1)\r\nOther__Name\r\n"
+        }
+        It 'exits 0 when every pre-authorized app resolves and one is Spaarke Office Add-in (Production)' {
+            & $script:T03 $script:Both $script:OfficeId $script:OtherId 'Spaarke Office Add-in (Production)' 'Spaarke BFF Client'
+            $r = Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'ok'
+            $calls = Get-Content (Join-Path $script:Dir 'calls.log') -Raw
+            $calls | Should Match 'spaarke-provisioning-controlplane-worker-dev --resource-group rg-spaarke-platform-dev'
+            $calls | Should Not Match "Other__Name'"
+        }
+        It 'exits 0 with the single Office add-in setting' {
+            & $script:T03 "$($script:S0)\r\n" $script:OfficeId '' 'Spaarke Office Add-in (Production)' ''
             (Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir).Exit | Should Be 0
+        }
+        It 'exits 1 when the Worker has no PreAuthorizedClientAppIds setting' {
+            & $script:T03 'Other__Name\r\n' '' '' '' ''
+            $r = Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'no EntraAppRegOptions__PreAuthorizedClientAppIds__N setting'
+        }
+        It 'exits 1 when the Worker app cannot be read' {
+            Set-Rules $script:Dir az @(, @('appsettings list', '1', ''))
+            (Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 and names an app id that has no service principal in the tenant' {
+            & $script:T03 $script:Both $script:OfficeId $script:OtherId 'Spaarke Office Add-in (Production)' ''
+            $r = Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match ([regex]::Escape($script:OtherId))
+        }
+        It 'exits 1 when a setting holds no value' {
+            & $script:T03 $script:Both $script:OfficeId '' 'Spaarke Office Add-in (Production)' ''
+            $r = Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'is empty'
+        }
+        It 'exits 1 when none of the pre-authorized apps is the production Office add-in' {
+            & $script:T03 $script:Both $script:OfficeId $script:OtherId 'Spaarke Word Add-in dev' 'Spaarke BFF Client'
+            $r = Invoke-Recipe 'PRQ-T-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'none of the pre-authorized'
+        }
+    }
+
+    Context 'PRQ-T-02 container-type application permissions (T186: the beta containerTypes/{id}/applicationPermissionGrants path never existed)' {
+        BeforeEach { Set-Rules $script:Dir az @(, @('get-access-token', '0', 'tok\n')) }
+        It 'asks the v1.0 containerTypeRegistrations path, never the beta one' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 404\r\n\r\n', '{}'))
+            Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir | Out-Null
+            $calls = Get-Content (Join-Path $script:Dir 'calls.log') -Raw
+            $calls | Should Match 'https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypeRegistrations/fb3817a8-5a55-42ba-8cc9-12cf055168b8/applicationPermissionGrants'
+            $calls | Should Not Match '/beta/'
+        }
+        It 'exits 0 when a grant carries readContent + writeContent' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{"value":[{"appId":"a","delegatedPermissions":["none"],"applicationPermissions":["readContent","writeContent","create"]}]}'))
+            $r = Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'ok'
+        }
+        It 'exits 0 for a pretty-printed body, and for a grant that carries full' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{\r\n  "value": [\r\n    {\r\n      "applicationPermissions": [\r\n        "readContent",\r\n        "writeContent"\r\n      ]\r\n    }\r\n  ]\r\n}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 0
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{"value":[{"applicationPermissions":["full"]}]}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 0
+        }
+        It 'exits 1 when the grants hold only readContent, or none' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{"value":[{"applicationPermissions":["readContent"]}]}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 1
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{"value":[]}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 when readContent and writeContent are split across two grants (one grant must hold both)' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 200\r\n\r\n', '{"value":[{"applicationPermissions":["readContent"]},{"applicationPermissions":["writeContent"]}]}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 1 on 404 saying the container type is not registered in this tenant' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 404\r\n\r\n', '{}'))
+            $r = Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'container type fb3817a8-5a55-42ba-8cc9-12cf055168b8 is not registered in this tenant'
+        }
+        It 'exits 1 on any other status' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 500\r\n\r\n', '{}'))
+            (Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'exits 0 with SKIP on the documented 403 (the operator''s Azure CLI token is not consented)' {
+            Set-Rules $script:Dir curl @(, @('applicationPermissionGrants', '0', 'HTTP/2 403\r\n\r\n', '{}'))
+            $r = Invoke-Recipe 'PRQ-T-02' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'SKIP'
         }
     }
 
@@ -370,7 +648,55 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
     }
 }
 
+Describe 'prereqs.yaml retired entries (T186) carry no recipe, so nothing runs them' {
+    foreach ($id in 'PRQ-T-04', 'PRQ-E-05', 'PRQ-E-13', 'PRQ-C-06') {
+        It "$id is retired, named RETIRED, dated, attributed and has no check_recipe" {
+            $p = $script:Prereqs[$id]
+            $p | Should Not BeNullOrEmpty
+            $p.status | Should Be 'retired'
+            $p.name.StartsWith('RETIRED') | Should Be $true
+            $p.retired_on | Should Not BeNullOrEmpty
+            $p.retired_by | Should Match 'T186'
+            $p.ContainsKey('check_recipe') | Should Be $false
+            [string]$p.consequence_of_absence | Should Not BeNullOrEmpty
+            [string]$p.remediation | Should Not BeNullOrEmpty
+        }
+    }
+    It 'the recipes that stay active are still active' {
+        foreach ($id in 'PRQ-T-02', 'PRQ-T-03', 'PRQ-S-00', 'PRQ-S-01', 'PRQ-S-03', 'PRQ-C-08', 'PRQ-C-10') {
+            $script:Prereqs[$id].ContainsKey('status') | Should Be $false
+            [string]$script:Prereqs[$id].check_recipe.cli | Should Not BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'prereqs.yaml mirrors the code that owns its constants' {
+    It 'PRQ-S-00 counts the same resource-group pattern SubscriptionDedication.StampGroup (H1) counts' {
+        $cs = [regex]::Match((Get-Content -Raw $script:Dedication), '@"(?<p>\^rg-spaarke-[^"]+)"').Groups['p'].Value
+        $cs | Should Not BeNullOrEmpty
+        $plain = $cs -replace '\(\?<\w+>', '' -replace '\)', ''   # drop the named groups: ^rg-spaarke-[a-z][a-z0-9]{2,7}-[a-z0-9]+$
+        $cli = [string]$script:Prereqs['PRQ-S-00'].check_recipe.cli
+        [regex]::Match($cli, "grep -iE '(?<p>\^rg-spaarke-[^']+)'").Groups['p'].Value | Should Be $plain
+        (Get-Content -Raw $script:Dedication) | Should Match 'RegexOptions.IgnoreCase'
+    }
+    It 'PRQ-S-03 lists the namespaces customer.bicep and the modules it composes deploy' {
+        $bicep = Get-Content -Raw $script:CustomerBicep
+        $files = @($script:CustomerBicep) + @([regex]::Matches($bicep, "(?m)^module \w+ 'modules/(?<f>[\w-]+\.bicep)'") | ForEach-Object { Join-Path (Split-Path $script:CustomerBicep) "modules/$($_.Groups['f'].Value)" })
+        $files.Count | Should BeGreaterThan 10
+        $deployed = $files | ForEach-Object { [regex]::Matches((Get-Content -Raw $_), "'(Microsoft\.[A-Za-z]+)/") | ForEach-Object { $_.Groups[1].Value } } |
+            Where-Object { $_ -notin 'Microsoft.Authorization', 'Microsoft.Resources' } | Sort-Object -Unique
+        $cli = [string]$script:Prereqs['PRQ-S-03'].check_recipe.cli
+        $recipe = ([regex]::Match($cli, '(?s)for ns in (?<l>.*?); do').Groups['l'].Value -replace '\\\r?\n', ' ') -split '\s+' | Where-Object { $_ } | Sort-Object -Unique
+        ($recipe -join ',') | Should Be ($deployed -join ',')
+    }
+    It 'PRQ-S-03 is H1''s default RequiredResourceProviders minus Microsoft.ManagedServices (Model 2 Lighthouse)' {
+        $h1 = [regex]::Matches((Get-Content -Raw $script:ReadinessOptions), '(?m)^\s*"(Microsoft\.[A-Za-z]+)",') | ForEach-Object { $_.Groups[1].Value }
+        $h1.Count | Should BeGreaterThan 10
+        $cli = [string]$script:Prereqs['PRQ-S-03'].check_recipe.cli
+        $recipe = ([regex]::Match($cli, '(?s)for ns in (?<l>.*?); do').Groups['l'].Value -replace '\\\r?\n', ' ') -split '\s+' | Where-Object { $_ } | Sort-Object -Unique
+        (($h1 | Where-Object { $_ -ne 'Microsoft.ManagedServices' } | Sort-Object -Unique) -join ',') | Should Be ($recipe -join ',')
+    }
+
     $dep = [regex]::Matches((Get-Content -Raw $script:Catalog), 'new PinnedDeployment\("(?<n>[^"]+)",\s*"(?<m>[^"]+)",\s*"(?<v>[^"]+)",\s*"(?<s>[^"]+)",\s*(?<c>\d+),\s*"(?<q>[^"]+)"')
     It 'parses the PinnedModelCatalog deployments' { $dep.Count | Should BeGreaterThan 0 }
     It 'PRQ-C-01 requests exactly the quota name:TPM pairs PinnedModelCatalog.RequestedTpmByQuotaName computes' {

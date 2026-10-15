@@ -94,7 +94,7 @@ export type HostFilterOperator =
  *   },
  *   // Status dropdown → multi-optionset
  *   applied.statusValues?.length && {
- *     attribute: 'sprk_eventstatus',
+ *     attribute: 'statuscode',
  *     operator: 'in',
  *     value: applied.statusValues,
  *   },

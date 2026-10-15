@@ -30,6 +30,9 @@
   <RuleDefinitions>
     <TabDisplayRules />
     <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
       <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.NotArchived">
         <CustomRule Library="$webresource:sprk_emailactions.js" FunctionName="Spaarke.Email.canArchiveEmail" Default="true">
           <CrmParameter Value="PrimaryControl" />
@@ -37,9 +40,6 @@
       </DisplayRule>
       <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.Web">
         <CrmClientTypeRule Type="Web" />
-      </DisplayRule>
-      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
-        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

@@ -83,6 +83,7 @@
     <AppModuleComponent type="1" schemaName="sprk_reportcard" />
     <AppModuleComponent type="1" schemaName="sprk_reportingentity" />
     <AppModuleComponent type="1" schemaName="sprk_reportingview" />
+    <AppModuleComponent type="1" schemaName="sprk_servicerequest" />
     <AppModuleComponent type="1" schemaName="sprk_speauditlog" />
     <AppModuleComponent type="1" schemaName="sprk_specontainertypeconfig" />
     <AppModuleComponent type="1" schemaName="sprk_speenvironment" />
@@ -107,17 +108,11 @@
     <AppModuleComponent type="60" id="{d880c3cf-80e2-42f3-82f9-24d040d09f17}" />
     <AppModuleComponent type="60" id="{ebaceffc-cd31-40fc-939c-2ec8c990656e}" />
     <AppModuleComponent type="60" id="{bddc0100-0dbe-4562-aafe-31d08c8ab506}" />
-    <AppModuleComponent type="60" id="{5d764e2e-4ace-4469-a4cf-3422e0428e2e}" />
     <AppModuleComponent type="60" id="{dfc9bb95-412c-4ea1-883b-363ecbc75e46}" />
-    <AppModuleComponent type="60" id="{7ae9ad5e-447d-432d-b6fc-3a6cb9471011}" />
     <AppModuleComponent type="60" id="{2205c86d-ed88-4a2f-a447-3b86a8781f2e}" />
-    <AppModuleComponent type="60" id="{cccff382-2b92-467e-bf1b-3db179512af8}" />
     <AppModuleComponent type="60" id="{449faa0e-f471-48ec-87d0-4719909546d2}" />
-    <AppModuleComponent type="60" id="{91c113ba-def9-4eec-8054-5002501a1395}" />
-    <AppModuleComponent type="60" id="{957a1f9f-0c2d-4759-99e9-54b255957025}" />
     <AppModuleComponent type="60" id="{7bb87dfd-ec3e-4ed9-8e3e-5725d3067295}" />
     <AppModuleComponent type="60" id="{661157fe-2fc9-4eaa-835f-5bfa2f7b64f7}" />
-    <AppModuleComponent type="60" id="{6296a9ea-5aec-4ab5-9aa9-5d53e0b4adb8}" />
     <AppModuleComponent type="60" id="{f3b707fb-3b5f-45f9-9c6b-5e573bb5d19e}" />
     <AppModuleComponent type="60" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
     <AppModuleComponent type="60" id="{4091f99f-ac41-484e-8256-71cac93e22d8}" />
@@ -143,11 +138,9 @@
     <AppModuleComponent type="60" id="{098ae145-1567-41ec-8398-86dbaac70c9b}" />
     <AppModuleComponent type="60" id="{4aabf594-b30a-490d-bf97-89c67c6777fe}" />
     <AppModuleComponent type="60" id="{bdb0ae1c-32fa-4374-b637-8dafe107bc44}" />
-    <AppModuleComponent type="60" id="{9c89722c-b4e4-44e5-b118-a3ba58499837}" />
     <AppModuleComponent type="60" id="{79bcb391-516c-4091-bb53-ae8e4fbb10c9}" />
     <AppModuleComponent type="60" id="{b01ced05-ecbd-46d8-8d5c-b20827731def}" />
     <AppModuleComponent type="60" id="{29de27bc-a257-4f29-99cf-bab4a84e688f}" />
-    <AppModuleComponent type="60" id="{bc0f68dd-a4b1-4a8f-bed3-c8f5db2f89cf}" />
     <AppModuleComponent type="60" id="{aa0fafdb-a9e6-4ac8-b2b2-cbe0172aaa35}" />
     <AppModuleComponent type="60" id="{b028db32-3619-48a5-ac51-cf3f947b0ef3}" />
     <AppModuleComponent type="60" id="{2934cf58-7912-4f26-995c-d1eac6da0242}" />

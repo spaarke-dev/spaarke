@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule-body validation refuses invalid bodies at save</title>
+    <phase>2 Policy and rule bodies</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A validation gate; if it is lenient, an unparseable rule body reaches the evaluator at runtime.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified validation against the schema from task 020.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>bff-api,validation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make an invalid rule body unsavable, with a field-level error, so no sprk_policyversion row can exist with an unparseable body.</prompt>
+  <role>SPAARKE backend developer. Fail closed.</role>
+  <goal>No sprk_policyversion row can be created or updated with a sprk_rulebody that fails its rule-type schema.</goal>
+
+  <context>
+    <background>A policy version is immutable after create, so an invalid body saved once is permanent. The validation is therefore the only point of control.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: validation happens on the WRITE path in the BFF (ADR-002: invariants live on the server, one owner per invariant). It must not be client-only, because a policy row can be authored from the model-driven app.</constraint>
+    <constraint source="ADR-002">Scope: no plugins. The BFF write path is the single owner of this invariant.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-03: admins may author policy rows directly in the Spaarke Platform app, which bypasses the BFF. Invalid rule bodies are therefore stopped at EVALUATION TIME, not only at save: the evaluator re-validates every policy version's body with RuleBodySchemaValidator before using it and FAILS CLOSED, so an invalid policy never produces a Signal and its error is surfaced (logged with the policy version id, and visible to admins). Any BFF write path that does exist still validates at save. The escalation trigger about non-BFF authoring paths is RESOLVED by this decision and no longer fires.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Write-path invariants and validation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Identify the BFF write path for sprk_policyversion and confirm it is the single owner of this invariant.</step>
+    <step order="2">Validate sprk_rulebody against the schema for its sprk_ruletype on create and on any update.</step>
+    <step order="3">Return a field-level error naming the offending clause, not a generic failure.</step>
+    <step order="4">Add tests: valid body saves; malformed JSON refused; valid JSON failing the schema refused; a body whose rule type does not match its shape refused.</step>
+    <step order="5">Document the gap if a model-driven-app author can still write the row directly via Xrm.WebApi, and record it as a known limitation with its mitigation.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a policy row can be authored by a path that bypasses the BFF (for example directly via Xrm.WebApi from the model-driven app), STOP and escalate. That is the WP-3 problem in the Dataverse write-path architecture, and silently accepting it means the invariant is not actually enforced.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid Existence body, when saved via the BFF, then it is accepted.</criterion>
+    <criterion testable="true">Negative: given malformed JSON, when saved, then a field-level error is returned and no row is created.</criterion>
+    <criterion testable="true">Negative: given valid JSON that fails the Existence schema, when saved, then it is refused with the offending clause named.</criterion>
+    <criterion testable="true">Negative: given a body whose shape does not match its declared rule type, when saved, then it is refused.</criterion>
+    <criterion testable="true">Any bypass path that can still write an invalid row is documented with its mitigation.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a policy version whose rule body fails schema validation, when the evaluator runs, then it produces no Signal for that policy, records the validation failure with the policy version id, and continues evaluating the other policies.</criterion>
+    <criterion testable="true">Negative: a rule body authored directly in the model-driven app and invalid against the schema never evaluates as if valid.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-08. Immutability makes this the only point of control: a bad body saved once cannot be edited out.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion date="2026-10-04" rigor="FULL" escalation-fired="false">
+    <summary>(Current as of rework round 2, 2026-10-04.) PolicyVersionValidator (Services/Signals/) is the single fail-closed seam over RuleBodySchemaValidator (020) + PredicateCompiler (021). ValidateForSave(ruleType, ruleBody, messageTemplate) is pure and never throws; it returns PolicyVersionValidationResult(IsValid, field-level Errors, bounded Reason). TryPrepareForEvaluation(PolicyVersionSnapshot, Guid? subjectId, out CompiledPredicate?) is the task-031 seam and the only sanctioned path to a compiled predicate (enforced by tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs). On refusal it logs OntologyWriterEvents.PolicyVersionInvalid (50301) with only the policy version id + policy code + reason, records ontology.policy.invalid{reason}, and returns false. It throws only for caller bugs: a null snapshot, or subjectId == Guid.Empty. The check order is: rule type, then length cap (32768, before any parse), then schema (evaluated once), then PredicateCompiler.CompileSchemaValidated, then malformed placeholder, then template tokens against CompiledPredicate.TemplateEligibleFields. A template token may name a subject 'when' field (any operator) or an 'exists' field that the clause pins to exactly one value; never a notExists field or an ambiguous one. The bounded reasons are rule_type_unsupported, rule_body_too_large, schema_invalid, compile_refused, template_token_outside_read_set, template_malformed and internal_error. No BFF write path exists for sprk_policyversion today (confirmed by grep). The escalation trigger is resolved by the owner's evaluation-time decision in this POML's constraints.</summary>
+    <acceptance>All 8 criteria met; evidence by current test name is in notes/022-progress.md "Acceptance criteria — evidence". (1-4) ValidateForSave tests for a valid body, malformed JSON, a schema failure naming /all/0 and /all/1/filter/sprk_revisedon, a type/shape mismatch, and a compiler-level refusal (unverified join). All are field-level, never a bare boolean. (5) The model-driven-app bypass is documented with its mitigation in "Known limitation". (6) BFF builds with 0 warnings; Signals-filtered tests pass 243/243 three consecutive runs; the arch guard passes 2/2. (7) TryPrepareForEvaluation never throws for content, logs + meters, and returns false so the evaluator continues. (8) The gate takes only column values, never a provenance flag, so Platform-app-authored and BFF-authored rows are checked identically. The arch test makes it the only path to a predicate.</acceptance>
+    <quality-gates>Independent review returned FAIL (2026-10-04, rework in progress). Findings: (1) CRITICAL -- "never throws" contract false: top-level and nested-filter duplicate JSON keys throw ArgumentException (JsonObject.InitializeDictionary), and 1e999999 throws FormatException (JsonElement.GetDecimal); both escaped Validate/ValidateForEvaluation with no 50301 log, no metric. (2) Tautological no-leak test asserted "not valid json" against the real text "not valid JSON" -- never actually exercised the no-leak guarantee. (3) Malformed placeholders ({{sprk-x}}, {{a b}}, {{}}, {{x, {{{x}}}) passed the validator and would render literally -- token-extraction regex only matched well-formed tokens, so malformed ones were invisible to the check. (4) ReadFields overclaimed: it is filter-condition attributes only (exists AND notExists), not everything "read"; naming/docs corrected. Design settled by the coordinator: template tokens come ONLY from positive fields (subject's own `when` + `exists` clauses), never `notExists` (fabricated-value risk under section 0.3); ambiguous same-name-on-multiple-positive-entities tokens refused; bool API replaced with TryPrepareForEvaluation(PolicyVersionSnapshot, subjectId, out CompiledPredicate?) as the ONLY path to a compiled predicate for the evaluator; Validate renamed ValidateForSave. Rework fixes all four findings plus F5-F11 below; see &lt;rework&gt; element for fixed/rejected-with-reason per item and the new test run. A SECOND independent review then returned FAIL with findings F1-F13. All are fixed in rework round 2 (the second &lt;rework&gt; element), which is pending re-review.</quality-gates>
+    <test-run>Current (rework round 2): Signals-filtered run, three consecutive times: "Passed! - Failed: 0, Passed: 243, Skipped: 0, Total: 243". This task's files account for 213: PolicyVersionValidatorTests 66, PredicateCompilerTests 64, RuleBodySchemaValidatorTests 45, SignalWriterTests 38. The arch guard PredicateCompilerCallerGuardTests passes 2/2. The full BFF suite was not run in round 2; it is left to the main session on a quiet machine. First pass, for the record: 148/148 Signals-scoped; two full-suite attempts were not clean because of machine contention (see escalation note).</test-run>
+    <publish-size>Fresh worktrees (C:/wt022m off origin/master @a082cfcda7, C:/wt022b = this branch's HEAD 62e47b32e + this task's uncommitted src changes copied in), both short paths, both published+zipped with PowerShell Compress-Archive -CompressionLevel Optimal: master 45.66 MB (212 files) vs branch+task 45.69 MB (212 files) = +0.036 MB. Well under the +5 MB single-task escalation threshold. Worktrees removed after measuring.</publish-size>
+    <cve-scan>dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api.csproj: "has no vulnerable packages given the current sources." No new packages added by this task.</cve-scan>
+    <conflict-check>git diff origin/master...HEAD + gh pr list --json files across 21 open PRs: zero overlap with any Services/Signals/** or OntologyWriter* file.</conflict-check>
+    <escalation-note>Full BFF suite attempted twice this session, neither clean, but NOT a code defect in this task's work: run 1 (no other command running in this session concurrently) = 35 failed / 14380 passed / 54 skipped / 14469 total over 1h16m -- the one failure captured in full (OfficeQuickCreateContractTests, unrelated to Signals) showed an HttpClient/TestHost response-read timeout, the classic resource-contention signature; run 2 (same, isolated from this session's own commands) ABORTED at 13m9s on a fatal CLR crash (0x80131506) inside ASP.NET Core route-pattern parsing during WebApplicationFactory host startup for SpeAdmin endpoints -- 0 failed / 12766 passed / 35 skipped up to the crash, again nothing in Signals. Concrete evidence: at the time of run 2, Get-Process showed 301 "dotnet" processes + 1 VBCSCompiler running system-wide on this machine -- consistent with the large number of other active agents in this session's roster (task-004/005/010-012/020/021/023/030/080/082-093, review-030/030b, several audit/cluster/verify agents), several of which are very likely running their own dotnet build/test processes in sibling worktrees concurrently. This matches the project's own precedent in current-task.md ("Full BFF suite uncontended at wave close: 14,356 total / 14,302 passed / 54 skipped / 0 failed. The 83/124-failure runs earlier were agent contention."). Recommend the main session re-run the full suite once contention subsides rather than accept either of these two runs as a verdict on this task's code.</escalation-note>
+  </completion>
+
+  <rework date="2026-10-04" trigger="independent-review-FAIL">
+    <disposition>Full fixed/rejected-with-reason table for every finding (1-11) is in
+      notes/022-progress.md "Rework (2026-10-04)" section (markdown table; too long to duplicate here
+      verbatim). Summary: (1) FIXED at two layers (RuleBodySchemaValidator strict-parse + bounded catch;
+      PolicyVersionValidator.ValidateInternal catch-all; TryPrepareForEvaluation's own catch) -- PLUS an
+      independently-discovered Json.Schema.Net 7.3.4 thread-safety bug (concurrent Evaluate() on the shared
+      schema instance produced ~40% false IsValid=true, and separately an unhandled IndexOutOfRangeException)
+      fixed with a lock (RuleBodySchemaValidator.EvaluationGate) and pinned by two Parallel.For regression
+      tests. (2) FIXED: exact structured-field-set + exact-message assertion, replacing the tautological
+      substring check. (3) FIXED: new shared SignalWriter.HasMalformedPlaceholder, called from the validator
+      (refuses) AND from RenderSentence (throws) -- both sides, as asked. (4) FIXED: ReadFields renamed
+      ConditionFields with corrected docs. (5) IMPLEMENTED per coordinator decision: CompiledPredicate gained
+      PositiveReadFields (subject when + exists clauses only) and AmbiguousPositiveFields (same field name on
+      &gt;1 distinct positive entity); the sprk_revisedon (notExists-only) test now asserts REFUSAL, not
+      success; FactValues guidance for task 031 documented on the class. (6) IMPLEMENTED per coordinator
+      decision: TryPrepareForEvaluation(PolicyVersionSnapshot, Guid? subjectId, out CompiledPredicate?
+      compiled) is the ONLY path to a compiled predicate; Validate renamed ValidateForSave. Compile was NOT
+      made non-public -- REJECTED WITH REASON: internal only blocks a different assembly, and
+      PredicateCompiler/PolicyVersionValidator/the evaluator all live in Sprk.Bff.Api, so it would not stop a
+      same-assembly bypass; true enforcement would require nesting PredicateCompiler privately, breaking its
+      own standalone tested contract (task 021's PredicateCompilerTests.cs) for no real gain. (7) FIXED: six
+      bounded sub-reasons added to OntologyWriterFailureReason (rule_type_unsupported, schema_invalid,
+      compile_refused, template_token_outside_read_set, template_malformed, internal_error), replacing the
+      single policy_version_rule_body_invalid bucket; tests assert the EXACT metric reason tag value via the
+      MeterListener's tag callback. Fixing this surfaced a real bug: PolicyVersionValidator was delegating
+      rule-type recognition to RuleBodySchemaValidator.ValidateRaw, which conflated "unknown ruletype" with
+      "known-type body fails schema" -- every unknown/blank ruletype was being mis-metered as schema_invalid;
+      rule-type parsing is now decided once, directly, before any schema call. (8) FIXED: TryParseRuleType
+      matches exact member names in a loop, never Enum.TryParse's comma-combining leniency. (9) FIXED:
+      PredicateCompiler.MaxRuleBodyLength=32768 / MaxInListLength=200, bounded PredicateCompilationException
+      refusals, limits stated with reasoning. One observation (not a fix, scope stayed literal to "in the
+      compiler"): RuleBodySchemaValidator's own parse+evaluate still runs before these caps, so it is not
+      itself length-bounded. (10) FIXED: all three field sets built via ToFrozenSet(StringComparer.Ordinal).
+      (11) FIXED: all eleven listed test gaps added (see PolicyVersionValidatorTests.cs).</disposition>
+    <test-run>tests/unit/domain/Signals/** (the four maintain-class files touched), three consecutive runs:
+      "Passed! - Failed: 0, Passed: 186, Skipped: 0, Total: 186" every time -- zero flakes after the
+      concurrency fix (the fix eliminated an intermittent RuleBodySchemaValidatorTests failure that appeared
+      DURING this rework, traced to the Json.Schema.Net bug above, not to any of this task's own logic).
+      BFF build: 0 warnings, 0 errors.</test-run>
+    <full-suite-note>Run ONCE as instructed, nothing else of mine running concurrently (checked: 293 system-wide
+      "dotnet" processes measured immediately before launch -- the machine was NOT quiet, consistent with the
+      coordinator's own expectation). Result: "Failed: 23, Passed: 14302, Skipped: 54, Total: 14379, Duration:
+      19m47s -- Test Run Aborted (Test host process crashed)". All 23 failures are in UNRELATED subsystems
+      (Office/Insights/Communication/Compose/Memory/Workspace/EndToEnd/Eval contract + integration tests) --
+      grep for Signal/PolicyVersion/RuleBody/PredicateCompiler/OntologyWriter across every failure line: zero
+      matches. The captured stack traces are HttpClient/TestHost read-timeout and "client aborted the request"
+      -- the same resource-contention signature as both of the FIRST pass's full-suite attempts, now
+      reproduced a third time at a different, still-heavy, system load. Not re-running a second time per the
+      coordinator's own instruction ("if it still fails... I'll run it when the machine is quieter").</full-suite-note>
+    <publish-size-note>Not re-measured: no .csproj/package change; the diff is ~305 lines of plain C# logic
+      across 6 modified files plus one new ~280-line class (mostly XML doc comments, stripped from the
+      compiled DLL, plus small bounded checks) -- the same order of magnitude as the first pass's measured
+      +0.036 MB. Judged not to meet the coordinator's "grows materially" re-measurement trigger.</publish-size-note>
+    <superseded-note>Round 2 superseded two parts of this round. (a) ConditionFields, PositiveReadFields and AmbiguousPositiveFields no longer exist; they were replaced by TemplateEligibleFields, AmbiguousTemplateFields and UnpinnedTemplateFields. (b) "Compile was NOT made non-public" still holds, but the single path is now enforced by an architecture test rather than by review.</superseded-note>
+  </rework>
+
+  <rework date="2026-10-04" round="2" trigger="second-independent-review-FAIL">
+    <disposition>All 13 findings F1-F13 are FIXED. The per-finding table, the pinning tests and the F8 decision evidence are in notes/022-progress.md "Rework round 2".
+      F1: Guid.Empty subjectId throws ArgumentException before validation, with no log or metric.
+      F2: the length cap runs before any parse in every layer, with a new reason rule_body_too_large; the schema is evaluated once (CompileSchemaValidated).
+      F3: TemplateEligibleFields means a 'when' field with any operator, or an 'exists' field pinned to exactly one value; conflicting pins are ambiguous. The FactValues doc says an exists token's value is the pinned literal.
+      F4: the notes and this completion block were rewritten for the current API.
+      F5: a renderer malformed-shape theory was added.
+      F6: the test now asserts the real JSON Pointers.
+      F7: 'when' shares $defs/filterConditions with clause filters, and the compiler has a numeric (System.Decimal) bound.
+      F8: then.messageTemplate is NOT designed (superseded by the sprk_messagetemplate column, schema-draft.md section 4 / spec.md NFR-02) and is refused anywhere in the body.
+      F9: a type with no schema throws for any body, and the doc now says so.
+      F10: misnamed tests were renamed.
+      F11: ConditionFields and two banned tests were removed, and a method-level arch test (Mono.Cecil IL scan) was added.
+      F12: the reserved-brace authoring rule is now documented; full-width braces are refused.
+      F13: rule-type numbers use NumberStyles.None + InvariantCulture.
+      Every negative test was verified to fail with its fix reverted.</disposition>
+    <test-run>BFF build: 0 warnings, 0 errors. Signals-filtered: 243/243, three consecutive runs. Arch guard: 2/2. The full suite is not run here; it is left to the main session.</test-run>
+    <publish-size-note>Not measured: no package or .csproj change. The round-2 diff is plain C# logic, a JSON schema edit, doc comments and test code.</publish-size-note>
+  </rework>
+
+  <rework date="2026-10-05" round="3" trigger="third-independent-review-PASS-WITH-FINDINGS">
+    <disposition>All findings (M1-M3, L1-L7) are FIXED. The per-finding table and pinning tests are in notes/022-progress.md "Rework round 3".
+      M1: an unpaired UTF-16 surrogate escape in a property name (thrown by the strict parse's duplicate-name check, or by the name walk) is now "not valid JSON" (schema_invalid) in RuleBodySchemaValidator, and a PredicateCompilationException in both PredicateCompiler entry points. The value case is covered too. "Never throws for Existence" is now true.
+      M2: the no-leak log test uses a distinctive non-null body and template, and covers body and template refusals.
+      M3: metric reasons are asserted for template_malformed and for internal_error; the latter is forced through the existing injected TimeProvider, and no production seam was added.
+      L1: the arch IL scan also flags ldtoken of Compile*, newobj of CompiledPredicate, and its Clone method (used by with). Permanent negative-control fixtures prove each detector. The doc states that reflection, dynamic and other assemblies are not covered.
+      L2: 'then' is reserved and refused. Grep confirmed nothing needs it: the seeded Path B body has none, and only two test fixtures carried "then": {}, now removed.
+      L3: canonical decimal emission into FetchXML; pins compare numbers by decimal value and strings ordinally. The case/accent-insensitive Dataverse eq is documented, and the FactValues doc is softened.
+      L4: the doc is corrected; a 'when' value may be NULL under a not-equal filter.
+      L5: the same-value positive case was added.
+      L6: the doc now names the seven reasons.
+      L7: the round-2 mutation summary is restated exactly.
+      Each negative test was verified to fail with its fix reverted, using three separate mutation runs plus two arch-guard runs.</disposition>
+    <test-run>BFF build (--no-incremental): 0 warnings, 0 errors. Signals-filtered: 274/274, three consecutive runs. This task's files: PolicyVersionValidatorTests 77, PredicateCompilerTests 76, RuleBodySchemaValidatorTests 53, SignalWriterTests 38. Arch guard: 7/7. The full suite, publish size, CVE scan and conflict-check are left to the main session.</test-run>
+  </rework>
+  <closeout date="2026-10-05" by="main-session">COMPLETED. Final code f44f24c5f. Independent reviews: round 1 FAIL, round 2 FAIL, round 3 PASS-WITH-FINDINGS (no fail-open in about 60 probe inputs); every finding fixed. Full BFF unit suite on 0c332e3ac (f44f24c5f + docs): Failed 0, Passed 14541, Skipped 54, Total 14595, 25 m 14 s, 81 dotnet processes at start. Publish size (CLAUDE.md section 10; fresh worktrees at short paths, Compress-Archive Optimal, PDBs included, 212 files on every side): 3828ccff2^ 45.69 MB vs f44f24c5f 45.70 MB, +0.01 MB; branch vs fresh master 293fcd4c8 45.65 MB, +0.05 MB (that comparison includes master drift); ceiling 60 MB. No package references changed; dotnet list package --vulnerable --include-transitive found no vulnerable packages on either side. Conflict check: none of the 13 files appears in any open PR; #935 touches other files in Spaarke.ArchTests (soft). Found along the way: the same Json.Schema.Net race in the AI meta-schema validation, fixed in its own PR as task 096 (#1294). Product consequence, recorded for task 031: the live Path B body pins no field to one value, so its message template can carry no record values until a rule construct names the row that supplies them.</closeout>
+</task>

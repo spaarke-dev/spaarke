@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-81: deploy the external SPA to dev (Static Web App) carrying tasks 056, 098/106 and 111, verify it live, close hand-off #1428</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable (ship-list review); the dispatch needs owner approval</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment of a shared external-user surface that also ships other projects' changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted workflow dispatch plus a fixed live checklist; judgment is confined to the ship list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to a shared environment; never concurrent with another deploy of the same surface.</parallel-reason>
+    <deps>none</deps>
+    <tags>deploy,frontend,external-access</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace hand-off #1428 with a deploy this project does (D-81). Ship master's external SPA to the dev Static Web App through the existing workflow, after the owner approves the list of everything that ships, then verify 056's wizard change, 106's To Do due dates and one smoke check per other shipped change.</prompt>
+  <role>SPAARKE platform engineer. Know exactly what you ship before you ship it.</role>
+  <goal>The dev external SPA serves a build of a recorded origin/master SHA that contains 23c359eaf (056) and 73d3b970e (106); the 111 regression row 4 and the 106 external To Do checks pass live; #1428 is closed with the result.</goal>
+
+  <context>
+    <background>Facts found while creating this task (2026-10-08) — VERIFY each:
+(a) The live target is the Azure Static Web App swa-spaarke-external-spa-dev (https://green-dune-0c4f1221e.7.azurestaticapps.net; config/environments.json dev.externalSpa; BFF ExternalAccess:PortalUrl). The Power Pages path (scripts/Deploy-ExternalWorkspaceSpa.ps1) was retired by the external-access project (commit 30aef16cfc). #1428 and deploy-log.md (task 111) looked at the Power Pages site sprk-external-workspace, which is why they reported "pre-CIAM, months behind".
+(b) The deploy is .github/workflows/deploy-external-spa.yml (workflow_dispatch only). Its build step sets the NON-SECRET CIAM values (VITE_MSAL_AUTHORITY, _CLIENT_ID, _TENANT_ID, _BFF_SCOPE, VITE_BFF_API_URL, Teams ids) that match config/environments.json dev.ciam. The SWA deploy token is the GitHub secret AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV. Nothing secret is needed in the repo.
+(c) Last run 37741946955, 2026-10-08T07:11Z, head 37d0c944c: it does NOT contain 23c359eaf (056) or 73d3b970e (106). Since then src/client/external-spa changed in 098 (1c69a260a) and 106 (9a7c4bcb8, 65c83f68c), and the SPA also builds @spaarke/ui-components from source (file: dependency), so every Spaarke.UI.Components change since 37d0c944c ships too.
+What to check live: issue #1428 body (056: Escape and backdrop no longer close DocumentUploadPage's wizard, x and Cancel do, no resize corner, title not h1, light and dark) and its comment (106: create a To Do with a due date shows that day; due today is not overdue; complete then reopen).</background>
+    <relevant-files>
+      <file role="read">.github/workflows/deploy-external-spa.yml</file>
+      <file role="read">config/environments.json (dev.externalSpa, dev.ciam)</file>
+      <file role="read">src/client/external-spa/package.json, README.md</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Owner approval required before dispatching the workflow: present the ship list (step 2) and the SHA. D-81 makes this deploy the project's task; the approval covers WHAT ships, because other projects' changes ship with it. Dev only; never the production or demo environments.</constraint>
+    <constraint source="project">Never put a secret in the repo, a note or a PR. Use the workflow as it is; do not change its VITE_* values. If a value is wrong (a CIAM sign-in fails with an authority, client or audience error), STOP and escalate rather than editing the workflow.</constraint>
+    <constraint source="project">Coordinate before dispatch: check `gh run list --workflow deploy-external-spa.yml` for a newer run by another project, and the external-access project's current state (projects/spaarke-SPA-external-access-platform-r3 on master, its open PRs) for a change that must not ship yet; if one exists, STOP and ask.</constraint>
+    <constraint source="project">No parking: a defect found in a shipped change is fixed in this project (own worktree off origin/master, own PR, do not merge) or reported to the main session for a new task. Never use --no-verify or bare git stash. Test data prefixed zz-122-, deleted afterwards and confirmed by query.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the relevant files.</step>
+    <step order="1">Verify facts (a)-(c): which origin invitation emails and the BFF use (ExternalAccess:PortalUrl on spaarke-bff-dev, read-only); whether the Power Pages site still serves users; the last workflow run and its SHA.</step>
+    <step order="2">Ship list: `git log --oneline LASTSHA..origin/master -- src/client/external-spa src/client/shared/Spaarke.UI.Components` (plus any other file: dependency in the SPA package.json), grouped by project/PR, each with a one-line user-visible effect.</step>
+    <step order="3">Build locally at the same SHA with the workflow's env values (npm install --legacy-peer-deps --no-audit --no-fund; npm run build) and run the SPA test suite; record failures (pre-existing ones are reported, not ignored).</step>
+    <step order="4">STOP: report the ship list, SHA and build/test result to the main session for owner approval.</step>
+    <step order="5">After approval: `gh workflow run deploy-external-spa.yml --ref master`; wait for success; confirm the served assets/app.js sha256 and byte size equal the local build of that SHA (names are not hashed).</step>
+    <step order="6">Live checks by a human in the browser (if the session has no browser tool, put the checklist in deploy-log.md and ask the owner): the #1428 wizard checks; the #1428-comment To Do checks with zz-122- data; one smoke check per ship-list group. Delete zz-122- rows.</step>
+    <step order="7">Record everything in deploy-log.md (target, SHA, run id, ship list, results), update the task 111 regression row 4 there, comment the result on #1428 and close it.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="DocumentUploadPage wizard (056)">
+      <steps>
+        <step>Open the dev external SPA, start a document upload, press Escape, click the backdrop, then click x</step>
+      </steps>
+      <expected>Escape and backdrop do not close it; x and Cancel do.</expected>
+    </test>
+    <test name="External To Do due date (106)">
+      <steps>
+        <step>Create a zz-122- To Do due today, then mark it complete and reopen it</step>
+      </steps>
+      <expected>Shows today's date, is not overdue, completes and reopens without error.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat the wizard check in dark mode</step>
+      </steps>
+      <expected>All surfaces themed.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">deploy-log.md records the verified live target, the deployed SHA (an origin/master commit containing 23c359eaf and 73d3b970e), the workflow run id and the ship list, and that the served app.js content hash (sha256) and byte size match the local build of that SHA (the build emits unhashed names, so asset names cannot be compared).</criterion>
+    <criterion testable="true">Live: DocumentUploadPage's wizard is not closed by Escape or the backdrop, is closed by x and Cancel, and renders correctly in light and dark; an external To Do created with a due date shows that date, is not overdue on its due day, and completes and reopens without error.</criterion>
+    <criterion testable="true">One smoke check per ship-list group is recorded as pass or as a fix/new task; zz-122- rows: 0 remain.</criterion>
+    <criterion testable="true">#1428 is closed with a comment naming the deploy and results.</criterion>
+    <criterion testable="true">Negative: no dispatch before a recorded owner approval; no secret or token in any committed file; the workflow file is unchanged; no environment other than dev was deployed; the retired Power Pages path was not used.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Sign-in to the deployed SPA fails with an authority, client-id, tenant or audience error: STOP; do not edit CIAM values or app registrations.</trigger>
+    <trigger>The ship list contains a change its owning project marks as not ready to deploy: STOP and ask.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81). Replaces the hand-off #1428 from task 111 and the external To Do browser checks left open by D-75 (deploy-log.md).</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
