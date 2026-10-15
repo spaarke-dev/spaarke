@@ -48,8 +48,14 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             // 503: the record's access settings could not be read (task 138), or the contact lookup could not be read
-            // (task 141, sdap.access.invite.contact_lookup_failed). Every 409/422/503 above is decided BEFORE
-            // onboarding, so it leaves no Contact, CIAM account or email behind.
+            // (task 141, sdap.access.invite.contact_lookup_failed), or (task 184) the pending-invite marker a contact
+            // needed did not land (sdap.access.invite.invite_marker_not_written: no grant, no email — retry). Every
+            // other 409/422/503 above is decided BEFORE
+            // onboarding, so it leaves no Contact, CIAM account or email behind — with two exceptions decided AFTER it,
+            // which carry the onboarded contactId: the grant core's own refusal when the record or grant changed while
+            // the account was provisioned (the re-run checks, a race), and the expired_not_restored 409 backstop (owner
+            // round 80 restores a lapsed grant, so no request is known to reach it). Onboarding is idempotent; a retry
+            // re-issues only the grant.
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
@@ -66,12 +72,20 @@ public static class InviteAndGrantExternalUserEndpoint
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
         IConfiguration configuration,
+        Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
         CancellationToken ct)
     {
+        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
+        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything is read or written: no contact, no account, no grant.
+        if (!ciamProvisioner.IsConfigured)
+            return InviteExternalUserEndpoint.CiamNotConfiguredResult(httpContext);
+
         // ── Validation ───────────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
@@ -225,11 +239,14 @@ public static class InviteAndGrantExternalUserEndpoint
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
         string onboardStatus;
+        bool? emailSent;
+        string? emailErrorCode;
         try
         {
             // The resolution the checks above judged — onboarding does not look the email up again.
-            var outcome = await InviteExternalUserEndpoint.ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, invitee, ct);
+            var outcome = await ExternalInviteService.ProvisionAsync(
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl,
+                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct);
 
             // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
             // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.
@@ -248,6 +265,10 @@ public static class InviteAndGrantExternalUserEndpoint
             }
 
             (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
+
+            // Adversarial pass 2, F2: an invite email that did not send is reported (the grant still proceeds), the same
+            // way on the new-account and the existing-account branch (§12 I-10).
+            (emailSent, emailErrorCode) = InviteExternalUserEndpoint.InviterVisibleEmail(outcome);
         }
         catch (Exception ex)
         {
@@ -279,9 +300,12 @@ public static class InviteAndGrantExternalUserEndpoint
         {
             // The SAME ceiling the pre-check used — the core re-runs every check itself (WP-1), so a record or a grant
             // that changed while the account was being provisioned is still judged at write time.
+            // Owner round 80: the modal's "+ Contact" re-add sends no date, so a re-add over a LAPSED grant is a SET —
+            // restored at the picked (ceiling-capped) level with today + 90, never answered 200 over a write that did
+            // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct, reAddRestoresLapsed: true);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -297,16 +321,27 @@ public static class InviteAndGrantExternalUserEndpoint
 
             accessRecordId = grantOutcome.AccessRecordId;
 
-            // Task 023: the upsert can succeed structurally while conferring no access — it matched an
-            // EXPIRED row and this request carried no new expiry. On the invite path that is logged
-            // rather than failed: the Contact WAS provisioned, so failing here would strand a real
-            // onboarding over a grant the operator can fix by re-granting with an expiry date.
+            // Task 023 / owner round 80: a grant that confers no access is never answered 200 "granted" — that told the
+            // modal a level was written when nothing was, and adopted an Assigned-To ledger entry for it. With the round-80
+            // restore a dateless re-add over a lapsed grant IS written (today + 90), and a past date is a 400 above, so no
+            // request is known to reach this; if one does, the Contact stays onboarded (idempotent) and the caller gets the
+            // same 409 as /grant, with the contact id — and nothing is adopted.
             if (grantOutcome.Warning is { } warning)
             {
                 logger.LogWarning(
-                    "[INVITE-GRANT] Contact {ContactId} was onboarded and the grant row {AccessRecordId} " +
-                    "exists, but it confers no access: {Warning}",
-                    grantRequest.ContactId, accessRecordId, warning);
+                    "[INVITE-GRANT] Contact {ContactId} was onboarded, but the grant on row {AccessRecordId} confers no " +
+                    "access: {Warning}", grantRequest.ContactId, accessRecordId, warning);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Grant did not take effect",
+                    detail: warning,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["traceId"] = httpContext.TraceIdentifier,
+                        ["reasonCode"] = "sdap.grant.expired_not_restored",
+                        ["accessRecordId"] = accessRecordId,
+                        ["contactId"] = contactId,
+                    });
             }
         }
         catch (Exception ex)
@@ -335,9 +370,27 @@ public static class InviteAndGrantExternalUserEndpoint
         await assignedAccess.MarkGrantAdoptedAsync(
             grantRoot.Type, grantRoot.Id, contactId, null, accessRecordId, CancellationToken.None);
 
+        // Task 036 (FR-07), review F1: a contact that was ALREADY onboarded gets no CIAM onboarding email on this route, so
+        // the grant email is its only notice — sent when the grant GAVE it access (never a same-level re-grant, an
+        // expiry-only change or a lower level). A contact onboarded by THIS request is emailed by the CIAM onboarding path
+        // already: exactly one email per invite, so no grant email for it. The grantee here is always a Contact (an
+        // organization grant is /grant's). Best effort, after the write: a failure is reported, never undoes the grant.
+        var notificationFailed = false;
+        if (string.Equals(onboardStatus, InviteExternalUserEndpoint.AlreadyProvisionedStatus, StringComparison.Ordinal)
+            && grantOutcome.AccessGained)
+        {
+            notificationFailed = await accessNotifier.NotifyContactGrantAsync(
+                grantRoot.Type, grantRoot.Id, contactId, grantOutcome.GrantedLevel, httpContext.User)
+                == GrantNotificationOutcome.Failed;
+        }
+
+        // Task 185 §12 I-10: the inviter is never told that the email already had a CIAM account (the log above keeps it).
         return TypedResults.Ok(new InviteAndGrantResponse(
-            contactId, onboardStatus, accessRecordId, portalUrl,
+            contactId, InviteExternalUserEndpoint.InviterVisibleStatus(onboardStatus), accessRecordId, portalUrl,
             GrantedAccessLevel: grantOutcome.GrantedLevel,
-            Narrowed: grantOutcome.Narrowed));
+            Narrowed: grantOutcome.Narrowed,
+            NotificationFailed: notificationFailed,
+            EmailSent: emailSent,
+            EmailErrorCode: emailErrorCode));
     }
 }

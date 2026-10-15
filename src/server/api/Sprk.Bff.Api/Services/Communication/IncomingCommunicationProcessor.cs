@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -431,6 +432,24 @@ public sealed class IncomingCommunicationProcessor
         if (_arrivedProducer is not null)
         {
             await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, ct);
+        }
+
+        // ── Step 4.9: a reply to a budget inquiry raises its "Record the outcome" To Do (ontology task 071 / D-111) ──
+        // After association (4.5): the reply carries sprk_regardingservicerequest only once the ladder has linked it. The
+        // creator is scoped, so it is resolved per message; it never throws (a failure must not fail email capture) and is
+        // idempotent per service request.
+        try
+        {
+            using var inquiryScope = _scopeFactory.CreateScope();
+            var inquiryTodo = inquiryScope.ServiceProvider
+                .GetService<Sprk.Bff.Api.Services.Signals.Actions.InquiryReplyTodoCreator>();
+            if (inquiryTodo is not null)
+                await inquiryTodo.OnReplyArrivedAsync(communicationId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Inquiry outcome To Do failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────
@@ -990,8 +1009,14 @@ public sealed class IncomingCommunicationProcessor
 
         // FR-D1 / FR-06: resolve the RAG grounding key ONCE for this communication — every attachment
         // shares the same regarding, so resolving inside the per-attachment enqueue would refetch it N times.
-        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
-            _genericEntityService, communicationId, _logger, ct);
+        // Task 177: the shared index-parent rule (the record that governs the communication) is Scoped.
+        ParentEntityContext? parentEntity;
+        using (var parentScope = _scopeFactory.CreateScope())
+        {
+            parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                _genericEntityService, parentScope.ServiceProvider.GetService<DocumentIndexParentResolver>(),
+                communicationId, _logger, ct);
+        }
 
         // SpeFileStore + IEmailAttachmentProcessor + CommunicationContainerResolver are Scoped — resolve
         // them once per message from one scope (R4 / R10); shared across this message's attachments
@@ -1307,8 +1332,14 @@ public sealed class IncomingCommunicationProcessor
         if (fileHandle?.Id is not null)
         {
             // FR-D1 / FR-06: resolve the grounding key for the archived .eml (single doc, one resolve).
-            var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
-                _genericEntityService, communicationId, _logger, ct);
+            // Task 177: the shared index-parent rule (the record that governs the communication) is Scoped.
+            ParentEntityContext? parentEntity;
+            using (var parentScope = _scopeFactory.CreateScope())
+            {
+                parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                    _genericEntityService, parentScope.ServiceProvider.GetService<DocumentIndexParentResolver>(),
+                    communicationId, _logger, ct);
+            }
             await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
     }

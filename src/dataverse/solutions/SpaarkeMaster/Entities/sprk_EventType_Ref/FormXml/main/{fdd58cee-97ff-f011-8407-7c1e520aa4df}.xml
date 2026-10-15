@@ -1,0 +1,173 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{fdd58cee-97ff-f011-8407-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{7018b584-2acc-474b-aee1-a3ab64a96f4f}" IsUserDefined="1" labelid="{fc8ec969-556f-476b-9be8-b1cc20426fda}" name="tab_overview">
+          <labels>
+            <label description="OVERVIEW" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="50%">
+              <sections>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{1a12e49e-4ccf-47b4-bdbd-fa5a2a3d625b}" labelid="{588fe016-896d-436c-ad21-44f7d9fb7cd7}" name="section_eventtype" celllabelposition="Top">
+                  <labels>
+                    <label description="EVENT TYPE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{3c876ae9-a38d-4b29-8933-5cbe98255999}" labelid="{629c7e26-9986-4da5-95d7-02a858433abd}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{94221069-b572-469e-aa8a-f5655407f416}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Event Type Code" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eventtypecode" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_eventtypecode" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9c2ba31a-c503-4c7f-bc83-1638eb200963}" locklevel="0" colspan="1" rowspan="4">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_description" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="50%">
+              <sections>
+                <section name="section_configurationjson" id="545463ba-7f2d-40f3-b20c-d0eb31ca7f4d" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="CONFIGURATION JSON" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{4ee855cc-13b2-4a43-861f-2bc0a1f6a8ea}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Event Type GUID" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eventtypeguid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_eventtypeguid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{4af764f1-e144-499b-9959-3dec092f0d37}" locklevel="0" colspan="1" rowspan="20" auto="true" showlabel="false">
+                        <labels>
+                          <label description="Field Configuration JSON" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_fieldconfigjson" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_fieldconfigjson" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{b756e43e-2efe-4bd4-ac68-6887ccc86361}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{bb10998b-d9c1-4ba6-8b60-d3917adbd60e}" showlabel="false" labelid="{910dedb4-f5dc-489c-8b68-091858f5045a}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{5daae370-d26b-4600-9ba1-25cfdc03165d}" showlabel="false" labelid="{d5ae9fe2-83be-497c-a1b2-f52acd2a7c4b}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{27599d83-271e-4b8b-802b-6b07f054587e}" showlabel="false" labelid="{bd7fd933-740d-4ce5-b816-3afd22992f54}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{5e00b6b5-c9de-4a92-89b1-c6c8b26d2361}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{e2ede44e-ac52-4a4e-af82-2043aac53c42}" labelid="{5db5d01f-16ea-484a-a669-6e85da249d09}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{a6d329a2-495e-4eb0-b39a-2818fd00a60e}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{3dae263e-34b2-4d53-8cca-55055e0106cf}" showlabel="false" labelid="{63be6916-77bb-4bbe-9e60-2b3c04129e4e}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{f45f6bc7-baf9-4840-979e-92e3f5a8a914}" showlabel="false" labelid="{589ef25d-7844-4c2d-9626-2c2b6440fa63}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{24d54402-8549-48c3-ae33-ad9b57c6b27e}" showlabel="false" labelid="{b849ee10-0f2d-421e-8fc2-1937a712913f}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Event Type main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

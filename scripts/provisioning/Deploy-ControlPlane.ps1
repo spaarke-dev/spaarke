@@ -634,6 +634,56 @@ if ($kvRefFailures.Count -gt 0) {
     exit 1
 }
 
+# =============================================================================
+# STARTUP SETTINGS PRESENT (task 255, read-only)
+#
+# The code this script deploys refuses to start (ValidateOnStart) without
+# settings that only platform-controlplane.bicep writes. A code deploy onto a
+# stack deployed before those settings existed would leave the sites down, so
+# check their NAMES (never values) on every target first. Today:
+#   - ReservedTenants__SpaarkeTenantId + ReservedTenants__CiamTenantIds__0
+#     (T255, INCOMING-141): the tenants POST /api/runs, H4b and H13 refuse as a
+#     customer workforce tenant. Both the Api and the Worker bind them.
+# Fix: re-deploy platform-controlplane.bicep with the environment's bicepparam
+# (it carries `ciamTenantIds`), then re-run this script.
+# =============================================================================
+
+Write-Section 'STARTUP SETTINGS PRESENT (read-only, task 255)'
+$requiredStartupSettings = @('ReservedTenants__SpaarkeTenantId', 'ReservedTenants__CiamTenantIds__0')
+$settingTargets = @()
+if ($deployApi) {
+    $settingTargets += [pscustomobject]@{ Label = ".Api production ($ApiAppServiceName)"; Site = $ApiAppServiceName; Slot = $null }
+    $settingTargets += [pscustomobject]@{ Label = ".Api staging slot ($ApiAppServiceName/$SlotName)"; Site = $ApiAppServiceName; Slot = $SlotName }
+}
+if ($deployWorker) {
+    $settingTargets += [pscustomobject]@{ Label = ".Worker ($WorkerAppServiceName)"; Site = $WorkerAppServiceName; Slot = $null }
+}
+$settingFailures = New-Object System.Collections.Generic.List[string]
+foreach ($settingTarget in $settingTargets) {
+    $slotArgs = if ($settingTarget.Slot) { @('--slot', $settingTarget.Slot) } else { @() }
+    $names = @(az webapp config appsettings list --resource-group $ResourceGroupName --name $settingTarget.Site @slotArgs --query '[].name' --output tsv 2>$null |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) {
+        $settingFailures.Add("$($settingTarget.Label): could not list app settings (az exit $LASTEXITCODE).") | Out-Null
+        continue
+    }
+    $missingSettings = @($requiredStartupSettings | Where-Object { $names -notcontains $_ })
+    if ($missingSettings.Count -gt 0) {
+        $settingFailures.Add("$($settingTarget.Label): missing $($missingSettings -join ', ')") | Out-Null
+    }
+    else {
+        Write-Success "$($settingTarget.Label): startup settings present."
+    }
+}
+if ($settingFailures.Count -gt 0) {
+    Write-Fail "$($settingFailures.Count) target(s) lack settings the new code requires at startup -- STOPPING before any code deploy (the sites would not start):"
+    foreach ($f in $settingFailures) {
+        Write-Host "    - $f" -ForegroundColor Red
+    }
+    Write-Host '    Re-deploy platform-controlplane.bicep with this environment''s bicepparam (it carries ciamTenantIds), then re-run.' -ForegroundColor Red
+    exit 1
+}
+
 # -----------------------------------------------------------------------------
 # Helper: publish (dotnet publish -- local, non-Azure; runs even under -WhatIf
 # so the operator can inspect the artifact before deciding to deploy it).
@@ -1135,11 +1185,10 @@ if (-not $SkipConfigVerification) {
         try {
             $missing = Get-MissingRequiredConfigKeys -SiteResourceGroup $ResourceGroupName -AppServiceName $WorkerAppServiceName -RequiredKeys $script:WorkerRequiredConfigKeys
             if ($missing.Count -gt 0) {
-                $script:VerificationFailures.Add("Worker site '$WorkerAppServiceName' is MISSING config key(s): $($missing -join ', '). Note: the Worker's required-key list intentionally reflects its CURRENT (pre-C5.1-fix) Bicep shape -- see this script's .DESCRIPTION 'CONFIG-KEY VERIFICATION - DISCOVERED DRIFT' note. A missing key here means the live site diverges even from that shape.") | Out-Null
+                $script:VerificationFailures.Add("Worker site '$WorkerAppServiceName' is MISSING config key(s): $($missing -join ', '). The Worker uses the canonical NFR-05 shape plus AZURE_CLIENT_ID (see .DESCRIPTION 'CONFIG-KEY VERIFICATION') -- STOP and investigate before relying on this deploy.") | Out-Null
             }
             else {
                 Write-Success 'All required Worker config keys present and non-empty.'
-                Write-Info 'Reminder: Worker key SHAPE still diverges from the canonical NFR-05/C5.1 shape used by .Api (filed gap, no owning task as of this script''s authoring).'
             }
         }
         catch {

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="119" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 12 (O4/W2, W3) - Find results visibly open what they show; check whether the Office To Do applies the restricted-record rule</title>
+    <phase>6 UAT round 12 (2026-10-08)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`FindResultsList.tsx`) and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small client change plus a read-only server trace.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT12-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Find files only; must not edit SaveFlow/SaveView/useSaveFlow, command surfaces, server code, ci-gated-suites.txt.</parallel-reason>
+    <deps>092, 102</deps>
+    <tags>frontend, office-addins, typescript, find, unit-test, investigation</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 12 items O4/W2 and W3. Record: `notes/042-uat-round12-2026-10-08.md`.</prompt>
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+  <goal>Every Find result (similar document, parent record, matching record) is visibly a link that opens its Spaarke record, and the owner knows whether `POST /api/office/todo` applies the restricted-record rule.</goal>
+
+  <context>
+    <background>
+      - Task 092 had already wired open handlers (FindView -> FindResultsList -> `openRecord`), gated on `canOpenRecord` + ORG_URL. Rows were borderless `subtle` buttons, which read as plain text; the non-openable fallback even had a border.
+      - Part B is investigation only; no server code.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner O4/W2">Items open their target; without ORG_URL / capability they stay plain (never a broken link).</constraint>
+    <constraint source="NFR-10 / ADR-021">Capability-gated, Fluent v9 tokens, keyboard operable, named buttons, visible focus.</constraint>
+    <constraint source="scope">No BFF/server edits; no App.tsx edit needed.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A similar document opens sprk_document/{id}; a matching record opens its entity/id; Enter and Space activate.</criterion>
+    <criterion testable="true">Openable rows carry a border, an open glyph and an "Open in Spaarke" tooltip.</criterion>
+    <criterion testable="true">Without onOpenRecord nothing is a button.</criterion>
+    <criterion testable="true">Gates: full jest green; lint 0; typecheck test-file errors not above 68, 0 production.</criterion>
+    <criterion testable="true">Note records the To Do restricted-rule findings with file:line.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Check existing wiring; add the affordance; new test file.</step>
+    <step>Trace OfficeService.CreateTodoAsync against the platform rules; write the note.</step>
+  </steps>
+
+  <justification>
+    <existing>Open handlers and gating exist (092); the shared opener is `openRecordLauncher`.</existing>
+    <extension>Yes - styling and cue on existing rows only.</extension>
+    <cost-of-doing-nothing>Owner UAT round 12: users do not realise Find rows open the record.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/__tests__/FindResultsList.openAffordance.test.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/119-find-open-links-and-todo-restriction-check.md</file>
+  </relevant-files>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/119-find-open-links-and-todo-restriction-check.md</file>
+  </outputs>
+</task>

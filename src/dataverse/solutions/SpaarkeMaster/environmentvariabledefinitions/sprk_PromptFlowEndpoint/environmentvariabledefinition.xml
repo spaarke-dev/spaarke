@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_PromptFlowEndpoint">
+  <description default="Azure AI Foundry Prompt Flow endpoint for orchestrated AI workflows. Format: https://{project}.{region}.inference.ml.azure.com/score">
+    <label description="Azure AI Foundry Prompt Flow endpoint for orchestrated AI workflows. Format: https://{project}.{region}.inference.ml.azure.com/score" languagecode="1033" />
+  </description>
+  <displayname default="Prompt Flow Endpoint">
+    <label description="Prompt Flow Endpoint" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

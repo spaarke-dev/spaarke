@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{ae428b71-6bc3-f111-a05c-0022482913fc}</WebResourceId>
+  <Name>sprk_accesspermission_inherited</Name>
+  <DisplayName>sprk_accesspermission_inherited</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_accesspermission_inheritedAE428B71-6BC3-F111-A05C-0022482913FC</FileName>
+</WebResource>

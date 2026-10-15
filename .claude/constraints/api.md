@@ -25,7 +25,7 @@ Load when:
 ### Architecture (ADR-001)
 
 - ✅ **MUST** use Minimal API for all HTTP endpoints
-- ✅ **MUST** use BackgroundService + Service Bus for async work
+- ✅ **MUST** place background work per ADR-052; inside the BFF, queue work is an ADR-004 `IJobHandler` (Service Bus) and scheduled work an ADR-036 `IScheduledJob` — not a new hand-rolled timer `BackgroundService` (`.claude/constraints/jobs.md`)
 - ✅ **MUST** register all services in single `Program.cs` middleware pipeline
 - ✅ **MUST** expose `/healthz` endpoint for health checks
 
@@ -41,7 +41,7 @@ Load when:
 - ✅ **MUST** register concretes by default (not interfaces)
 - ✅ **MUST** use feature module extensions (`AddSpaarkeCore`, `AddDocumentsModule`, `AddWorkersModule`)
 - ✅ **MUST** use Options pattern with `ValidateOnStart()`
-- ✅ **MUST** keep DI registrations ≤15 non-framework lines
+- ✅ **MUST** keep `Program.cs` composing feature modules, one line each, with registrations inside `Add{Feature}Module()`. ~15 non-framework lines is the readability target, not a gate: when the module list grows past it, group related modules — never inline or hide registrations to hit the number
 - ✅ **MUST** use single typed `HttpClient` per upstream service
 
 ### Error Handling (ADR-019)

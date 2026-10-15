@@ -232,7 +232,7 @@ public class SecureChildOwnershipEndpointTests
             CancellationToken ct = default) =>
             Task.FromResult((Array.Empty<EventEntity>(), 0));
 
-        public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+        public Task UpdateEventStatusAsync(Guid id, int statusCode, DateOnly? completedDate = null, CancellationToken ct = default)
         {
             StatusUpdates.Add((id, statusCode));
             return Task.CompletedTask;

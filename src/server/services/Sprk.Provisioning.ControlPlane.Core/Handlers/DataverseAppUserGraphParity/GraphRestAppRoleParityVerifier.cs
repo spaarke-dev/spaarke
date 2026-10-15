@@ -2,17 +2,17 @@
 // GraphRestAppRoleParityVerifier.cs
 //
 // Production IGraphAppRoleParityVerifier — the T3 silent-fail trap post-
-// condition check (spec.md FR-33). Raw Microsoft Graph REST call (same
-// Path-C rationale as GraphRestAppRoleGranter.cs) — independently re-reads
+// condition check (spec.md FR-33). Raw Microsoft Graph REST calls (same
+// Path-C rationale as GraphRestAppRoleGranter.cs; shared plumbing in
+// GraphAppRoleRest) — independently re-reads
 // GET /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments (Graph-resource-
-// scoped) and asserts every expected AppRoleId is present.
+// scoped) and asserts every expected AppRoleId is present and, since task 261,
+// that no other Graph app role is.
 //
-// NOT under test in the CI unit suite (real Graph REST call). Handler unit
-// tests substitute a fake IGraphAppRoleParityVerifier.
+// HTTP-testable through the internal constructor (credential factory); handler
+// unit tests substitute a fake IGraphAppRoleParityVerifier.
 // -----------------------------------------------------------------------------
 
-using System.Net.Http.Headers;
-using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Options;
@@ -22,10 +22,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 /// <inheritdoc cref="IGraphAppRoleParityVerifier"/>
 public sealed class GraphRestAppRoleParityVerifier : IGraphAppRoleParityVerifier
 {
-    private static readonly string[] GraphScope = { "https://graph.microsoft.com/.default" };
-
     private readonly HttpClient _httpClient;
     private readonly IGraphAppRolesRegistry _registry;
+    private readonly Func<string, TokenCredential> _credentialFactory;
     private readonly ILogger<GraphRestAppRoleParityVerifier> _logger;
 
     public GraphRestAppRoleParityVerifier(
@@ -33,14 +32,28 @@ public sealed class GraphRestAppRoleParityVerifier : IGraphAppRoleParityVerifier
         IGraphAppRolesRegistry registry,
         IOptions<H10DataverseAppUserGraphParityOptions> options,
         ILogger<GraphRestAppRoleParityVerifier> logger)
+        : this(httpClient, registry, options, logger,
+              tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>Test seam: a credential factory instead of DefaultAzureCredential.</summary>
+    internal GraphRestAppRoleParityVerifier(
+        HttpClient httpClient,
+        IGraphAppRolesRegistry registry,
+        IOptions<H10DataverseAppUserGraphParityOptions> options,
+        ILogger<GraphRestAppRoleParityVerifier> logger,
+        Func<string, TokenCredential> credentialFactory)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _registry = registry;
         _logger = logger;
+        _credentialFactory = credentialFactory;
         _httpClient.Timeout = options.Value.GraphRequestTimeout;
     }
 
@@ -55,26 +68,11 @@ public sealed class GraphRestAppRoleParityVerifier : IGraphAppRoleParityVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(expectedRoles);
 
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
-        AccessToken token;
-        try
-        {
-            token = await credential.GetTokenAsync(
-                new TokenRequestContext(GraphScope), cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "T3 verify: token acquisition failed for UAMI SP {UamiSpId}", uamiServicePrincipalObjectId);
-            return new GraphAppRoleParityResult.Partial(
-                expectedRoles.Select(r => r.Value).ToList(), GrantedCount: 0, ExpectedCount: expectedRoles.Count);
-        }
-
         HashSet<string> currentIds;
         try
         {
-            var graphSpId = await ResolveGraphResourceSpIdAsync(token, cancellationToken).ConfigureAwait(false);
-            currentIds = await ReadCurrentAppRoleIdsAsync(token, uamiServicePrincipalObjectId, graphSpId, cancellationToken)
-                .ConfigureAwait(false);
+            var (_, assignments) = await ReadAsync(uamiServicePrincipalObjectId, tenantId, cancellationToken).ConfigureAwait(false);
+            currentIds = assignments.Select(a => a.AppRoleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -97,55 +95,52 @@ public sealed class GraphRestAppRoleParityVerifier : IGraphAppRoleParityVerifier
             missing, GrantedCount: expectedRoles.Count - missing.Count, ExpectedCount: expectedRoles.Count);
     }
 
-    private async Task<string> ResolveGraphResourceSpIdAsync(AccessToken token, CancellationToken ct)
+    /// <inheritdoc/>
+    public async Task<GraphAppRoleExtrasResult> FindUnexpectedRolesAsync(
+        string uamiServicePrincipalObjectId,
+        string tenantId,
+        IReadOnlyList<GraphAppRoleEntry> allowedRoles,
+        CancellationToken cancellationToken)
     {
-        var filter = Uri.EscapeDataString($"appId eq '{_registry.GraphResourceAppId}'");
-        var uri = new Uri($"https://graph.microsoft.com/v1.0/servicePrincipals?$filter={filter}&$select=id,displayName");
-        using var doc = await GetJsonAsync(uri, token, ct).ConfigureAwait(false);
-        var values = doc.RootElement.GetProperty("value");
-        if (values.GetArrayLength() == 0)
+        ArgumentException.ThrowIfNullOrWhiteSpace(uamiServicePrincipalObjectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(allowedRoles);
+
+        if (allowedRoles.Count == 0 || allowedRoles.Any(r => string.IsNullOrWhiteSpace(r.AppRoleId)))
         {
-            throw new InvalidOperationException(
-                $"Microsoft Graph resource service principal (appId={_registry.GraphResourceAppId}) not found in tenant.");
+            return new GraphAppRoleExtrasResult.Unknown("The allowed role set is empty or has a null AppRoleId — no verdict.");
         }
-        return values[0].GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Graph resource SP lookup returned a null id.");
+        var allowedIds = allowedRoles.Select(r => r.AppRoleId!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var (graph, assignments) = await ReadAsync(uamiServicePrincipalObjectId, tenantId, cancellationToken).ConfigureAwait(false);
+            var extras = assignments
+                .Where(a => !allowedIds.Contains(a.AppRoleId))
+                .Select(a => graph.NameOf(a.AppRoleId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return extras.Count == 0
+                ? new GraphAppRoleExtrasResult.None()
+                : new GraphAppRoleExtrasResult.Found(extras);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "T3 extras check: appRoleAssignments read failed for UAMI SP {UamiSpId}", uamiServicePrincipalObjectId);
+            return new GraphAppRoleExtrasResult.Unknown(
+                $"Could not read the identity's Graph app-role assignments: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
-    private async Task<HashSet<string>> ReadCurrentAppRoleIdsAsync(
-        AccessToken token, string uamiSpId, string graphSpId, CancellationToken ct)
+    private async Task<(GraphResourcePrincipal Graph, IReadOnlyList<GraphAppRoleAssignment> Assignments)> ReadAsync(
+        string uamiSpId, string tenantId, CancellationToken ct)
     {
-        var uri = new Uri($"https://graph.microsoft.com/v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments");
-        using var doc = await GetJsonAsync(uri, token, ct).ConfigureAwait(false);
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!doc.RootElement.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
-        {
-            return result;
-        }
-        foreach (var entry in values.EnumerateArray())
-        {
-            var resourceId = entry.TryGetProperty("resourceId", out var r) ? r.GetString() : null;
-            if (!string.Equals(resourceId, graphSpId, StringComparison.OrdinalIgnoreCase)) continue;
-            var appRoleId = entry.TryGetProperty("appRoleId", out var a) ? a.GetString() : null;
-            if (!string.IsNullOrWhiteSpace(appRoleId)) result.Add(appRoleId);
-        }
-        return result;
+        var token = await _credentialFactory(tenantId)
+            .GetTokenAsync(new TokenRequestContext(GraphAppRoleRest.GraphScope), ct).ConfigureAwait(false);
+        var graph = await GraphAppRoleRest.ResolveGraphResourceAsync(_httpClient, token, _registry.GraphResourceAppId, ct)
+            .ConfigureAwait(false);
+        var assignments = await GraphAppRoleRest.ReadAssignmentsAsync(_httpClient, token, uamiSpId, graph.Id, ct)
+            .ConfigureAwait(false);
+        return (graph, assignments);
     }
-
-    private async Task<JsonDocument> GetJsonAsync(Uri uri, AccessToken token, CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"GET {uri} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 300)}");
-        }
-        return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
-    }
-
-    private static string Truncate(string s, int max)
-        => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
 }

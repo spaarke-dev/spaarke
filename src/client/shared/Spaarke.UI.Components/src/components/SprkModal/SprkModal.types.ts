@@ -15,6 +15,13 @@ export interface SprkModalNav {
   total: number;
   /** Navigate to the previous/next record. */
   onNavigate: (dir: 'prev' | 'next') => void;
+  /**
+   * Optional guard run BEFORE `onNavigate`. Return (or resolve to) `false` to block the move — the seam
+   * for a discard check ("Discard what you haven't recorded?") or a cross-frame dirty-check. A guard that
+   * throws or rejects blocks the move (fail closed). Without a guard, `onNavigate` runs synchronously.
+   * Lifted from `BrowseModal` into the shell so every `nav` consumer (`BrowseModal`, `WizardShell`) gets it.
+   */
+  onBeforeNavigate?: (dir: 'prev' | 'next') => boolean | Promise<boolean>;
 }
 
 /**
@@ -58,6 +65,18 @@ export interface SprkModalProps {
    * open→false unmount, which would reset it). Default `false`.
    */
   hidden?: boolean;
+  /**
+   * When `true`, the modal stays MOUNTED and VISIBLE while a page-level native
+   * side pane (the `Xrm.Utility.lookupObjects` advanced-lookup pane, which opens
+   * at the right edge of the window) is open: it dims and is `inert` (no pointer
+   * or keyboard input) until the flag is cleared, and its page layer drops just
+   * below the pane's so the pane opens ON TOP of it (`sidePaneLayering.ts`).
+   * When the pane cannot be layered above it, the surface moves left so its
+   * right edge clears the pane instead. The modal reads as sitting behind the lookup
+   * instead of disappearing (owner test feedback 2026-10-07, Manage Access).
+   * Used together with `nonBlocking`. Ignored when `hidden` is `true`. Default `false`.
+   */
+  yieldToSidePane?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */

@@ -5,9 +5,10 @@
 //          AiSafety:ContentSafety:ManagedIdentity:Enabled (an RBAC gap shows up here
 //          as a failed_open_error spike, not as a 5xx on the chat endpoint).
 // Counter:  ai.safety.shield_evaluations (meter Sprk.Bff.Api.Ai, AiTelemetry.cs)
-//           outcome ∈ completed | blocked | failed_open_timeout | failed_open_error
+//           outcome ∈ completed | blocked | failed_open_timeout | failed_open_error | failed_open_auth
+//           (failed_open_auth = Content Safety refused the BFF identity / no token — not transient, task 230b)
 // Expected columns (part 1): timestamp (1h bin), evaluations, completed, blocked,
-//                            failedOpenTimeout, failedOpenError, failOpenRate
+//                            failedOpenTimeout, failedOpenError, failedOpenAuth, failOpenRate
 // Expected columns (part 2): tenantId, evaluations, failedOpen, failOpenRate
 let window = 7d;
 customMetrics
@@ -17,9 +18,10 @@ customMetrics
             completed         = sumif(valueSum, outcome == "completed"),
             blocked           = sumif(valueSum, outcome == "blocked"),
             failedOpenTimeout = sumif(valueSum, outcome == "failed_open_timeout"),
-            failedOpenError   = sumif(valueSum, outcome == "failed_open_error")
+            failedOpenError   = sumif(valueSum, outcome == "failed_open_error"),
+            failedOpenAuth    = sumif(valueSum, outcome == "failed_open_auth")
   by bin(timestamp, 1h)
-| extend failOpenRate = round(todouble(failedOpenTimeout + failedOpenError) / todouble(evaluations), 4)
+| extend failOpenRate = round(todouble(failedOpenTimeout + failedOpenError + failedOpenAuth) / todouble(evaluations), 4)
 | order by timestamp asc
 
 // -- Part 2: per-tenant fail-open rate (which tenants ride unshielded?) --

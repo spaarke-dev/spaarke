@@ -540,9 +540,10 @@ public sealed class WebSearchHandler : IToolHandler
     /// Service resolves a Key Vault reference INTO the application's configuration at startup either
     /// way. What the indirection buys is that the secret's NAME becomes per-environment
     /// configuration instead of a hard-coded key. The only in-repo pattern that genuinely keeps the
-    /// value out of <c>IConfiguration</c> is a runtime <c>SecretClient</c> fetch
-    /// (<c>KnowledgeDeploymentService.GetApiKeyFromKeyVaultAsync</c>), which would add a Key Vault
-    /// round-trip to the web-search path — the latency this task's escalation trigger names.
+    /// value out of <c>IConfiguration</c> is a runtime <c>SecretClient</c> fetch (the former
+    /// <c>KnowledgeDeploymentService.GetApiKeyFromKeyVaultAsync</c>, removed by customer-provisioning task 230b with
+    /// the key-only CustomerOwned search path), which would add a Key Vault round-trip to the web-search path — the
+    /// latency this task's escalation trigger names.
     /// </remarks>
     private string? ResolveApiKey()
     {

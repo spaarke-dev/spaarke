@@ -63,26 +63,28 @@ When working in a **git worktree** (e.g., `spaarke-wt-{project-name}`), addition
 
 ```
 DETECT worktree:
-  git rev-parse --git-common-dir
+  git rev-parse --git-dir         # main repo → ".git"; linked worktree → ".../.git/worktrees/{name}"
 
-  IF output contains ".git/worktrees":
+  IF git-dir is not ".git":
     → Working in a worktree
-    → MAIN_REPO_PATH = git rev-parse --git-common-dir (parent of .git/worktrees)
-    → After merge to master, MUST sync main repo
+    → MAIN_REPO_PATH = dirname(git rev-parse --git-common-dir)   # ONE dirname (worktree-sync Step 4)
+    → After merge to master, sync the main repo (below)
+
+  (Corrected 2026-10-10: this used to test `--git-common-dir` for ".git/worktrees". In a linked
+  worktree `--git-common-dir` is the main repo's `.git`, so that test was always false and the
+  derived path pointed inside `.git`.)
 ```
 
 ### Auto-Sync After Merge (MANDATORY for Worktrees)
 
-When merging to master from a worktree, **always** sync the main repo:
+When merging to master from a worktree, sync the main repo with the **guarded fast-forward** in
+`/merge-to-master` Step A.6: fast-forward only, and only when the main checkout has `master` checked
+out (otherwise `git fetch origin master:master`); STOP and report on refusal. Never `git reset --hard`,
+`git stash` or `git checkout` there — the main checkout can hold another session's uncommitted work.
 
-```powershell
-# After pushing branch:master
-cd {MAIN_REPO_PATH}
-git fetch origin
-git pull origin master
-```
-
-This ensures the main repo's local master matches origin/master.
+(Corrected 2026-10-10. This block used to run `cd {MAIN_REPO_PATH}; git fetch origin; git pull origin master`
+— no `--ff-only` and no HEAD check, so on a diverged or other-branch main checkout it created a merge
+commit there.)
 
 ---
 
@@ -456,13 +458,14 @@ SUGGEST PR template content for user to paste
 
 ### Step 8: Monitor CI Status
 
-After pushing, CI runs automatically. **Two systems run in parallel today** (updated 2026-08-29):
+After pushing, CI runs automatically. The CI Router runs Tier 1 and Tier 2; `Client lint` and `CI Standalone Checks` run alongside (updated 2026-10-14):
 
 | Workflow | Role | Blocking? |
 |---|---|---|
 | **`CI` (Router)** → `ci-tier1-blocking.yml` | Compile, Arch Tests (MUST-NOT subset), auth/tenant/eval/fidelity gates. Target p95 ≤3 min. | **Yes** — this is the verdict that matters |
 | **`CI` (Router)** → `ci-tier2-advisory.yml` | Full unit tests, format, lint, ADR NetArchTest, markdown links, plugin size | **No — advisory by design.** A red Tier 2 does **not** block a merge |
-| **`SDAP CI`** (legacy `sdap-ci.yml`) | Build & Test, Code Quality, Trivy | Running in parallel pending retirement (task CICD-077) |
+| **`Client lint (type-aware ratchet)`** (`client-lint.yml`) | Typed ESLint ratchet on client packages | **Yes — required** |
+| **`CI Standalone Checks`** (`ci-standalone-checks.yml`) | Dependency audit, Release build + BFF publish, Compose client gate, client typecheck, PCF ESLint | **No — advisory** (red jobs on master raise quality alerts). `sdap-ci.yml` was retired 2026-10-14 (CICD-077) |
 
 Tier 2 being advisory is deliberate, not an oversight — it exists so slow/flaky checks cannot hold up
 high-frequency master pushes. Do **not** "fix" a red Tier 2 by making it blocking.
@@ -532,14 +535,11 @@ Next steps:
 > `git push origin {branch}:master`"*. That is a **direct push that bypasses the PR**, and it is not how
 > work lands on this repo. Every PR merged in the CI-remediation project used `gh pr merge --squash`.
 >
-> A direct push also **starves the CI cutover measurement**: `scripts/ci/shadow-window-status.ps1`
-> enumerates merged **PRs** and compares the legacy vs. new workflow verdict on each merge commit.
-> Work pushed straight to master creates no PR, contributes no comparison, and therefore *delays*
-> retiring `sdap-ci.yml`.
+> (Historical: direct pushes also starved the CI cutover measurement in `scripts/ci/shadow-window-status.ps1`; that window closed when `sdap-ci.yml` was retired on 2026-10-14.)
 >
 > **Master IS protected (enabled 2026-08-29).** A repository **ruleset** — not classic branch
-> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`**
-> check must pass, and force-push/deletion are blocked. A direct push to master is refused.
+> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`** and
+> **`Client lint (type-aware ratchet)`** checks must pass, and force-push/deletion are blocked. A direct push to master is refused.
 >
 > Classic branch protection is **unavailable on this repo** — both `GET` and `PUT` on
 > `/branches/master/protection` return `404 "Branch protection has been disabled on this repository"`
@@ -547,7 +547,7 @@ Next steps:
 > at `gh api repos/spaarke-dev/spaarke/rulesets/21824191`, and read what actually applies with
 > `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
 >
-> **The required context is `Router`** — the literal check-run name — **not** `CI / Router` as some
+> **The required contexts are `Router` and `Client lint (type-aware ratchet)`** — the literal check-run names — **not** `CI / Router` as some
 > planning docs say. `Router` is the router workflow's `always()` aggregate over `classify` + `tier1`;
 > **tier2 is deliberately excluded from its adjudication**, which is what makes Tier 2 advisory in
 > practice. Docs-only PRs skip Tier 1 and `Router` still reports success, so they are not blocked
@@ -565,12 +565,10 @@ When user requests "merge to master" or "merge and sync":
 2. Merge via the PR (squash is this repo's convention):
    gh pr merge {N} --squash --delete-branch
 
-3. IF in worktree (MANDATORY):
-   MAIN_REPO=$(git rev-parse --git-common-dir | sed 's|/.git/worktrees.*||')
-   cd "$MAIN_REPO"
-   git fetch origin
-   git pull origin master
-   → Report: "✅ Main repo synced to {commit-sha}"
+3. IF in worktree: sync the main repo with `/merge-to-master` Step A.6 (HEAD guard, fast-forward
+   only, STOP on refusal). → Report: "✅ Main repo synced to {commit-sha}" or why it was not.
+   (Replaced 2026-10-10: `MAIN_REPO=$(git rev-parse --git-common-dir | sed ...)` + `git pull origin
+   master` — the sed was a no-op in a linked worktree and the pull could merge into the main checkout.)
 
 4. Summary:
    ✅ Merged to master
@@ -686,5 +684,5 @@ gh pr create                            # Create PR (if gh installed)
 | Pushed broken code that fails CI | Tests or build not run locally before push | MANDATORY: `dotnet build src/server/api/Sprk.Bff.Api/` AND `dotnet test` BEFORE `git push`. The skill enforces this at Step 6. |
 | PR opened against the wrong base branch | `gh pr create` defaulted to a non-master base | Always pass `--base master` explicitly when creating PRs. Verify before clicking "Create PR" in the web UI. |
 | Force-pushed to a shared branch and overwrote teammate's work | Used `--force` instead of `--force-with-lease` | NEVER `--force` on shared branches. `--force-with-lease` rejects the push if the remote moved since your last fetch. |
-| Worktree merge-to-master succeeded but main repo's local master is stale | Forgot Step 10.3 (sync main repo) | Always run `git rev-parse --git-common-dir` to find main repo path; `cd $MAIN_REPO && git pull origin master`. Skill enforces this when in worktree. |
+| Worktree merge-to-master succeeded but main repo's local master is stale | Forgot Step 10.3 (sync main repo), or the guarded sync refused | Run `/merge-to-master` Step A.6 (main repo = ONE `dirname` of `git rev-parse --git-common-dir`; fast-forward only; only when main has `master` checked out). If it refuses, report — never reset/stash/checkout over the main checkout. |
 | PR description copy-pasted from another PR with wrong issue link | Reused template without updating placeholders | Use `references/pr-template.md` with `--body-file` then EDIT the PR description on GitHub — don't leave placeholder text. |

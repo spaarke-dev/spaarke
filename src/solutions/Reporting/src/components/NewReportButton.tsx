@@ -168,7 +168,7 @@ export const NewReportButton: React.FC<NewReportButtonProps> = ({
             {/* Error banner */}
             {error && (
               <div className={styles.errorWrapper}>
-                <MessageBar intent="error" layout="singleline">
+                <MessageBar intent="error" layout="multiline">
                   <MessageBarBody>{error}</MessageBarBody>
                 </MessageBar>
               </div>

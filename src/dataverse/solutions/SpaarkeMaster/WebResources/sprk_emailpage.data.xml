@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{3cc45ae3-008b-f111-8076-7ced8d174eb8}</WebResourceId>
+  <Name>sprk_emailpage</Name>
+  <DisplayName>Email</DisplayName>
+  <Description>Outlook-style Email workspace (email-communication-solution-r5) - standalone code page</Description>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_emailpage3CC45AE3-008B-F111-8076-7CED8D174EB8</FileName>
+</WebResource>

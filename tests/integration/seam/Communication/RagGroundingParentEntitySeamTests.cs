@@ -95,12 +95,27 @@ public sealed class RagGroundingParentEntitySeamTests
     }
 
     [Fact]
+    public void FromCommunication_WorkAssignmentRegarding_IsACoreRecord_ReturnsWorkAssignmentGroundingKey()
+    {
+        // Task 177 (verifier round): a work assignment is a core record search authorizes (scope=entity names it), so it
+        // grounds; before, it was "not representable" and a communication filed to it indexed with no parent.
+        var workAssignmentId = Guid.NewGuid();
+        var comm = Communication(
+            ("sprk_regardingworkassignment", "sprk_workassignment", workAssignmentId, "WA-1"),
+            ("sprk_regardingaccount", "account", Guid.NewGuid(), "Contoso"));
+
+        var result = RegardingParentEntityMapper.FromCommunication(comm);
+
+        result.Should().Be(new ParentEntityContext("workassignment", workAssignmentId.ToString(), "WA-1"));
+    }
+
+    [Fact]
     public void FromCommunication_NonRepresentablePrimary_ReturnsNull_DoesNotFallThroughToSecondary()
     {
-        // Work assignment is the primary (higher priority than account in RegardingFieldMap order) but is NOT
-        // a representable type. The mapper must degrade to null rather than misfiling to the account.
+        // An event is the primary (higher priority than account in RegardingFieldMap order) but is NOT a representable
+        // type. The mapper must degrade to null rather than misfiling to the account.
         var comm = Communication(
-            ("sprk_regardingworkassignment", "sprk_workassignment", Guid.NewGuid(), "WA-1"),
+            ("sprk_regardingevent", "sprk_event", Guid.NewGuid(), "Hearing"),
             ("sprk_regardingaccount", "account", Guid.NewGuid(), "Contoso"));
 
         var result = RegardingParentEntityMapper.FromCommunication(comm);
@@ -137,7 +152,7 @@ public sealed class RagGroundingParentEntitySeamTests
             .ReturnsAsync(Communication(("sprk_regardingmatter", "sprk_matter", matterId, "Acme v. Widget")));
 
         var result = await RegardingParentEntityMapper.ResolveAsync(
-            service.Object, communicationId, NullLogger.Instance, CancellationToken.None);
+            service.Object, TestDocumentIndexParentResolver.Over(service.Object), communicationId, NullLogger.Instance, CancellationToken.None);
 
         result!.EntityType.Should().Be(ParentEntityContext.EntityTypes.Matter);
         result.EntityId.Should().Be(matterId.ToString());
@@ -155,9 +170,39 @@ public sealed class RagGroundingParentEntitySeamTests
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
         var act = async () => await RegardingParentEntityMapper.ResolveAsync(
-            service.Object, communicationId, NullLogger.Instance, CancellationToken.None);
+            service.Object, TestDocumentIndexParentResolver.Over(service.Object), communicationId, NullLogger.Instance, CancellationToken.None);
 
         var result = await act.Should().NotThrowAsync();
         result.Subject.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Task 177 (verifier round, older F1): a communication filed to a matter AND a secure project is grounded under the
+    /// PROJECT — the record that governs it — not the first regarding in RegardingFieldMap order (the matter).
+    /// </summary>
+    [Fact]
+    public async Task ResolveAsync_MatterAndSecureProject_GroundsUnderTheProject()
+    {
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var service = new Mock<IGenericEntityService>();
+        service
+            .Setup(s => s.RetrieveAsync(CommunicationEntity, communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Communication(
+                ("sprk_regardingmatter", "sprk_matter", matterId, "Acme v. Widget"),
+                ("sprk_regardingproject", "sprk_project", projectId, "Secure Diligence")));
+        service
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        var flags = new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
+            new Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags(IsSecure: false, IsRestricted: false));
+        flags.Flags[projectId] = new Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var result = await RegardingParentEntityMapper.ResolveAsync(
+            service.Object, TestDocumentIndexParentResolver.Over(service.Object, flags), communicationId, NullLogger.Instance,
+            CancellationToken.None);
+
+        result.Should().Be(new ParentEntityContext("project", projectId.ToString(), "Secure Diligence"));
     }
 }

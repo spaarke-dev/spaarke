@@ -27,6 +27,10 @@ resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview
   }
   properties: {
     minimumTlsVersion: '1.2'
+    // Keyless (owner D13, task 244): SAS is rejected; the stamp BFF sends and receives with its UAMI
+    // (Azure Service Bus Data Sender + Data Receiver, modules/bff-runtime-rbac.bicep), configured by
+    // namespace (`ServiceBus__FullyQualifiedNamespace`).
+    disableLocalAuth: true
   }
 }
 
@@ -45,17 +49,8 @@ resource queues 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = [f
   }
 }]
 
-// Authorization rule for application access
-resource sendListenRule 'Microsoft.ServiceBus/namespaces/AuthorizationRules@2022-10-01-preview' = {
-  parent: serviceBusNamespace
-  name: 'SpaarkeAppAccess'
-  properties: {
-    rights: ['Send', 'Listen']
-  }
-}
+// No SAS authorization rule and no connection-string output (task 244): local auth is disabled.
 
 output serviceBusId string = serviceBusNamespace.id
 output serviceBusName string = serviceBusNamespace.name
 output serviceBusEndpoint string = serviceBusNamespace.properties.serviceBusEndpoint
-#disable-next-line outputs-should-not-contain-secrets
-output serviceBusConnectionString string = sendListenRule.listKeys().primaryConnectionString

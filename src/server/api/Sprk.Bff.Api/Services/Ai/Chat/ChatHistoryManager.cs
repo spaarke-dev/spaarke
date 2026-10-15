@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Sprk.Bff.Api.Infrastructure.Text;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -258,7 +259,7 @@ public sealed class ChatHistoryManager
             var prompt =
                 "Write a short, work-descriptive title (3-6 words, no quotes, no trailing " +
                 "punctuation, no markdown) for a conversation that starts with this message:\n\n" +
-                TruncateSurrogateSafe(firstMessageContent, 500);
+                TextTruncation.TruncateSurrogateSafe(firstMessageContent, 500);
 
             var raw = await _openAiClient.GetCompletionAsync(
                 prompt: prompt,
@@ -306,7 +307,7 @@ public sealed class ChatHistoryManager
             return "New conversation";
         }
 
-        return TruncateSurrogateSafe(oneLine, TitleMaxLength);
+        return TextTruncation.TruncateSurrogateSafe(oneLine, TitleMaxLength);
     }
 
     /// <summary>
@@ -330,7 +331,7 @@ public sealed class ChatHistoryManager
             oneLine = oneLine.Replace("  ", " ");
         }
 
-        return string.IsNullOrWhiteSpace(oneLine) ? string.Empty : TruncateSurrogateSafe(oneLine, TitleMaxLength);
+        return string.IsNullOrWhiteSpace(oneLine) ? string.Empty : TextTruncation.TruncateSurrogateSafe(oneLine, TitleMaxLength);
     }
 
     /// <summary>
@@ -446,7 +447,7 @@ public sealed class ChatHistoryManager
     // "Session Outputs" context primitive) moved to
     // ContextSliceProducers.ConversationContextProducer.BuildLedgerOutputsContext — the single production
     // home for the Memory.Conversation primitive shared by the interactive chat endpoint (ChatEndpoints)
-    // and the Context Binder. The producer reuses TruncateSurrogateSafe below (exposed internal).
+    // and the Context Binder. Both use Infrastructure.Text.TextTruncation.TruncateSurrogateSafe.
 
     // =========================================================================
     // Ledger-output digest (ADR-040 / FR-P0-02)
@@ -509,29 +510,9 @@ public sealed class ChatHistoryManager
         };
 
         text = text.ReplaceLineEndings(" ").Trim();
-        return TruncateSurrogateSafe(text, MaxOutputSnippetLength);
+        return TextTruncation.TruncateSurrogateSafe(text, MaxOutputSnippetLength);
     }
 
-    /// <summary>
-    /// Caps <paramref name="text"/> at <paramref name="maxLength"/> characters, backing
-    /// off one char if the cap would split a surrogate pair (e.g. an emoji), which would
-    /// produce a malformed UTF-16 string. Appends an ellipsis only when truncated.
-    /// </summary>
-    internal static string TruncateSurrogateSafe(string text, int maxLength)
-    {
-        if (text.Length <= maxLength)
-        {
-            return text;
-        }
-
-        var cut = maxLength;
-        if (char.IsHighSurrogate(text[cut - 1]))
-        {
-            cut--;
-        }
-
-        return text[..cut] + "…";
-    }
 
     /// <summary>
     /// Returns the first summary-like string property on an object payload

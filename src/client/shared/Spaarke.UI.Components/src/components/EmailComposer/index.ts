@@ -30,6 +30,18 @@ export type { ISendEmailPageProps } from './wrappers/SendEmailPage';
 export { SendEmailPane } from './wrappers/SendEmailPane';
 export type { ISendEmailPaneProps } from './wrappers/SendEmailPane';
 
+// Failed-send wording (owner decision 2026-10-09) — the engine's "Email not sent" dialog text, exported
+// for hosts that show the failure themselves (`sendFailureDisplay="host"`) and for unit tests.
+export {
+  describeSendFailure,
+  describeDraftSaveFailure,
+  toSendCommunicationError,
+  SEND_FAILURE_NETWORK_CODE,
+  SEND_FAILURE_CLIENT_CODE,
+  SEND_FAILURE_UNCONFIRMED_CODE,
+} from './describeSendFailure';
+export type { ISendFailureDescription } from './describeSendFailure';
+
 // Xrm-backed compose-lookup handler factory (shared by the Email code page +
 // the SpaarkeAi `email` widget mounts — see file docblock). The engine stays
 // context-agnostic; hosts inject these callbacks.

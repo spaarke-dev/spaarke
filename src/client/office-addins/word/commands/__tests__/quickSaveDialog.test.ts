@@ -12,7 +12,7 @@ import {
   RESULT_CAP_MS,
   SAVING_MESSAGE,
   type QuickSaveDialog,
-} from '../quickSaveDialog';
+} from '@shared/commands/quickSaveDialog';
 
 const ORG = 'https://spaarkedev1.crm.dynamics.com';
 const RECORD_URL = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_document&id=2bcfc5d2-0000-4000-8000-000000000001&pagetype=entityrecord&navbar=off`;
@@ -40,7 +40,7 @@ describe('quickSaveDialog', () => {
   const userClosesDialog = (dialog: FakeDialog): void => dialog.handlers['dialogEventReceived']!({ error: 12006 });
 
   function open(orgUrl: string | undefined = ORG): Promise<QuickSaveDialog> {
-    return openQuickSaveDialog({ onComplete, orgUrl });
+    return openQuickSaveDialog({ onComplete, orgUrl, pagePath: '/word/commands-notify.html' });
   }
 
   beforeEach(() => {

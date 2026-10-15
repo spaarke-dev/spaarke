@@ -49,9 +49,8 @@ public sealed class FileBffPublishSizeReporter : IBffPublishSizeReporter
         if (!File.Exists(request.PublishZipPath))
         {
             throw new FileNotFoundException(
-                $"BFF publish zip not found at '{request.PublishZipPath}' — Deploy-BffApi.ps1 did not " +
-                "produce the compressed artifact this reporter measures. Verify the deploy runner's " +
-                "output layout matches BffDeployOptions.BffPublishZipPath.",
+                $"BFF publish zip not found at '{request.PublishZipPath}' — H9 measures the zip it downloaded " +
+                "from the artifact store; the download step should have written it there.",
                 request.PublishZipPath);
         }
 

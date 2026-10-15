@@ -323,9 +323,11 @@ describe('useSavedSearches', () => {
         })
       );
 
-      const savePromise = act(async () => {
-        const p = result.current.saveSearch(sampleSavedSearch);
-        return p;
+      // Start the save without awaiting it: an `act` that returns the pending promise cannot flush
+      // the `isSaving` state until the save settles, so the in-flight state would never be observable.
+      let savePromise: Promise<unknown>;
+      await act(async () => {
+        savePromise = result.current.saveSearch(sampleSavedSearch);
       });
 
       // Should be saving while awaiting
@@ -336,7 +338,9 @@ describe('useSavedSearches', () => {
       await act(async () => {
         resolveSave!();
       });
-      await savePromise;
+      await act(async () => {
+        await savePromise;
+      });
 
       expect(result.current.isSaving).toBe(false);
     });

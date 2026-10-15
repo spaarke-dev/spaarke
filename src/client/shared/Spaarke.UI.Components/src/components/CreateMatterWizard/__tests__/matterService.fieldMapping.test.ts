@@ -17,6 +17,7 @@ import { MatterService } from '../matterService';
 import type { ICreateMatterFormState } from '../formTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 function makeForm(overrides?: Partial<ICreateMatterFormState>): ICreateMatterFormState {
   return {
@@ -156,7 +157,7 @@ describe('MatterService — Field Mapping Framework engine wiring (task 020)', (
 
   it('is a graceful no-op (unchanged behavior) when no profile is configured for the pair (404)', async () => {
     const { dataService, createCalls } = makeDataService();
-    const authFetch = jest.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response);
+    const authFetch = /* no profile: authenticatedFetch THROWS ApiError(404), as production does */ jest.fn(async (): Promise<Response> => { throw apiErrorFor(404); });
 
     const service = new MatterService(dataService, authFetch, BFF_BASE);
     const result = await service.createMatter(makeForm(), [], {}, undefined, undefined, PROJECT_ASSOCIATION);
@@ -168,7 +169,7 @@ describe('MatterService — Field Mapping Framework engine wiring (task 020)', (
 
   it('does not call the engine when no association is supplied', async () => {
     const { dataService } = makeDataService();
-    const authFetch = jest.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response);
+    const authFetch = /* no profile: authenticatedFetch THROWS ApiError(404), as production does */ jest.fn(async (): Promise<Response> => { throw apiErrorFor(404); });
 
     const service = new MatterService(dataService, authFetch, BFF_BASE);
     const result = await service.createMatter(makeForm(), [], {});

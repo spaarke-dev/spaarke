@@ -213,7 +213,7 @@ Authentication: all routes are `RequireAuthorization()` from `WorkspaceLayoutEnd
 
 | Method + Route | Handler | Purpose |
 |---|---|---|
-| `GET /api/config/client` | `ClientConfigEndpoints` | Anonymous — returns `bffBaseUrl`, `msalClientId`, `msalAuthority`, `msalScopes`, `tenantId` for direct-URL bootstrap. |
+| `GET /api/config/client` | `ConfigEndpoints` | Anonymous — returns `bffBaseUrl`, `msalClientId`, `msalAuthority`, `msalScopes`, `tenantId` for direct-URL bootstrap, plus `appInsightsConnectionString` (the environment's browser telemetry target, `null` when not configured; #1537). `@spaarke/auth` fetches it once and caches it per BFF host. |
 | `GET /api/workspace/layouts` | `WorkspaceLayoutService.GetLayoutsAsync` | Returns union of hard-coded system + Dataverse-system (`sprk_issystem=true`) + user-owned layouts. Hard-coded first, then Dataverse-system by `sortOrder`, then user by `sortOrder`. |
 | `GET /api/workspace/layouts/default` | `GetDefaultLayoutAsync` | 4-step cascade: per-user default → Dataverse system default → hard-coded system default → `null`. Returns 200 with explicit null body when cascade exhausts. |
 | `GET /api/workspace/layouts/{id}` | `GetLayoutByIdAsync` | System layouts checked first (no Dataverse round-trip); user layouts gated by `ownerid === userId`; Dataverse-system records visible to all users. |

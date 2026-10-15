@@ -363,6 +363,17 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 AiSearchIndexRejectionCodes.IndexProvisioningFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        if (outcome is AiSearchIndexProvisionOutcome.Failure { AccessDenied: true } accessDenied)
+        {
+            // Task 244: the search service is Entra-only; a fresh stamp's Search roles can take minutes to apply.
+            var diagnostic =
+                $"{accessDenied.Diagnostic} — the L2 identity is not (yet) authorized on the search service. On a new " +
+                "stamp this is role propagation after H2a: wait a few minutes, then resume the run. If it persists, " +
+                "check the L2 identity's Search Service Contributor assignment on the service.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.SearchAccessDenied, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
         if (outcome is AiSearchIndexProvisionOutcome.Failure provFailure)
         {
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,

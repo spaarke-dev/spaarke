@@ -185,7 +185,8 @@ public sealed class SearchIndexClientProvisioner : IAiSearchIndexProvisioner
                     "H2b SearchIndexClient PUT failed: customerId={CustomerId} index={IndexName} status={Status}",
                     request.CustomerId, indexName, status);
                 return new AiSearchIndexProvisionOutcome.Failure(
-                    $"PUT index '{indexName}' at '{request.SearchEndpoint}' returned HTTP {status}: {Truncate(body, 800)}");
+                    $"PUT index '{indexName}' at '{request.SearchEndpoint}' returned HTTP {status}: {Truncate(body, 800)}",
+                    AccessDenied: status is 401 or 403);
             }
 
             provisioned.Add(indexName);

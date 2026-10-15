@@ -66,14 +66,19 @@ public sealed class H2aBicepInfraDeployHandlerTests
     private const string SubscriptionId = "sub-cus-acme-prod";
     // Task 245b: H2a's idempotency version is the resolved template's content version.
     private const string BicepVer = "abc123def456";
+    // Declares every output H2a requires (inspector rule R4, task 246) — like the real customer.json.
     private static readonly ResolvedArmTemplate TestTemplate =
-        new("customer", "customer-arm-2026.10.01-1.json", """{"resources":[]}""", BicepVer);
+        new("customer", "customer-arm-2026.10.01-1.json", TemplateDeclaring(ArmDeploymentRunner.RequiredOutputNames), BicepVer);
+
+    private static string TemplateDeclaring(IEnumerable<string> outputNames) =>
+        "{\"resources\":[],\"outputs\":{" +
+        string.Join(",", outputNames.Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}")) + "}}";
     private const string ExpectedUamiRid = "/subscriptions/x/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
-    // ---------- T1 happy path — Model 2 dedicated ----------
+    // ---------- T1 happy path — Model 2 ----------
 
     [Fact]
-    public async Task HappyPath_Model2Dedicated_AllCollaboratorsGreen_SucceedsAndAdvancesState()
+    public async Task HappyPath_Model2_AllCollaboratorsGreen_SucceedsAndAdvancesState()
     {
         var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-1");
@@ -108,6 +113,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
         // Task 242 — the Managed Redis endpoint H4b sets as Redis__Endpoint.
         repo.LastWrittenRun.InterStepState.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
+        // Task 246 — the Content Safety endpoint H4b sets as AiSafety__ContentSafety__Endpoint.
+        repo.LastWrittenRun.InterStepState.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -120,10 +127,10 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest.Template.Should().BeSameAs(runner.Template);
     }
 
-    // ---------- T2 happy path — Model 1 shared ----------
+    // ---------- T2 happy path — Model 1 (dedicated stamp, D-12) ----------
 
     [Fact]
-    public async Task HappyPath_Model1Shared_TenancyModelFlowsToRunner()
+    public async Task HappyPath_Model1_TenancyModelFlowsToRunner()
     {
         var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-2");
@@ -432,6 +439,30 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task TemplateMissingARequiredOutput_FailsResumable_BeforeDeploying()
+    {
+        // Task 246 (R4): a template published before contentSafetyEndpoint existed, resolved by this worker. It must
+        // stop here — Resumable, nothing deployed — not deploy for ~20 minutes and then quarantine on the outputs.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-246");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        runner.Template = TestTemplate with
+        {
+            Json = TemplateDeclaring(ArmDeploymentRunner.RequiredOutputNames.Where(n => n != "contentSafetyEndpoint")),
+        };
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.TemplateOutputsMissing);
+        failure.Diagnostic.Should().Contain("contentSafetyEndpoint").And.Contain("publish-provisioning-arm-artifacts.yml");
+        runner.CallCount.Should().Be(0, "nothing is deployed when the template cannot satisfy H2a's outputs");
+    }
+
     // ---------- T9 upgrade-mode drift REJECT ----------
 
     [Fact]
@@ -533,84 +564,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
-    // ---------- HANDLER-13 openaiDeploymentSetPolicy auto-recompose (Wave 2 pre-dispatch remediation 2026-08-27) ----------
-
-    private sealed class StubOpenAiRecomposer : IOpenAiDeploymentSetRecomposer
-    {
-        private readonly OpenAiDeploymentSetRecomposeResult _result;
-        public int CallCount { get; private set; }
-        public OpenAiDeploymentSetRecomposeRequest? LastRequest { get; private set; }
-        public StubOpenAiRecomposer(OpenAiDeploymentSetRecomposeResult result) => _result = result;
-        public Task<OpenAiDeploymentSetRecomposeResult> RecomposeAsync(
-            OpenAiDeploymentSetRecomposeRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            LastRequest = request;
-            return Task.FromResult(_result);
-        }
-    }
-
-    [Fact]
-    public async Task Handler13_StrictPolicy_RecomposerNotInvoked()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h13-strict");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var recomposer = new StubOpenAiRecomposer(
-            new OpenAiDeploymentSetRecomposeResult(
-                Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences.PinnedModelCatalog.Models,
-                Array.Empty<string>(), string.Empty));
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector(),
-            optionsOverride: new BicepInfraDeployOptions
-            {
-                OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.Strict,
-            },
-            recomposer: recomposer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        recomposer.CallCount.Should().Be(0, "Strict policy MUST NOT invoke the recomposer");
-    }
-
-    [Fact]
-    public async Task Handler13_AutoRecomposePolicy_RecomposerInvoked_ProceedsToRunner()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h13-auto");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var recomposer = new StubOpenAiRecomposer(
-            new OpenAiDeploymentSetRecomposeResult(
-                Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences.PinnedModelCatalog.Models
-                    .Where(m => m.ModelId == "gpt-4o-mini")
-                    .ToArray(),
-                new[] { "gpt-4o", "text-embedding-3-large" },
-                "Dropped 2 zero-TPM models on fresh sub."));
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector(),
-            optionsOverride: new BicepInfraDeployOptions
-            {
-                OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.AutoRecompose,
-            },
-            recomposer: recomposer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        recomposer.CallCount.Should().Be(1, "AutoRecompose policy MUST invoke the recomposer");
-        recomposer.LastRequest!.FullPinnedSet.Should().HaveCount(3, "canonical 3-model set from ADR-020");
-        runner.CallCount.Should().Be(1, "runner MUST fire after successful recompose");
-    }
-
-    [Fact]
-    public void Handler13_OpenAiDeploymentSetPolicy_DefaultsToStrict()
-    {
-        var options = new BicepInfraDeployOptions();
-        options.OpenAiDeploymentSetPolicy.Should().Be(OpenAiDeploymentSetPolicy.Strict,
-            "default policy MUST preserve pre-Wave-2 behavior (deploy full model set)");
-    }
-
     // ---------- HANDLER-10 kvRefIdentity invalid detector (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
     [Fact]
@@ -705,6 +658,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             KeyVaultUri = "https://kv.vault.azure.net/",
             ServiceBusFullyQualifiedNamespace = "ns.servicebus.windows.net",
             RedisEndpoint = "r.westus2.redis.azure.net:10000",
+            ContentSafetyEndpoint = "https://cs.cognitiveservices.azure.com/",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -724,6 +678,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.KeyVaultUri))]
     [InlineData(nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace))]
     [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
+    [InlineData(nameof(BicepDeployOutputs.ContentSafetyEndpoint))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -747,6 +702,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             ServiceBusFullyQualifiedNamespace = blankField == nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace)
                 ? "" : complete.ServiceBusFullyQualifiedNamespace,
             RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
+            ContentSafetyEndpoint = blankField == nameof(BicepDeployOutputs.ContentSafetyEndpoint) ? "" : complete.ContentSafetyEndpoint,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -945,8 +901,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         ArmTemplateInspector inspector,
         string? runNotesDir = null,
         FakeResourceNameAvailabilityProbe? nameProbe = null,
-        BicepInfraDeployOptions? optionsOverride = null,
-        IOpenAiDeploymentSetRecomposer? recomposer = null)
+        BicepInfraDeployOptions? optionsOverride = null)
     {
         var options = Options.Create(optionsOverride ?? new BicepInfraDeployOptions
         {
@@ -958,24 +913,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         // existing tests remain unaffected. HANDLER-05-specific tests supply
         // a Conflict-returning fake explicitly.
         var effectiveNameProbe = nameProbe ?? FakeResourceNameAvailabilityProbe.AllAvailable();
-        // HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): default
-        // to the live-production recomposer wired against a throw-if-called
-        // fake transport. Existing tests use the default
-        // OpenAiDeploymentSetPolicy = Strict which skips the recomposer, so
-        // the transport is never actually hit; if a regression accidentally
-        // invokes it under a Strict-policy test, the fake handler throws
-        // loudly rather than silently masking a broken code path.
-        var throwingArmClient = ArmSdkTestFakes.NewArmClient(
-            ArmSdkTestFakes.NewHandler(_ =>
-                throw new InvalidOperationException(
-                    "H2a Strict-policy test path invoked the OpenAI deployment-set " +
-                    "recomposer's ARM transport — Strict MUST skip the recomposer.")));
-        var effectiveRecomposer = recomposer ?? new ArmOpenAiDeploymentSetRecomposer(
-            throwingArmClient,
-            NullLogger<ArmOpenAiDeploymentSetRecomposer>.Instance);
         return new H2aBicepInfraDeployHandler(
-            repo, runner, probe, driftDetector, inspector, effectiveNameProbe,
-            effectiveRecomposer, options,
+            repo, runner, probe, driftDetector, inspector, effectiveNameProbe, options,
             NullLogger<H2aBicepInfraDeployHandler>.Instance);
     }
 
@@ -1033,6 +972,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/",
         ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net",
         RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
+        ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
         SignalRDeployed = signalRDeployed,
     };
 

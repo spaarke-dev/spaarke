@@ -69,7 +69,7 @@ public static class BicepDeployRejectionCodes
     /// The active Bicep template contains an Azure OpenAI model deployment
     /// version of <c>latest</c> or an unpinned/blank version literal (violates
     /// ADR-020). Model deployments MUST be pinned to specific versions
-    /// (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large 1).
+    /// (the stamp set in openai.bicep, mirrored by PinnedModelCatalog — task 247).
     /// </summary>
     public const string ModelVersionNotPinned = "model-version-not-pinned";
 
@@ -97,6 +97,14 @@ public static class BicepDeployRejectionCodes
     /// endpoint URIs). Configuration/template drift — operator must resolve.
     /// </summary>
     public const string BicepDeployOutputsIncomplete = "bicep-deploy-outputs-incomplete";
+
+    /// <summary>
+    /// Task 246: the resolved ARM template does not DECLARE an output H2a requires
+    /// (<see cref="ArmDeploymentRunner.RequiredOutputNames"/>) — typically a template published before the
+    /// output was added, resolved by a newer worker. Caught before any ARM call, so nothing was deployed:
+    /// Resumable once the current template is published (publish-provisioning-arm-artifacts.yml).
+    /// </summary>
+    public const string TemplateOutputsMissing = "template-outputs-missing";
 
     /// <summary>
     /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10 verbatim.

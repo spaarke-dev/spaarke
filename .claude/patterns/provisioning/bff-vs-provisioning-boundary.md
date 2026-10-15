@@ -74,7 +74,7 @@ Load this pattern when:
 
 - **Where the fix lives**: `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:39` → CLASS-B (BFF-side shared).
 - **Standard rule** would route to BFF-owning worktree.
-- **Complication**: fix is architectural (Model 1 shared BFF ↔ per-tenant Dataverse routing decision) — not a one-liner. Needs ADR conflict resolution per CLAUDE.md §6.5.
+- **Complication**: fix is architectural (Model 1 shared BFF ↔ per-tenant Dataverse routing decision) — not a one-liner. Needs ADR conflict resolution per CLAUDE.md §6.5. *(Superseded by D-12, 2026-09-28: no shared Model 1 BFF remains — every stamp has one BFF and one Dataverse environment, so this routing question no longer exists.)*
 - **Route applied**: task 204b (ADR tension) in THIS project (SESSION 7 absorption, since r3 closed). Task PAUSES at Step 2 for owner Path A/B/C decision per §6.5 protocol.
 - **Documented in**: punch list SESSION 7 amendment + task 204b escalation trigger.
 

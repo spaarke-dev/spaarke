@@ -14,6 +14,10 @@
 # The BFF's SPE admin plane reaches no unbound container, so an unstamped container would be invisible to the very
 # business unit's administrators it was made for.
 #
+# CUSTOMER MARKER (customer-provisioning-orchestration-r1 tasks 227d/227e): the container is also marked with -CustomerId
+# (the BFF's Customer__Id app setting) and the marker is read back — the BFF's app-only calls reach only containers that
+# are configured or carry their customer's marker (SpeContainerOwnershipGuard), so an unmarked container would be refused.
+#
 # T6 FIX (spec.md FR-11 + § MUST rules): SPE container creation now uses
 # confidential-client CERT-BASED auth. The prior `az account get-access-token`
 # path was DELEGATED (user identity of whoever ran `az login`) and returned
@@ -36,6 +40,7 @@
 param(
     [Parameter(Mandatory)][string]$BusinessUnitId,       # Dataverse BU GUID - always specific
     [Parameter(Mandatory)][string]$BusinessUnitName,     # Display name for the container
+    [Parameter(Mandatory)][string]$CustomerId,           # The BFF's Customer__Id app setting, EXACTLY (case-sensitive) - the container's customer marker
     [string]$ContainerTypeId  = $env:SPE_CONTAINER_TYPE_ID,
     [string]$DataverseUrl     = $env:DATAVERSE_URL,      # e.g., "https://spaarke-prod.crm.dynamics.com"
 
@@ -61,6 +66,9 @@ if (-not [guid]::TryParse($BusinessUnitId, [ref]$parsedBusinessUnitId) -or $pars
     throw "BusinessUnitId '$BusinessUnitId' is not a business-unit GUID — the container would have no owner, so none is created."
 }
 $BusinessUnitId = $parsedBusinessUnitId.ToString('D')
+if ([string]::IsNullOrWhiteSpace($CustomerId)) {
+    throw "CustomerId is blank — pass the BFF's Customer__Id app setting; an unmarked container is refused by the BFF, so none is created."
+}
 if (-not $DataverseUrl)    { throw "DataverseUrl required. Pass -DataverseUrl or set DATAVERSE_URL env var." }
 if (-not $OwningAppId)     { throw "OwningAppId required for SPE cert-based auth. Pass -OwningAppId or set API_APP_ID env var." }
 if (-not $TenantId)        { throw "TenantId required for SPE cert-based auth. Pass -TenantId or set TENANT_ID env var." }
@@ -221,7 +229,7 @@ Write-Host "Step 3b: Binding the container to business unit $BusinessUnitId..." 
 
 try {
     Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $BusinessUnitId `
-        -GraphBase 'https://graph.microsoft.com/v1.0'
+        -CustomerId $CustomerId -GraphBase 'https://graph.microsoft.com/v1.0'
     Write-Host ""
 }
 catch {

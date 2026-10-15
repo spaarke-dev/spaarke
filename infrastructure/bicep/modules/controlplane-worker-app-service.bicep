@@ -117,7 +117,7 @@ param serviceBusQueueName string = 'sprk-provisioning-jobs'
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table. Consumed by DataverseEnvironmentRegistryOptions.AdminEnvironmentUrl (Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs, task 112 -- Path X MI-native, DefaultAzureCredential pinned to this module\'s UAMI via ManagedIdentity__ClientId below; NO client secret). REQUIRED as of task 122 (Wave G-2): the Worker\'s composition root now registers the REAL client unconditionally (NullDataverseEnvironmentRegistryClient placeholder removed from DI) and DataverseEnvironmentRegistryOptions.Validate() fails fast at boot if this is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (DS-8 mandates Path X real from day one).')
 param adminDataverseEnvironmentUrl string
 
-@description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer\'s target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above).')
+@description('LEGACY credential chain only (requireSecretFreeIdentity=false). Name of the platform Key Vault secret the EnvVarValues__ClientSecret and SolutionImportOptions__ClientSecret Key Vault references resolve. NOT referenced when requireSecretFreeIdentity=true (the default since task 252): H6, H7 and H7b then sign in through the FR-39 chain (ManagedIdentityFederated only) and no app setting names this secret. H6, H7 and H7b sign in as the customer BFF app registration H3 creates for that customer (D-13: one BFF app registration per customer, both models), so one shared platform secret cannot authenticate as it; the legacy chain survives only for the ADR-028 A4 prong-3 exception (unmigrated environments, sunset 2026-11-23). Never create, seed or restore this secret in a secret-free environment (provisioning.md KV credential lifecycle rule 1); Seed-PlatformKeyVault.ps1 does not seed it.')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
 
@@ -150,18 +150,24 @@ param customerRunGuardTenantId string = ''
 @description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the bound UAMI is a Dataverse Application User on the admin env (customerRunGuardTenantId is diagnostics-only) (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module\'s value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
 param customerRunGuardEnabled bool = false
 
-@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master\'s pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves the legacy shape byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)')
-param requireSecretFreeIdentity bool = false
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master\'s pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free control plane must carry ZERO references to the secret. Default TRUE since task 252 (2026-10-09): every control-plane environment is secret-free unless a prong-3 unmigrated environment explicitly passes false (SS6.5 resolution record), so a new environment never gets a Key Vault reference to a secret the binding rule forbids creating. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)')
+param requireSecretFreeIdentity bool = true
 
 // ============================================================================
 // A44.5 -- BFF-app-reg credential app settings (exactly ONE of these two sets
 // is appended to the base appSettings below via concat + ternary):
-//   - legacy (requireSecretFreeIdentity=false): the two KV-refs exactly as
-//     tasks 142 / 204a wired them.
-//   - secret-free (requireSecretFreeIdentity=true): FR-39 ordered-credential
-//     chain settings consumed by WorkerCredentialSelectionOptions
+//   - secret-free (requireSecretFreeIdentity=true, the DEFAULT since task
+//     252): FR-39 ordered-credential chain settings consumed by
+//     WorkerCredentialSelectionOptions
 //     (Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/**, task
-//     205i) -- MI-FIC via the SAME UAMI this module binds.
+//     205i) -- MI-FIC via the SAME UAMI this module binds. No app setting
+//     references BFF-API-ClientSecret.
+//   - legacy (requireSecretFreeIdentity=false, prong-3 opt-in only): the two
+//     KV-refs exactly as tasks 142 / 204a wired them. With no Credentials
+//     section the Worker resolves the legacy [ClientSecret] chain and reads
+//     them.
+// Dataverse-ClientSecret is referenced by NO control-plane app setting in
+// either mode (FR-38 deleted the last one, Wave G-8 Batch 2).
 // ============================================================================
 var legacyClientSecretAppSettings = [
   {
@@ -181,7 +187,7 @@ var secretFreeCredentialAppSettings = [
   { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
 ]
 
-@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
+@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). H3 also makes it the subject of the federated credential spaarke-l2-worker on each customer BFF app registration (ISS-015), through which H6/H7/H7b sign in as that registration secret-free -- the principalId, never the clientId (AADSTS700213). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
 param controlPlanePrincipalId string
 
 
@@ -193,8 +199,29 @@ param controlPlanePrincipalId string
 @description('SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker\'s UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0\'s SpeOwnerCredential probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice.')
 param speContainerTypeOwners array = []
 
+@description('Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c).')
+param preAuthorizedClientAppIds array = [
+  '1958aec2-0218-495e-8e3c-37133e9b8357'
+]
+
+@description('Client id of the shared Spaarke Copilot Agent app (T257; secret-free public client, PKCE). When set it is appended to preAuthorizedClientAppIds, so H3 pre-authorizes it on every customer BFF app for user_impersonation. Empty (default): not added -- the app does not exist until the operator creates it. Must be a GUID: H3 rejects every run on a malformed entry (appreg-preauthorized-client-invalid).')
+param copilotAgentClientAppId string = ''
+
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 255: the tenants that are never a customer's workforce tenant — Spaarke's own (the control plane is deployed in
+// it; the same value as EntraAppRegOptions__SpaarkeTenantId) and the CIAM tenant(s).
+var reservedTenantSettings = concat([
+  { name: 'ReservedTenants__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(ciamTenantIds)), i => {
+  name: 'ReservedTenants__CiamTenantIds__${i}'
+  value: ciamTenantIds[i]
+}))
 
 // Task 245b: flatten speContainerTypeOwners into indexed app settings (the .NET
 // configuration binder's list syntax: SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId ...).
@@ -202,6 +229,19 @@ var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerType
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__ContainerTypeId', value: speContainerTypeOwners[i].containerTypeId }
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
 ]))
+
+// T257: the shared Copilot agent client joins the platform's pre-authorized clients once the operator has created it.
+var effectivePreAuthorizedClientAppIds = concat(preAuthorizedClientAppIds, empty(copilotAgentClientAppId) ? [] : [copilotAgentClientAppId])
+
+// T240a: H3's platform settings. SpaarkeTenantId is the federated-credential issuer for Model 1 stamps
+// (profile spaarke-hosted-model2): without it every Model 1 run fails at H3's FIC step. The control plane
+// is deployed in Spaarke's own tenant, so the deployment's tenant is that value.
+var entraAppRegSettings = concat([
+  { name: 'EntraAppRegOptions__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(effectivePreAuthorizedClientAppIds)), i => {
+  name: 'EntraAppRegOptions__PreAuthorizedClientAppIds__${i}'
+  value: effectivePreAuthorizedClientAppIds[i]
+}))
 
 // ============================================================================
 // APP SERVICE (WORKER -- slotless per DS-3 Section 3; UAMI-only per ADR-028)
@@ -276,47 +316,38 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
 
         // ---------------------------------------------------------------
         // Task 142 (Wave G-4): EnvVarValues -- H7's Dataverse Web API
-        // writer collaborator authenticates to each customer's Dataverse
-        // env using the SAME shared multitenant BFF app-reg credential H6
-        // uses for solution import (the MI-Dataverse App User from H10 does
-        // not exist yet at H7's point in the DAG). Sourced from the platform
-        // KV's canonical BFF-API-ClientSecret secret (task 126 real-value
-        // population).
+        // writer (and H7b, which binds the same section) signs in to each
+        // customer's Dataverse env as that customer's OWN BFF app
+        // registration (H3 output InterStepState.BffAppRegId; D-13 -- one
+        // BFF app registration per customer), the same identity H6 uses for
+        // solution import.
         //
-        // A44.5 (task 205i; restored by task 245b): the EnvVarValues__ClientSecret
-        // KV-ref is NOT emitted here unconditionally -- it lives in
-        // legacyClientSecretAppSettings (appended via the concat + ternary at
-        // the bottom of this array) and is OMITTED when
-        // requireSecretFreeIdentity=true, where the FR-39 chain settings take
-        // its place and EnvVarValuesOptions.Validate() accepts the empty slot.
+        // A44.5 (task 205i; restored by task 245b; default flipped by task
+        // 252): the credential comes from the FR-39 chain settings in
+        // secretFreeCredentialAppSettings (appended via the concat + ternary
+        // at the bottom of this array). The EnvVarValues__ClientSecret KV-ref
+        // exists only in legacyClientSecretAppSettings (prong-3 opt-in,
+        // requireSecretFreeIdentity=false); on the secret-free chain
+        // EnvVarValuesOptions.Validate() accepts the empty slot.
         // ---------------------------------------------------------------
 
         // ---------------------------------------------------------------
         // Task 204a (Wave G-8 Class-B follow-on to task 142): SolutionImport
-        // -- H6's Dataverse Web API solution importer (task 141,
-        // DataverseWebApiSolutionImporter.cs:93) authenticates via
-        // confidential-client credentials against the SAME shared multitenant
-        // BFF app-reg H7 uses for EnvVarValues writes (per SolutionImportOptions
-        // docstring and H6SolutionImportHandler.cs:278-291 which emits
-        // MissingClientSecret at runtime today when the option-bound value is
-        // unset). Sourced from the SAME canonical never-delete
-        // BFF-API-ClientSecret secret. Adds runtime-required wiring the
-        // original wave-C5 comment (SolutionImportOptions.cs:82-95) always
-        // called for -- H7 landed via task 142, H6 was deferred until this
-        // task 204a Class-B verify-first sweep found the gap.
+        // -- H6's Dataverse Web API solution importer (task 141) signs in as
+        // the same per-customer BFF app registration H7 uses (H3 output;
+        // D-13).
         //
         // NOTE: unlike EnvVarValuesOptions.Validate() (which fails fast at
-        // boot on missing ClientSecret via ValidateOnStart), SolutionImportOptions
-        // .Validate() only asserts ProvisioningArtifactsContainerUri +
-        // SolutionArtifactManifestBlobName -- H6's ClientSecret is a runtime
-        // Resumable failure per §4C rollback classification (H6SolutionImportHandler
-        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret).
+        // boot on a missing ClientSecret under the legacy chain),
+        // SolutionImportOptions.Validate() only asserts
+        // ProvisioningArtifactsContainerUri + SolutionArtifactManifestBlobName
+        // -- under the legacy chain a missing ClientSecret is a runtime
+        // Resumable failure (SolutionImportRejectionCodes.MissingClientSecret).
         //
-        // A44.5 (task 205i; restored by task 245b): the
-        // SolutionImportOptions__ClientSecret KV-ref lives in
-        // legacyClientSecretAppSettings -- OMITTED when
-        // requireSecretFreeIdentity=true (H6 then selects MI-FIC via the
-        // FR-39 chain).
+        // A44.5 (task 205i; restored by task 245b; default flipped by task
+        // 252): the SolutionImportOptions__ClientSecret KV-ref lives in
+        // legacyClientSecretAppSettings (prong-3 opt-in only); on the default
+        // secret-free chain H6 selects MI-FIC via the FR-39 chain settings.
         // ---------------------------------------------------------------
 
         // ---------------------------------------------------------------
@@ -360,19 +391,16 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ControlPlane.Core/Concurrency/CustomerRunGuardModule.cs +
         // CustomerRunGuardOptions.cs). Uses the ADMIN Dataverse env
         // (adminDataverseEnvironmentUrl above -- SAME registry env the
-        // DataverseEnvironmentRegistry client talks to) with confidential-
-        // client credentials against the SHARED BFF app-reg (SAME app-reg
-        // H6/H7 use for solution-import + env-var writes). ClientSecret
-        // sources from the same BFF-API-ClientSecret KV secret (BINDING
-        // never-delete).
+        // DataverseEnvironmentRegistry client talks to) and signs in as the
+        // bound UAMI (no client secret -- see the MIGRATED note below).
         //
         // Enabled=false by default per null-object kill-switch pattern
-        // (ADR-032): a fresh L2 deployment without the admin-env credentials
-        // wired stays boot-safe (the null-object returns Success
-        // unconditionally, WARN-log on each acquire). Flip to true once
-        // customerRunGuardTenantId + the bound UAMI
-        // secret are all in place -- CustomerRunGuardOptions.Validate()
-        // fails fast at boot on missing fields when Enabled=true.
+        // (ADR-032): a fresh L2 deployment without the UAMI registered as a
+        // Dataverse Application User stays boot-safe (the null-object returns
+        // Success unconditionally, WARN-log on each acquire). Flip to true
+        // once the bound UAMI is an Application User on the admin env --
+        // CustomerRunGuardOptions.Validate() fails fast at boot on missing
+        // fields when Enabled=true.
         // ---------------------------------------------------------------
         { name: 'CustomerRunGuard__TargetDataverseUrl', value: adminDataverseEnvironmentUrl }
         { name: 'CustomerRunGuard__TenantId', value: customerRunGuardTenantId }
@@ -411,7 +439,9 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // by two handlers): H4's KV RBAC bootstrap grants THIS principal (L2's
         // own identity) Secrets Officer on each customer vault, and H2a sends it
         // as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps
-        // (Website Contributor on the stamp BFF). SPE owning-app credentials
+        // (Website Contributor on the stamp BFF); H3 makes it the subject of
+        // each customer BFF registration's spaarke-l2-worker federated
+        // credential (ISS-015). SPE owning-app credentials
         // are appended below (speContainerTypeOwnerSettings). Task 225b (D18)
         // removed the vendor-key platform vault setting (no Spaarke-shared
         // vendor key remains in the customer catalog).
@@ -439,7 +469,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
           name: 'ExchangeSidecar__SharedSecret'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
         }
-      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings, entraAppRegSettings, reservedTenantSettings)
     }
   }
 }

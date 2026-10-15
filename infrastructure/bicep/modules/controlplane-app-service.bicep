@@ -88,6 +88,10 @@ param adminDataverseEnvironmentUrl string
 @description('CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module\'s value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)')
 param customerRunGuardEnabled bool = false
 
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): POST /api/runs refuses either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Api startup without it. Same value the Worker module receives.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('App Insights connection string (from monitoring.bicep outputs).')
 param appInsightsConnectionString string
 
@@ -96,6 +100,78 @@ param aadLoginEndpoint string = environment().authentication.loginEndpoint
 
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 255: the tenants that are never a customer's workforce tenant — Spaarke's own (the control plane is deployed in
+// it) and the CIAM tenant(s). Appended to both slots' settings below.
+var reservedTenantSettings = concat([
+  { name: 'ReservedTenants__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(ciamTenantIds)), i => {
+  name: 'ReservedTenants__CiamTenantIds__${i}'
+  value: ciamTenantIds[i]
+}))
+
+// Both slots carry the same settings. Non-sticky settings travel WITH the content on a swap, so a slot
+// without them cannot start and would hand production an empty configuration (found 2026-10-08: the
+// staging slot crashed on a missing Cosmos:AccountEndpoint, and a swap with preview stuck half-done).
+var appSettings = [
+  // ---------------------------------------------------------------
+  // Bearer / audience (FR-20 acceptance)
+  // ---------------------------------------------------------------
+  { name: 'AzureAd__Audience', value: jwtAudience }
+  { name: 'AzureAd__TenantId', value: jwtTenantId }
+  { name: 'AzureAd__ClientId', value: controlPlaneAppRegClientId }
+  { name: 'AzureAd__Instance', value: aadLoginEndpoint }
+
+  // ---------------------------------------------------------------
+  // Cosmos (task 024 wiring - endpoint only; MI resolves credentials).
+  // Keys renamed per DS-5 C5.1 to match CosmosModule.cs:98-110
+  // (Cosmos:AccountEndpoint / :DatabaseName / :ContainerName) - the
+  // OLD keys (Cosmos__Endpoint/__Database/__RunsContainer) were never
+  // read by the code; the live dev stamp only worked via manual
+  // app-setting aliases layered on top of this wrong Bicep output.
+  // ---------------------------------------------------------------
+  { name: 'Cosmos__AccountEndpoint', value: cosmosAccountEndpoint }
+  { name: 'Cosmos__DatabaseName', value: cosmosDatabaseName }
+  { name: 'Cosmos__ContainerName', value: cosmosRunsContainerName }
+
+  // ---------------------------------------------------------------
+  // Service Bus (DS-5 C5.1 fix): MI-only FQNS + queue name, NOT a
+  // connection string. ServiceBusModule.cs:53 documents that any
+  // connection-string setting is IGNORED -- the code always resolves
+  // ServiceBus:FullyQualifiedNamespace + uses the bound UAMI's token
+  // credential (ADR-028). The old KV-ref connection-string app-setting
+  // this replaces (removed) was dead code from this App Service's
+  // perspective -- the code never read it.
+  // ---------------------------------------------------------------
+  { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
+  { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
+
+  // ---------------------------------------------------------------
+  // Managed-identity discovery (pin DefaultAzureCredential to bound
+  // UAMI). AZURE_CLIENT_ID is the Azure-native env var
+  // DefaultAzureCredential honors natively; ManagedIdentity__ClientId
+  // is ADDED per DS-5 C5.1 because CosmosModule.cs:125 and
+  // ServiceBusModule.cs:157 read the app's own ManagedIdentity:ClientId
+  // config key (not the Azure env-var convention) to pin their
+  // per-module TokenCredential to the bound UAMI. Both kept
+  // (belt-and-braces; harmless duplication).
+  // ---------------------------------------------------------------
+  { name: 'AZURE_CLIENT_ID', value: uamiClientId }
+  { name: 'ManagedIdentity__ClientId', value: uamiClientId }
+
+  // REG-07 registry client + I5 CustomerRunGuard (task 242b). The guard's TargetDataverseUrl and
+  // ManagedIdentityClientId fall back to the two settings above/below (CustomerRunGuardModule).
+  { name: 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', value: adminDataverseEnvironmentUrl }
+  { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
+
+  // ---------------------------------------------------------------
+  // App Insights (connection string is not a secret per Azure guidance)
+  // ---------------------------------------------------------------
+  { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
+  { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
+]
+
+var allAppSettings = concat(appSettings, reservedTenantSettings)
 
 // ============================================================================
 // APP SERVICE (UAMI-only from birth per ADR-028 + T1/T5)
@@ -123,63 +199,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: [
-        // ---------------------------------------------------------------
-        // Bearer / audience (FR-20 acceptance)
-        // ---------------------------------------------------------------
-        { name: 'AzureAd__Audience', value: jwtAudience }
-        { name: 'AzureAd__TenantId', value: jwtTenantId }
-        { name: 'AzureAd__ClientId', value: controlPlaneAppRegClientId }
-        { name: 'AzureAd__Instance', value: aadLoginEndpoint }
-
-        // ---------------------------------------------------------------
-        // Cosmos (task 024 wiring - endpoint only; MI resolves credentials).
-        // Keys renamed per DS-5 C5.1 to match CosmosModule.cs:98-110
-        // (Cosmos:AccountEndpoint / :DatabaseName / :ContainerName) - the
-        // OLD keys (Cosmos__Endpoint/__Database/__RunsContainer) were never
-        // read by the code; the live dev stamp only worked via manual
-        // app-setting aliases layered on top of this wrong Bicep output.
-        // ---------------------------------------------------------------
-        { name: 'Cosmos__AccountEndpoint', value: cosmosAccountEndpoint }
-        { name: 'Cosmos__DatabaseName', value: cosmosDatabaseName }
-        { name: 'Cosmos__ContainerName', value: cosmosRunsContainerName }
-
-        // ---------------------------------------------------------------
-        // Service Bus (DS-5 C5.1 fix): MI-only FQNS + queue name, NOT a
-        // connection string. ServiceBusModule.cs:53 documents that any
-        // connection-string setting is IGNORED -- the code always resolves
-        // ServiceBus:FullyQualifiedNamespace + uses the bound UAMI's token
-        // credential (ADR-028). The old KV-ref connection-string app-setting
-        // this replaces (removed) was dead code from this App Service's
-        // perspective -- the code never read it.
-        // ---------------------------------------------------------------
-        { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
-        { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
-
-        // ---------------------------------------------------------------
-        // Managed-identity discovery (pin DefaultAzureCredential to bound
-        // UAMI). AZURE_CLIENT_ID is the Azure-native env var
-        // DefaultAzureCredential honors natively; ManagedIdentity__ClientId
-        // is ADDED per DS-5 C5.1 because CosmosModule.cs:125 and
-        // ServiceBusModule.cs:157 read the app's own ManagedIdentity:ClientId
-        // config key (not the Azure env-var convention) to pin their
-        // per-module TokenCredential to the bound UAMI. Both kept
-        // (belt-and-braces; harmless duplication).
-        // ---------------------------------------------------------------
-        { name: 'AZURE_CLIENT_ID', value: uamiClientId }
-        { name: 'ManagedIdentity__ClientId', value: uamiClientId }
-
-        // REG-07 registry client + I5 CustomerRunGuard (task 242b). The guard's TargetDataverseUrl and
-        // ManagedIdentityClientId fall back to the two settings above/below (CustomerRunGuardModule).
-        { name: 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', value: adminDataverseEnvironmentUrl }
-        { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
-
-        // ---------------------------------------------------------------
-        // App Insights (connection string is not a secret per Azure guidance)
-        // ---------------------------------------------------------------
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
-        { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
-      ]
+      appSettings: allAppSettings
     }
   }
 }
@@ -212,9 +232,7 @@ resource stagingSlot 'Microsoft.Web/sites/slots@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      // App settings inherit from prod slot at swap time by default (no slot-
-      // sticky settings declared here). Operational overrides applied via
-      // post-deploy PATCH.
+      appSettings: allAppSettings
     }
   }
 }

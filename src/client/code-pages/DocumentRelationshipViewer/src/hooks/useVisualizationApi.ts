@@ -11,6 +11,7 @@ import type { VisualizationQueryParams, GraphMetadata } from '../types/api';
 export interface UseVisualizationApiOptions {
   apiBaseUrl: string;
   documentId: string;
+  /** Gates the fetch only; NOT sent to the BFF (it uses the token's `tid`). */
   tenantId: string;
   threshold?: number;
   limit?: number;
@@ -52,7 +53,6 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
 
   const queryParams = useMemo(
     (): VisualizationQueryParams => ({
-      tenantId,
       threshold,
       limit,
       depth,
@@ -61,7 +61,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
       includeKeywords: true,
       includeParentEntity: true,
     }),
-    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes]
+    [threshold, limit, depth, documentTypes, relationshipTypes]
   );
 
   const fetchData = useCallback(async () => {

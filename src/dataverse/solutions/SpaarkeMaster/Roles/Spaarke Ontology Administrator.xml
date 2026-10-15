@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Role id="{2f2b2137-bfbe-f111-aaaf-0022482913fc}" name="Spaarke Ontology Administrator" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <IsCustomizable>1</IsCustomizable>
+  <IsAutoAssigned>0</IsAutoAssigned>
+  <AppliesTo>All users</AppliesTo>
+  <Description>Spaarke ontology administrator</Description>
+  <SummaryOfCoreTablePermissions>Read, write, delete, append</SummaryOfCoreTablePermissions>
+  <RolePrivileges>
+    <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_Signal" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_Policy" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_Signal" level="Deep" />
+    <RolePrivilege name="prvAssignsprk_Signal" level="Deep" />
+    <RolePrivilege name="prvCreateSharePointData" level="Global" />
+    <RolePrivilege name="prvCreatesprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvCreatesprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvCreatesprk_Policy" level="Deep" />
+    <RolePrivilege name="prvCreatesprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvCreatesprk_TriageCategory" level="Global" />
+    <RolePrivilege name="prvDeletesprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvDeletesprk_Policy" level="Deep" />
+    <RolePrivilege name="prvDeletesprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvDeletesprk_Signal" level="Deep" />
+    <RolePrivilege name="prvReadPluginAssembly" level="Global" />
+    <RolePrivilege name="prvReadPluginType" level="Global" />
+    <RolePrivilege name="prvReadSdkMessage" level="Global" />
+    <RolePrivilege name="prvReadSdkMessageProcessingStep" level="Global" />
+    <RolePrivilege name="prvReadSdkMessageProcessingStepImage" level="Global" />
+    <RolePrivilege name="prvReadSharePointData" level="Global" />
+    <RolePrivilege name="prvReadSharePointDocument" level="Global" />
+    <RolePrivilege name="prvReadsprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvReadsprk_Policy" level="Deep" />
+    <RolePrivilege name="prvReadsprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvReadsprk_Signal" level="Deep" />
+    <RolePrivilege name="prvReadsprk_TriageCategory" level="Global" />
+    <RolePrivilege name="prvWriteSharePointData" level="Global" />
+    <RolePrivilege name="prvWritesprk_BudgetRevision" level="Deep" />
+    <RolePrivilege name="prvWritesprk_Policy" level="Deep" />
+    <RolePrivilege name="prvWritesprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
+    <RolePrivilege name="prvWritesprk_TriageCategory" level="Global" />
+  </RolePrivileges>
+</Role>

@@ -27,7 +27,6 @@ Before running this command:
 1. `{project-path}/spec.md` must exist (run `/design-to-spec` first if needed)
 2. Extended context recommended for complex projects:
    ```
-   MAX_THINKING_TOKENS=50000
    CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
    ```
 

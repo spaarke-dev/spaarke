@@ -75,7 +75,7 @@ public sealed class DataverseWebApiModelDeploymentReferenceWriter : IModelDeploy
         {
             foreach (var deployment in request.Deployments)
             {
-                var existingId = await FindByNameAsync(envUri, token, deployment.ModelId, cancellationToken)
+                var existingId = await FindByNameAsync(envUri, token, deployment.Name, cancellationToken)
                     .ConfigureAwait(false);
 
                 var payload = BuildPayload(deployment, request.Provider);
@@ -89,7 +89,7 @@ public sealed class DataverseWebApiModelDeploymentReferenceWriter : IModelDeploy
                     await CreateAsync(envUri, token, payload, cancellationToken).ConfigureAwait(false);
                 }
 
-                upserted.Add(deployment.ModelId);
+                upserted.Add(deployment.Name);
             }
 
             return new ModelDeploymentReferenceWriteOutcome.Success(upserted);
@@ -118,9 +118,9 @@ public sealed class DataverseWebApiModelDeploymentReferenceWriter : IModelDeploy
         return await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct).ConfigureAwait(false);
     }
 
-    private async Task<string?> FindByNameAsync(Uri envUri, AccessToken token, string modelId, CancellationToken ct)
+    private async Task<string?> FindByNameAsync(Uri envUri, AccessToken token, string name, CancellationToken ct)
     {
-        var encodedName = Uri.EscapeDataString(modelId);
+        var encodedName = Uri.EscapeDataString(name);
         var uri = new Uri(envUri,
             $"/api/data/v9.2/sprk_aimodeldeployments?$filter=sprk_name eq '{encodedName}'&$select=sprk_aimodeldeploymentid");
         var doc = await SendAndReadAsync(uri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
@@ -133,7 +133,7 @@ public sealed class DataverseWebApiModelDeploymentReferenceWriter : IModelDeploy
     private static Dictionary<string, object?> BuildPayload(ModelDeploymentReference deployment, ModelProvider provider)
         => new()
         {
-            ["sprk_name"] = deployment.ModelId,
+            ["sprk_name"] = deployment.Name,
             ["sprk_modelid"] = deployment.ModelId,
             ["sprk_provider"] = (int)provider,
             ["sprk_capability"] = (int)deployment.Capability,

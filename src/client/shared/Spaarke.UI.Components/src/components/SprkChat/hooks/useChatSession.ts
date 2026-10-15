@@ -23,6 +23,19 @@ import {
   IHostContext,
   AuthenticatedFetchFn,
 } from '../types';
+import { isApiError, isAuthFailure } from '../../../utils/thrownFetchError';
+
+/**
+ * The error a failed session request reports. `authenticatedFetch` THROWS for a non-OK response, so the
+ * `"<action> (<status>): <reason>"` form the `!response.ok` branches build is rebuilt here from the
+ * thrown ApiError (its message is the ProblemDetails detail/title, else "HTTP n") or AuthError (401).
+ * A network or other error is passed through.
+ */
+function requestFailure(action: string, err: unknown): Error {
+  if (isApiError(err)) return new Error(`${action} (${err.status}): ${err.message}`);
+  if (isAuthFailure(err)) return new Error(`${action} (401): ${err instanceof Error ? err.message : 'sign-in required'}`);
+  return err instanceof Error ? err : new Error(action);
+}
 
 interface UseChatSessionOptions {
   /** Base URL for the BFF API */
@@ -86,11 +99,6 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
           }),
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to create session (${response.status}): ${errorText}`);
-        }
-
         const data = await response.json();
         const newSession: IChatSession = {
           sessionId: data.sessionId,
@@ -101,7 +109,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
         setMessages(initialMessages ?? []);
         return newSession;
       } catch (err: unknown) {
-        const errorObj = err instanceof Error ? err : new Error('Failed to create session');
+        const errorObj = requestFailure('Failed to create session', err);
         setError(errorObj);
         return null;
       } finally {
@@ -158,16 +166,6 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     try {
       const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
 
-      if (response.status === 404) {
-        // Stale-session signal — server no longer has this session id.
-        return { ok: false, staleSession: true };
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to load history (${response.status}): ${errorText}`);
-      }
-
       const data = await response.json();
       const historyMessages: IChatMessage[] = (data.messages || []).map(
         (m: { role: string; content: string; timestamp: string }) => ({
@@ -180,7 +178,12 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
       setMessages(historyMessages);
       return { ok: true };
     } catch (err: unknown) {
-      const errorObj = err instanceof Error ? err : new Error('Failed to load history');
+      // `@spaarke/auth`'s authenticatedFetch THROWS ApiError(404) for a 404 (it never returns it), so the stale-session signal is
+      // recognised here — otherwise the host never learns to start a fresh session.
+      if (isApiError(err, 404)) {
+        return { ok: false, staleSession: true };
+      }
+      const errorObj = requestFailure('Failed to load history', err);
       setError(errorObj);
       return { ok: false };
     } finally {
@@ -224,18 +227,13 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
           body.additionalDocumentIds = additionalDocumentIds;
         }
 
-        const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
+        await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to switch context (${response.status}): ${errorText}`);
-        }
       } catch (err: unknown) {
-        const errorObj = err instanceof Error ? err : new Error('Failed to switch context');
+        const errorObj = requestFailure('Failed to switch context', err);
         setError(errorObj);
       } finally {
         setIsLoading(false);
@@ -257,19 +255,14 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     setError(null);
 
     try {
-      const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, {
+      await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, {
         method: 'DELETE',
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete session (${response.status}): ${errorText}`);
-      }
 
       setSession(null);
       setMessages([]);
     } catch (err: unknown) {
-      const errorObj = err instanceof Error ? err : new Error('Failed to delete session');
+      const errorObj = requestFailure('Failed to delete session', err);
       setError(errorObj);
     } finally {
       setIsLoading(false);

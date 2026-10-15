@@ -98,6 +98,11 @@ public sealed class L2LoadTestFactory : WebApplicationFactory<Program>
         // so no HTTP call is added to the latency being measured. Same setting as RunsEndpointsTests.
         builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-loadtest.crm.dynamics.com");
 
+        // T255: ReservedTenantsOptions is ValidateOnStart on the Api (Spaarke's tenant + the CIAM tenant the
+        // customer workforce tenant rule refuses). Test values, distinct from every tenant the scenarios send.
+        builder.UseSetting("ReservedTenants:SpaarkeTenantId", "5a5a5a5a-0000-4000-8000-000000000001");
+        builder.UseSetting("ReservedTenants:CiamTenantIds:0", "c1a0c1a0-0000-4000-8000-000000000002");
+
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs.
         builder.UseEnvironment("Testing");

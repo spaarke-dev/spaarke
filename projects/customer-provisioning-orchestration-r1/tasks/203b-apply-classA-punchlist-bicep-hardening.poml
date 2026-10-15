@@ -4,7 +4,8 @@
     <title>Apply Class-A punch list — Sub-phase 203b bicep hardening (12 bicep/script rows: SB RBAC + config aliases + artifacts storage + ACR + L2 UAMI RBAC + shared UAMI grants + FromBicepOutput + KV clobber fix + Model 1 KV grant + queue recreate + CustomerRunGuard)</title>
     <phase>Phase Pre-Live-Fire — Class-A punch list bicep hardening</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <note date="2026-10-08">Executed 2026-08-24 (commits 3b4f400c5, 9eee99de6; results in notes/task-203b-execution-results.md; A26 queue ceremony run by the operator 2026-08-26). Re-verified 2026-10-08 against the post-D-12/D-13 tree: A13, A14, A17, A18, A21, A22 (customer.bicep kvSecrets), A23, A24, A26 (controlplane-sb-queue.bicep) and A27 (settings emitted) still hold; A19's subscription grant is now Owner on each customer subscription (T228, controlplane-subscription-rbac.bicep); A20 and A25 are obsolete (model1-shared.bicep and model1-shared-l2-rbac.bicep deleted by T225a, b9fd48bbe). Open item carried out of this task: customerRunGuardEnabled defaults to false and no parameter file sets it, so the I5 same-customer guard is off unless an operator overrides it.</note>
     <rigor>FULL</rigor>
     <rigor-reason>Per project CLAUDE.md rigor table: any task tagged `deploy` (bicep) → FULL. These changes will fire live against Azure resources during task 186; wrong RBAC assignments or clobbered KV secrets are correctness-adjacent regressions per §Human Escalation Triggers (BINDING never-delete BFF-API/Dataverse-ClientSecret). Also touches `.claude/constraints/azure-deployment.md` publish-size verification obligation.</rigor-reason>
     <model-tier>sonnet</model-tier>

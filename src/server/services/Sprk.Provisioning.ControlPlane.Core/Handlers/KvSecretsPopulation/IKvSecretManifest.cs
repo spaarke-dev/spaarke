@@ -99,14 +99,8 @@ public enum KvSecretValueSource
 
     // 5 was FromSharedService (task 200 H4-shared) — retired T226 (2026-09-30); not reused.
 
-    /// <summary>
-    /// T226 (2026-09-30) — value is a Spaarke topology constant carried on the run as a NON-SECRET
-    /// parameter (manifest <c>value_source: from-topology-constants</c>, introduced by task 214 for
-    /// <c>SPE-ContainerTypeId</c>, whose value comes from <c>spaarke-constants.yaml
-    /// per_env_constants.&lt;env&gt;.containerTypeId</c>). H4 supplies it via
-    /// <see cref="KvSecretWriteRequest.IntakeValues"/>.
-    /// </summary>
-    FromTopologyConstants = 6,
+    // 6 was FromTopologyConstants (task 214, SPE-ContainerTypeId) — retired with that unread secret by T227e
+    // (2026-10-06); not reused.
 
     /// <summary>
     /// Task 245a — a non-secret value taken from an INTAKE parameter (<c>IntakeParameterCatalog</c>,

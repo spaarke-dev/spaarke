@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -77,6 +78,9 @@ public static class AssignedAccessAction
 }
 
 /// <summary>One subject's result.</summary>
+/// <param name="Invite">Task 185 (§12 I-9): what a contact grant this pass wrote did about the contact's CIAM invite —
+/// ADDITIVE, <c>null</c> when no invite was considered (no grant written, an organization, or a pass with no internal actor).
+/// Never carries the code.</param>
 public sealed record AssignedAccessEntryOutcome(
     string SubjectKind,
     Guid SubjectId,
@@ -84,7 +88,8 @@ public sealed record AssignedAccessEntryOutcome(
     Guid? SystemUserId,
     string State,
     string? Reason,
-    string Action);
+    string Action,
+    GrantInviteResult? Invite = null);
 
 /// <summary>Something a pass could not do or could not confirm. Never reported as done.</summary>
 public sealed record AssignedAccessFailure(string? SubjectKind, Guid? SubjectId, string Kind, string Message);
@@ -120,7 +125,8 @@ public sealed record AssignedAccessListEntry(
 /// The ONE invariant owner of the Assigned-To auto-grants (unified-access-control-r2 task 142 · owner round 2 item 5 +
 /// Q5; round 3 A1/A2/R3; round 3 A3–A6/A8 accepted as recommended): every registry-listed "Assigned *" contact or
 /// organization on a project, matter or work assignment holds Collaborate access — a removable grant on the record's
-/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible internal user — unless an
+/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible user (an enabled person —
+/// <see cref="InternalShareEndpoints.ClassifyEligibility"/>, the rule <c>/share-user</c> applies) — unless an
 /// operator declined it, a veto forbids it, or the record's policy says otherwise.
 /// </summary>
 /// <remarks>
@@ -134,7 +140,10 @@ public sealed record AssignedAccessListEntry(
 /// <item>Level: Collaborate, uncapped (A1 / rule 5) — <see cref="GrantCeiling.AssignedToRule"/>; the share mask comes from
 /// <see cref="RecordShareLevels"/>, never a new constant. An absent expiry is today + 90 through the core's
 /// <c>DefaultExpiry</c>.</item>
-/// <item>Restricted: no contact or organization grant; a linked internal user's share is unaffected (round 2 item 3).
+/// <item>Restricted: no contact or organization grant; a linked user's share is unaffected (round 2 item 3) — unless the
+/// user is flagged external (<c>sprk_isexternal = true</c>): then no share either, and one the Restricted remover took
+/// away is recorded Skipped(restricted), never Declined, so it comes back when the record stops being Restricted (owner
+/// round 67).
 /// Secure or Limited: no organization grant. Secure: contact grants and shares are SUGGESTED, not written
 /// (A3 = prompt: <see cref="AssignedAccessState.PendingConfirmation"/>); an auto grant that existed before the record
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
@@ -209,6 +218,13 @@ public sealed class AssignedAccessMaterializer
     private readonly ILogger<AssignedAccessMaterializer> _logger;
     private readonly IServiceScopeFactory? _scopes;
 
+    /// <summary>Task 185 (§12 I-9): the ONE invite core the grant flows share — an internal assignment of an unbound
+    /// contact with an email sends the invite, as <c>/grant</c> does.</summary>
+    private readonly ExternalInviteService _invites;
+
+    /// <summary>Task 185 (§12 I-9, I-4/I-7): a partner contact's assignment tells an internal user the colleague needs an invite.</summary>
+    private readonly GrantAccessNotifier _notifier;
+
     /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
     /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
     /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
@@ -229,9 +245,14 @@ public sealed class AssignedAccessMaterializer
         IConfiguration configuration,
         TimeProvider timeProvider,
         ILogger<AssignedAccessMaterializer> logger,
+        ExternalInviteService invites,
+        GrantAccessNotifier notifier,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
+        // Both Scoped and unconditionally registered beside this class (ExternalAccessModule); neither depends on it.
+        _invites = invites ?? throw new ArgumentNullException(nameof(invites));
+        _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _store = store;
         _dataverse = dataverse;
         _participations = participations;
@@ -651,8 +672,14 @@ public sealed class AssignedAccessMaterializer
     {
         try
         {
-            var flags = await _participations
+            // Task 174 (owner round 84): the EFFECTIVE flags — Restricted, Limited or Secure through a parent governs what an
+            // assignee is given (suggest vs share, convert), exactly as the read path cancels it. The S5 keep follows the
+            // record's OWN stored flag (main-session ruling on verifier F1-c), as /unshare-user does: a not-yet-flagged child
+            // is still owned by its business unit, so ending its assignment share leaves readers.
+            var own = await _participations
                 .GetRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
+            run.OwnIsSecure = !own.TryGetValue(run.RootId, out var ownFlags) || ownFlags.IsUnreadable || ownFlags.IsSecure;
+            var flags = await _participations.FoldEffectiveAsync(run.Logical, own, ct).ConfigureAwait(false);
             // Absent = unreadable at write time (task 138's rule), never "no veto".
             return flags.TryGetValue(run.RootId, out var f) && !f.IsUnreadable ? f : null;
         }
@@ -696,7 +723,7 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        var target = await ResolveTargetAsync(subject, ct).ConfigureAwait(false);
+        var target = await ResolveTargetAsync(subject, flags, ct).ConfigureAwait(false);
 
         // (3) Access this owner created: verify it, convert it (141 link), renew it.
         if (live.FirstOrDefault(r => r.State is AssignedAccessState.Granted or AssignedAccessState.Shared) is { } ours)
@@ -753,7 +780,20 @@ public sealed class AssignedAccessMaterializer
             var modified = IsModified(ours, row);
 
             // ── Task 141 link appeared: the contact is an internal user — convert grant → share ──
-            if (target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive)
+            // GitHub #1410 / owner round 82 ("the parent permissions control"): the record is not flagged secure, but it may be
+            // filed under a secure matter or project whose No Access list governs it. A walled user is NOT converted (the
+            // grant is left exactly as it is, and converts once the wall lifts); a check that cannot be completed is a fault
+            // (reported, the run red) and nothing is converted this pass.
+            var convertWall = target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive
+                ? await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    run.Logical, run.RootId, target.SystemUserId!.Value, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false)
+                : null;
+            if (convertWall?.Outcome == SecureShareWallOutcome.Unverifiable)
+            {
+                DenyListFault(run, subject, "the conversion of its grant to a share", detail: convertWall.Fault);
+            }
+
+            if (convertWall is not null && !convertWall.RefusesShare)
             {
                 var written = await WriteShareAsync(run, subject, target.SystemUserId!.Value, ct).ConfigureAwait(false);
                 if (written is not { } mask)
@@ -815,14 +855,29 @@ public sealed class AssignedAccessMaterializer
             return false; // a malformed row: decide fresh
 
         var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+        if (current == 0 && target.Kind == TargetKind.Skip && target.SkipReason == AssignedAccessReason.Restricted
+            && target.SystemUserId == user)
+        {
+            // Owner round 67: the record became Restricted and this user is flagged external, so the Restricted remover
+            // (RestrictedExternalShareRemover) took the share away — a KNOWN cause, never an operator's removal (which
+            // would stick as Declined). Recorded as Restricted, so the share is given back once the record is not.
+            await EnsureRowsAsync(run, subject, byField,
+                new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.Restricted, null, user,
+                    ours.GrantedLevel), ct).ConfigureAwait(false);
+            run.Entry(subject, fields, user, AssignedAccessState.Skipped, AssignedAccessReason.Restricted,
+                AssignedAccessAction.Ledger);
+            return true;
+        }
+
         if (current == 0)
         {
             // Task 143's enforcer removes a WALLED user's share on a secure record: a known cause, restored once the wall
             // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks. Task 158
             // final round (main-session round 58 item 1): on a work assignment or project filed under a secure record the
             // enforcer also removes it for a person on that PARENT's list, so the parents' lists are asked too — the guard's
-            // one entry point, as the suggestion below asks it.
-            if (flags.IsSecure)
+            // one entry point, as the suggestion below asks it. GitHub #1410 / owner round 82: asked WHATEVER the record's flag
+            // — the enforcer also removes it on a not-yet-secure record filed under a walled secure parent (the guard answers
+            // NotSecure for a record with no secure parent, which falls through to the operator's removal as before).
             {
                 var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                     run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
@@ -1064,19 +1119,21 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        run.Writes++;
         if (outcome.Warning is { } warning)
         {
-            // ADR-003: the core wrote, but the grant does not confer access (a row lapsed between this read and the
-            // core's). Never reported as Granted: a failure, and nothing in the ledger changes, so the next pass decides
-            // again from fresh reads.
+            // ADR-003: the grant does not confer access (a row lapsed between this read and the core's). This call sends
+            // no date then (a date is sent only when nothing conferred), so since task 113 the core refused before
+            // writing: nothing changed. Never reported as Granted: a failure, and nothing in the ledger changes, so the
+            // next pass decides again from fresh reads (and, seeing nothing conferring, sends a date).
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was written but confers no access ({Warning}); " +
-                "not recorded as granted.", run.Logical, run.RootId, subject, warning);
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was not written — the existing grant has lapsed " +
+                "and confers no access ({Warning}); not recorded as granted.", run.Logical, run.RootId, subject, warning);
             run.Fail(subject, "grant-not-conferring",
-                $"Access for {subject} on this record was written but does not take effect yet. The next update will try again.");
+                $"Access for {subject} on this record was not put in place yet: their existing grant has lapsed. The next update will try again.");
             return;
         }
+
+        run.Writes++;
 
         var survivorExpiry = expiry
             ?? (active.Count > 0
@@ -1087,8 +1144,166 @@ public sealed class AssignedAccessMaterializer
         await EnsureRowsAsync(run, subject, byField,
             new AssignedAccessLedgerWrite(AssignedAccessState.Granted, reason, outcome.AccessRecordId, null,
                 (int)ExternalAccessLevel.Collaborate, survivorExpiry), ct).ConfigureAwait(false);
+
+        // Task 185 (§12 I-9): the grant is written; an unbound contact still needs the invite to sign in. Only here — the
+        // fresh grant an assignment gives — never on a renewal or a restore of an existing grant.
+        var invite = subject.Kind == AssignedSubjectKind.Contact
+            ? await InviteAfterGrantAsync(run, subject, outcome.AccessGained, ct).ConfigureAwait(false)
+            : null;
+
         run.Entry(subject, fields, null, AssignedAccessState.Granted, reason,
-            prior is null ? AssignedAccessAction.Granted : AssignedAccessAction.Raised);
+            prior is null ? AssignedAccessAction.Granted : AssignedAccessAction.Raised, invite);
+    }
+
+    // =========================================================================================
+    // Task 185 (§12 I-9): the invite after an assignment's grant
+    // =========================================================================================
+
+    /// <summary>Who made the assignment a pass materializes (task 185 §12 I-9).</summary>
+    private enum ActorKind
+    {
+        /// <summary>No person: the job, or an inline pass with no caller (the secure-root inheritance, a field mapping).</summary>
+        None,
+
+        /// <summary>The caller's oid is a systemuser's: an internal user's write or sync.</summary>
+        Internal,
+
+        /// <summary>The caller's oid is a contact's (a partner, task 140 / I-4): contacts never invite.</summary>
+        Partner,
+
+        /// <summary>The caller's oid is neither a systemuser's nor a contact's, or could not be read: no invite.</summary>
+        Unresolved,
+    }
+
+    /// <summary>
+    /// After this pass wrote a contact grant: the round 98 rule the grant flows apply (§11 option (c), §12 I-1 to I-4,
+    /// I-7, I-9), keyed on who made the assignment.
+    /// <list type="bullet">
+    /// <item>An INTERNAL user's write or sync (the request's oid resolves to a systemuser): the ONE invite core
+    /// (<see cref="ExternalInviteService.InviteOnGrantAsync"/>) — an unbound contact with an email is invited, a current
+    /// marker is <c>AlreadyPending</c> (I-2), a bound contact is <c>NotNeeded</c>, a failure is <c>Failed</c> and the grant
+    /// stands (I-1, logged at Warning without the code by the core).</item>
+    /// <item>A PARTNER contact's write (the oid is a contact's): no invite (I-4); an unbound colleague with an email is
+    /// <c>NeedsInternalInvite</c> and one internal user is told (<see cref="GrantAccessNotifier.NotifyInviteNeededAsync"/>,
+    /// the I-7 fallback order, the partner's own granters first).</item>
+    /// <item>No person (the reconciliation job, or an inline pass with no caller), or an oid that resolves to nobody: no
+    /// invite, logged. A background pass never invites: it would replace a code each time it re-decides a subject.</item>
+    /// </list>
+    /// The materializer sends no "you were given access" email, so the invite is the contact's only email (I-3). Never throws.
+    /// </summary>
+    private async Task<GrantInviteResult?> InviteAfterGrantAsync(
+        Run run, AssignedSubject subject, bool accessGained, CancellationToken ct)
+    {
+        try
+        {
+            var (actor, partnerContactId) = await ResolveActorAsync(run, ct).ConfigureAwait(false);
+            switch (actor)
+            {
+                case ActorKind.Internal:
+                    return await _invites.InviteOnGrantAsync(subject.Id).ConfigureAwait(false);
+
+                case ActorKind.Partner:
+                    {
+                        var assessment = await _invites.AssessAsync(subject.Id, CancellationToken.None).ConfigureAwait(false);
+                        var invite = assessment.Final ?? new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite);
+                        if (invite.Status == GrantInviteStatus.NeedsInternalInvite && accessGained)
+                        {
+                            var granters = await PartnerGrantersAsync(run, partnerContactId!.Value).ConfigureAwait(false);
+                            await _notifier.NotifyInviteNeededAsync(
+                                run.Request.RootType, run.RootId, subject.Id, new ClaimsPrincipal(new ClaimsIdentity()), granters)
+                                .ConfigureAwait(false);
+                        }
+
+                        return invite;
+                    }
+
+                default:
+                    _logger.LogInformation(
+                        "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: contact {ContactId} was granted with no internal user " +
+                        "behind the pass ({Actor}); no invite is sent. An internal user's Invite sends it.",
+                        run.Request.Trigger, run.Logical, run.RootId, subject.Id, actor);
+                    return null;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // I-1: the grant stands. Nothing here carries the code (it exists only inside the invite core).
+            _logger.LogWarning(ex,
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the invite after the grant to contact {ContactId} failed. The grant stands; " +
+                "retry with Invite.", run.Logical, run.RootId, subject.Id);
+            return new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode);
+        }
+    }
+
+    /// <summary>
+    /// Who is behind this pass, resolved once per run. The job is never a person. Otherwise the request's oid: a systemuser's
+    /// (the read <c>sprk_grantedby</c> already uses) is internal; a contact's (bound to it) is a partner; anything else —
+    /// no oid, an unknown oid, a read that failed — invites nobody (fail closed).
+    /// </summary>
+    private async Task<(ActorKind Kind, Guid? PartnerContactId)> ResolveActorAsync(Run run, CancellationToken ct)
+    {
+        if (run.Actor is { } known)
+            return known;
+
+        (ActorKind, Guid?) resolved = (ActorKind.None, null);
+        if (run.Request.Trigger != AssignedAccessTrigger.Job
+            && Guid.TryParse(run.Request.GrantorOid?.Trim(), out var oid) && oid != Guid.Empty)
+        {
+            // The read sprk_grantedby resolution makes (ResolveGrantedBySystemUserIdAsync), made here so that a FAILED read
+            // is told apart from "no systemuser" — a fault must never turn an internal user into a partner.
+            List<GrantExternalAccessEndpoint.SystemUserRow>? users;
+            try
+            {
+                users = await _dataverse.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
+                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid", top: 1,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[ASSIGNED-ACCESS] {Type} {RootId}: who made the assignment could not be read; no invite is sent this pass.",
+                    run.Logical, run.RootId);
+                users = null;
+            }
+
+            if (users is null)
+            {
+                resolved = (ActorKind.Unresolved, null);
+            }
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            {
+                resolved = (ActorKind.Internal, null);
+            }
+            else
+            {
+                var contacts = await _identities.FindContactsByOidAsync(oid, ct).ConfigureAwait(false);
+                resolved = contacts.Status == LookupStatus.Read && contacts.Rows.Count == 1 && contacts.Rows[0].IsActive
+                    ? (ActorKind.Partner, contacts.Rows[0].ContactId)
+                    : (ActorKind.Unresolved, null);
+            }
+        }
+
+        run.Actor = resolved;
+        return resolved;
+    }
+
+    /// <summary>I-7: the internal users who granted the partner contact its own access here (<c>sprk_grantedby</c>); best effort.</summary>
+    private async Task<IReadOnlyList<Guid>> PartnerGrantersAsync(Run run, Guid partnerContactId)
+    {
+        try
+        {
+            var rows = await ExternalGrantLifecycle.QueryActiveRowsAsync(
+                _dataverse, ExternalGrantKey.ForContact(run.Request.RootType, run.RootId, partnerContactId), CancellationToken.None)
+                .ConfigureAwait(false);
+            return ContactGrantEndpoints.GrantersOf(rows, partnerContactId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grants of partner contact {ContactId} could not be read; the record's " +
+                "owner or creator is told instead.", run.Logical, run.RootId, partnerContactId);
+            return Array.Empty<Guid>();
+        }
     }
 
     private async Task FreshShareAsync(
@@ -1107,11 +1322,12 @@ public sealed class AssignedAccessMaterializer
 
         var restoring = live.Any(r => r.State == AssignedAccessState.Skipped && r.Reason == AssignedAccessReason.RemovedByNoAccess);
 
-        if (flags.IsSecure)
         {
             // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
             // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
-            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            // parent's No Access list too — the guard's one entry point for the record and its parents. GitHub #1410 / owner
+            // round 82: asked WHATEVER the record's flag (a not-yet-secure record filed under a walled secure parent is
+            // governed by that parent's list); the guard answers NotSecure for a record with no secure parent.
             var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                 run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
@@ -1126,15 +1342,15 @@ public sealed class AssignedAccessMaterializer
                 // Task 142 r4 (owner round 13 item 5): a fault, not a wall — nothing shared or suggested (fail closed), and
                 // the run FAILS like the deny-list fault (counted, logged, the job red). The ledger keeps what it said, so a
                 // share 143's enforcer removed is still restored once the check reads again.
-                DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault);
+                DenyListFault(run, subject, restoring || !flags.IsSecure ? "its share" : "its suggestion", detail: wall.Fault);
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccessUnverifiable, user)
                     .ConfigureAwait(false);
                 return;
             }
 
-            if (!restoring)
+            if (flags.IsSecure && !restoring)
             {
-                // Owner answer A3: suggest, do not share.
+                // Owner answer A3: suggest, do not share (secure records only).
                 await EnsureRowsAsync(run, subject, byField,
                     new AssignedAccessLedgerWrite(AssignedAccessState.PendingConfirmation, null, null, user), ct).ConfigureAwait(false);
                 run.Entry(subject, fields, user, AssignedAccessState.PendingConfirmation, null, AssignedAccessAction.Ledger);
@@ -1300,9 +1516,10 @@ public sealed class AssignedAccessMaterializer
                         return;
                     }
 
-                    if (flags.IsSecure)
+                    if (run.OwnIsSecure)
                     {
                         // Owner S5: a secure record always keeps someone who can see it — this rule never removes a share there.
+                        // Task 174 (F1-c ruling): the record's OWN stored flag, as /unshare-user's S5 — not the effective one.
                         await EndAsync(AssignedAccessReason.KeptSecureRecord, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
@@ -1352,7 +1569,9 @@ public sealed class AssignedAccessMaterializer
         public static Target Skip(string reason, Guid? user = null) => new(TargetKind.Skip, reason, user);
     }
 
-    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, CancellationToken ct)
+    /// <param name="flags">The root's flags, read once per run: <see cref="InternalShareEndpoints.ClassifyEligibility"/> asks
+    /// whether the record is Restricted for a linked user flagged external (owner round 67).</param>
+    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, RootRecordFlags flags, CancellationToken ct)
     {
         if (subject.Kind == AssignedSubjectKind.Organization)
         {
@@ -1403,8 +1622,7 @@ public sealed class AssignedAccessMaterializer
         // Task 141 §2/§5: the link (sprk_primarycontact) is honoured as it is; a user with NO link is represented by the
         // contact bound to its oid. A user linked to ANOTHER contact is not this contact's, whatever the oid says.
         var represented = candidates
-            .Where(c => c.PrimaryContactId == subject.Id
-                        || (c.PrimaryContactId is null && boundOid is { } b && c.Oid == b))
+            .Where(c => c.Represents(subject.Id, boundOid))
             .GroupBy(c => c.SystemUserId)
             .Select(g => g.First())
             .ToList();
@@ -1415,12 +1633,23 @@ public sealed class AssignedAccessMaterializer
         if (represented.Count > 1)
             return Target.Skip(AssignedAccessReason.LinkAmbiguous); // never pick one of two
 
+        // Owner round 67: the ONE rule /share-user applies. An enabled person is shared with, flagged external or not —
+        // except on a Restricted record, where a user flagged external (sprk_isexternal = true; blank is not external)
+        // gets nothing: no share, and no contact grant either, since a Restricted record admits no contact-based access.
+        // That is recorded as Restricted (the reason a contact gets there), so lifting Restricted gives the share back.
         var user = represented[0];
-        return InternalShareEndpoints.ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal) switch
+
+        // Verifier V4: the ONE "barred on Restricted" predicate is asked FIRST — a DISABLED or non-person user flagged external
+        // on a Restricted record is Restricted (the remover's known cause), never Ineligible (which would turn the remover's
+        // removal into a sticky Declined and keep the share away after Restricted is lifted and the user re-enabled).
+        if (InternalShareEndpoints.IsBarredOnRestricted(user.IsExternal, flags.IsRestricted))
+            return Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId);
+
+        return InternalShareEndpoints.ClassifyEligibility(
+                user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
         {
             InternalShareEndpoints.ShareEligibility.Eligible => new Target(TargetKind.Share, null, user.SystemUserId),
-            // Refused ONLY because sprk_isexternal is not "internal": an external person gets a grant row (criterion 3).
-            InternalShareEndpoints.ShareEligibility.NotInternal => new Target(TargetKind.ContactGrant),
+            InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
             _ => Target.Skip(AssignedAccessReason.Ineligible, user.SystemUserId),
         };
     }
@@ -1957,7 +2186,8 @@ public sealed class AssignedAccessMaterializer
         try
         {
             var logical = ExternalGrantRoot.LogicalNameFor(rootType);
-            var flags = await _participations.GetRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
+            // Task 174: the composition's gates use the EFFECTIVE flags, so this mirror does too.
+            var flags = await _participations.GetEffectiveRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
             if (!flags.TryGetValue(rootId, out var f) || f.IsUnreadable)
                 return new[] { ResidualTerm.Unknown };
             if (f.IsDirectOnly || f.IsRestricted || f.IsInactive)
@@ -2090,14 +2320,20 @@ public sealed class AssignedAccessMaterializer
         /// <summary>Task 149: this run made at least one CONFIRMED system-user share write on the root.</summary>
         public bool RootShareWritten { get; set; }
 
+        /// <summary>Task 174 (F1-c): the record's OWN stored Secure flag (unreadable counts as secure), for the S5 keep only.</summary>
+        public bool OwnIsSecure { get; set; } = true;
+
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();
 
+        /// <summary>Task 185 (§12 I-9): who is behind this pass, resolved at the first contact grant and kept for the run.</summary>
+        public (ActorKind Kind, Guid? PartnerContactId)? Actor { get; set; }
+
         public void Entry(AssignedSubject subject, IReadOnlyList<string> fields, Guid? user, AssignedAccessState state,
-            string? reason, string action)
+            string? reason, string action, GrantInviteResult? invite = null)
             => Entries.Add(new AssignedAccessEntryOutcome(
                 subject.Kind == AssignedSubjectKind.Contact ? "contact" : "organization", subject.Id, fields.ToList(), user,
-                state.ToString(), reason, action));
+                state.ToString(), reason, action, invite));
 
         public void Fail(AssignedSubject? subject, string kind, string message)
             => Failures.Add(new AssignedAccessFailure(

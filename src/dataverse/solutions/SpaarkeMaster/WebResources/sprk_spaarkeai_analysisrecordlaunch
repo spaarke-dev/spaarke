@@ -1,0 +1,143 @@
+"use strict";
+var Sprk = Sprk || {};
+Sprk.SpaarkeAi = Sprk.SpaarkeAi || {};
+Sprk.SpaarkeAi.AnalysisRecordLaunch = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/ribbon/AnalysisRecordLaunch.ts
+  var AnalysisRecordLaunch_exports = {};
+  __export(AnalysisRecordLaunch_exports, {
+    openExistingAnalysis: () => openExistingAnalysis,
+    openNewAnalysisFromRecord: () => openNewAnalysisFromRecord
+  });
+
+  // src/utils/launch-resolver.ts
+  function buildLaunchUrl(params) {
+    const record = {};
+    if (params.entityLogicalName) {
+      record["entityLogicalName"] = params.entityLogicalName;
+    }
+    if (params.entityId) {
+      record["entityId"] = params.entityId.replace(/^\{|\}$/g, "");
+    }
+    if (params.matterId) {
+      record["matterId"] = params.matterId.replace(/^\{|\}$/g, "");
+    }
+    if (params.analysisId) {
+      record["analysisId"] = params.analysisId.replace(/^\{|\}$/g, "");
+    }
+    if (params.worktype) {
+      record["worktype"] = params.worktype;
+    }
+    if (params.regarding) {
+      record["regarding"] = params.regarding.replace(/^\{|\}$/g, "");
+    }
+    const composeParams = params;
+    if (composeParams.composeMode) {
+      record["composeMode"] = composeParams.composeMode;
+    }
+    if (composeParams.sprkDocumentId) {
+      record["sprkDocumentId"] = composeParams.sprkDocumentId.replace(/^\{|\}$/g, "");
+    }
+    if (composeParams.speDriveItemId) {
+      record["speDriveItemId"] = composeParams.speDriveItemId;
+    }
+    if (composeParams.speDriveId) {
+      record["speDriveId"] = composeParams.speDriveId;
+    }
+    if (composeParams.speFileName) {
+      record["speFileName"] = composeParams.speFileName;
+    }
+    if (composeParams.activeWorkType) {
+      record["activeWorkType"] = composeParams.activeWorkType;
+    }
+    return new URLSearchParams(record).toString();
+  }
+  function openSpaarkeAi(params, target = 2) {
+    if (typeof Xrm === "undefined") {
+      console.warn(
+        "[launch-resolver] Xrm global not available. SpaarkeAi must be opened via direct URL."
+      );
+      return;
+    }
+    const data = buildLaunchUrl(params);
+    void Xrm.Navigation.navigateTo(
+      {
+        pageType: "webresource",
+        webresourceName: "sprk_spaarkeai",
+        data
+      },
+      {
+        target,
+        width: { value: 80, unit: "%" },
+        height: { value: 80, unit: "%" }
+      }
+    );
+  }
+
+  // src/ribbon/AnalysisRecordLaunch.ts
+  function openNewAnalysisFromRecord(primaryControl, worktype) {
+    let entityId;
+    try {
+      entityId = primaryControl.data.entity.getId();
+    } catch (err) {
+      console.warn(
+        "[AnalysisRecordLaunch] Could not read record id from primaryControl:",
+        err
+      );
+      return;
+    }
+    const normalizedEntityId = entityId.replace(/^\{|\}$/g, "");
+    if (!normalizedEntityId) {
+      console.warn(
+        "[AnalysisRecordLaunch] Record id is empty (likely an unsaved form). Ignoring New Analysis command."
+      );
+      return;
+    }
+    if (!worktype) {
+      console.warn(
+        "[AnalysisRecordLaunch] No worktype supplied to the New Analysis command. Ignoring \u2014 check the ribbon's StaticValue CrmParameter."
+      );
+      return;
+    }
+    const entityLogicalName = primaryControl.data.entity.getEntityName();
+    openSpaarkeAi(
+      {
+        entityLogicalName,
+        entityId: normalizedEntityId,
+        worktype,
+        // `regarding` carried for symmetry with the entity-context channel above
+        // (which is authoritative — see launch-resolver.ts's URL parameter contract).
+        regarding: normalizedEntityId
+      },
+      2
+    );
+  }
+  function openExistingAnalysis(analysisId) {
+    const normalizedAnalysisId = (analysisId != null ? analysisId : "").replace(/^\{|\}$/g, "");
+    if (!normalizedAnalysisId) {
+      console.warn(
+        "[AnalysisRecordLaunch] No analysis id resolved from the subgrid selection. Ignoring Open Analysis command."
+      );
+      return;
+    }
+    openSpaarkeAi({ analysisId: normalizedAnalysisId }, 2);
+  }
+  return __toCommonJS(AnalysisRecordLaunch_exports);
+})();

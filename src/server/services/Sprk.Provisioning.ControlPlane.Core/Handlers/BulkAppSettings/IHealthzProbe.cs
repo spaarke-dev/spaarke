@@ -1,9 +1,9 @@
 // -----------------------------------------------------------------------------
 // IHealthzProbe.cs
 //
-// Task 201 — seam over the HTTP /healthz backoff-poll H4b performs after the
-// generated Configure-AppServiceSettings.generated.ps1 script writes app
-// settings + Azure triggers ONE App Service restart cycle.
+// Task 201 — seam over the HTTP /healthz backoff-poll H4b performs after it
+// writes the app settings (one write per slot — task 253, ARM SDK) + Azure
+// triggers ONE App Service restart cycle.
 //
 // CONTRACT:
 //   ProbeWithBackoffAsync polls the target URL with an internal backoff
@@ -31,7 +31,7 @@ public interface IHealthzProbe
     /// internal backoff budget is exhausted. Backoff schedule:
     /// 30s / 60s / 90s / 120s / 180s (5 probes, ~8-min total).
     /// </summary>
-    /// <param name="healthzUrl">The healthz URL (e.g. https://spaarke-bff-demo.azurewebsites.net/healthz).</param>
+    /// <param name="healthzUrl">The healthz URL (e.g. https://spaarke-bff-dev.azurewebsites.net/healthz).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// <see cref="HealthzResult.Success"/> on first HTTP 200 observed;

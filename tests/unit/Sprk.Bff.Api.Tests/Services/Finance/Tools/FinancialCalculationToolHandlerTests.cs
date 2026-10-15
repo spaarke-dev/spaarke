@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance.Tools;
@@ -32,9 +32,9 @@ public class FinancialCalculationToolHandlerTests
 
     public FinancialCalculationToolHandlerTests()
     {
-        _dataverseService = Substitute.For<IDataverseService>();
-        _telemetry = Substitute.For<FinanceTelemetry>();
-        _logger = Substitute.For<ILogger<FinancialCalculationToolHandler>>();
+        _dataverseService = new Mock<IDataverseService>().Object;
+        _telemetry = new Mock<FinanceTelemetry>().Object;
+        _logger = new Mock<ILogger<FinancialCalculationToolHandler>>().Object;
         _handler = new FinancialCalculationToolHandler(_dataverseService, _telemetry, _logger);
     }
 

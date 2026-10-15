@@ -32,7 +32,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | [DEPLOYMENT-VERIFICATION-GUIDE.md](DEPLOYMENT-VERIFICATION-GUIDE.md) | Consolidated post-deploy verification: BFF API, PCF, code pages, web resources, infrastructure | 2026-04-05 | 2026-04-05 | New |
 | [CONFIGURATION-MATRIX.md](CONFIGURATION-MATRIX.md) | Complete reference of all BFF API configuration settings: sections, defaults, locations, Key Vault secrets | 2026-04-05 | 2026-04-05 | New |
 | [SECRET-ROTATION-PROCEDURES.md](SECRET-ROTATION-PROCEDURES.md) | Key Vault secret rotation procedures | 2026-04-05 | — | — |
-| [auth-deployment-setup.md](auth-deployment-setup.md) | **Spaarke Auth v2 (ADR-028) operator runbook** — new-environment setup: Dataverse env vars + App Service settings + Azure AD MI permissions + Dataverse Application User + Exchange ApplicationAccessPolicy (§7) + verification smoke tests | 2026-05-19 | 2026-05-19 | Production |
+| [auth-deployment-setup.md](auth-deployment-setup.md) | **RETIRED stub (2026-08-17)** — content merged into [SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (auth §6.5/§7.3/§7.7; Exchange mailbox access §4.2.1/§7.9) | 2026-05-19 | 2026-10-07 | Retired |
 | [MI-CONFIGURATION-PATTERNS.md](MI-CONFIGURATION-PATTERNS.md) | **BFF per-env promotion runbook** — consolidated 6-pattern checklist from Phase 5 demo cutover (5 MI clientId keys, mandatory Cosmos, AgentService placeholders, opt-out flags, Dataverse Application User, Exchange ApplicationAccessPolicy ×2) | 2026-05-25 | 2026-05-25 | New |
 | [SPAARKE-SELF-SERVICE-USER-REGISTRATION.md](SPAARKE-SELF-SERVICE-USER-REGISTRATION.md) | Self-service user registration system setup | 2026-04-04 | — | Phase 1 |
 | [DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md](DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md) | M365 Declarative Agent build and deployment | 2026-03-26 | — | Validated |
@@ -43,6 +43,7 @@ This directory contains practical guides for deploying, configuring, administeri
 |----------|-------------|--------------|---------------|--------|
 | [CUSTOMER-ONBOARDING-RUNBOOK.md](CUSTOMER-ONBOARDING-RUNBOOK.md) | End-to-end customer onboarding runbook | 2026-03-20 | — | — |
 | [CUSTOMER-QUICK-START-CHECKLIST.md](CUSTOMER-QUICK-START-CHECKLIST.md) | Quick start checklist for new customers | 2026-03-20 | — | — |
+| [COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md](COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md) | Note for the customer's IT: install the per-customer Spaarke AI Copilot agent in their own tenant (T257) | 2026-10-09 | 2026-10-09 | New |
 
 ### AI — Deployment & Configuration
 
@@ -173,6 +174,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | Creating AI playbook scopes | `SCOPE-CONFIGURATION-GUIDE.md`, `JPS-AUTHORING-GUIDE.md` |
 | Configuring RAG | `RAG-CONFIGURATION.md`, `RAG-TROUBLESHOOTING.md` |
 | M365 Copilot integration | `M365-COPILOT-ADMIN-GUIDE.md`, `COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md` |
+| Per-customer Copilot agent (customer stamps) | `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.12, `COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md` |
 | Communication admin | `COMMUNICATION-ADMIN-GUIDE.md`, `COMMUNICATION-DEPLOYMENT-GUIDE.md` |
 | Workspace entity creation | `WORKSPACE-ENTITY-CREATION-GUIDE.md`, `WORKSPACE-AI-PREFILL-GUIDE.md` |
 | Customer onboarding | `CUSTOMER-ONBOARDING-RUNBOOK.md`, `CUSTOMER-QUICK-START-CHECKLIST.md` |

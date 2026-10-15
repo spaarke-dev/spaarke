@@ -308,6 +308,26 @@ describe('themeStorage', () => {
       (document.querySelector as jest.Mock).mockRestore();
     });
 
+    it('auto mode follows the dark-mode URL flag even when the context says light (standard controls, 2026-10-07)', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      setMockLocation({ search: '?appid=x&flags=themeOption%3Ddarkmode' });
+      try {
+        expect(getEffectiveDarkMode({ fluentDesignLanguage: { isDarkTheme: false } })).toBe(true);
+      } finally {
+        restoreLocation();
+      }
+    });
+
+    it('an explicit light preference still wins over the dark-mode URL flag', () => {
+      localStorageMock.getItem.mockReturnValue('light');
+      setMockLocation({ search: '?flags=themeOption%3Ddarkmode' });
+      try {
+        expect(getEffectiveDarkMode()).toBe(false);
+      } finally {
+        restoreLocation();
+      }
+    });
+
     it('should prioritize localStorage over context', () => {
       localStorageMock.getItem.mockReturnValue('light');
       const mockContext = {

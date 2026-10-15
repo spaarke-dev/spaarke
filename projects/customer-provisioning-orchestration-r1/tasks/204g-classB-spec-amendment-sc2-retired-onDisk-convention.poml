@@ -4,7 +4,8 @@
     <title>Class-B B21 spec amendment — SC #2 allow retired-on-disk-with-banner convention (Wave G-6 pattern)</title>
     <phase>Pre-Live-Fire — Class-B spec amendment (post-186 safe)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <note date="2026-10-08">Executed 2026-08-24 (commit 6746e48e6). Re-verified 2026-10-08: spec.md SC #2 carries the amendment (now line 382); sub-check (c) holds (no retired class is DI-registered). Sub-check (b) fails today for Handlers/BulkAppSettings/PwshProcessRunner.cs (active, no banner, registered at Worker/Program.cs:550); that belongs to the H4b rework (T253), not to this amendment.</note>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Spec amendment only — no code changes, no tests, no `.claude/` writes. Per root CLAUDE.md §8 rigor decision tree: docs/inventory/simple-updates = MINIMAL. Quality gates skipped per MINIMAL row.</rigor-reason>
     <model-tier>sonnet</model-tier>

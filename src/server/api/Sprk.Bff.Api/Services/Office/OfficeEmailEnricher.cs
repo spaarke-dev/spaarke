@@ -32,23 +32,27 @@ public class OfficeEmailEnricher
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // Only fetch if body is missing and we have an internet message ID
-        if (!string.IsNullOrEmpty(request.Email?.Body) || string.IsNullOrEmpty(request.Email?.InternetMessageId))
+        // Only fetch if the body is missing and the request names the message in the caller's mailbox. Task 121: Graph
+        // addresses a message by its Exchange item id, never by the RFC Message-ID, so the key is the item id — sent in
+        // ExchangeItemId, or (an add-in older than task 121) in InternetMessageId. A request that carries only an RFC
+        // Message-ID cannot be fetched and is returned unchanged.
+        var graphMessageKey = request.Email is null ? null : ResolveExchangeItemId(request.Email);
+        if (request.Email is null || !string.IsNullOrEmpty(request.Email.Body) || graphMessageKey is null)
         {
-            return request; // Body already present or no message ID
+            return request; // Body already present or no item id
         }
 
         try
         {
             _logger.LogInformation(
                 "Fetching email content from Graph API for message {MessageId}",
-                request.Email.InternetMessageId);
+                graphMessageKey);
 
             // Get Graph client with OBO auth
             var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
 
             // Fetch message with body and attachments
-            var message = await graphClient.Me.Messages[request.Email.InternetMessageId]
+            var message = await graphClient.Me.Messages[graphMessageKey]
                 .GetAsync(requestConfig =>
                 {
                     requestConfig.QueryParameters.Select = new[]
@@ -70,7 +74,7 @@ public class OfficeEmailEnricher
             {
                 _logger.LogWarning(
                     "Graph API returned null message for {MessageId}",
-                    request.Email.InternetMessageId);
+                    graphMessageKey);
                 return request; // Graph API returned null, return original request
             }
 
@@ -117,7 +121,7 @@ public class OfficeEmailEnricher
                 _logger.LogInformation(
                     "Retrieved {AttachmentCount} attachments from Graph API for message {MessageId} - all will be embedded in .eml",
                     attachmentReferences.Count,
-                    request.Email.InternetMessageId);
+                    graphMessageKey);
             }
 
             // Create updated email metadata with Graph API content
@@ -142,7 +146,7 @@ public class OfficeEmailEnricher
             _logger.LogError(
                 ex,
                 "Failed to fetch email content from Graph API for message {MessageId}",
-                request.Email?.InternetMessageId);
+                graphMessageKey);
 
             // Don't throw - continue with whatever content we have from the client
             // This allows fallback to client-provided data if Graph API fails
@@ -285,27 +289,20 @@ public class OfficeEmailEnricher
             message.Date = metadata.SentDate.Value;
         }
 
-        // Set message ID if it's a valid RFC 2822 Message-ID format
-        // Note: Exchange item IDs (AAMkA...) are NOT valid Message-IDs
-        // Valid format: <something@something> or just something@something
-        if (!string.IsNullOrEmpty(metadata.InternetMessageId))
+        // The Message-ID header carries the RFC 5322 Message-ID (task 121: the task pane now sends it, as Quick Save
+        // always did). Only when the request has none — an add-in older than task 121 sent the Exchange item id in
+        // InternetMessageId, and a draft has no Message-ID — is the item id kept, in a custom header, for reference.
+        var rfcMessageId = ResolveRfcMessageId(metadata);
+        if (rfcMessageId is not null)
         {
-            // Check if it looks like an RFC 2822 Message-ID (contains @ and doesn't look like base64)
-            var msgId = metadata.InternetMessageId;
-            if (msgId.Contains('@') && !msgId.StartsWith("AAMk", StringComparison.OrdinalIgnoreCase))
-            {
-                // Strip angle brackets if present, MimeKit will add them
-                if (msgId.StartsWith("<") && msgId.EndsWith(">"))
-                {
-                    msgId = msgId[1..^1];
-                }
-                message.MessageId = msgId;
-            }
-            // If it's an Exchange item ID, store it in a custom header for reference
-            else
-            {
-                message.Headers.Add("X-Exchange-Item-Id", metadata.InternetMessageId);
-            }
+            // Strip angle brackets if present, MimeKit will add them
+            message.MessageId = rfcMessageId.StartsWith('<') && rfcMessageId.EndsWith('>')
+                ? rfcMessageId[1..^1]
+                : rfcMessageId;
+        }
+        else if (ResolveExchangeItemId(metadata) is { } exchangeItemId)
+        {
+            message.Headers.Add("X-Exchange-Item-Id", exchangeItemId);
         }
 
         // Build body with attachments
@@ -413,6 +410,65 @@ public class OfficeEmailEnricher
         var suffix = Guid.NewGuid().ToString("N")[..8];
         return (documentName, $"{stem}_{suffix}.eml");
     }
+
+    // ── Task 121 (spaarkeai-word-add-in-r1): the email's two keys ────────────────────────────────────────────────────
+    // An Outlook message has two identifiers with different jobs. The RFC 5322 Message-ID (item.internetMessageId) is
+    // the same in every mailbox: it is the .eml's Message-ID header, sprk_emailmessageid, and the key that links a save
+    // to the communication that captured the same email. The Exchange item id (item.itemId) names the message in ONE
+    // mailbox: it is what Graph fetches by. Before task 121 the task pane sent the item id in InternetMessageId, so its
+    // saves stored no Message-ID and never linked to their communication. The pane now sends each in its own field; a
+    // request from an older pane is still read correctly, by the shape of the value.
+
+    /// <summary>
+    /// Whether <paramref name="value"/> is an RFC 5322 Message-ID rather than an Exchange item id. A Message-ID always
+    /// has an <c>@</c> (<c>id-left "@" id-right</c>); an Exchange item id is base64 and never does, and the ids of mail
+    /// items begin <c>AAMk</c> (or <c>AQMk</c>) — checked as well, defensively.
+    /// </summary>
+    private static bool IsRfcMessageId(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains('@')
+        && !value.StartsWith("AAMk", StringComparison.Ordinal)
+        && !value.StartsWith("AQMk", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The email's RFC Message-ID, or <see langword="null"/> when the request carries none. A request that sends
+    /// <see cref="EmailMetadata.ExchangeItemId"/> is from a task-121 client, which never puts the item id in
+    /// <see cref="EmailMetadata.InternetMessageId"/>, so its value is taken as sent. Only a request without it — an
+    /// older client — is read by the shape of the value.
+    /// </summary>
+    public static string? ResolveRfcMessageId(EmailMetadata email)
+    {
+        if (string.IsNullOrWhiteSpace(email.InternetMessageId))
+            return null;
+
+        return !string.IsNullOrWhiteSpace(email.ExchangeItemId) || IsRfcMessageId(email.InternetMessageId)
+            ? email.InternetMessageId
+            : null;
+    }
+
+    /// <summary>
+    /// The message's Exchange item id: <see cref="EmailMetadata.ExchangeItemId"/>, or — from an add-in older than task
+    /// 121 — an <see cref="EmailMetadata.InternetMessageId"/> that is not a Message-ID. <see langword="null"/> when
+    /// neither is present.
+    /// </summary>
+    public static string? ResolveExchangeItemId(EmailMetadata email)
+    {
+        if (!string.IsNullOrWhiteSpace(email.ExchangeItemId))
+            return email.ExchangeItemId;
+
+        return !string.IsNullOrWhiteSpace(email.InternetMessageId) && !IsRfcMessageId(email.InternetMessageId)
+            ? email.InternetMessageId
+            : null;
+    }
+
+    /// <summary>
+    /// The message id an email save STORES (<c>sprk_emailmessageid</c>, the email artifact) and keys its idempotency on:
+    /// the RFC Message-ID whenever the request carries one. Without one (an add-in older than task 121, or a draft) it
+    /// is the item id, exactly what such a save stored before — so <c>resolve-email-identity</c>, which matches either
+    /// key, still finds it.
+    /// </summary>
+    public static string? ResolveStoredMessageId(EmailMetadata email) =>
+        ResolveRfcMessageId(email) ?? ResolveExchangeItemId(email);
 
     // SanitizeFileName MOVED 2026-08-29 to Infrastructure/Graph/SpeUploadPath.SanitizeFileName, together
     // with its explicit Windows-strict character set. It was the only PUBLIC implementation of a function

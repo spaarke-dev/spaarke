@@ -1,39 +1,40 @@
 # Current Task State — `spaarkeai-word-add-in-r1`
 
-> **Format (2026-10-06):** this file holds CURRENT state only and is REWRITTEN at each checkpoint — never prepend a new block on top of old ones. Standing directives + environment gotchas live in the project `CLAUDE.md` ("Standing directives & gotchas"). Session history lives in git (checkpoint commit messages) and the verbatim archive `notes/handoff-history/current-task-archive-2026-10-06.md` (do NOT load it on recovery; grep it only if you need a specific past detail). Why: see `.claude/skills/context-handoff/SKILL.md` "State, not history" and `notes/handoff-history/2026-10-06-conversion-review.md`.
+> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-07 (tasks 109-112). Rounds 5-10 + 097 live; round 11 (109-112) merged (#1357 `081065863`) and live: add-in site deployed; dev BFF deployed from that master (36.19 MB, 4/4 SHA-256, /healthz ok, new route 401 unauthenticated); full UAT waits for UAC-r2's secure project
+> **Last Updated**: 2026-10-14 (pre-UAT dev deploy done; docs fix #1835 merged; owner UAT in progress).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **UAT rounds 5-7 + task 097 — all merged.** Merged: #1301 (098/099/100, BFF deployed), #1315 (101-103), #1316 (Word Email tab ON + Outlook footer shows package version), #1321 (097 archive option A + copies as protected as the source). Dev BFF deployed from master `11a8ba203` (36.14 MB — master shrank; 4/4 SHA-256; routes 401). Add-in site live from `b403c7713` (Email tab verified `canEmailFromPane:!0` in the deployed bundle). |
-| **Next Action** | 0) Round 11 live and owner-confirmed 2026-10-07 ("yes these worked"): Quick Save dialog, quick-saved doc reopened + File to record, filed doc opened from Spaarke, Expand left of ⋮. Not yet reported: filing to a secure record without access (expect a no-permission message) — fold into the full UAT. 1) Rounds 8-10 merged: 106 (#1338), 107 (#1341), 108 (#1347 `c4d38a33e`); the add-in site deploys from master. 2) Owner 2026-10-06: the FULL UAT runs after UAC-r2 completes the secure project. It covers rounds 5-11, Test User 1 check for 080, Word Email tab (sends own doc; foreign doc → `sdap.access.deny.communication.send`), archive (Spaarke email page, archive on, secure + >4 MB attachment → separate files; secure copy in the secure container). 3) Outlook desktop: RESOLVED 2026-10-07 — resetting the new Outlook on that machine fixed it (per-machine state). |
-| **Waiting on others** | ⚠️ **065 residual security gap (MEDIUM)** — a save with NO related record: the caller's table-level create right on `sprk_document` is unverified (the row is created app-only with a team owner since 080, so nothing checks it), and destination-container authorization waits on UAC-r2 **#1025 (OPEN)**; TASK-INDEX 065 is marked with this residual. UAC-r2 also: retire the unused `POST /api/documents/{id}/share-link` + its tests (`notes/098-share-link-route-refusal.patch`); settle the cross-secure archive copy (keeps `sprk_relatedcommunication`) before switching on `DocumentPointer__StrictDerivedContainer` (097 note §11.4). Indexing owner: Find's "Matter: Matter" / "Unknown" are server fallbacks (`VisualizationService.cs:836/:1258`) — pane masks them. |
-| **Questions for the owner** | (1) ~~#1011~~ reopened 2026-10-06 (owner go); hand-off message for UAC-r2 given to the owner. (2) ~~BU geometry~~ answered 2026-10-06 (one primary BU; secure BU is its sibling — CLAUDE.md). (3) 080: owner 2026-10-06 — dev backfill SKIPPED (dev data not indicative); the Test User 1 check (save → reopen → Run Index → To Do from the document) is part of the NEXT UAT. |
-| **Later / next re-upload** | Remove the 404 `CommandRuntime.code.script` (`outlook/manifest.json:84`, `word/manifest.json:78`) at the next package version bump. 098's composer record-link reaches users only when the Email page / Console / upload wizard / communication PCFs are rebuilt + deployed. 090 wrap-up (`/test-diet`) after UAT ends. |
-| **Out of scope here** | Owner 2026-10-06: an Outlook "submit Service Request" add-in for license-free workforce users is a SEPARATE project, aligned with the external-access SPA; nothing to record in this project. |
-| **Main checkout** | `C:\code_files\spaarke` — check its branch first; fast-forward only when it is on master and clean; otherwise `git branch -f master origin/master` (memory). |
-| **Tree** | Branch `work/spaarkeai-word-add-in-r1` clean and pushed (merged with master). Temp worktrees removed. Branch `work/word-addin-097-archive-optionA` is merged (#1321) — may be left as is (never delete branches as part of merge). |
+| **Task** | **042 🔄: owner full UAT.** Everything is on dev from master `3084f0ca1`. 126 ✅ (#1815). |
+| **Status** | Pre-UAT deploy done 2026-10-14 (owner go 2026-10-13):<br>- BFF `spaarke-bff-dev`: this project deployed `3084f0ca1`. Other projects have since redeployed. UAC-r2 deployed master `6da771b96` (#1827) and then `8a1f3bb11` (#1861); both contain ours. R3 announced a deploy of its branch `4e23edeb2` (master plus 62 unmerged commits). That build changes the add-in email save (`EmailUploadCaptureService`: rows start `sprk_isinternalonly=true` and are lowered when the thread is Open). Its columns exist on dev. When reading 121 UAT results, check which build was live. The next master deploy removes R3's changes.<br>- CommunicationConnections PCF 1.7.2: solution 1.7.2, live bundle byte-equal to the build. The `customcontrols` row still reads 1.7.1, filed as #1832.<br>- Code pages `sprk_emailpage`, `sprk_communicationreconciliation`, `sprk_spaarkeai`: built from `3084f0ca1`, #1812 marker present, read back byte-equal (03:00Z).<br>The add-ins are current (`05356cbf7`). |
+| **Next Action** | 1. Owner UAT: 042 (full), 080 (Test User 1 opens a matter-filed document they saved, then Index and document To Do), 121 (email save), 127 (grids), 078 (Word on the web). Fix what they report.<br>2. 090 wrap-up (`/test-diet`) after UAT.<br>3. SPA-r3 waits on the owner's Ralph Dewey sign-in retest (https://green-dune-0c4f1221e.7.azurestaticapps.net/); pass the result on. |
 
-## State of every open item
+### Unpushed / uncommitted
+- None on this branch after the PCF 1.7.2 PR merges. Local only: branch `wip/t126-workforce-customer` (shelved). Worktrees `C:\wt1798` and `C:\wt127` are this session's own and can be removed.
 
-| Item | State |
-|---|---|
-| 083, 088–096 | ✅ merged and deployed |
-| 097 | ✅ #1316 (Email tab on) + #1321 (archive option A, protected copies); BFF `11a8ba203` deployed; live checks open |
-| 098–100 (round 5) | ✅ #1301, deployed; 098 route refusal reverted (UAC-r2 tests) — record link shipped |
-| 101–103 (round 6) | ✅ #1315, add-in site deployed |
-| 104–105 (round 7) | ✅ #1323 merged `002ac9b39`; add-in site auto-deploy |
-| 106 (round 8) | ✅ #1338 merged `4eeed68ee` |
-| 107 (round 9) | ✅ #1341 merged `3d1556260` |
-| 108 (round 10) | ✅ #1347 merged `c4d38a33e` |
-| 109-112 (round 11) | ✅ #1357 merged `081065863`; add-in + dev BFF deployed |
-| 042 | 🔄 UAT continues (notes `042-uat-round5/6/7-*.md`); Outlook desktop issue open (owner info needed) |
-| 090 | 🔲 wrap-up with `/test-diet` after 042 |
-| Publish size | 097: +4,188 B vs master merge base (Compress-Archive Optimal, 192=192 files); 100: +15.6 KB |
+## Owner answers given 2026-10-14
+- **"Spaarke Office Add In User" role:** not a gate. No code checks it. Who gets the add-in is set in M365 admin center → Integrated Apps. Rights come from per-record checks run as the user, so the role's privileges add to the base role. UAC-r2 owns its shape: their 10-08 edit removed Share, and task 128 added what `/todo` needs. In dev it is held directly by 7 users and through the root BU's default team "Spaarke" (174 members; default-team roles were approved by the owner, UAC-r2 G146-5). The admin guide §7.5 and the deployment checklist used to call it required; corrected in #1835 (owner go 2026-10-14). A stale comment in UAC-r2's `SecureChildShareReconciliationJob.cs:18` still says the role holds Share at Deep. It is a comment only; offered to pass it to UAC-r2.
+- Reviewed ontology PR #1862 (task 144: `ReconciledEmailFiling` now re-stamps right away) at `7737dea71`: OK, no findings.
 
-## Critical context
-- Graph refuses sharing links on every SPE file. Owner decided 2026-10-05: document links open the Spaarke record; 098 shipped that in the shared composer. Only the now-unused share-link ROUTE remains (retirement handed to UAC-r2 — "Waiting on others").
-- Local add-in build needs the CI env values from `.github/workflows/deploy-office-addins.yml` (see CLAUDE.md "Standing directives & gotchas").
+## Waiting on the owner (live checks)
+- **Task 127**: Matter Documents grid footer `v1.1.85`, no `[AppInsightsService]` warning; VisualHost renders; dev App Insights gets `customEvents`; Daily Briefing, Email page and Communication Reconciliation behave as before.
+- **PCF re-sync**: MatterHeader 1.0.22; RecordHeader 1.1.12; Communication form timeline and actions; document relationship viewer opens.
+- **A9 live-test item:** a licensed B2B guest signs in to the add-in from their own company's desktop Office and Word (authority pinned to the Spaarke tenant). If it fails, raise it with the owner before any workaround.
+- **Task 121**: Message-ID header and link to an existing communication; an unfiled communication gets filed; "Related to" cards; reopening shows saved; a pre-121 email still shows saved; a second user gets their own document.
+- **078**: one Word-on-the-web run + desktop Word build number.
+
+## Blocked / waiting on others
+- **SPA-r3 (A9):** workforce-contact sign-in (tasks 044–048, 058, 059, 074–076 not built). Teams is in scope for workforce contacts (owner 2026-10-13).
+- **customer-provisioning-orchestration-r1**: T186 awaits the owner's OK; 240b/c not started.
+- **UAC-r2**: on 185 (#1827), then a BFF redeploy from master; 186 (workforce baseline role) open.
+- **#1591**, **#1832**: filed for the script and platform owners.
+
+## Open owner items / later
+- Main checkout `C:\code_files\spaarke` refused the fast-forward to master. The blocker is the untracked `tests/Spaarke.ArchTests/WebResourceMirrorParity.baseline.txt`, and 4 tracked files are modified (another session's work?). Left untouched; the owner cleans it.
+- Optional: reassign the 3 pre-task-146 app-owned dev events (#1034 comment). Dataverse write, needs owner go.
+- Repo copy of the Matter form loses the 6 lines at the next SpaarkeMaster release export (not hand-edited).
+- Dev package rename "Spaarke (Dev)"; AppStore publishing later.
+- Filed follow-ups (other owners): #1464, #1468, #1469, #1470, #1471, #1476, #1477, #1505, #1540, #1551, #1591, #1832; #1034 status comment.

@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_EnableMultiDocumentAnalysis">
+  <defaultvalue>no</defaultvalue>
+  <description default="Feature flag for Phase 2 multi-document analysis capability. Keep as No until Phase 2 features are deployed.">
+    <label description="Feature flag for Phase 2 multi-document analysis capability. Keep as No until Phase 2 features are deployed." languagecode="1033" />
+  </description>
+  <displayname default="Enable Multi-Document Analysis">
+    <label description="Enable Multi-Document Analysis" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000002</type>
+</environmentvariabledefinition>

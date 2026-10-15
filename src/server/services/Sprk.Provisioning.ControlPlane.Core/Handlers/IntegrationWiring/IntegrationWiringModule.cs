@@ -2,20 +2,20 @@
 // IntegrationWiringModule.cs
 //
 // L2 CONTROL-PLANE DI composition for the H14 post-deploy integration wiring
-// handler + its 3 DAG-parallel sub-handlers (task 073).
+// handler + its H14a sub-handler (task 073; H14b/H14c removed, ISS-019) + its
+// H14m customer-mailbox sub-handler (task 263).
 //
 // SCOPE:
 //   - Bind IntegrationWiring:{ExchangeAdminAppId, ExchangeAssignmentNamePrefix,
-//     GraphRequestTimeout, GraphSubscriptionExpirationMinutes,
-//     DataverseRequestTimeout, ServiceEndpoint*, KvReadTimeout,
+//     KvReadTimeout,
 //     SidecarBaseUrl, SidecarRequestTimeout, SidecarTransientRetryDelay,
 //     SidecarSharedSecret*} options. (Task 162 W3 cleanup: removed
 //     PwshExecutable / ExchangePolicyScriptPath / ExchangeScriptTimeout —
 //     see IntegrationWiringOptions.cs file header for rationale.)
-//   - Register the 7 collaborator seams (IExchangePolicyApplier,
-//     IKvSecretReader, IGraphSubscriptionCreator, IServiceEndpointWebhookRegistrar)
-//     + the 4 handler types (H14a/b/c sub-handlers + H14 parent).
-//   - Register H14IntegrationWiringHandler + its 3 sub-handlers as Scoped
+//   - Register the collaborator seams (IExchangePolicyApplier,
+//     IExchangePolicyReadClient, IKvSecretReader)
+//     + the 2 handler types (H14a sub-handler + H14 parent).
+//   - Register H14IntegrationWiringHandler + its sub-handler as Scoped
 //     (parity with every other H-series handler's DI lifetime).
 //
 // UNCONDITIONAL REGISTRATION (ADR-032): every registration below is
@@ -41,15 +41,14 @@
 // plain Configure&lt;T&gt;() to AddOptions&lt;T&gt;().Bind().Validate().ValidateOnStart()
 // (NFR-05 fail-fast parity with task 153's RuntimeReferencesModule / task
 // 151's AppConfigSeedModule) so a misconfigured KvReadTimeout fails the
-// Worker at boot instead of surfacing only on H14b/H14c's first dispatch.
+// Worker at boot instead of surfacing only on first use.
 //
 // TASK 161 (Wave G-6) / TASK 251: IExchangePolicyApplier + IExchangePolicyReadClient are
 // both ExchangePolicySidecarClient (typed HttpClient posting to the Listener.ps1
 // sitecontainer sidecar on http://127.0.0.1:8091/apply-mailbox-access and
 // /read-mailbox-access, per DS-1b §3; the pwsh shell-out applier was deleted by
-// task 251). Registered via AddHttpClient&lt;TImpl&gt;() — parity with GraphRestSubscriptionCreator
-// / DataverseWebApiServiceEndpointWebhookRegistrar's own typed-HttpClient
-// registrations — so IHttpClientFactory manages the underlying handler pool.
+// task 251). Registered via AddHttpClient&lt;TImpl&gt;() so IHttpClientFactory manages the
+// underlying handler pool.
 // The client depends on IKvSecretReader (task 160) for the per-boot
 // X-Sidecar-Auth shared-secret read from platform KV; that seam is already
 // registered above and needs no wiring change here.
@@ -58,7 +57,7 @@
 //   H14 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
 //   AI-internal types (ADR-013 forcing-function rule — no IActionResolver,
 //   IActionRunner, IOpenAiClient, IPlaybookService injection). H14 uses
-//   IProvisioningRunRepository (task 037) + the 4 dedicated seams; no
+//   IProvisioningRunRepository (task 037) + the dedicated seams; no
 //   BFF-facade dependencies.
 // -----------------------------------------------------------------------------
 
@@ -68,8 +67,8 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
 /// <summary>
-/// DI registration for the H14 post-deploy integration wiring handler + its 3
-/// sub-handlers + 4 collaborator seams. Composed behind a single
+/// DI registration for the H14 post-deploy integration wiring handler + its
+/// H14a sub-handler + the collaborator seams. Composed behind a single
 /// <see cref="AddH14IntegrationWiringHandler"/> extension method to minimize
 /// Program.cs edit surface + avoid merge-conflict pressure with sibling
 /// Batch 3F tasks (054 H11, 072 H12c) that also touch Program.cs.
@@ -80,8 +79,8 @@ public static class IntegrationWiringModule
     public const string ConfigSection = "IntegrationWiring";
 
     /// <summary>
-    /// Registers <see cref="H14IntegrationWiringHandler"/> + its 3 sub-handlers
-    /// + 4 collaborator seams with the DI container.
+    /// Registers <see cref="H14IntegrationWiringHandler"/> + its H14a sub-handler
+    /// + the collaborator seams with the DI container.
     /// </summary>
     public static IServiceCollection AddH14IntegrationWiringHandler(
         this IServiceCollection services,
@@ -116,6 +115,13 @@ public static class IntegrationWiringModule
         services.AddHttpClient<ExchangePolicySidecarClient>();
         services.AddTransient<IExchangePolicyApplier>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
         services.AddTransient<IExchangePolicyReadClient>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
+        // Task 263: the same client serves H14m's customer-mailbox ensure and H13's read (one transport, one token).
+        services.AddTransient<ICustomerMailboxClient>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
+
+        // Task 263: the stamp's sprk_communicationaccount row (H14m writes, H13 reads) — H7b's identity and options
+        // (EnvVarValuesOptions + the Worker's WorkerDataverseCredentialFactory), its own named HttpClient.
+        services.AddHttpClient(DataverseWebApiCommunicationAccountStore.HttpClientName);
+        services.AddScoped<ICommunicationAccountStore, DataverseWebApiCommunicationAccountStore>();
 
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —
@@ -129,8 +135,6 @@ public static class IntegrationWiringModule
             var logger = sp.GetRequiredService<ILogger<SecretClientKvReader>>();
             return new SecretClientKvReader(credential, options, logger);
         });
-        services.AddHttpClient<IGraphSubscriptionCreator, GraphRestSubscriptionCreator>();
-        services.AddHttpClient<IServiceEndpointWebhookRegistrar, DataverseWebApiServiceEndpointWebhookRegistrar>();
 
         // Sub-handlers — registered by concrete type (parity with every other
         // H-series handler's DI posture; a future reconciler resolves by
@@ -138,13 +142,11 @@ public static class IntegrationWiringModule
         // fan-out). Each is ALSO independently resolvable/testable per the
         // POML acceptance criterion ("each sub-handler... registers in L2 DI").
         services.AddScoped<H14aExchangePolicySubHandler>();
-        services.AddScoped<H14bGraphWebhookSubHandler>();
-        services.AddScoped<H14cDataverseWebhookSubHandler>();
+        services.AddScoped<H14mCustomerMailboxSubHandler>();   // task 263
 
-        // Parent handler — the ONLY one of the 4 a future reconciler would
-        // dispatch off the Service Bus queue (HandlerId "H14"); it resolves
-        // the 3 sub-handlers via constructor injection + Task.WhenAll
-        // (see H14IntegrationWiringHandler.cs file header for the DAG-parallel
+        // Parent handler — the ONLY one of the 3 a reconciler dispatches off the
+        // Service Bus queue (HandlerId "H14"); it resolves H14a via constructor
+        // injection (see H14IntegrationWiringHandler.cs file header for the
         // single-writer rationale).
         services.AddScoped<H14IntegrationWiringHandler>();
 

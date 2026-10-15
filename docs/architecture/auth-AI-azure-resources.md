@@ -1,12 +1,12 @@
 # AI Azure Resources
 
-> **Last Updated**: 2026-05-17
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: spaarke-ai-platform-unification-r2 (AIPU2-003)
-> **Status**: Current — Content Safety resource added (R2 safety perimeter)
+> **Last Updated**: 2026-10-06
+> **Last Reviewed**: 2026-10-06
+> **Reviewed By**: customer-provisioning-orchestration-r1 (task 246 — Content Safety sections corrected; earlier: spaarke-ai-platform-unification-r2 AIPU2-003)
+> **Status**: Current — Content Safety is keyless (managed identity); shared dev serves it from `spaarke-openai-dev`
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20), Config keys re-verified (2026-04-05), Content Safety provisioned (2026-05-17)
+> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20), Config keys re-verified (2026-04-05), Content Safety re-verified against Azure + BFF app settings (2026-10-06)
 
 ---
 
@@ -17,7 +17,7 @@
 | Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
 | Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
 | Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
-| Azure AI Content Safety | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| Azure AI Content Safety | `https://spaarke-openai-dev.cognitiveservices.azure.com/` (served by the multi-service AIServices account) |
 | AI Foundry Studio | [Portal Link](https://ai.azure.com) |
 
 ---
@@ -98,7 +98,8 @@ Secrets are stored in Key Vault: `spaarke-spekvcert` (SharePointEmbedded resourc
 | `ai-docintel-key` | Document Intelligence API key (Key1) | 2025-12-09 |
 | `rag-api-key` | RAG indexing API key for `/api/ai/rag/enqueue-indexing` | 2026-01-17 |
 | `servicebus-connection-string` | Azure Service Bus connection string | 2026-01-17 |
-| `ContentSafety--ApiKey` | Azure AI Content Safety API key (Key1) — R2 safety perimeter | 2026-05-17 |
+
+No Content Safety key is stored in this vault (checked 2026-10-06: no secret whose name contains `ContentSafety`). The BFF calls Content Safety with its managed identity — see [Azure AI Content Safety](#azure-ai-content-safety).
 
 ### Key Vault Access
 
@@ -167,18 +168,36 @@ az cognitiveservices account keys regenerate \
 ## Azure AI Content Safety
 
 > **Added**: 2026-05-17 — AIPU2-003 (Spaarke AI Platform Unification R2)
+> **Corrected**: 2026-10-06 — task 246 (customer-provisioning-orchestration-r1). Superseded: the dedicated `spaarke-contentsafety-dev` account, the `ContentSafety--ApiKey` Key Vault secret, and the `AiSafety__Enabled` / `AiSafety__Endpoint` / `AiSafety__ApiKey` / `AiSafety__PromptShieldsApiVersion` / `AiSafety__GroundednessApiVersion` app settings this section used to list. None of them exist: there is no such Azure resource or secret, and no BFF code reads those keys.
 > **Purpose**: Safety perimeter for AI inputs and outputs — Prompt Shields (jailbreak + indirect attack detection) and Groundedness Detection (RAG answer validation).
+
+### Shared dev
+
+Shared dev has **no dedicated Content Safety account**. Content Safety is served by the multi-service AIServices account `spaarke-openai-dev` (the same account as [Azure OpenAI](#azure-openai-service)).
 
 | Property | Value |
 |----------|-------|
-| **Resource Name** | `spaarke-contentsafety-dev` |
+| **Resource Name** | `spaarke-openai-dev` (kind `AIServices`) |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | West US 2 |
+| **Region** | East US (as Azure reports it, 2026-10-06; the resource group name says westus2) |
 | **SKU** | S0 (Standard) |
-| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
-| **Key Vault Secret** | `ContentSafety--ApiKey` in `spaarke-spekvcert` |
-| **Bicep Module** | `infrastructure/bicep/modules/content-safety.bicep` |
+| **Endpoint** | `https://spaarke-openai-dev.cognitiveservices.azure.com/` |
+| **Auth** | Managed identity (Microsoft Entra). No API key is stored or configured. |
+| **Required role** | **Cognitive Services User** for the BFF identity. "Cognitive Services OpenAI User" does NOT cover Content Safety dataActions. |
 | **Verify Script** | `scripts/Verify-ContentSafetyResource.ps1` |
+
+### Customer stamps
+
+Each customer stamp has its own account, deployed by `infrastructure/bicep/customer.bicep` through `infrastructure/bicep/modules/content-safety.bicep` (task 246):
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `sprk-{customer}-{env}-contentsafety` (kind `ContentSafety`; also its custom subdomain) |
+| **Resource Group** | The stamp resource group |
+| **Region** | `contentSafetyLocation` parameter (default `westus` — must offer Prompt Shields and Groundedness Detection; `westus2` has no Groundedness) |
+| **Auth** | Local (key) auth **disabled**. The stamp's user-assigned managed identity holds **Cognitive Services User**. |
+| **Endpoint wiring** | `customer.bicep` sets `AiSafety__ContentSafety__Endpoint`; provisioning handler H4b re-applies it from H2a's `contentSafetyEndpoint` output. |
+| **Key** | None. No customer vault holds a Content Safety key; the manifest secret `ContentSafety-ApiKey` was removed. |
 
 ### API Capabilities
 
@@ -186,6 +205,8 @@ az cognitiveservices account keys regenerate \
 |-----|--------------|-------------|--------|
 | Prompt Shields | `/contentsafety/text:shieldPrompt` | `2024-09-01` | Verified |
 | Groundedness Detection | `/contentsafety/text:detectGroundedness` | `2024-09-15-preview` | Verified |
+
+The API versions are constants in `PromptShieldService.cs` and `GroundednessCheckService.cs`, not configuration.
 
 **Prompt Shields** detects two attack classes:
 - `userPromptAttack` — direct jailbreak attempts in the user turn
@@ -195,67 +216,44 @@ az cognitiveservices account keys regenerate \
 
 ### Regional Requirement
 
-Prompt Shields and Groundedness Detection require **West US 2** or **East US 2** (as of 2026). Do not move this resource to another region without first confirming API availability.
+Prompt Shields and Groundedness Detection are regional. Confirm both are offered in a region before placing an account there. Per the [region table](https://learn.microsoft.com/azure/ai-services/content-safety/region-availability) (updated 2026-09-18) the US regions with both are westus, eastus, eastus2 and canadaeast — not westus2. Customer stamps therefore default `contentSafetyLocation` to `westus`; shared dev's account is in eastus.
 
 ### App Service Configuration
 
-Add these settings to `spe-api-dev-67e2xz` for the `AiSafety` configuration section (bound by `AiSafetyOptions` in AIPU2-006):
+The BFF reads these keys (code: `Infrastructure/DI/AiSafetyModule.cs`, `Services/Ai/Safety/ContentSafetyAuthHandler.cs`, `Services/Ai/Safety/PromptShieldService.cs`, `Services/Ai/Chat/Middleware/PromptShieldChatMiddleware.cs`). Values on the shared dev BFF `spaarke-bff-dev` (RG `rg-spaarke-dev`) as of 2026-10-06:
 
-| Setting | Value |
-|---------|-------|
-| `AiSafety__Enabled` | `true` |
-| `AiSafety__Endpoint` | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
-| `AiSafety__ApiKey` | `@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ContentSafety--ApiKey/)` |
-| `AiSafety__PromptShieldsApiVersion` | `2024-09-01` |
-| `AiSafety__GroundednessApiVersion` | `2024-09-15-preview` |
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `AiSafety__ContentSafety__Endpoint` | `https://spaarke-openai-dev.cognitiveservices.azure.com/` | **Required** outside Development/Testing: the BFF refuses to start without it. There is no default. |
+| `AiSafety__ContentSafety__ManagedIdentity__Enabled` | `true` | Bearer-token auth with the BFF's managed identity. |
+| `AiSafety__PromptShield__ChatPipelineEnabled` | `true` | Turns on the pre-LLM Prompt Shield scan in the chat pipeline (template default `false`). |
+
+Optional: `AiSafety__PromptShield__TimeoutMs` (Prompt Shield deadline in milliseconds; default `500`). No API key setting is present. `AiSafety__ContentSafety__ApiKey` is for local development only. Do not set it in a deployed environment: when it is non-empty and managed identity is not enabled, the BFF sends the key instead of a token.
 
 ### Azure CLI Commands
 
 ```bash
-# View Content Safety resource
+# View the shared-dev account that serves Content Safety
 az cognitiveservices account show \
-  --name spaarke-contentsafety-dev \
+  --name spaarke-openai-dev \
   --resource-group spe-infrastructure-westus2
 
-# Get API keys
-az cognitiveservices account keys list \
-  --name spaarke-contentsafety-dev \
-  --resource-group spe-infrastructure-westus2
-
-# Rotate API key
-az cognitiveservices account keys regenerate \
-  --name spaarke-contentsafety-dev \
-  --resource-group spe-infrastructure-westus2 \
-  --key-name key1
-
-# Store key in Key Vault (use Verify-ContentSafetyResource.ps1 instead for full verification)
-az keyvault secret set \
-  --vault-name spaarke-spekvcert \
-  --name ContentSafety--ApiKey \
-  --value "$(az cognitiveservices account keys list \
-    --name spaarke-contentsafety-dev \
-    --resource-group spe-infrastructure-westus2 \
-    --query key1 --output tsv)"
-
-# One-off provisioning via Bicep module
-az deployment group create \
-  --resource-group spe-infrastructure-westus2 \
-  --template-file infrastructure/bicep/modules/content-safety.bicep \
-  --parameters contentSafetyName=spaarke-contentsafety-dev
+# List who holds Cognitive Services User on it (the BFF identity must be listed)
+az role assignment list \
+  --scope "$(az cognitiveservices account show --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 --query id -o tsv)" \
+  --query "[?roleDefinitionName=='Cognitive Services User'].principalId" -o tsv
 ```
 
 ### Verification
 
-Run the verification script to confirm both APIs are reachable and sync the key to Key Vault:
+The verification script is keyless and read-only. It gets a Microsoft Entra token with `az account get-access-token --resource https://cognitiveservices.azure.com` (your own `az login`, which needs Cognitive Services User on the account) and calls shieldPrompt and detectGroundedness. It reads no key and writes nothing to Key Vault.
 
 ```powershell
+# Shared dev (defaults: -ResourceGroup spe-infrastructure-westus2 -ResourceName spaarke-openai-dev)
 ./scripts/Verify-ContentSafetyResource.ps1
-```
 
-Run in read-only mode (no Key Vault write):
-
-```powershell
-./scripts/Verify-ContentSafetyResource.ps1 -SkipKeyVault
+# A customer stamp
+./scripts/Verify-ContentSafetyResource.ps1 -SubscriptionId <sub> -ResourceGroup <stamp-rg> -ResourceName sprk-acme-prod-contentsafety
 ```
 
 ---
@@ -377,9 +375,11 @@ boundary cannot be forgotten.
 **Still in force as belt-and-braces**: every document carries `tenantId` and every query filters on it.
 That control is retained, just no longer credited with separating customers.
 
-**Service**: `IKnowledgeDeploymentService` still routes requests to the configured placement. ⚠️ Its
-`Shared` value is a **retired option** for customer-serving deployments; any index naming scheme must key on
-the **customer**, not on `tenantId`, which is identical across Model 1 customers.
+**Service**: `IKnowledgeDeploymentService` routes requests to the configured index. Its default `Shared`
+value reads `AiSearch:KnowledgeIndexName` — on a stamp, the stamp's own index in its own AI Search service — and
+is the value every stamp uses; `Dedicated` reads `{tenantId}-knowledge`, which nothing creates (#1432; corrected
+2026-10-08, T235). Customer isolation comes from the per-customer service, never from `tenantId`, which is
+identical across Model 1 customers.
 
 ---
 

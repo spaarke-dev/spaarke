@@ -105,7 +105,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
     const session = sessionFromUrl(url);
     return { ok: true, status: 200, json: async () => ledger.get(session) ?? [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 // SprkChat stub — captures injected local (Assistant confirmation) messages only; this suite does not
@@ -176,6 +176,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 
 // Import AFTER mocks.
 import { ConversationPane, COMPOSE_EDIT_CONFIRMATION } from '../ConversationPane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const bridgeRef: { current: ComposeActionBridgeValue | null } = { current: null };
 function BridgeCapture(): null {

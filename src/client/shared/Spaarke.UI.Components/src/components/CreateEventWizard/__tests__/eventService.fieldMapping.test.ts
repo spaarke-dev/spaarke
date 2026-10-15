@@ -18,6 +18,7 @@
 import { bffChildWriteFetch, childWriteCalls, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { ICreateEventFormState } from '../formTypes';
 import {
   _resetRecordNumberFieldCacheForTests,
@@ -146,7 +147,7 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
 
   it('is a graceful no-op (unchanged behavior) when no profile is configured for the pair (404)', async () => {
     const ds = makeDataService();
-    const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
+    const authenticatedFetch = /* no profile: authenticatedFetch THROWS ApiError(404), as production does */ jest.fn(async (): Promise<Response> => { throw apiErrorFor(404); });
 
     const service = new EventService(ds, bffChildWriteFetch(ds, authenticatedFetch), 'https://bff.example.com');
     const result = await service.createEvent(makeForm(), 'sprk_matter', NO_CASCADE);
@@ -170,7 +171,7 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
 
   it('sends the sprk_event create to POST /api/v1/child-records/sprk_event (UAC-r2 task 147 r1)', async () => {
     const ds = makeDataService();
-    const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
+    const authenticatedFetch = /* no profile: authenticatedFetch THROWS ApiError(404), as production does */ jest.fn(async (): Promise<Response> => { throw apiErrorFor(404); });
     const bff = bffChildWriteFetch(ds, authenticatedFetch);
 
     const service = new EventService(ds, bff, 'https://bff.example.com');
@@ -182,7 +183,7 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
 
   it('does not call the engine when no regarding parent is supplied', async () => {
     const ds = makeDataService();
-    const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
+    const authenticatedFetch = /* no profile: authenticatedFetch THROWS ApiError(404), as production does */ jest.fn(async (): Promise<Response> => { throw apiErrorFor(404); });
 
     const service = new EventService(ds, bffChildWriteFetch(ds, authenticatedFetch), 'https://bff.example.com');
     const result = await service.createEvent(makeForm({ regardingRecordId: '' }), undefined, NO_CASCADE);

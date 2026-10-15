@@ -6,8 +6,10 @@ using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Membership = Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService;
 
@@ -39,7 +41,7 @@ public class SpeContainerMembershipSyncTests
     private static readonly Guid SecureProject = Guid.Parse("17110000-0000-4000-8000-0000000000d0");
 
     private readonly Mock<IGenericEntityService> _dataverse = new();
-    private readonly Mock<Membership> _membership = new(Mock.Of<IGraphClientFactory>(), NullLogger<Membership>.Instance);
+    private readonly Mock<Membership> _membership = new(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<Membership>.Instance);
     private readonly Mock<ISecurableEntityRegistry> _registry = new();
     private readonly Mock<IDataverseRecordShareService> _rights = new();
     private readonly List<Entity> _units = [];
@@ -357,6 +359,42 @@ public class SpeContainerMembershipSyncTests
 
         result.SecureContainers.Should().Be(1);
         _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static SdapProblemException NotOwned() => new(
+        SpeContainerOwnershipGuard.NotOwnedErrorCode, "Not Found", "SharePoint Embedded container not found.", 404);
+
+    [Fact(DisplayName = "Task 227d: a secure record pointing at a container this stamp does not own is skipped — not a failure, the pass goes on")]
+    public async Task Jit_ContainerRefusedByOwnershipGuard_IsSkippedNotFailed()
+    {
+        var other = Guid.Parse("17110000-0000-4000-8000-0000000000d1");
+        _secureProjects.Add(new Entity("sprk_project", SecureProject) { ["sprk_containerid"] = "b!foreign-container" });
+        _secureProjects.Add(new Entity("sprk_project", other) { ["sprk_containerid"] = SecureContainer });
+        _membership.Setup(m => m.ReadMarkersAsync("b!foreign-container", It.IsAny<CancellationToken>())).ThrowsAsync(NotOwned());
+        _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, string>());
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        result.SecureContainers.Should().Be(2);
+        result.Failed.Should().Be(0);
+        result.Problems.Should().ContainSingle().Which.Should().Contain("not one of this stamp's containers");
+        _membership.Verify(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "Task 227d: a business unit stamped with a container this stamp does not own is a named failure, and the pass goes on")]
+    public async Task Standing_ContainerRefusedByOwnershipGuard_IsANamedFailure()
+    {
+        BusinessUnitContainer();
+        _users.Add(User(Alice, Unit));
+        _units.Add(new Entity("businessunit", OtherUnit) { ["sprk_containerid"] = "b!foreign-container" });
+        _membership.Setup(m => m.ReadAccessAsync("b!foreign-container", It.IsAny<CancellationToken>())).ThrowsAsync(NotOwned());
+
+        var result = await Sut().SyncStandingWritersAsync(CancellationToken.None);
+
+        result.Failed.Should().Be(1);
+        result.Problems.Should().ContainSingle().Which.Should().Contain("b!foreign-container").And.Contain("not one of this stamp's containers");
+        GrantVerified(Alice, Times.Once());
     }
 
     // ── The marker key (pure) ──────────────────────────────────────────────────────────────────────────────────────

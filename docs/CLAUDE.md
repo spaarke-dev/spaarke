@@ -1,54 +1,21 @@
-# CLAUDE.md - Documentation Traffic Controller
+<!--
+Maintainer notes (stripped before Claude reads this file): loads when Claude reads a file under docs/. Keep it a
+router; the catalogue is docs/INDEX.md and the load order is root CLAUDE.md §14 — do not copy either here.
+Previous version: .claude/archive/2026-10-07/modules/docs.CLAUDE.md
+-->
+# docs/ — how to use this folder
 
-> **Last Updated**: March 31, 2026
->
-> **Purpose**: Direct AI to appropriate documentation. Code is the source of truth — read code first, docs second.
+**Code is the source of truth; docs lag.** When a doc disagrees with `src/`, the code is right and the doc gets fixed (root §2). Read code and `.claude/patterns/` (index: `.claude/patterns/INDEX.md`) / `.claude/adr/` first; come here for the *why* and for procedures.
 
----
+- **Find a doc:** [`docs/INDEX.md`](INDEX.md) — the full catalogue. Load order across layers: root `CLAUDE.md` §14.
+- **Folders:** `architecture/` decisions and rationale · `standards/` cross-cutting coding standards · `guides/` operations (deploy, configure) · `procedures/` development workflow · `data-model/` Dataverse schemas · `adr/` full ADR history (the concise rules are in `.claude/adr/`) · `deployment/`, `assessments/`, `enhancements/`, `notes/`, `product-documentation/`, `screenshots/`.
 
-## Architecture Discovery Hierarchy
+| Task | Primary source | Then |
+|---|---|---|
+| Implement a feature | Code + `.claude/patterns/` + `.claude/adr/` | `docs/architecture/` for the why |
+| Deploy | The deploy skill (`.claude/skills/*-deploy/`) | `docs/guides/` |
+| Understand an ADR | `.claude/adr/ADR-XXX-*.md` | `docs/adr/ADR-XXX-*.md` for full context |
+| Debug | Code first | `docs/guides/` |
+| Change architecture | `docs/adr/` (full versions) | `docs/architecture/` for current decisions |
 
-| Priority | Source | What It Contains |
-|----------|--------|-----------------|
-| 1. **Code** | `src/` | Implementation (source of truth) |
-| 2. **Patterns** | `.claude/patterns/` | 25-line pointer files → which code to read |
-| 3. **ADR Constraints** | `.claude/adr/` | MUST/MUST NOT rules (~100 lines each) |
-| 4. **Architecture** | `docs/architecture/` | Decisions and rationale only (no implementation) |
-| 5. **Guides** | `docs/guides/` | Operational procedures (deploy, configure) |
-| 6. **Full ADRs** | `docs/adr/` | Complete history and alternatives considered |
-
----
-
-## docs/ Directory Structure
-
-```
-docs/
-├── adr/                      # Full ADRs with history and rationale
-├── architecture/             # Architecture decisions (trimmed to decisions-only)
-├── guides/                   # Operational procedures and how-to guides
-├── procedures/               # Process documentation
-├── standards/                # Coding and auth standards
-├── data-model/               # Dataverse entity schemas
-├── product-documentation/    # User-facing docs
-└── enhancements/             # Enhancement proposals
-```
-
----
-
-## Loading Strategy by Task Type
-
-| Task Type | Primary Source | Secondary Source |
-|-----------|----------------|------------------|
-| Implement feature | Code + `.claude/patterns/` + `.claude/adr/` | `docs/architecture/` for "why" |
-| Deploy | `.claude/skills/{deploy-skill}/SKILL.md` | `docs/guides/` for procedures |
-| Understand ADR | `.claude/adr/ADR-XXX.md` | `docs/adr/ADR-XXX-*.md` for full context |
-| Debug issue | Code first, then `docs/guides/` | — |
-| Architecture change | `docs/adr/` (full versions) | `docs/architecture/` for current decisions |
-
----
-
-## See Also
-
-- Root `/CLAUDE.md` — Repository-wide instructions and Architecture Discovery section
-- `/.claude/patterns/INDEX.md` — Pattern file index (pointer format)
-- `/.claude/skills/INDEX.md` — Skill registry and workflows
+When you change behaviour, update the doc that describes it in the same PR.

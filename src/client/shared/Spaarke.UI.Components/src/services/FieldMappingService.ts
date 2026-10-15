@@ -41,6 +41,7 @@ import {
   type IMappingResult,
 } from '../types/FieldMappingTypes';
 import { discoverNavProps, findNavProp, cleanGuid } from './PolymorphicResolverService';
+import { isApiError } from '../utils/thrownFetchError';
 
 /**
  * Inputs to {@link applyFieldMappings}. Deliberately matches the
@@ -213,6 +214,17 @@ async function fetchProfile(
     const dto = (await response.json()) as unknown;
     return normalizeProfile(dto);
   } catch (err) {
+    // `@spaarke/auth`'s authenticatedFetch THROWS for a non-2xx instead of returning it, so the two
+    // status branches above only run under a fetch that returns failures. Give the thrown shape the
+    // same outcomes: 404 is "no profile configured" (silent no-op), any other HTTP failure is the
+    // same warning the returned-response path records.
+    if (isApiError(err, 404)) {
+      return null;
+    }
+    if (isApiError(err)) {
+      warnings.push(`Field-mapping profile fetch failed (HTTP ${err.status}): ${err.message}`);
+      return null;
+    }
     const message = err instanceof Error ? err.message : String(err);
     warnings.push(`Field-mapping profile fetch threw and was treated as no-profile: ${message}`);
     return null;

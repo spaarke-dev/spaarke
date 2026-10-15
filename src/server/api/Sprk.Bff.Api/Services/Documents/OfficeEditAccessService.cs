@@ -234,9 +234,15 @@ public class OfficeEditAccessService
         {
             var row = await _entities.RetrieveAsync(record.EntityLogicalName, record.RecordId, ["sprk_accesspermission"], ct)
                 .ConfigureAwait(false);
-            return row is null
-                   || row.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("sprk_accesspermission")?.Value
-                       == ExternalParticipationService.AccessPermissionRestricted;
+            if (row is null
+                || row.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("sprk_accesspermission")?.Value
+                    == ExternalParticipationService.AccessPermissionRestricted)
+                return true;
+
+            // #1478 (task 175): Restricted THROUGH a parent counts (task 174's effective rule); a chain that cannot be read
+            // counts as Restricted (fail closed: no grant for an external caller).
+            return await Sprk.Bff.Api.Infrastructure.ExternalAccess.EffectiveRootFlags.RestrictedThroughFilingAsync(
+                _entities, _logger, record.EntityLogicalName, record.RecordId, ct).ConfigureAwait(false) ?? true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

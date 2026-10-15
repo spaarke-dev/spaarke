@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
 ///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI) — and, for a record NOT yet flagged secure, that
 ///      the caller created it (owner round 10 item 10, task 150: <c>createdby</c> when a person, else
-///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the Write gate) — the record's current owner, the
+///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the delegation gate (Write and Share)) — the record's current owner, the
 ///      OWN owner of each row the owner move cascades to (<see cref="AssignCascadeChildOwners"/> — complete or refused,
 ///      task 133 c1), and the creator's current share (complete read or nothing — a record that keeps its own container
 ///      is refused when it cannot be read, task 133 r1)
@@ -60,9 +60,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <para><b>The one rule this ordering serves</b> (owner, session 27 round 3, S5): a secure record must always keep
 /// at least one person who can open it. A memberless team owns it, so after step 5 the creator's share is the only
 /// way in. Every single failure therefore ends either with the record back in its pre-call ownership (the creator
-/// keeps the access they had, and can retry through the normal Write gate) or with the creator's share in place.
+/// keeps the access they had, and can retry through the normal delegation gate (Write and Share)) or with the creator's share in place.
 /// Only a DOUBLE failure — the share and then the compensating move — can leave a record nobody opens; that state has
-/// its own reason code, a CRITICAL log line, and a recovery an administrator (who holds Write) can run: a provisioning
+/// its own reason code, a CRITICAL log line, and a recovery an administrator (who holds Write and Share) can run: a provisioning
 /// call that resumes it — or, for a record that keeps its own container, a Manage Access share (next paragraph).</para>
 ///
 /// <para><b>A record that KEEPS its own container cannot be resumed</b> (task 133 r1, verifier round 4). Once the team
@@ -87,7 +87,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// round 2 withdrew a round-1 path that completed when another person already held a share, because it changed that
 /// owner-decided contract without the owner). A resume of a record NOT flagged secure is held to the same creator rule
 /// as the forward path (owner round 10 item 10; task 150 verifier c1 item 4) — before any write; a flagged one stays on
-/// the Write gate.</para>
+/// the delegation gate (Write and Share).</para>
 ///
 /// <para><b>RESUME through Make Secure</b> (<c>transition: "make-secure"</c>; task 150, round 40 items 1 and 2). The form's
 /// Make Secure command finishes such a record with the forward Make Secure path's rules, minus the move it no longer
@@ -218,8 +218,8 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// The creator's share failed AND the record could not be shown to be back with its pre-call owner — or the owner
     /// move could not be verified and no creator share could be issued. The record may be owned by the memberless
-    /// team with nobody shared: the creator cannot call again (they no longer pass the Write gate). An administrator,
-    /// who holds Write, recovers it: for a record with no container recorded, by calling provisioning again — it resumes
+    /// team with nobody shared: the creator cannot call again (they no longer pass the delegation gate (Write and Share)). An administrator,
+    /// who holds Write and Share, recovers it: for a record with no container recorded, by calling provisioning again — it resumes
     /// and shares it to the person who created the record (<c>createdby</c>, or <c>sprk_createdbyperson</c> for an
     /// app-created row); for a record that KEEPS its own container (<c>containerKept: true</c>), that call answers
     /// <c>already_provisioned</c> instead, so the administrator shares it through Manage Access (task 133 r1). The name
@@ -276,6 +276,15 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>A named colleague whose No Access check could not be completed — skipped (ADR-003).</summary>
     internal const string ReasonPrincipalNoAccessUnverifiable = "sdap.provision.principal_no_access_unverifiable";
+
+    /// <summary>
+    /// unified-access-control-r2 task 114 (owner round 67): the record is Restricted (internal use only) and this named
+    /// colleague — or, on Make Secure, the record's creator — is flagged <c>sprk_isexternal = true</c>, so
+    /// <c>InternalShareEndpoints.ClassifyEligibility</c> refuses them. Skipped with a per-person warning. When the flag or the
+    /// record's Restricted state cannot be read, the colleague is skipped as <see cref="ReasonPrincipalNoAccessUnverifiable"/>
+    /// ("whether they may access it could not be checked").
+    /// </summary>
+    internal const string ReasonPrincipalExternalOnRestricted = "sdap.provision.principal_external_on_restricted";
 
     /// <summary>
     /// Task 150 (round 33 items 1 and 5): a named colleague — or, on Make Secure, the record's creator — whose share could
@@ -389,7 +398,7 @@ public static class ProvisionProjectEndpoint
     /// Task 150 (owner round 10 item 10, 2026-10-03): the record is NOT yet marked secure, and the caller is not the person
     /// who created it. An unflagged record is secured through this call only for its creator — <c>createdby</c> when that
     /// is a person, otherwise the server-stamped <c>sprk_createdbyperson</c> (an app-only create). A record already
-    /// flagged (an older client, a row from before task 150) stays on the route's Write gate. Refused before any write
+    /// flagged (an older client, a row from before task 150) stays on the route's delegation gate (Write and Share). Refused before any write
     /// (403), deterministic for that caller: securing an existing record someone else created, with the content already
     /// filed under it, is task 148's transition, not this call.
     /// </summary>
@@ -397,7 +406,7 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// Task 150 (round 33 item 1): <see cref="ProvisionProjectRequest.Transition"/> for the form's Make Secure command —
-    /// securing an EXISTING record (task 148's surface). That path is held to the route's Write gate only (owner R3b):
+    /// securing an EXISTING record (task 148's surface). That path is held to the route's delegation gate (Write and Share) only (owner R3b):
     /// the creator rule of owner round 10 item 10 (<see cref="ReasonNotRecordCreator"/>) belongs to the wizards'
     /// create-then-secure path, which sends no transition. On it the record's creator is shared to as well
     /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27); and the
@@ -429,7 +438,7 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
-    /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
+    /// email-processing default (task 133; the AI staging container went with its setting in task 227f). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
     /// (the shared container stays where the configuration points; nothing is orphaned).
     /// </summary>
@@ -438,7 +447,6 @@ public static class ProvisionProjectEndpoint
         "Communication:ArchiveContainerId",
         "EmailProcessing:DefaultContainerId",
         "Email:DefaultContainerId",
-        "SharePointEmbedded:StagingContainerId"
     };
 
     // ── Share rights (task 061) ──────────────────────────────────────────────
@@ -557,7 +565,7 @@ public static class ProvisionProjectEndpoint
     // Handler
     // =========================================================================
 
-    private static Task<IResult> ProvisionProjectAsync(
+    private static async Task<IResult> ProvisionProjectAsync(
         ProvisionProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeFileStore speFileStore,
@@ -572,12 +580,36 @@ public static class ProvisionProjectEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
-        => ProvisionCoreAsync(
+    {
+        var result = await ProvisionCoreAsync(
             request,
             ProvisioningCreator.Caller(callerAccessProbe, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
             httpContext.TraceIdentifier,
             dataverseClient, speFileStore, recordShare, secureChildren, relatedRoots, configuration, noAccessGuard,
             accessCacheInvalidator, fileRelocator, callerAccessProbe, httpContext, logger, ct);
+
+        // ── Task 175 (owner round 87): a work assignment or project made secure BY HAND keeps it as its own ──
+        //
+        // Making a record stricter is never refused (a child may be stricter than its parent). Its access record now says the
+        // secure designation was set on it, so a parent that is later secured and then un-secured does not take it away (round
+        // 87 item 2). Best effort: a failure here is logged, and the job reads the same fact from the record within 5 minutes.
+        var target = ResolveRoot(request);
+        if (result is Microsoft.AspNetCore.Http.HttpResults.Ok<ProvisionProjectResponse> && target.Ok
+            && SecureRootInheritance.Inherits(ExternalGrantRoot.LogicalNameFor(target.Type)))
+        {
+            try
+            {
+                await relatedRoots.FollowParentsAsync(ExternalGrantRoot.LogicalNameFor(target.Type), target.Id,
+                    httpContext.TraceIdentifier, CancellationToken.None, ownSecureSetNow: true);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[PROVISION] Recording that {RecordId} was made secure by hand failed; the job records it.", target.Id);
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// unified-access-control-r2 task 158 (owner round 6): provisions a work assignment or project that is FILED UNDER a
@@ -638,7 +670,7 @@ public static class ProvisionProjectEndpoint
             return ProblemDetailsHelper.ValidationError(target.Error ?? "A record to provision is required.");
 
         // Task 150 (round 33 item 1): which surface asks. Omitted = the wizards' create-then-secure path (creator rule);
-        // make-secure = the form's Make Secure command (Write gate). Anything else is refused before any read or write: an
+        // make-secure = the form's Make Secure command (delegation gate (Write and Share)). Anything else is refused before any read or write: an
         // unrecognised value never falls back to either rule, and only the exact token relaxes the creator rule.
         bool makeSecure;
         if (request.Transition is null)
@@ -700,6 +732,19 @@ public static class ProvisionProjectEndpoint
         // new client arrives unflagged. One from the old client, or created before task 150, arrives flagged and not
         // provisioned; both take exactly the same path from here (rollout constraint), the flagged one skipping the write.
         var alreadyFlagged = row.sprk_issecure == true;
+
+        // Task 114 (owner round 67, item 3 decided 2026-10-06: RESTRICTED WINS over the last-reader rule): on a Restricted
+        // record the person this run would share it to — the creator / Make Secure caller — is not shared to when flagged
+        // sprk_isexternal = true, exactly as a named colleague is not. A secure record left with nobody internal is then
+        // provisioned anyway (an administrator still sees it) and the response says so.
+        // #1478 (task 175): Restricted THROUGH a parent counts as Restricted (owner round 84; task 174's effective rule) — a
+        // work assignment or project filed under a Restricted matter is Restricted before its own column catches up. A
+        // chain that cannot be read counts as Restricted (fail closed: it only bars a person flagged external).
+        var restrictedThroughFiling = row.sprk_accesspermission != ExternalParticipationService.AccessPermissionRestricted
+                                      && (await relatedRoots.IsRestrictedThroughFilingAsync(root.LogicalName, recordId, ct) ?? true);
+        var creatorRule = new RestrictedCreatorRule(
+            dataverseClient,
+            row.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted || restrictedThroughFiling);
 
         var recordName = row.NameFrom(root.NameColumn) ?? request.ProjectRef ?? recordId.ToString();
 
@@ -966,7 +1011,7 @@ public static class ProvisionProjectEndpoint
             // than they hold) — the share this run proves; the record's creator joins the colleague step, exactly as on the
             // forward path. Flagged or not: a Make Secure that failed after its first write is finished by the same call.
             var finish = await ResumeMakeSecureAsync(
-                dataverseClient, recordShare, callerAccessProbe!, noAccessGuard, httpContext!, root, recordId, row,
+                creatorRule, dataverseClient, recordShare, callerAccessProbe!, noAccessGuard, httpContext!, root, recordId, row,
                 ownerTeamId, alreadyFlagged, logger, traceId, ct);
 
             if (finish.Error != null)
@@ -984,7 +1029,7 @@ public static class ProvisionProjectEndpoint
             // path's first write and nothing clears it on failure; before task 150 provisioning required it; and the
             // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
             // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
-            // on the route's Write gate. (Make Secure — round 33 item 1 — never reaches here: the branch above.)
+            // on the route's delegation gate (Write and Share). (Make Secure — round 33 item 1 — never reaches here: the branch above.)
             // Task 158's inherited provisioning has no caller: the person is the recorded creator by construction.
             if (!alreadyFlagged && !creator.IsRecordedCreator)
             {
@@ -1048,7 +1093,7 @@ public static class ProvisionProjectEndpoint
 
             // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
-                recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
+                creatorRule, recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
 
             if (resumed.Error != null)
                 return resumed.Error;
@@ -1072,7 +1117,7 @@ public static class ProvisionProjectEndpoint
 
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
-                dataverseClient, recordShare, creator, noAccessGuard, accessCacheInvalidator, relatedRoots, root, recordId, row,
+                creatorRule, dataverseClient, recordShare, creator, noAccessGuard, accessCacheInvalidator, relatedRoots, root, recordId, row,
                 ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, makeSecure, logger,
                 traceId, ct);
 
@@ -1089,8 +1134,9 @@ public static class ProvisionProjectEndpoint
         IReadOnlyList<ProvisionSkippedPrincipal> skippedPrincipals;
         try
         {
-            (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
-                recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger, traceId, ct);
+            (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(restrictedThroughFiling,
+                dataverseClient, recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger,
+                traceId, ct);
         }
         finally
         {
@@ -1103,6 +1149,34 @@ public static class ProvisionProjectEndpoint
             // where their own owner change happens), on success or failure of the colleague step, before any later
             // return, and never fails provisioning: the hook does not throw and is not bound to the request's token.
             await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
+
+        // ── Task 114 (owner round 67, item 3: Restricted wins): the person not shared to, and whether anyone internal remains ──
+        // The creator / Make Secure caller flagged external on a Restricted record was NOT shared to (above). They are named
+        // like a skipped colleague, and when nobody internal can open the record now, the response says so plainly — an
+        // administrator still sees it and shares it with an internal user. Never a failure: the record is provisioned.
+        bool? noInternalReader = null;
+        string? noInternalReaderMessage = null;
+        // A person this run did not share to is never reported as shared to (task 114 verifier round 3): the empty GUID,
+        // and they are named in skippedPrincipals instead.
+        var sharedToCreator = creatorRule.SkippedCreator == creatorId ? Guid.Empty : creatorId;
+        if (creatorRule.SkippedCreator is { } skippedCreator)
+        {
+            skippedPrincipals = skippedPrincipals
+                .Append(new ProvisionSkippedPrincipal(skippedCreator, ReasonPrincipalExternalOnRestricted,
+                    "This record is Restricted to internal users, and this person is flagged as external, so it was not " +
+                    "shared with them."))
+                .ToList();
+            noInternalReader = await NoInternalReaderAsync(dataverseClient, recordShare, root, recordId, logger, traceId, ct);
+            var label = root.DisplayLabel.ToLowerInvariant();
+            noInternalReaderMessage = noInternalReader switch
+            {
+                true => "Nobody internal can open this " + label + " now: it is Restricted, and the people it would have " +
+                        "been shared with are flagged as external. An administrator must share it with an internal user.",
+                null => "Whether anyone internal can open this " + label + " could not be confirmed. Check its Manage " +
+                        "Access, and have an administrator share it with an internal user if nobody is listed.",
+                _ => null,
+            };
         }
 
         // ── Step 8 (task 148): the record's EXISTING related records follow it into isolation ──
@@ -1163,7 +1237,7 @@ public static class ProvisionProjectEndpoint
                 OwnerTeamId: ownerTeamId,
                 OwnerTeamName: ownerTeamName,
                 SpeContainerId: keptContainerId,
-                SharedToCreatorSystemUserId: creatorId,
+                SharedToCreatorSystemUserId: sharedToCreator,
                 AdditionalPrincipalsShared: additionalShared,
                 RecordType: root.WireToken,
                 RecordId: recordId,
@@ -1173,6 +1247,8 @@ public static class ProvisionProjectEndpoint
                 FiledRecords: keptChildren.Filed)
             {
                 Files = keptChildren.Files,
+                NoInternalReader = noInternalReader,
+                NoInternalReaderMessage = noInternalReaderMessage,
             });
         }
 
@@ -1233,7 +1309,7 @@ public static class ProvisionProjectEndpoint
             OwnerTeamId: ownerTeamId,
             OwnerTeamName: ownerTeamName,
             SpeContainerId: speContainerId,
-            SharedToCreatorSystemUserId: creatorId,
+            SharedToCreatorSystemUserId: sharedToCreator,
             AdditionalPrincipalsShared: additionalShared,
             RecordType: root.WireToken,
             RecordId: recordId,
@@ -1243,12 +1319,103 @@ public static class ProvisionProjectEndpoint
             FiledRecords: children.Filed)
         {
             Files = children.Files,
+            NoInternalReader = noInternalReader,
+            NoInternalReaderMessage = noInternalReaderMessage,
         });
     }
 
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /// <summary>
+    /// Task 114 (owner round 67): the one share-eligibility rule for the person a provisioning run shares the record to
+    /// (the Restricted branch of <see cref="InternalShareEndpoints.ClassifyEligibility"/>): on a Restricted record a user
+    /// flagged <c>sprk_isexternal = true</c> is not shared to. Asked at most once per user per request (cached), so the
+    /// share-first step and the steps after the move always agree.
+    /// </summary>
+    private sealed class RestrictedCreatorRule(DataverseWebApiClient client, bool recordIsRestricted)
+    {
+        private readonly Dictionary<Guid, bool?> _answers = new();
+
+        /// <summary>The person this run did not share to (flagged external on a Restricted record), if any.</summary>
+        public Guid? SkippedCreator { get; private set; }
+
+        /// <summary><c>true</c> = not shared to; <c>false</c> = shared to; <c>null</c> = could not be read (fail closed).</summary>
+        /// <param name="fresh">Read the flag again rather than answer from this request's cache (task 114 verifier V1: the
+        /// last-resort grant after an unverifiable owner move asks a FRESH answer before writing a share).</param>
+        public async Task<bool?> IsBarredAsync(Guid userId, ILogger logger, CancellationToken ct, bool fresh = false)
+        {
+            if (!recordIsRestricted)
+                return false;
+            if (!fresh && _answers.TryGetValue(userId, out var known))
+                return known;
+
+            bool? answer;
+            try
+            {
+                var rows = await client.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                    InternalShareEndpoints.SystemUserEntitySet, filter: "systemuserid eq " + userId,
+                    select: "systemuserid,sprk_isexternal", top: 1, cancellationToken: ct);
+                answer = InternalShareEndpoints.IsBarredOnRestricted(
+                    rows.FirstOrDefault(r => r.Id == userId)?.IsExternal, rootIsRestricted: true);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] Whether {UserId} is flagged external could not be read on a Restricted record; their share " +
+                    "is not proven.", userId);
+                answer = null;
+            }
+
+            _answers[userId] = answer;
+            if (answer == true)
+                SkippedCreator = userId;
+            return answer;
+        }
+    }
+
+    /// <summary>
+    /// Task 114: whether the record now has NO enabled internal user (not flagged external) with a direct share that can
+    /// read it — <c>null</c> when that could not be read. Display-only: it never fails provisioning.
+    /// </summary>
+    private static async Task<bool?> NoInternalReaderAsync(
+        DataverseWebApiClient dataverseClient, IDataverseRecordShareService recordShare, SecureRecordRoot root, Guid recordId,
+        ILogger logger, string traceId, CancellationToken ct)
+    {
+        try
+        {
+            var readers = (await recordShare.GetPrincipalAccessOrThrowAsync(root.LogicalName, recordId, ct))
+                .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && RecordShareLevels.CanRead(s.AccessRightsMask))
+                .Select(s => s.Principal.Id)
+                .Distinct()
+                .ToList();
+            foreach (var batch in readers.Chunk(InternalShareEndpoints.NameBatchSize))
+            {
+                var users = await dataverseClient.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                    InternalShareEndpoints.SystemUserEntitySet,
+                    filter: string.Join(" or ", batch.Select(id => "systemuserid eq " + id)),
+                    select: "systemuserid,isdisabled,sprk_isexternal",
+                    top: batch.Length,
+                    cancellationToken: ct);
+                if (users.Any(u => batch.Contains(u.Id) && u.IsDisabled is false && u.IsExternal != true))
+                    return false;
+            }
+
+            logger.LogWarning(
+                "[PROVISION] Restricted {RecordType} {RecordId} was provisioned with NO internal reader (its people are flagged " +
+                "external): an administrator must share it with an internal user. TraceId={TraceId}",
+                root.WireToken, recordId, traceId);
+            return true;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[PROVISION] Whether anyone internal can open Restricted {RecordType} {RecordId} could not be read. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Task 148 — a child pass that did not complete (ADR-003: never reported as success, never a bare 500). The record's own
@@ -1630,6 +1797,7 @@ public static class ProvisionProjectEndpoint
     /// The unlink is the first write, after every read: a failure of it changes nothing else.</para>
     /// </remarks>
     private static async Task<CreatorShareStep> MoveWithCreatorShareAsync(
+        RestrictedCreatorRule creatorRule,
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         ProvisioningCreator creator,
@@ -1689,7 +1857,7 @@ public static class ProvisionProjectEndpoint
         //
         // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
         // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
-        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the Write gate (owner R3b).
+        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the delegation gate (Write and Share) (owner R3b).
         if (row.sprk_issecure != true && !makeSecure)
         {
             var notCreator = await RefuseUnlessRecordCreatorAsync(
@@ -1840,9 +2008,9 @@ public static class ProvisionProjectEndpoint
         // ── Step 4.5: SHARE-FIRST ────────────────────────────────────────────
         if (preCreatorMask is { } knownPreMask)
         {
-            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
+            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
             wroteCreatorShare = first.WriteAttempted;
-            creatorShareProven = first.Proven;
+            creatorShareProven = first.Proven && !first.Barred; // a barred person holds no share (verifier V2)
 
             if (!first.Proven)
             {
@@ -1919,30 +2087,50 @@ public static class ProvisionProjectEndpoint
             // The PATCH may have landed. Whatever happened, the creator's share must be in place (S5). It is PROVEN by
             // the same complete read every other share write on this path uses (task 133 verifier round 1) — a share
             // proven before the move is not assumed to have survived it (live gate (b)).
-            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
-            var shareConfirmed = ensured.Proven;
-            var shareIssued = ensured.Proven;
+            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
+            // Task 114 verifier V2: a person barred on a Restricted record holds NO share — "proven" only that none is owed —
+            // so it is never reported as a share in place.
+            var creatorBarred = ensured.Barred;
+            var shareConfirmed = ensured.Proven && !ensured.Barred;
+            var shareIssued = shareConfirmed;
 
-            if (!shareConfirmed)
+            if (!ensured.Proven)
             {
                 // The read or the write failed. Issue the share without a read to confirm it: leaving no share risks a
                 // record nobody can open if the move DID land. The response then says the share is NOT confirmed. A Make
                 // Secure caller's is issued at their floor (round 46 item 1: never lower than they held), not below it.
-                var fallbackMask = shareTarget?.Invoke(0) ?? CreatorAccessMask;
-                var fallbackRights = fallbackMask == CreatorAccessMask
-                    ? CreatorAccessRights
-                    : RecordShareLevels.RightsCsvForMask(fallbackMask);
-                try
+                // Task 114 verifier V1: never to a person flagged external on a Restricted record — a FRESH read of the
+                // flag must answer "not barred" before this unconfirmed write; barred or unreadable, nothing is written.
+                var barredNow = await creatorRule.IsBarredAsync(creatorId, logger, ct, fresh: true);
+                if (barredNow == false)
                 {
-                    await recordShare.GrantAccessAsync(
-                        root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), fallbackRights, ct);
-                    shareIssued = true;
+                    var fallbackMask = shareTarget?.Invoke(0) ?? CreatorAccessMask;
+                    var fallbackRights = fallbackMask == CreatorAccessMask
+                        ? CreatorAccessRights
+                        : RecordShareLevels.RightsCsvForMask(fallbackMask);
+                    try
+                    {
+                        await recordShare.GrantAccessAsync(
+                            root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), fallbackRights, ct);
+                        shareIssued = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex,
+                            "[PROVISION] The creator's share on {RecordType} {RecordId} could not be issued after an " +
+                            "unverifiable owner move. TraceId={TraceId}", root.WireToken, recordId, traceId);
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    logger.LogError(ex,
-                        "[PROVISION] The creator's share on {RecordType} {RecordId} could not be issued after an " +
-                        "unverifiable owner move. TraceId={TraceId}", root.WireToken, recordId, traceId);
+                    creatorBarred = barredNow == true;
+                    logger.LogError(
+                        "[PROVISION] No last-resort share to {CreatorId} on {RecordType} {RecordId} after an unverifiable " +
+                        "owner move: {Why}. TraceId={TraceId}", creatorId, root.WireToken, recordId,
+                        creatorBarred
+                            ? "the record is Restricted and they are flagged external"
+                            : "whether they are flagged external on this Restricted record could not be read",
+                        traceId);
                 }
 
                 // A share proven before the move was issued too, even if it cannot be confirmed now.
@@ -1952,6 +2140,28 @@ public static class ProvisionProjectEndpoint
             // Task 132 (C12): the PATCH may have re-owned the record, and the creator's share may have been written —
             // evict (always safe, never fails the request) before either answer below.
             await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
+            if (creatorBarred)
+            {
+                logger.LogCritical(
+                    "[PROVISION] {RecordType} {RecordId}: the owner move could not be verified, and the record is Restricted " +
+                    "while {CreatorId} is flagged external, so it was NOT shared to them. If the Secure Record owner team now " +
+                    "owns it, no internal user may be able to open it. TraceId={TraceId}",
+                    root.WireToken, recordId, creatorId, traceId);
+
+                return CreatorShareStep.Failed(Problem(
+                    StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    "The record's owner could not be read back after the assignment, so whether it is now owned by the " +
+                    "Secure Record owner team is not known. " + unlinkedNote +
+                    "This record is Restricted to internal users and the person it would be shared to is flagged as " +
+                    "external, so it was NOT shared to them. If the team now owns it, no internal user may be able to " +
+                    "open it: an administrator shares it with an internal user and calls provisioning again. If the " +
+                    "assignment did not take effect, the record is where it was and provisioning can be called again.",
+                    traceId, (ReasonKey, ReasonOwnerAssignmentUnverified), ("ownerTeamId", ownerTeamId),
+                    ("creatorShareConfirmed", false),
+                    ("creatorShareSkippedReason", ReasonPrincipalExternalOnRestricted),
+                    ("containerKept", keepsOwnContainer)));
+            }
 
             if (shareIssued)
             {
@@ -1977,7 +2187,7 @@ public static class ProvisionProjectEndpoint
                     afterText = "A share to the creator was issued but could not be read back, so it is NOT confirmed. If " +
                                 "the creator can open the record they may call again: a record the team now owns is " +
                                 "resumed, and one it does not own is provisioned from the start. If they cannot, an " +
-                                "administrator (who holds Write on it) calls provisioning again: it resumes and ensures " +
+                                "administrator (who holds Write and Share on it) calls provisioning again: it resumes and ensures " +
                                 "the share for the person who created the record.";
                 }
 
@@ -1999,9 +2209,9 @@ public static class ProvisionProjectEndpoint
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The record's owner could not be read back after the assignment, and no share to its creator could be " +
                 "issued. " + unlinkedNote + "If the record is now owned by the Secure Record owner team, nobody can open " +
-                "it, and its creator no longer passes the Write check this endpoint requires: " + (keepsOwnContainer
+                "it, and its creator no longer passes the Write and Share check this endpoint requires: " + (keepsOwnContainer
                     ? KeptContainerRecovery + " "
-                    : "an administrator (who holds Write on it) calls provisioning again, which resumes and shares the " +
+                    : "an administrator (who holds Write and Share on it) calls provisioning again, which resumes and shares the " +
                       "record to the person who created it. ") +
                 "If the assignment did not take effect, the record is where it was and its creator calls provisioning " +
                 "again.",
@@ -2010,7 +2220,7 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Step 5.5: prove the creator's share on the moved record ───────────
-        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
+        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
         if (proof.Proven)
             return CreatorShareStep.Ok(creatorId);
 
@@ -2112,17 +2322,17 @@ public static class ProvisionProjectEndpoint
 
         // What the creator can do now. A share-first grant that was PROVEN before the move has not been removed by this
         // call (compensation removes it only after a verified move back), so — unless the move itself dropped it (live
-        // gate (b)) — the creator still opens the record; otherwise they may not, and may no longer pass the Write gate.
+        // gate (b)) — the creator still opens the record; otherwise they may not, and may no longer pass the delegation gate (Write and Share).
         var creatorText = keepsOwnContainer && creatorShareProven
             ? "The creator's share was confirmed before the move and this call has not removed it, so unless the move " +
               "itself dropped it the creator can still open the record. "
-            : "Its creator may not be able to open it and may no longer pass the Write check this endpoint requires. ";
+            : "Its creator may not be able to open it and may no longer pass the Write and Share check this endpoint requires. ";
 
         // The recovery that works against the marker: a record that keeps its own container is never resumed (task 133
         // r1), so an administrator restores access directly; one with no container is resumed by their call.
         var recoveryText = keepsOwnContainer
             ? "While the team owns it, " + KeptContainerRecovery + " "
-            : "While the team owns it, an administrator (who holds Write on it) calls provisioning again: it resumes and " +
+            : "While the team owns it, an administrator (who holds Write and Share on it) calls provisioning again: it resumes and " +
               "shares the record to the person who created it. ";
 
         // If an UNVERIFIED move back did land, it cascaded like the move out: every child now has the record's pre-call
@@ -2498,6 +2708,7 @@ public static class ProvisionProjectEndpoint
     /// its explicit access list. One who uses the form's Make Secure command is shared to like any caller of it.</para>
     /// </remarks>
     private static async Task<(Guid CallerId, Guid? RecordCreator, IResult? Error)> ResumeMakeSecureAsync(
+        RestrictedCreatorRule creatorRule,
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
@@ -2550,7 +2761,7 @@ public static class ProvisionProjectEndpoint
         // read above) — proven by a read (the forward path's proof; the record is already the team's, so there is no move to
         // undo).
         var ensured = await EnsureCreatorShareAsync(
-            recordShare, root, recordId, callerId, logger, ct, held => MakeSecureCallerMask(held | floor.HeldMask));
+            recordShare, root, recordId, callerId, logger, ct, held => MakeSecureCallerMask(held | floor.HeldMask), creatorRule);
         if (!ensured.Proven)
         {
             logger.LogError(
@@ -2738,7 +2949,7 @@ public static class ProvisionProjectEndpoint
     /// <see cref="ReasonCreatorUnresolved"/> (never read as "the creator"). Then
     /// <see cref="RefuseUnlessRecordCreatorAsync"/> decides, with the same columns and the same fail-closed reads. A
     /// System Administrator who is not the creator and needs to finish such a row sets the flag first (F4: the platform
-    /// lets that role write it) — the row is then on the Write gate like every documented resume.
+    /// lets that role write it) — the row is then on the delegation gate (Write and Share) like every documented resume.
     /// </remarks>
     private static async Task<IResult?> RefuseUnflaggedResumeUnlessCreatorAsync(
         DataverseWebApiClient dataverseClient,
@@ -3168,6 +3379,7 @@ public static class ProvisionProjectEndpoint
     /// <see cref="ResolveResumeCreatorAsync"/> decided, proven by a read. Nothing else is written here.
     /// </summary>
     private static async Task<CreatorShareStep> EnsureResumeCreatorShareAsync(
+        RestrictedCreatorRule creatorRule,
         IDataverseRecordShareService recordShare,
         SecureRecordRoot root,
         Guid recordId,
@@ -3177,7 +3389,7 @@ public static class ProvisionProjectEndpoint
         string traceId,
         CancellationToken ct)
     {
-        var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
+        var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, creatorRule: creatorRule);
         if (!ensured.Proven)
         {
             return CreatorShareStep.Failed(Problem(
@@ -3237,9 +3449,26 @@ public static class ProvisionProjectEndpoint
         Guid creatorId,
         ILogger logger,
         CancellationToken ct,
-        Func<int, int>? targetFor = null)
+        Func<int, int>? targetFor = null,
+        RestrictedCreatorRule? creatorRule = null)
     {
         var principal = DataversePrincipalRef.User(creatorId);
+
+        // Task 114: on a Restricted record a person flagged external is not shared to — the share is deliberately absent,
+        // which is this step's answer ("proven" that nothing is owed). A flag that cannot be read is no proof (ADR-003).
+        if (creatorRule is not null)
+        {
+            var barred = await creatorRule.IsBarredAsync(creatorId, logger, ct);
+            if (barred is null)
+                return new ShareEnsureResult(Proven: false, WriteAttempted: false);
+            if (barred == true)
+            {
+                logger.LogWarning(
+                    "[PROVISION] Restricted {RecordType} {RecordId}: {CreatorId} is flagged external, so the record is NOT " +
+                    "shared to them (owner round 67: Restricted wins over the last-reader rule).", root.WireToken, recordId, creatorId);
+                return new ShareEnsureResult(Proven: true, WriteAttempted: false, Barred: true);
+            }
+        }
 
         int current;
         try
@@ -3481,7 +3710,80 @@ public static class ProvisionProjectEndpoint
     /// (<see cref="ReasonPrincipalShareFailed"/>) — so the client tells the caller who did not get access, and the
     /// confirmation's "the person who created this record … will keep access" is never broken without saying so.</para>
     /// </remarks>
+    /// <summary>
+    /// Task 114: <paramref name="colleagues"/> without anyone a Restricted record may not be shared with
+    /// (<c>ClassifyEligibility</c> = <c>ExternalOnRestricted</c>); each one left out is added to <paramref name="skipped"/>.
+    /// </summary>
+    private static async Task<List<Guid>> WithoutExternalOnRestrictedAsync(
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, bool restrictedThroughFiling, List<Guid> colleagues,
+        List<ProvisionSkippedPrincipal> skipped, ILogger logger, string traceId, CancellationToken ct)
+    {
+        const string couldNotCheck =
+            "Whether this person may access this record could not be checked (whether they are flagged as external on a " +
+            "Restricted record), so it was not shared with them. Add them through Manage Access once it can be checked.";
+
+        List<InternalShareEndpoints.SystemUserRow> users;
+        bool restricted;
+        try
+        {
+            users = await dataverseClient.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                InternalShareEndpoints.SystemUserEntitySet,
+                filter: string.Join(" or ", colleagues.Select(id => $"systemuserid eq {id}")),
+                select: "systemuserid,sprk_isexternal",
+                top: colleagues.Count,
+                cancellationToken: ct);
+
+            restricted = false;
+            if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true) && restrictedThroughFiling)
+            {
+                restricted = true; // #1478: Restricted through a parent (task 175)
+            }
+            else if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true))
+            {
+                var rows = await dataverseClient.QueryAsync<RootRow>(
+                    root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: "sprk_accesspermission", top: 1,
+                    cancellationToken: ct);
+                restricted = rows.FirstOrDefault() is { } rootRow
+                    ? rootRow.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted
+                    : throw new InvalidOperationException("The record did not come back, so whether it is Restricted is unknown.");
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[PROVISION] Whether the named colleagues of {RecordType} {RecordId} are flagged external on a Restricted record " +
+                "could not be read; none is shared. TraceId={TraceId}", root.WireToken, recordId, traceId);
+            skipped.AddRange(colleagues.Select(id => new ProvisionSkippedPrincipal(id, ReasonPrincipalNoAccessUnverifiable, couldNotCheck)));
+            return new List<Guid>();
+        }
+
+        if (!restricted)
+            return colleagues;
+
+        var kept = new List<Guid>(colleagues.Count);
+        foreach (var id in colleagues)
+        {
+            var row = users.FirstOrDefault(u => u.Id == id);
+            if (InternalShareEndpoints.IsBarredOnRestricted(row?.IsExternal, rootIsRestricted: true))
+            {
+                logger.LogWarning(
+                    "[PROVISION] Not sharing Restricted {RecordType} {RecordId} with named principal {PrincipalId}: flagged " +
+                    "external (owner round 67). TraceId={TraceId}", root.WireToken, recordId, id, traceId);
+                skipped.Add(new ProvisionSkippedPrincipal(id, ReasonPrincipalExternalOnRestricted,
+                    "This record is Restricted to internal users, and this person is flagged as external, so it was not " +
+                    "shared with them."));
+                continue;
+            }
+
+            kept.Add(id);
+        }
+
+        return kept;
+    }
+
     private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
+        bool restrictedThroughFiling,
+        DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         SecureShareNoAccessGuard noAccessGuard,
         ProvisionProjectRequest request,
@@ -3542,6 +3844,14 @@ public static class ProvisionProjectEndpoint
         }
 
         colleagues = allowed;
+        if (colleagues.Count == 0)
+            return (0, skipped);
+
+        // ── Task 114 (owner round 67): the ONE share-eligibility rule — a Restricted record is never shared with a person
+        // flagged external. The flags are read for the colleagues; the record's Restricted state only when one of them is
+        // flagged. A read that fails skips the colleague (ADR-003), as an unverifiable No Access check does.
+        colleagues = await WithoutExternalOnRestrictedAsync(
+            dataverseClient, root, recordId, restrictedThroughFiling, colleagues, skipped, logger, traceId, ct);
         if (colleagues.Count == 0)
             return (0, skipped);
 
@@ -3942,7 +4252,10 @@ public static class ProvisionProjectEndpoint
     /// Whether a read proved the creator's share exact, and whether this call wrote (or tried to write) it — the
     /// second decides whether an undo has anything to undo.
     /// </summary>
-    private readonly record struct ShareEnsureResult(bool Proven, bool WriteAttempted);
+    /// <param name="Barred">Task 114 verifier V2: the person is flagged external on a Restricted record, so NO share was written
+    /// and none is owed — <see cref="Proven"/> is <c>true</c> (nothing to prove), but the person holds no share, and a caller
+    /// that would otherwise say "the share is in place" must say it was not given.</param>
+    private readonly record struct ShareEnsureResult(bool Proven, bool WriteAttempted, bool Barred = false);
 
     /// <summary>The creator whose share is proven, or the response that stopped provisioning.</summary>
     private sealed record CreatorShareStep(Guid CreatorId, IResult? Error)
@@ -4029,6 +4342,10 @@ public static class ProvisionProjectEndpoint
     {
         [JsonPropertyName("sprk_issecure")]
         public bool? sprk_issecure { get; set; }
+
+        /// <summary>Task 114: Access Permission (Restricted = 100000002), read only by the colleague step's rule.</summary>
+        [JsonPropertyName("sprk_accesspermission")]
+        public int? sprk_accesspermission { get; set; }
 
         /// <summary>
         /// The container recorded on the record. Half of the marker — see <see cref="IsProvisioned"/>; never a marker

@@ -3,8 +3,8 @@
 //
 // Phase C'' Wave G-7 — SHARED per-invariant probe seam. Coordinated with
 // sibling parallel task 173 (I2 AI Search) to avoid a 4-way collision on the
-// H13 invariant-verifier surface across tasks 170 (I1), 173 (I2), 174 (I3),
-// 176 (I4), and 179 (I5).
+// H13 invariant-verifier surface across tasks 170 (I1 — runtime probe deleted
+// by task 230a), 173 (I2), 174 (I3), 176 (I4), and 179 (I5).
 //
 // COMPOSITE PATTERN:
 //   Each per-invariant real probe implements this ONE interface and registers

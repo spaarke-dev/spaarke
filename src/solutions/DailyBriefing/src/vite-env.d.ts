@@ -4,18 +4,9 @@
  * Vite build-time environment variables for DailyBriefing Code Page.
  *
  * All VITE_* variables are public — do not place secrets here.
+ *
+ * There is deliberately NO build-time App Insights key (#1537): a key baked into
+ * the build sent every customer's browser telemetry to the environment the build
+ * was made for. main.tsx initialises AppInsightsService at runtime with this
+ * environment's connection string from the BFF (`getTelemetryConnectionString`).
  */
-interface ImportMetaEnv {
-  /**
-   * Application Insights instrumentation key (optional). When set, errors
-   * caught by AppErrorBoundary / safeRegister / WidgetErrorBoundary are
-   * shipped to App Insights "Failures" pane via reportClientError().
-   *
-   * Set via CI/CD pipeline env var: VITE_APP_INSIGHTS_KEY=<key> npm run build
-   */
-  readonly VITE_APP_INSIGHTS_KEY?: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -258,7 +259,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -272,13 +272,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Delete job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Delete job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -292,7 +290,10 @@ public sealed class BulkOperationService : BackgroundService
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await DeleteContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct);
+            // Per container: one this stamp does not own is refused before any read (task 227d, owner D29).
+            var (graphClient, clientError) = await ClientForContainerAsync(config, containerId, operationId, ct);
+            var error = clientError
+                ?? await DeleteContainerInScopeAsync(graphClient!, config, scope, containerId, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -334,7 +335,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -348,13 +348,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Permissions job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Permissions job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -367,8 +365,10 @@ public sealed class BulkOperationService : BackgroundService
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await GrantOnContainerInScopeAsync(
-                graphClient, config, scope, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
+            var (graphClient, clientError) = await ClientForContainerAsync(config, containerId, operationId, ct);
+            var error = clientError
+                ?? await GrantOnContainerInScopeAsync(
+                    graphClient!, config, scope, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -402,6 +402,13 @@ public sealed class BulkOperationService : BackgroundService
         "The container was not found among the containers you administer under this configuration; it was not changed.";
 
     /// <summary>
+    /// The per-item error when the container's ownership record could not be written before its soft delete (#1652):
+    /// the container was not deleted, and the item can be retried.
+    /// </summary>
+    internal const string OwnershipRecordUnavailableError =
+        "The container's ownership record could not be saved, so it was not deleted. Try again later.";
+
+    /// <summary>
     /// Soft-deletes <paramref name="containerId"/> ONLY if it is of <paramref name="config"/>'s container type AND
     /// bound to a business unit <paramref name="scope"/> reaches. Returns null on success, or the item's error.
     /// </summary>
@@ -414,6 +421,13 @@ public sealed class BulkOperationService : BackgroundService
     /// business-unit stamp (<see cref="SpeContainerBusinessUnitStamp"/>) — and written only when the caller's scope
     /// captured at acceptance reaches it (<see cref="SpeAdminCallerScope.CanReach"/>), or refused.
     /// </para>
+    /// <para>
+    /// <b>Ownership record (#1652).</b> Graph discards a container's marker and business-unit stamp on soft delete, so
+    /// the delete goes through <see cref="SpeAdminGraphService.RecordAndSoftDeleteContainerAsync"/>: this stamp's
+    /// ownership record of the container — from the binding just read — is written first, and when it cannot be
+    /// written the container is NOT deleted (the item fails). Without the record the container would be unreachable
+    /// in the recycle bin for every admin.
+    /// </para>
     /// </remarks>
     internal async Task<BulkOperationItemError?> DeleteContainerInScopeAsync(
         Microsoft.Graph.GraphServiceClient graphClient,
@@ -423,18 +437,18 @@ public sealed class BulkOperationService : BackgroundService
         Guid operationId,
         CancellationToken ct)
     {
-        if (!await IsContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct))
+        if (await ReadContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct) is not { } read)
         {
             return new BulkOperationItemError(containerId, ContainerNotInScopeError);
         }
 
         try
         {
-            // Soft-delete: move to recycle bin (not permanent delete).
+            // Soft-delete: move to recycle bin (not permanent delete), after recording who owns it (#1652).
             // GraphCallScope translates ODataError -> SpaarkeStorageException inside
             // Infrastructure.Graph, so this file catches a Spaarke-domain type (ADR-007 §1).
             await GraphCallScope.Run(
-                () => _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct),
+                () => _graphService.RecordAndSoftDeleteContainerAsync(graphClient, config, containerId, read, ct),
                 $"SoftDeleteContainer({containerId})");
 
             _logger.LogDebug(
@@ -455,6 +469,14 @@ public sealed class BulkOperationService : BackgroundService
                 "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed: {Error}",
                 operationId, containerId, msg);
             return new BulkOperationItemError(containerId, msg);
+        }
+        catch (SpeDeletedContainerRecordUnavailableException recordEx)
+        {
+            // The record could not be written, so the DELETE was never sent (#1652).
+            _logger.LogWarning(recordEx,
+                "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' NOT deleted: its ownership record could not be written.",
+                operationId, containerId);
+            return new BulkOperationItemError(containerId, OwnershipRecordUnavailableError);
         }
         catch (Exception ex)
         {
@@ -481,7 +503,7 @@ public sealed class BulkOperationService : BackgroundService
         Guid operationId,
         CancellationToken ct)
     {
-        if (!await IsContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct))
+        if (await ReadContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct) is null)
         {
             return new BulkOperationItemError(containerId, ContainerNotInScopeError);
         }
@@ -524,11 +546,45 @@ public sealed class BulkOperationService : BackgroundService
     }
 
     /// <summary>
-    /// True only when the container can be read AND its container type (as Graph reports it) is the config's AND
-    /// <paramref name="scope"/> reaches its business-unit binding. Every other outcome — not found, another type, an
-    /// unparseable type on either side, a binding outside the scope, a read fault — is false (fail closed, ADR-003).
+    /// The app-only client for ONE container (task 227d, owner D29): refused — 404 <c>spe_container_not_owned</c> —
+    /// unless this stamp owns it. A refusal is reported as <see cref="ContainerNotInScopeError"/>, the same item error as
+    /// a container outside the caller's scope, so a batch reveals nothing about other customers' containers. Any other
+    /// failure to get the client is that item's error; the batch continues.
     /// </summary>
-    private async Task<bool> IsContainerInScopeAsync(
+    internal async Task<(Microsoft.Graph.GraphServiceClient? Client, BulkOperationItemError? Error)> ClientForContainerAsync(
+        SpeAdminGraphService.ContainerTypeConfig config, string containerId, Guid operationId, CancellationToken ct)
+    {
+        try
+        {
+            return (await _graphService.GetClientForContainerAsync(config, containerId, ct), null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+        {
+            _logger.LogWarning(
+                "BulkOperationService: job {OperationId} — container '{ContainerId}' is not this stamp's; refused without a read.",
+                operationId, containerId);
+            return (null, new BulkOperationItemError(containerId, ContainerNotInScopeError));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "BulkOperationService: job {OperationId} — no Graph client for container '{ContainerId}'; not changed.",
+                operationId, containerId);
+            return (null, new BulkOperationItemError(containerId, ProblemDetailsHelper.Redact(ex.Message) ?? ex.GetType().Name));
+        }
+    }
+
+    /// <summary>
+    /// The container's binding read, only when the container can be read AND its container type (as Graph reports it)
+    /// is the config's AND <paramref name="scope"/> reaches its business-unit binding. Every other outcome — not found,
+    /// another type, an unparseable type on either side, a binding outside the scope, a read fault — is null (fail
+    /// closed, ADR-003).
+    /// </summary>
+    private async Task<SpeContainerBindingRead?> ReadContainerInScopeAsync(
         Microsoft.Graph.GraphServiceClient graphClient,
         SpeAdminGraphService.ContainerTypeConfig config,
         SpeAdminCallerScope scope,
@@ -557,7 +613,7 @@ public sealed class BulkOperationService : BackgroundService
                     refusal != SpeContainerRefusal.None ? SpeAdminTenantScope.RefusalReason(refusal) : "type_not_reported");
             }
 
-            return permitted;
+            return permitted ? read : null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -569,7 +625,7 @@ public sealed class BulkOperationService : BackgroundService
                 "BulkOperationService: job {OperationId} — could not read container '{ContainerId}' to verify its " +
                 "container type and business-unit binding; refused without a write.",
                 operationId, containerId);
-            return false;
+            return null;
         }
     }
 

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using FluentAssertions;
@@ -399,7 +400,7 @@ public class RevokeGrantOverlapAndOwnContainerTests
         public Mock<SpeContainerMembershipService> Build()
         {
             var mock = new Mock<SpeContainerMembershipService>(
-                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string containerId, string email, CancellationToken _) =>

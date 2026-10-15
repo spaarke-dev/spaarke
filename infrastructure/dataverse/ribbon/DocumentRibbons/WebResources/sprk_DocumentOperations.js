@@ -1,11 +1,16 @@
 /**
  * Spaarke Document Operations
- * Version: 1.28.0
+ * Version: 1.28.1
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.28.1:
+ * - SendToIndex sends the environment tenant (sprk_TenantId, the tenant the user signed in
+ *   against) instead of the MSAL account's tenantId, which is not the environment's tenant
+ *   for a B2B guest (#1453, task 123).
  *
  * Changes in 1.28.0:
  * - FR-18 (spaarke-modal-system): Removed showChoiceDialog's hand-rolled
@@ -81,7 +86,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.28.0",
+    version: "1.28.1",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -323,6 +328,11 @@ Spaarke.Document._initMsal = function() {
     Spaarke.Document._msalInitPromise = Spaarke.Document._loadMsalLibrary()
         .then(function() {
             var tenantId = Spaarke.Document.Config.msal.tenantId;
+            // Fail closed: a missing tenant would build https://login.microsoftonline.com/null (#1453).
+            if (!tenantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) {
+                Spaarke.Document._msalInitPromise = null;
+                throw new Error("sprk_TenantId environment variable is missing or not a tenant GUID");
+            }
 
             // Pre-build authority metadata to skip endpoint discovery
             // This avoids the openid-configuration fetch that fails in Dataverse iframe context
@@ -2073,15 +2083,14 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
             return;
         }
 
-        // Get tenant ID from MSAL account (Azure AD tenant ID)
-        // This must match the tenantId used by PCF controls for indexing and visualization
-        // Previously used Dataverse organizationId which caused tenantId mismatch
-        // NOTE: Using traditional syntax (not ?.) for Dataverse web resource compatibility
-        var tenantId = (Spaarke.Document._currentAccount && Spaarke.Document._currentAccount.tenantId) ||
-            Spaarke.Document.Config.msal.tenantId;
+        // Tenant ID = the environment's Azure AD tenant (sprk_TenantId) - the tenant the user signed in
+        // against, and the tid of the BFF token. This must match the tenantId used by PCF controls for
+        // indexing and visualization. Never the MSAL account's tenantId: that is not the environment's
+        // tenant for a B2B guest (#1453). Previously used Dataverse organizationId (tenantId mismatch).
+        var tenantId = Spaarke.Document.Config.msal.tenantId;
 
         if (!tenantId) {
-            console.error("[Spaarke.Document] SendToIndex - No tenantId available from MSAL account");
+            console.error("[Spaarke.Document] SendToIndex - sprk_TenantId environment variable is not set");
             await Xrm.Navigation.openAlertDialog({
                 text: "Unable to determine tenant ID. Please try the operation again.",
                 confirmButtonLabel: "OK"

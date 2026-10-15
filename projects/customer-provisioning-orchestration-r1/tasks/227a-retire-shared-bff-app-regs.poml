@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Retire the shared "Spaarke BFF - Trial 1 / Model 1" app-registration paths and their constants (plan G2)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G2)</phase>
+    <gate>startable now (T247 ✅)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>PowerShell + YAML + skill text; no .cs change. Failure mode: /provision-environment hard-stops on a constant (bffApiAppId) no Model 1 stamp has.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deletion of named, unread paths; every file is listed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/skills/provision-environment/SKILL.md (main-session-only)</parallel-reason>
+    <tags>provisioning, model1-dedicated, entra, spe, scripts</tags>
+    <deps>247</deps>
+  </metadata>
+
+  <prompt>Delete the shared-tier BFF app-registration code and constants; H3 creates each customer's BFF app (D-13).</prompt>
+
+  <role>SPAARKE platform developer (PowerShell, provisioning skill). Follow the provisioning constraints.</role>
+
+  <goal>
+    No script, constant, skill step or doc creates, names or requires a shared "Spaarke BFF - Trial 1" / "Spaarke BFF - Model 1"
+    app registration, and /provision-environment no longer hard-stops on `bffApiAppId`. The container-type owning-app path
+    (`-CreateOwningApp Model1`, FIC helpers, `-AcctClaimOnly`) and `containerTypeId` stay.
+  </goal>
+
+  <justification>
+    <existing>Register-EntraAppRegistrations.ps1 `-CreateBffApp` (Trial1|Model1|Model2), Get-SpeTopologyBffAppDisplayName, New-SpaarkeSpeBffApp; spaarke-constants.yaml bffApiAppId / bffProdBase / name_templates.bffAppServiceRg + bffAppServiceName; SKILL Step 0.5b/0.5c reads them.</existing>
+    <extension>Removal only; H3 (GraphAppRegistrationProvisioner, `spaarke-bff-api-{customerId}`) already owns the per-customer BFF app.</extension>
+    <cost-of-doing-nothing>SKILL Step 0.5c hard-stops every dispatch because bffApiAppId is null and no Model 1 stamp will ever have a shared one; an operator following the runbook creates an app registration nothing uses.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Fact sheet 2026-10-06 (read-only agent): the L2 control plane reads none of these constants (H7 takes BffAppRegId from H3).
+      No Pester test references -CreateBffApp / spaarke-constants. Readers: SKILL.md :345-348, :399-402, :482-485 (hard stop),
+      :536-560 (beta containerTypes/{id}/registrations check, "STALE until T227"), :1729-1730 (Model 2 consent URL, out of scope);
+      context-defaults.{dev,prod}.json (documentation only); scripts/README.md :330-340; prereqs.yaml PRQ-C-05 (Model 2 only).
+      Topology doc §3A rows 4-5 still list "Spaarke BFF — Trial 1" and name the per-customer app "Spaarke BFF — {Customer}"
+      (H3's real name: spaarke-bff-api-{customerId}).
+    </background>
+    <relevant-files>
+      <file>scripts/Register-EntraAppRegistrations.ps1 (:192, :213-285, :1244-1300, :1466-1644, :1809-1815)</file>
+      <file>scripts/provisioning-prereqs/spaarke-constants.yaml; scripts/provisioning-prereqs/context-defaults.{dev,prod}.json</file>
+      <file>scripts/README.md; .claude/skills/provision-environment/SKILL.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A; docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (G2, T227)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="D-12/D-13">Delete -CreateBffApp and its helpers entirely (no Model2 path kept — Model 2 is out of scope and H3 owns per-customer BFF apps). Trim -CreateOwningApp to Model1.</constraint>
+    <constraint source="keep">containerTypeId, -CreateOwningApp Model1, FIC helpers, -AcctClaimOnly stay working.</constraint>
+    <constraint source="skill">SKILL Step 0.5b/0.5c: drop the BFF app checks and {bffAppServiceId}/{bffAppId} substitution; the container-type registration check uses the v1.0 path GET /storage/fileStorage/containerTypeRegistrations/{containerTypeId}. Leave the Model 2 consent URL (Step 5a) untouched except to stop reading a removed constant.</constraint>
+    <constraint source="scope">No live Entra/Graph change.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Script: remove -CreateBffApp + helpers + dispatch; trim -CreateOwningApp ValidateSet; README lines.</step>
+    <step order="2">Constants + context-defaults: remove bffApiAppId, bffProdBase, bffAppServiceRg/bffAppServiceName (after confirming every reader is rewritten).</step>
+    <step order="3">Skill Step 0.5b/0.5c rewrite; topology doc §3A rows 4-5 + runbook; inventory.</step>
+    <step order="4">Verify: script parses (pwsh -Command { . script } / Get-Command), grep criterion; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git grep -n "CreateBffApp\|bffApiAppId\|bffProdBase\|bffAppServiceRg\|bffAppServiceName\|Spaarke BFF - Model 1\|Spaarke BFF - Trial 1"` outside projects/**, CHANGELOG and archive returns nothing.</criterion>
+    <criterion testable="true">Register-EntraAppRegistrations.ps1 parses; `-CreateOwningApp Trial1` is rejected by parameter validation; `-CreateOwningApp Model1` is accepted.</criterion>
+    <criterion testable="true">SKILL Step 0.5c contains no hard stop on a BFF app id.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (STANDARD).
+    - Register-EntraAppRegistrations.ps1: -CreateBffApp, -CustomerName, Get-SpeTopologyBffAppDisplayName and
+      New-SpaarkeSpeBffApp deleted; -CreateOwningApp and the owning-app helpers accept Model1 only (Model 2
+      multi-tenant branches removed). Parses; -CreateOwningApp Trial1 is rejected by parameter validation.
+    - spaarke-constants.yaml: bffApiAppId, bffProdBase, name_templates.bffAppServiceRg/bffAppServiceName removed;
+      trial-era comments replaced. context-defaults.{dev,prod}.json: bffAppServiceId / bffAppId removed.
+    - SKILL: Step 0.5b derivations + substitutions; Step 0.5c BFF checks (4)(5) + null hard stop removed;
+      Step 5a reads no removed constant; stale PRQ-T-07 sample line removed.
+    - Deviation from the constraint "registration check uses the v1.0 GET": not added. The operator's Azure CLI
+      token is not consented for SPE registration reads (the container-type GET already returns 403, observed
+      T248), and H0's SpeOwnerCredential check GETs the v1.0 registration as the owning app. An operator check
+      that always 403s is not needed (owner rule: needed -> build, else remove).
+    - PRQ-C-05 (Model 2 only) retired with the existing status: retired convention (manifest v7): it read the
+      shared bffApiAppId; the customer's BFF app id only exists once H3 runs. validate.ps1 OK (35 prereqs).
+    - Docs: topology §3A (row 4 removed; per-customer row named spaarke-bff-api-{customerId}, H3/H8),
+      runbook Steps 7 + 9, inventory (identity rows, Retired table), PROVISIONING-PREREQUISITES (v7), scripts/README.
+    - Remaining grep hits are other identifiers: customer.bicep `bffAppServiceName` (the stamp's App Service),
+      client JS `bffApiAppId` cache key for env var sprk_BffApiAppId, H7 comments, retirement notes,
+      runs/pre-dispatch-readiness-gap-report.md (historical run report).
+    - validate-recipe-authoring.ps1 FAILs on other prereqs are pre-existing and not run in CI.
+  </notes>
+</task>

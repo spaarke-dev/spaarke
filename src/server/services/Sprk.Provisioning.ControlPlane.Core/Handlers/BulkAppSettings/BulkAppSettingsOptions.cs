@@ -16,31 +16,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 /// </summary>
 public sealed class BulkAppSettingsOptions
 {
-    /// <summary>
-    /// Path to the pwsh executable H4b invokes to run the generated Configure
-    /// script. Defaults to <c>pwsh</c> (resolved via PATH). On Linux App
-    /// Service the operator install path is <c>/usr/bin/pwsh</c>. Parity with
-    /// <c>KvSecretsPopulationOptions.AzCliExecutable</c>.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Absolute or work-dir-relative path to the generated Configure script.
-    /// Defaults to the canonical path under the repo (script is embedded /
-    /// deployed alongside the L2 Worker publish output — the operator adjusts
-    /// via app-setting when the deploy layout differs). Overridable per-env.
-    /// </summary>
-    public string ConfigureScriptPath { get; set; } =
-        "scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1";
-
-    /// <summary>
-    /// Hard upper bound for the Configure script invocation. Batched
-    /// <c>az webapp config appsettings set --settings @settings</c> per slot,
-    /// then Azure schedules a restart — the SET itself is fast (~10-30s per
-    /// slot) but 5 min covers slot-swap tail latency + throttling. Failure
-    /// on timeout = Resumable (script writes are transactional per slot).
-    /// </summary>
-    public TimeSpan ScriptTimeout { get; set; } = TimeSpan.FromMinutes(5);
+    // Task 253 (G38): PwshExecutable, ConfigureScriptPath and ScriptTimeout were DELETED with the pwsh run of the
+    // generated Configure script — H4b writes the settings through the ARM SDK (IAppServiceSettingsWriter); the Worker
+    // host has no pwsh and no scripts/ folder.
 
     /// <summary>
     /// URL template for the /healthz probe. <c>{appServiceName}</c> is

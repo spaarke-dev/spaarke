@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{195ab203-233e-4285-a34d-4acb5c0869ef}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_projectnumber" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_projectid">
+          <cell name="sprk_projectnumber" width="150" />
+          <cell name="sprk_projectname" width="300" />
+          <cell name="sprk_projecttype_ref" width="200" />
+          <cell name="sprk_practicearea" width="200" />
+          <cell name="ownerid" width="200" />
+          <cell name="createdon" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_project">
+          <attribute name="sprk_projectid" />
+          <attribute name="sprk_projectnumber" />
+          <attribute name="createdon" />
+          <order attribute="sprk_projectnumber" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_projectname" />
+          <attribute name="ownerid" />
+          <attribute name="sprk_practicearea" />
+          <attribute name="sprk_projecttype_ref" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Projects" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

@@ -521,6 +521,8 @@ public sealed class A42FicReconciliationTests
             Profile = "spaarke-hosted-model2",
         };
         run.Parameters.NonSecret[H3EntraAppRegHandler.TenantIdParameterKey] = SpaarkeTenantId;
+        // T240a: H3 derives the code pages' SPA redirect from the intake environment URL.
+        run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = $"https://spaarke-{CustomerId}.crm.dynamics.com/";
         // Task 245a (G25): the customer vault name is H2a's output, not a run parameter.
         run.InterStepState.KeyVaultName = KeyVaultName;
         run.InterStepState.MiObjectId = UamiPrincipalId;
@@ -552,7 +554,7 @@ public sealed class A42FicReconciliationTests
     {
         var options = Options.Create(new EntraAppRegOptions
         {
-            ExpectedDelegatedScopeCount = 5,
+            ExpectedDelegatedScopeCount = EntraAppRegPermissionCatalog.All.Count,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options, NullLogger<H3EntraAppRegHandler>.Instance);
@@ -665,10 +667,10 @@ public sealed class A42FicReconciliationTests
         private FakeVerifier(AdminConsentVerificationResult result) => _result = result;
 
         public static FakeVerifier Verified()
-            => new(new AdminConsentVerificationResult.Verified(5, 5, null));
+            => new(new AdminConsentVerificationResult.Verified(EntraAppRegPermissionCatalog.All.Count, EntraAppRegPermissionCatalog.All.Count, null));
 
         public static FakeVerifier Pending()
-            => new(new AdminConsentVerificationResult.Pending(0, 5, "consent not yet granted", null));
+            => new(new AdminConsentVerificationResult.Pending(0, EntraAppRegPermissionCatalog.All.Count, "consent not yet granted", null));
 
         public Task<AdminConsentVerificationResult> VerifyAsync(
             string bffAppRegId, string tenantId, int expectedDelegatedScopeCount, CancellationToken ct)

@@ -1,0 +1,29 @@
+<form>
+  <tabs>
+    <tab name="general" id="{33333333-0000-0000-0000-000000000001}" IsUserDefined="0">
+      <labels><label description="General" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section name="access" id="{33333333-0000-0000-0000-000000000002}" IsUserDefined="0" columns="1">
+              <labels><label description="Access" languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{33333333-0000-0000-0000-000000000003}">
+                    <labels><label description="Access Permission" languagecode="1033" /></labels>
+                    <control id="sprk_accesspermission" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_accesspermission" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <events>
+    <event name="onload" application="false" active="false" />
+    <event name="onsave" application="false" active="false" />
+  </events>
+  <formLibraries />
+</form>

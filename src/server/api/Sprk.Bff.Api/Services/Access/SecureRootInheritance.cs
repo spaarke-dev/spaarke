@@ -187,6 +187,61 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
 
     /// <summary>At least one record it is filed under is (readably) secure — the record is secure whatever the rest say.</summary>
     public bool HasSecureParent => SecureParents.Count > 0;
+
+    /// <summary>
+    /// #1616: the answer is unknown (<see cref="Unverifiable"/> is set) ONLY because a work assignment's pair names a matter or
+    /// project that none of its typed lookups repeats (<see cref="SecureRootInheritance.PairNamesAParentOnItsOwn"/>) —
+    /// every record it IS filed under was read. That pair is text any user with Write can set, so it never files the record
+    /// anywhere: it still holds everything that would LOOSEN the record or give it a parent's sharees (it may be a stale
+    /// pair left beside a typed re-file, or a bypass), but it is not a record the creator's No Access walls are asked about.
+    /// </summary>
+    public bool UnknownOnlyThroughAnUnrepeatedPair { get; init; }
+
+    /// <summary>
+    /// #1616: whether the creator's No Access walls can be decided over <see cref="SecureParents"/>: every record it is filed
+    /// under was read, or the only gap is an unrepeated pair while a typed parent is readably secure (the record is secured
+    /// under that parent, and the pair names nothing it is filed under).
+    /// </summary>
+    public bool WallsDecidable => IsKnown || (UnknownOnlyThroughAnUnrepeatedPair && HasSecureParent);
+
+    /// <summary>
+    /// Task 174 (owner round 84): the most restrictive <c>sprk_accesspermission</c> among the records the climb read above
+    /// this one (Restricted over Limited), and the record that carries it — <c>null</c> when none of them is Limited or
+    /// Restricted. Read in the SAME parent read as the Secure flag (no extra query). Only as deep as the climb went: the
+    /// sharee rule's one-level climb reports the direct parents' value, the walls' climb every ancestor's.
+    /// </summary>
+    public FilingPermission? StrictestPermission { get; init; }
+
+    /// <summary>
+    /// Task 174 (verifier F1-d): the records this one is filed under DIRECTLY, each with the effective Secure flag and
+    /// Access Permission rank that arrive through it (its own values, folded with everything above it that the climb read).
+    /// Display names only these: a direct parent is already visible on the record's own lookup, a grandparent is not.
+    /// </summary>
+    public IReadOnlyList<FilingParentState> DirectParents { get; init; } = Array.Empty<FilingParentState>();
+}
+
+/// <summary>Task 174: one DIRECT filing parent and what arrives through it — <see cref="EffectiveSecure"/> (it or anything
+/// above it is secure) and <see cref="EffectiveRank"/> (<see cref="FilingPermission.Rank"/> of the strictest Access
+/// Permission on it or above it).</summary>
+public sealed record FilingParentState(SecureFilingParent Parent, bool EffectiveSecure, int EffectiveRank);
+
+/// <summary>
+/// Task 174 (owner round 84): an Access Permission a record inherits from a record it is filed under — the option value
+/// (<c>ExternalParticipationService.AccessPermissionLimited</c> or <c>AccessPermissionRestricted</c>) and that record.
+/// </summary>
+public sealed record FilingPermission(int Value, SecureFilingParent From)
+{
+    /// <summary>Restricted (2) over Limited (1); any other value is Standard (0), as the flag read maps it.</summary>
+    internal static int Rank(int? value) => value switch
+    {
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.AccessPermissionRestricted => 2,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.AccessPermissionLimited => 1,
+        _ => 0,
+    };
+
+    /// <summary>The stricter of two (the first on a tie); <c>null</c> stands for Standard.</summary>
+    internal static FilingPermission? Stricter(FilingPermission? a, FilingPermission? b) =>
+        b is null || (a is not null && Rank(a.Value) >= Rank(b.Value)) ? a : b;
 }
 
 /// <summary>
@@ -255,7 +310,10 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// <para><b>"Filed under"</b> (the POML's goal, task 155's sweep): a work assignment's typed <c>sprk_regardingmatter</c> /
 /// <c>sprk_regardingproject</c>, or the polymorphic pair (<c>sprk_regardingrecordid</c> + <c>sprk_regardingrecordtype</c>)
 /// naming a matter or project; a project's pair (a project has no typed regarding lookup). Secure-if-ANY: one secure parent is
-/// enough. A pair naming any other type (an invoice, a contact, a work assignment) is not this rule.</para>
+/// enough. A pair naming any other type (an invoice, a contact, a work assignment) is not this rule. #1630 (owner Option A,
+/// 2026-10-11): a work assignment's typed <c>sprk_regardinginvoice</c> / <c>sprk_regardingevent</c> files it under the
+/// matters and projects THAT invoice or event belongs to (its own typed root columns, <see cref="IntermediateFilingColumns"/>
+/// — the core-ancestor stamp topology, read live); an intermediate that cannot be read is unverifiable.</para>
 /// <para><b>Fail closed (ADR-003).</b> A pair that cannot be resolved (an id that is not a GUID, no type, an unreadable type)
 /// or a parent whose flag cannot be read — or reads EMPTY (owner round 17 item 3) — is never "not secure". When no OTHER
 /// parent is readably secure the record is <see cref="SecureRootInheritOutcome.Unverifiable"/>: nothing is written, a BFF
@@ -264,11 +322,14 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// unreadable parent's No Access list (owner round 31 item 1), so provisioning, a create and a re-file all refuse
 /// (<c>sdap.provision.creator_no_access_unverifiable</c>) until it can be read, and the job reports it. A parent that does
 /// not exist is not a secure parent (it confers nothing).</para>
-/// <para><b>Never auto-unsecure</b> (owner round 6 item 4): nothing here ever takes a record OUT of isolation. A record re-filed
-/// away from its secure parent, or whose parent is unsecured, stays secure; unsecuring it is the unsecure endpoint's act
-/// (F3). Its ACCESS is another matter (main-session round 39 item 1): unsecuring a parent ends the unmodified shares it passed
-/// on (<see cref="EndWhatAParentPassedOnAsync"/>, called by the unsecure after it revokes the parent's own shares) — the filed
-/// record is still secure, and a sharee's access to it came only from the parent share just revoked.</para>
+/// <para><b>Both ways — task 175, owner round 84</b> ("if parent changes, then child changes"; REPLACES round 6 item 4's "never
+/// auto-unsecure" and task 158's constraint of that name): a record re-filed away from its secure parent, or whose parent is
+/// unsecured, FOLLOWS it out of isolation when no other ancestor is secure — through the unsecure endpoint's own steps
+/// (<see cref="FollowParentsAsync"/>, SecureRootInheritance.Cascade.cs), from the parent's unsecure, the re-file writers
+/// and the job — and its Access Permission follows too. A record WITH a parent cannot be un-secured (or its Access
+/// Permission set) on its own (<see cref="AccessFollowsParent"/>); F3 applies only to a parentless record. Unsecuring a
+/// parent still ends the unmodified shares it passed on first (<see cref="EndWhatAParentPassedOnAsync"/>, main-session
+/// round 39 item 1), before its filed records follow it.</para>
 /// <para><b>Triggers.</b> (1) create: the BFF writers call <see cref="PlanCreateAsync"/> before the write and create the
 /// row INTO isolation (owner round 31 item 2), then <see cref="CompleteIsolatedCreateAsync"/>; (2) re-file: they call
 /// <see cref="CheckRefileAsync"/> before the write and <see cref="SecureAfterWriteAsync"/> after it; (3) a parent becoming
@@ -280,7 +341,7 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// <c>sprk_assignedaccess</c> ledger (owner round 30) — and a parent's UNSECURE ends them all
 /// (<see cref="EndWhatAParentPassedOnAsync"/>, round 39 item 1).</para>
 /// </remarks>
-public sealed class SecureRootInheritance
+public sealed partial class SecureRootInheritance
 {
     internal const string WorkAssignment = "sprk_workassignment";
     internal const string Project = "sprk_project";
@@ -291,6 +352,7 @@ public sealed class SecureRootInheritance
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
     private const string IsSecureColumn = "sprk_issecure";
+    private const string AccessPermissionColumn = "sprk_accesspermission"; // task 174: read with the flag (round 84)
     private const string OwningTeamColumn = "owningteam";
     private const string ContainerColumn = "sprk_containerid";
 
@@ -342,6 +404,95 @@ public sealed class SecureRootInheritance
             [Project] = Array.Empty<(string, string)>(),
         };
 
+    /// <summary>
+    /// #1630 (owner decision 2026-10-11, Option A): the typed lookups that file a work assignment under an INTERMEDIATE — an
+    /// invoice or an event, the two the Create Work Assignment wizard offers besides a matter or project. Such a work
+    /// assignment is filed under the matters and projects that intermediate belongs to
+    /// (<see cref="IntermediateParentColumns"/>), exactly as if it were filed under them directly: secured, owned by the
+    /// secure team, given their sharees, walled by their No Access lists, and listed under them in the child direction.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Reuse, not a new parent model.</b> What an intermediate belongs to is
+    /// <see cref="CoreAncestorResolver.IntermediateRootColumns"/> — the root columns every child filed under that intermediate
+    /// is stamped from (task 156), its matter and project columns only (a matter or project is the only parent this rule
+    /// knows, <see cref="IsParent"/>). Both columns are typed lookups Dataverse AppendTo-checks for whoever sets them; an
+    /// intermediate's polymorphic pair is never read here (#1616 / #1627: text any user with Write can set), and a work
+    /// assignment's pair naming an invoice or event still counts only by repeating the typed lookup (#1628).</para>
+    /// <para><b>Fail closed.</b> An intermediate that cannot be read is unverifiable, never "under nothing". One that does
+    /// not exist confers nothing (as a parent that does not exist). An intermediate whose root is a work assignment or a
+    /// service request names no matter or project, so it adds no parent — the shape stays as it was (filed issue).</para>
+    /// <para>The same two columns are <c>RecordContainerResolver.ChildAncestorLinks</c>' intermediate links of a work
+    /// assignment (followed there through the intermediate for storage); <c>sprk_regardingcommunication</c> is not in the
+    /// owner's decision and stays as it was (held by the storage resolver, not a filing here).</para>
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<(string Column, string Intermediate)>> IntermediateFilingColumns =
+        new Dictionary<string, IReadOnlyList<(string, string)>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [WorkAssignment] = new[] { ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingevent", "sprk_event") },
+            [Project] = Array.Empty<(string, string)>(),
+        };
+
+    /// <summary>
+    /// #1630: the columns ON an intermediate (<see cref="IntermediateFilingColumns"/>) that name the matters and projects it
+    /// belongs to — <see cref="CoreAncestorResolver.IntermediateRootColumns"/> (the stamp topology), its matter and project
+    /// columns only. Empty for a type with none.
+    /// </summary>
+    internal static IReadOnlyList<(string Column, string ParentTable)> IntermediateParentColumns(string intermediate) =>
+        CoreAncestorResolver.IntermediateRootColumns.TryGetValue(intermediate, out var roots)
+            ? roots.Where(r => IsParent(r.RootEntity)).Select(r => (r.Column, r.RootEntity.Trim().ToLowerInvariant())).ToArray()
+            : Array.Empty<(string, string)>();
+
+    /// <summary>#1630: every typed lookup that decides what a row of <paramref name="table"/> is filed under — its parent
+    /// lookups (<see cref="TypedFilingColumns"/>) and its intermediate lookups (<see cref="IntermediateFilingColumns"/>) —
+    /// with the table each names.</summary>
+    internal static IReadOnlyList<(string Column, string Table)> TypedLookupsOf(string table) =>
+        (TypedFilingColumns.TryGetValue(table, out var typed) ? typed : Array.Empty<(string, string)>())
+            .Concat(IntermediateFilingColumns.TryGetValue(table, out var intermediates) ? intermediates : Array.Empty<(string, string)>())
+            .ToArray();
+
+    /// <summary>
+    /// #1616: the inheriting tables whose ADR-024 pair (<see cref="PairIdColumn"/> + <see cref="PairTypeColumn"/>) is
+    /// BFF-MANAGED — field-secured, so ONLY the BFF application user can create or update it (after asking AppendTo on the
+    /// record it names AS THE CALLER, <c>OwnedChildWrite</c>), while every user still reads it (task 133's two profiles;
+    /// <c>scripts/Set-RegardingPairFieldSecurity.ps1</c>; the solution's <c>FieldSecurityProfiles.xml</c>). On such a table the
+    /// pair names a parent ON ITS OWN: <c>sprk_project</c> has no typed filing lookup, so the pair is its only filing.
+    /// </summary>
+    /// <remarks>
+    /// <para>On every other inheriting table (<c>sprk_workassignment</c>) the pair is plain text that any user with Write
+    /// can set through the Web API, so it names a parent ONLY by repeating one of the typed filing lookups
+    /// (<see cref="TypedFilingColumns"/>) — which Dataverse itself AppendTo-checks for whoever sets them. A pair that names
+    /// a matter or project no typed lookup names is undetermined, never a filing (<see cref="PairNamesAParentOnItsOwn"/>):
+    /// it holds the sharee mirror and every loosening, and is never listed as Confirmed in the child direction; beside a
+    /// typed parent that is readably secure it does not hold the securing or the creator's walls
+    /// (<see cref="SecureParentsAnswer.WallsDecidable"/>). The container resolver refuses such a pair naming any root
+    /// (a work assignment too). Its writers send the typed lookup and the same pair (the Create Work Assignment wizard —
+    /// a matter, project, invoice or event — and the BFF).</para>
+    /// <para>Why not field security on the work assignment's pair too: the Create Work Assignment wizard and the Assign
+    /// Work follow-on create the row through <c>Xrm.WebApi</c> AS THE USER with the pair in the payload, which a secured
+    /// column would refuse.</para>
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> BffManagedPairTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Project };
+
+    /// <summary>
+    /// #1616: whether a row of <paramref name="table"/> is filed under the record its ADR-024 pair names when no typed filing
+    /// lookup repeats it — only where the pair is BFF-managed (<see cref="BffManagedPairTables"/>).
+    /// </summary>
+    internal static bool PairNamesAParentOnItsOwn(string? table) =>
+        table is not null && BffManagedPairTables.Contains(table.Trim());
+
+    /// <summary>
+    /// #1616: why a <paramref name="table"/> row's pair naming a <paramref name="pairTable"/> that none of its typed filing
+    /// lookups names files it under nothing — the reason both the readers and the BFF writers give.
+    /// </summary>
+    internal static string PairWithoutTypedLookupReason(string table, string pairTable)
+    {
+        var columns = TypedFilingColumns.TryGetValue(table, out var typed) ? typed.Select(t => t.Column) : Enumerable.Empty<string>();
+        return $"its {PairIdColumn} names a {pairTable} that none of its filing lookups ({string.Join(", ", columns)}) names; " +
+               $"a {(string.Equals(table, Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment")} is " +
+               "filed under a matter or project only through those lookups (the pair repeats one)";
+    }
+
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 
     private readonly IGenericEntityService _dataverse;
@@ -366,6 +517,7 @@ public sealed class SecureRootInheritance
     /// (3)), so there is no cycle.</param>
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? _fileRelocator;
+    private readonly IRecordOwnershipResolver _ownership;
 
     public SecureRootInheritance(
         IGenericEntityService dataverse,
@@ -383,8 +535,13 @@ public sealed class SecureRootInheritance
         // and the Make Secure file relocation (round 26 item 3). Optional so this service's test compositions keep
         // compiling; the host registers both (IMembershipCacheInvalidator unconditionally, with its Null-Object).
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null)
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null,
+        // Task 175: the ONE ownership rule, for the owner a cascaded un-secure gives a record (its parents' business unit's
+        // team). Optional for the same reason; without it the rule is constructed over this class's own reader.
+        IRecordOwnershipResolver? ownership = null)
     {
+        _ownership = ownership ?? new RecordOwnershipResolver(dataverse, configuration,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
         _accessCacheInvalidator = accessCacheInvalidator ?? new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance);
         _fileRelocator = fileRelocator;
@@ -414,8 +571,7 @@ public sealed class SecureRootInheritance
     /// <summary>Every column that decides what a row of <paramref name="table"/> is filed under.</summary>
     internal static IReadOnlySet<string> FilingColumnsOf(string table) =>
         new HashSet<string>(
-            (TypedFilingColumns.TryGetValue(table, out var typed) ? typed.Select(t => t.Column) : Enumerable.Empty<string>())
-                .Append(PairIdColumn).Append(PairTypeColumn),
+            TypedLookupsOf(table).Select(t => t.Column).Append(PairIdColumn).Append(PairTypeColumn),
             StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The wire token for an inheriting table.</summary>
@@ -425,6 +581,11 @@ public sealed class SecureRootInheritance
         : "workassignment";
 
     // ── (1) + (2): create and re-file ────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Task 175 fix round 2 (K3): the refusal text for a generic write of <c>sprk_issecure</c>.</summary>
+    internal const string SecureFlagRefusalText =
+        "sprk_issecure is set only by Make Secure and Remove Secure (and, for a record filed under a secure record, by Spaarke " +
+        "following its parent), so it was not written";
 
     /// <summary>
     /// BEFORE a BFF create or re-file of a work assignment or project: when the write sets or clears what the row is filed
@@ -439,17 +600,35 @@ public sealed class SecureRootInheritance
     /// <param name="writes">The columns the write sets, by any spelling a BFF writer uses: the logical name, or the
     /// navigation property with <c>@odata.bind</c>; values as <see cref="EntityReference"/>, <see cref="Guid"/>, a bind path
     /// (<c>/sprk_matters(…)</c>), a GUID string, or <c>null</c> for a clear.</param>
+    /// <param name="callerMayFileUnder">#1630: the writer's own AS-THE-CALLER check on the SECURE matters and projects the
+    /// write files the row under only THROUGH an invoice or event it sets (<see cref="IntermediateFilingColumns"/>) — records
+    /// no lookup of the write names, so the writer's own lookup check never asked about them (create parity:
+    /// <see cref="PlanCreateAsync"/> asks the same of every secure parent). Asked once they are known and before anything else
+    /// about them is said; its refusal is returned. <c>null</c>: the writer asks nothing more.</param>
     public async Task<RecordOwnerResolution?> CheckRefileAsync(
-        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct)
+        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct,
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!Inherits(table))
             return null;
 
+        var materialized = writes as IReadOnlyCollection<KeyValuePair<string, object?>> ?? writes.ToList();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a caller never writes it.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke (it records what is set on the record and what is inherited), so it was not written");
+
+        // Task 175 fix round 2 (K3): the secure flag is set only by the transitions (F3 and their isolation steps) and the
+        // cascade — never by a generic writer, whatever the value.
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText);
+
         List<FilingWrite> filingWrites;
         try
         {
-            filingWrites = FilingWritesIn(table, writes);
+            filingWrites = FilingWritesIn(table, materialized);
         }
         catch (FilingValueException ex)
         {
@@ -458,7 +637,13 @@ public sealed class SecureRootInheritance
             return Refused(table, ex.Message);
         }
 
-        if (filingWrites.Count == 0)
+        // Task 175 (owner round 84): an UPDATE that sets sprk_accesspermission or sprk_issecure on a record that will have a
+        // parent after the write is refused — "if a child has a parent then the access cannot be changed manually". A create
+        // is not refused: the cascade sets its values from its parents (the job, ≤ 5 minutes; enforcement already follows the
+        // parent, task 174).
+        var setsLocked = recordId is not null
+                         && materialized.Any(w => AccessFollowsParent.LockedColumns.Contains(NormalizeColumn(w.Key)));
+        if (filingWrites.Count == 0 && !setsLocked)
             return null;
 
         FilingFacts after;
@@ -473,7 +658,33 @@ public sealed class SecureRootInheritance
             return Refused(table, "the record could not be read, so what it would be filed under cannot be checked");
         }
 
-        var answer = await DecideParentsAsync(after, ct).ConfigureAwait(false);
+        var intermediates = new IntermediateReads();
+        var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct, intermediates)
+            .ConfigureAwait(false);
+
+        // #1630: AS THE CALLER, on the secure records this write files the row under only through an invoice or event it sets —
+        // before any refusal below says anything about them (a creator wall, a floor, an unreadable flag).
+        if (callerMayFileUnder is not null && answer.HasSecureParent)
+        {
+            var throughWrite = SecureParentsThroughWrittenIntermediates(after, filingWrites, intermediates, answer);
+            if (throughWrite.Count > 0
+                && await callerMayFileUnder(throughWrite, ct).ConfigureAwait(false) is { } callerRefusal)
+                return callerRefusal;
+        }
+
+        if (setsLocked)
+        {
+            if (!answer.IsKnown)
+                return Refused(table, answer.Unverifiable!); // what it is filed under is unknown: never "no floor" on a guess
+
+            if (filedUnder.Count > 0
+                && await FloorRefusalAsync(table, recordId!.Value, materialized, filingWrites.Count == 0, answer, filedUnder, ct)
+                    .ConfigureAwait(false) is { } belowFloor)
+                return belowFloor;
+
+            if (filingWrites.Count == 0)
+                return null; // at or above the floor (or no parent): the record's own value
+        }
 
         // Secure-if-any: a readable secure parent means the record is secured after the write whatever another parent says
         // (securing is the closed direction). Only when no parent is readably secure does an unreadable one refuse.
@@ -497,6 +708,144 @@ public sealed class SecureRootInheritance
     }
 
     /// <summary>
+    /// #1630: the secure matters and projects in <paramref name="answer"/> that the row reaches ONLY through an invoice or event
+    /// <paramref name="writes"/> sets — not through a typed parent lookup it has after the write (<paramref name="after"/>),
+    /// which the writer's lookup check covers or which it was filed under already. Read from the decision's own reads.
+    /// </summary>
+    private static IReadOnlyList<SecureFilingParent> SecureParentsThroughWrittenIntermediates(
+        FilingFacts after, IReadOnlyList<FilingWrite> writes, IntermediateReads intermediates, SecureParentsAnswer answer)
+    {
+        if (!IntermediateFilingColumns.TryGetValue(after.Table, out var intermediateColumns) || intermediateColumns.Count == 0)
+            return Array.Empty<SecureFilingParent>();
+
+        var direct = TypedFilingColumns[after.Table]
+            .Select(c => (Table: c.ParentTable, Id: after.Typed.TryGetValue(c.Column, out var id) ? id : null))
+            .Where(c => c.Id is { } i && i != Guid.Empty)
+            .Select(c => (c.Table, c.Id!.Value))
+            .ToHashSet();
+        var reached = new HashSet<(string Table, Guid Id)>();
+        foreach (var write in writes)
+        {
+            var intermediate = intermediateColumns.FirstOrDefault(
+                c => string.Equals(c.Column, write.Column, StringComparison.OrdinalIgnoreCase));
+            if (intermediate.Column is null || write.Id is not { } id || id == Guid.Empty)
+                continue;
+            if (intermediates.TryGetValue((intermediate.Intermediate, id), out var read) && read.Parents is { } parents)
+                reached.UnionWith(parents.Where(p => !direct.Contains(p)));
+        }
+
+        return answer.SecureParents
+            .Where(p => reached.Contains((p.Table.Trim().ToLowerInvariant(), p.Id)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Task 175 (owner round 87): the refusal of a BFF write that would make a filed work assignment or project LOOSER than the
+    /// floor its parents set — an Access Permission below theirs, or its Secure flag cleared while a parent is secure — or
+    /// <c>null</c>. Tightening (or an equal value) is never refused. The floor: the whole chain (the 174 walk) when the write
+    /// does not change the filing; the new parents' own values when it does (the job raises anything their own parents
+    /// raise). A value that cannot be read is refused (never "looser is fine" on a guess).
+    /// </summary>
+    private async Task<RecordOwnerResolution?> FloorRefusalAsync(
+        string table, Guid recordId, IReadOnlyCollection<KeyValuePair<string, object?>> writes, bool filingUnchanged,
+        SecureParentsAnswer direct, IReadOnlyList<FiledParent> filedUnder, CancellationToken ct)
+    {
+        bool floorSecure;
+        int floorRank;
+        if (filingUnchanged)
+        {
+            var chain = await ReadSecureParentsAsync(_dataverse, _logger, table, recordId, ct, _recordTypes, MaxFilingDepth)
+                .ConfigureAwait(false);
+            if (!chain.IsKnown)
+                return Refused(table, chain.Unverifiable!);
+            (floorSecure, floorRank) = FloorOf(chain);
+        }
+        else
+        {
+            floorSecure = direct.HasSecureParent || filedUnder.Any(p => p.Flag == true);
+            floorRank = filedUnder.Select(p => Math.Max(0, RankOf(p.Permission))).DefaultIfEmpty(0).Max();
+        }
+
+        var noun = table.Trim().Equals(Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment";
+        var parents = AccessFollowsParent.Describe(filedUnder.Select(p => new SecureFilingParent(p.Table, p.Id, p.Name)).ToList());
+        foreach (var (key, written) in writes)
+        {
+            var column = NormalizeColumn(key);
+            if (string.Equals(column, AccessPermissionColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadOption(written, out var option) || RankOf(option) < 0)
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the Access Permission written to this {noun} could not be read, so it was not written");
+                if (RankOf(option) < floorRank)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, so its Access Permission cannot be lower than " +
+                        $"{(floorRank == 2 ? "Restricted" : "Limited")} (owner round 87); it was not written");
+                }
+            }
+            else if (string.Equals(column, IsSecureColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadBool(written, out var secure))
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the secure flag written to this {noun} could not be read, so it was not written");
+                if (secure == false && floorSecure)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, which is secure, so it cannot be made not secure (owner round 87); it " +
+                        "was not written");
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>An option value as a BFF writer spells it: an OptionSetValue, a number, a numeric string or JSON; null is Standard.</summary>
+    private static bool TryReadOption(object? value, out int? option)
+    {
+        option = null;
+        switch (value)
+        {
+            case null or DBNull:
+                return true;
+            case OptionSetValue o:
+                option = o.Value;
+                return true;
+            case int i:
+                option = i;
+                return true;
+            case long l when l is >= int.MinValue and <= int.MaxValue:
+                option = (int)l;
+                return true;
+            case string text when int.TryParse(text, out var parsed):
+                option = parsed;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Null:
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Number && json.TryGetInt32(out var number):
+                option = number;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(json.GetString(), out var fromText):
+                option = fromText;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>A Yes/No value as a BFF writer spells it; null is not a value (refused).</summary>
+    private static bool TryReadBool(object? value, out bool? flag)
+    {
+        flag = value switch
+        {
+            bool b => b,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.True } => true,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.False } => false,
+            _ => null,
+        };
+        return flag is not null;
+    }
+
+    /// <summary>
     /// Task 158 r1 (owner round 31 item 1): the re-file refusal when the record's recorded creator (the person an inherited
     /// provisioning secures it for) is walled off the record or any secure parent it would be filed under, or when that
     /// cannot be decided — a parent that cannot be read, a creator that cannot be named, a guard that cannot answer.
@@ -507,7 +856,7 @@ public sealed class SecureRootInheritance
     {
         var logical = table.Trim().ToLowerInvariant();
         var noun = logical == Project ? "project" : "work assignment";
-        if (!answer.IsKnown)
+        if (!answer.WallsDecidable)
         {
             return Refusal(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable,
                 $"whether the person who created this {noun} may access every secure record it would be filed under could " +
@@ -575,13 +924,33 @@ public sealed class SecureRootInheritance
 
         try
         {
-            var result = await SecureIfFiledUnderSecureAsync(table, recordId, traceId ?? Guid.NewGuid().ToString("N"), ct)
-                .ConfigureAwait(false);
+            var trace = traceId ?? Guid.NewGuid().ToString("N");
+            var result = await SecureIfFiledUnderSecureAsync(table, recordId, trace, ct).ConfigureAwait(false);
             if (!result.IsComplete)
             {
                 _logger.LogError(
                     "[SECURE-INHERIT] {Table} {RecordId} was written but is not secured yet ({Outcome}, {Code}: {Detail}); the " +
                     "secure-root inheritance job retries it.", table, recordId, result.Outcome, result.ReasonCode, result.Detail);
+            }
+
+            // Task 175 (owner round 87, goal 2): a re-file recomputes its stored values against the NEW floor — and never
+            // loosens: what the record held beyond the new parents' floor becomes its own (its access record says it was
+            // re-filed); it can only be raised to the new floor. A record left with no parent keeps its values (and becomes
+            // editable). Never throws; what does not complete is left at the more restrictive state for the job.
+            if (result.Outcome is not (SecureRootInheritOutcome.NotFound or SecureRootInheritOutcome.Unverifiable))
+            {
+                var follow = await FollowParentsAsync(table, recordId, trace, ct).ConfigureAwait(false);
+                if (!follow.IsComplete)
+                {
+                    _logger.LogWarning(
+                        "[FOLLOW-PARENT] {Table} {RecordId} was re-filed but is not in step with its parents yet ({Outcome}, {Code}: " +
+                        "{Detail}); the secure-root inheritance job completes it.", table, recordId, follow.Outcome, follow.ReasonCode,
+                        follow.Detail);
+                }
+
+                // A project that changed carries the change down to what is filed under it (bounded; the job does the rest).
+                if (IsParent(table) && follow.WroteAnything)
+                    await CascadeBelowAsync(table, recordId, trace, ct).ConfigureAwait(false);
             }
 
             return result;
@@ -627,6 +996,14 @@ public sealed class SecureRootInheritance
         var logical = table.Trim().ToLowerInvariant();
         var noun = logical == Project ? "project" : "work assignment";
         var materialized = writes.ToArray();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a create never carries one.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so the {noun} was not created"));
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText));
+
         List<FilingWrite> filingWrites;
         try
         {
@@ -663,7 +1040,7 @@ public sealed class SecureRootInheritance
         }
 
         // Round 31 item 1: the creator honours every secure parent's No Access list AND the record's own — before the write.
-        if (!answer.IsKnown)
+        if (!answer.WallsDecidable)
         {
             return SecureRootCreatePlan.Refused(Refusal(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable,
                 $"whether you may access every secure record this {noun} would be filed under could not be checked " +
@@ -1080,6 +1457,26 @@ public sealed class SecureRootInheritance
         // in-memory state a failed ledger write would leave stale.
         var declinedRows = new HashSet<Guid>();
 
+        // Task 114 (owner round 67): on a RESTRICTED record a user flagged external is never passed on, and the Restricted
+        // remover takes away a share such a user already held — a KNOWN cause. Asked once, for the users the ledger names.
+        // A read that fails leaves their removals undecided (below) — never an operator's.
+        RestrictedPrincipalsAnswer? restricted;
+        try
+        {
+            restricted = await _synchronizer.RestrictedExternalPrincipalsOrThrowAsync(
+                logical, recordId,
+                ledger.Where(r => r.State != AssignedAccessState.Revoked)
+                    .Select(AssignedAccessStore.InheritedPrincipalOf).OfType<DataversePrincipalRef>(),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-INHERIT] Whether {Table} {RecordId} is Restricted, or who its sharees flagged external are, could not " +
+                "be read; a removed inherited share of a user is decided on the next pass.", logical, recordId);
+            restricted = null;
+        }
+
         // (a) The record's own shares against what the ledger says was passed on.
         foreach (var row in ledger.Where(r => r.State != AssignedAccessState.Revoked))
         {
@@ -1101,6 +1498,41 @@ public sealed class SecureRootInheritance
 
             if (IsPending(row) && held == PriorMaskOf(row.Reason))
                 continue; // recorded, but the share never landed: the mirror below writes it again — never a removal
+
+            if (principal.Kind == DataversePrincipalKind.SystemUser && restricted is null)
+            {
+                // Task 114: the Restricted remover, or an operator? Undecided: nothing re-added this pass, nothing recorded.
+                declinedRows.Add(row.Id);
+                notDone.Add($"why {principal}'s inherited share was removed could not be decided (whether the record is " +
+                            "Restricted could not be read)");
+                continue;
+            }
+
+            if (restricted?.Barred.Contains(principal) == true)
+            {
+                // Task 114: the record is Restricted and the user is flagged external — the Restricted remover's removal, a
+                // known cause. Skipped(restricted), never Declined, so the share is passed on again once the record is not.
+                try
+                {
+                    await UpdateDecidedRowAsync(row,
+                        new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.Restricted), ct).ConfigureAwait(false);
+                    _logger.LogInformation(
+                        "[SECURE-INHERIT] {Principal}'s inherited share on Restricted {Table} {RecordId} was removed (the user is " +
+                        "flagged external): it is passed on again once the record is not Restricted.", principal, logical, recordId);
+                }
+                catch (LedgerRowChangedException)
+                {
+                    notDone.Add($"{principal}'s inherited share record changed while it was being decided; it is decided on the next pass");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "[SECURE-INHERIT] Recording why {Principal}'s inherited share on {Table} {RecordId} went failed.",
+                        principal, logical, recordId);
+                    notDone.Add($"{principal} could not be recorded as removed because the record is Restricted");
+                }
+
+                continue;
+            }
 
             // Removed or narrowed since it was passed on (or, unconfirmed, changed by someone else). By whom? Task 158 final
             // round (main-session round 58 item 1): task 143's enforcer also removes a share here when the person is on a
@@ -2193,7 +2625,7 @@ public sealed class SecureRootInheritance
         IReadOnlyList<FiledRootRef> filed;
         try
         {
-            var flag = await ReadParentAsync(parent, parentId, ct).ConfigureAwait(false);
+            var flag = await ReadParentAsync(_dataverse, parent, parentId, ct).ConfigureAwait(false);
 
             // A record that is not (or no longer) there, or reads NOT secure, passes nothing on — and its filed records are
             // not read at all (a share on an ordinary matter costs no read of what is filed under it). An EMPTY flag is never
@@ -2255,71 +2687,356 @@ public sealed class SecureRootInheritance
     /// The climb goes level by level through every work assignment or project the record is filed under — secure or not, a
     /// filing is a filing — with a visited set (a cycle ends the climb), and a chain still rising past the bound is
     /// <see cref="SecureParentsAnswer.Unverifiable"/> (fail closed), never "no more parents".</param>
+    /// <param name="absentIsUnknown">Opt-in for the READ path (default <c>false</c>, the write-time semantics UAC-r2 relies on:
+    /// a named record that does not exist confers nothing). <c>true</c>: a filing parent the row NAMES (or the invoice or event
+    /// it is filed through, #1630) but the read did not return (deleted in a race, or invisible to the reader), or a climbed
+    /// row that is no longer there, makes the answer
+    /// <see cref="SecureParentsAnswer.Unverifiable"/>, so a caller that folds it counts the record as secure (owner policy:
+    /// unknown is secure).</param>
     internal static async Task<SecureParentsAnswer> ReadSecureParentsAsync(
         IGenericEntityService dataverse, ILogger logger, string table, Guid recordId, CancellationToken ct,
-        ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1)
+        ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1, bool absentIsUnknown = false)
     {
         if (!Inherits(table))
             return new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null);
 
-        recordTypes ??= new ConcurrentDictionary<Guid, string?>();
-        var start = (Table: table.Trim().ToLowerInvariant(), Id: recordId);
-        var visited = new HashSet<(string, Guid)> { start };
-        var frontier = new List<(string Table, Guid Id)> { start };
-        var secure = new List<SecureFilingParent>();
-        string? unknown = null;
-        for (var level = 1; frontier.Count > 0; level++)
+        // One record: every row and every parent is read on its own (one query each, as before #1410), so a fault on one
+        // parent never hides a readable secure sibling (secure-if-any).
+        var answers = await ClimbAsync(dataverse, logger, table.Trim().ToLowerInvariant(), new[] { recordId }, batched: false,
+            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown).ConfigureAwait(false);
+        return answers[recordId];
+    }
+
+    /// <summary>
+    /// GitHub #1410: the ONE parent walk (<see cref="ReadSecureParentsAsync"/>) asked about MANY records of one table at
+    /// once — for the Teams/SPA read-time No Access veto, which composes every record a user can reach and must not climb
+    /// each one with its own round trips. The same climb and the same decision per record; the reads are batched, and
+    /// their faults are CHUNK-granular and fail closed: each level's rows are read per table in chunks of
+    /// <see cref="IdsPerQuery"/>, and the flags of the records they are filed under likewise, so a chunk read that faults
+    /// leaves every record that needed it <see cref="SecureParentsAnswer.Unverifiable"/>. Every asked id has an answer; a
+    /// table whose rows file under nothing (a matter) answers "no parents" for each.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>> ReadSecureParentsOfManyAsync(
+        IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1,
+        bool absentIsUnknown = false)
+    {
+        ArgumentNullException.ThrowIfNull(recordIds);
+        var ids = recordIds.Distinct().ToList();
+        if (!Inherits(table) || ids.Count == 0)
+            return ids.ToDictionary(id => id, _ => new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null));
+
+        return await ClimbAsync(dataverse, logger, table.Trim().ToLowerInvariant(), ids, batched: true,
+            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown).ConfigureAwait(false);
+    }
+
+    /// <summary>One record's climb: what it has visited, what it reads next, and what it has found.</summary>
+    private sealed class ParentClimb((string Table, Guid Id) start)
+    {
+        public (string Table, Guid Id) Start { get; } = start;
+
+        public HashSet<(string, Guid)> Visited { get; } = new() { start };
+
+        public List<(string Table, Guid Id)> Frontier { get; set; } = new() { start };
+
+        public List<SecureFilingParent> Secure { get; } = new();
+
+        /// <summary>Task 174: the strictest Access Permission met on the way up (null = Standard).</summary>
+        public FilingPermission? Strictest { get; set; }
+
+        public string? Unknown { get; set; }
+
+        /// <summary>#1616: the first unrepeated pair met on the way up (<see cref="SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair"/>).</summary>
+        public string? UnrepeatedPair { get; set; }
+    }
+
+    /// <summary>A row's filing as read: the facts (<c>null</c> = the row does not exist), or a fault.</summary>
+    private readonly record struct FactsRead(FilingFacts? Facts, bool Faulted);
+
+    /// <summary>A matter's or project's flag, name and Access Permission (task 174) as read: the row (<c>null</c> = it does
+    /// not exist), or a fault.</summary>
+    private readonly record struct ParentRead(ParentRow? Row, bool Faulted);
+
+    /// <summary>One matter or project as the parent read returns it.</summary>
+    private readonly record struct ParentRow(bool? Flag, string? Name, int? Permission);
+
+    /// <summary>Task 174: a record a row is filed under that exists, with its own flag and Access Permission as read.</summary>
+    private readonly record struct FiledParent(string Table, Guid Id, string? Name, bool? Flag, int? Permission);
+
+    /// <summary>
+    /// The climb behind <see cref="ReadSecureParentsAsync"/> and <see cref="ReadSecureParentsOfManyAsync"/> (round 61 item
+    /// 1): level by level, each record's frontier is read, decided and climbed with its own visited set (a cycle ends the
+    /// climb); a row past <paramref name="maxDepth"/> that is still filed under something ends that record's climb
+    /// Unverifiable. A row reached by several records' climbs is read and decided once.
+    /// </summary>
+    /// <param name="batched"><c>false</c>: every row and every parent is read on its own (the one-record shape).
+    /// <c>true</c>: read in chunks (#1410).</param>
+    private static async Task<Dictionary<Guid, SecureParentsAnswer>> ClimbAsync(
+        IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<Guid> starts, bool batched,
+        ConcurrentDictionary<Guid, string?> recordTypes, int maxDepth, CancellationToken ct, bool absentIsUnknown = false)
+    {
+        var climbs = starts.Select(id => new ParentClimb((table, id))).ToList();
+        var facts = new Dictionary<(string Table, Guid Id), FactsRead>();
+        var decisions = new Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)>();
+        var faultedTypes = new HashSet<Guid>(); // #1410 F3: a pair type that could not be read is not read again in this call
+        for (var level = 1; climbs.Any(c => c.Frontier.Count > 0); level++)
         {
-            var next = new List<(string Table, Guid Id)>();
-            foreach (var (rowTable, rowId) in frontier)
+            var rows = climbs.SelectMany(c => c.Frontier).Distinct().ToList();
+            await ReadFactsIntoAsync(dataverse, logger, rows.Where(r => !facts.ContainsKey(r)).ToList(), facts, batched, ct)
+                .ConfigureAwait(false);
+            if (level <= maxDepth)
             {
-                FilingFacts? facts;
+                var undecided = rows
+                    .Where(r => !decisions.ContainsKey(r) && facts[r].Facts is not null)
+                    .Select(r => facts[r].Facts!)
+                    .ToList();
+                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct, absentIsUnknown)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var climb in climbs)
+            {
+                var next = new List<(string Table, Guid Id)>();
+                foreach (var row in climb.Frontier)
+                {
+                    var read = facts[row];
+                    if (read.Faulted)
+                    {
+                        climb.Unknown ??= level == 1
+                            ? "the record could not be read"
+                            : $"what the {row.Table} it is filed under is itself filed under could not be read";
+                        continue;
+                    }
+
+                    if (read.Facts is not { } rowFacts)
+                    {
+                        // A record that does not exist confers nothing (write-time). The read path opts in: a row the climb
+                        // reached that is no longer there is unknown, not "files under nothing".
+                        if (absentIsUnknown)
+                            climb.Unknown ??= $"the {row.Table} the climb reached was not returned (missing, or not visible to the reader)";
+                        continue;
+                    }
+
+                    if (level > maxDepth)
+                    {
+                        // Past the bound: a row that is still filed under something ends the climb UNDECIDED (fail closed).
+                        if (rowFacts.Typed.Values.Any(v => v is not null) || !string.IsNullOrWhiteSpace(rowFacts.PairId))
+                            climb.Unknown ??= $"it is filed under a chain of more than {maxDepth} matters or projects, which is not followed further";
+                        continue;
+                    }
+
+                    var (answer, filedUnder) = decisions[row];
+                    if (answer.UnknownOnlyThroughAnUnrepeatedPair)
+                        climb.UnrepeatedPair ??= answer.Unverifiable;
+                    else
+                        climb.Unknown ??= answer.Unverifiable;
+                    climb.Strictest = FilingPermission.Stricter(climb.Strictest, answer.StrictestPermission);
+                    foreach (var parent in answer.SecureParents)
+                    {
+                        if (!climb.Secure.Any(s => string.Equals(s.Table, parent.Table, StringComparison.OrdinalIgnoreCase) && s.Id == parent.Id))
+                            climb.Secure.Add(parent);
+                    }
+
+                    // The direct question (maxDepth 1, the sharee rule) stops here. The walls climb on: only a work assignment or
+                    // project is itself filed under something; a matter ends the chain.
+                    foreach (var parent in maxDepth > 1 ? filedUnder : Array.Empty<FiledParent>())
+                    {
+                        if (Inherits(parent.Table) && climb.Visited.Add((parent.Table, parent.Id)))
+                            next.Add((parent.Table, parent.Id));
+                    }
+                }
+
+                climb.Frontier = next;
+            }
+        }
+
+        // Task 174 (verifier F1-a): a work assignment or project above the record that is not flagged secure itself but sits
+        // below a secure ancestor IS secure (round 84), so its No Access list binds what is filed below it too. Decided over
+        // the decisions already read (no extra query; a plain reachability walk per question, no memo); only the walls'
+        // climb (maxDepth > 1) adds them — the one-level questions (inheritance, the sharee rule) are unchanged.
+        var effective = new EffectiveOverDecisions(decisions);
+        foreach (var climb in climbs)
+        {
+            if (maxDepth > 1)
+            {
+                foreach (var node in effective.Ancestors(climb.Start, climb.Visited))
+                {
+                    if (node.Flag != true && Inherits(node.Table) && (node.Table, node.Id) != climb.Start && effective.IsSecure(node)
+                        && !climb.Secure.Any(x => string.Equals(x.Table, node.Table, StringComparison.OrdinalIgnoreCase) && x.Id == node.Id))
+                        climb.Secure.Add(new SecureFilingParent(node.Table, node.Id, node.Name));
+                }
+            }
+        }
+
+        return climbs.ToDictionary(
+            c => c.Start.Id,
+            c => new SecureParentsAnswer(c.Secure, c.Unknown ?? c.UnrepeatedPair)
+            {
+                UnknownOnlyThroughAnUnrepeatedPair = c.Unknown is null && c.UnrepeatedPair is not null,
+                StrictestPermission = c.Strictest,
+                DirectParents = decisions.TryGetValue(c.Start, out var own)
+                    ? own.FiledUnder.Select(p => new FilingParentState(
+                        new SecureFilingParent(p.Table, p.Id, p.Name), effective.IsSecure(p), effective.Rank(p))).ToList()
+                    : Array.Empty<FilingParentState>(),
+            });
+    }
+
+    /// <summary>
+    /// Task 174: the effective Secure flag and Access Permission rank of each record the climb read, over its decisions —
+    /// a record's own values folded with every record above it that was decided. A plain reachability walk per question
+    /// (no memo, so a filing cycle can never cache a partial "not secure"); the graph above one record is a handful of rows.
+    /// A record not decided (a matter, or past the bound — which already makes the answer unverifiable) has its own values.
+    /// </summary>
+    private sealed class EffectiveOverDecisions(
+        IReadOnlyDictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> decisions)
+    {
+        private IReadOnlyList<FiledParent> Above((string Table, Guid Id) key) =>
+            Inherits(key.Table) && decisions.TryGetValue(key, out var d) ? d.FiledUnder : Array.Empty<FiledParent>();
+
+        /// <summary><paramref name="node"/> and every record above it, each once.</summary>
+        private IEnumerable<FiledParent> SelfAndAbove(FiledParent node)
+        {
+            var seen = new HashSet<(string, Guid)> { (node.Table, node.Id) };
+            var stack = new Stack<FiledParent>();
+            stack.Push(node);
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                yield return current;
+                foreach (var parent in Above((current.Table, current.Id)))
+                {
+                    if (seen.Add((parent.Table, parent.Id)))
+                        stack.Push(parent);
+                }
+            }
+        }
+
+        public bool IsSecure(FiledParent node) => SelfAndAbove(node).Any(n => n.Flag == true);
+
+        public int Rank(FiledParent node) => SelfAndAbove(node).Max(n => FilingPermission.Rank(n.Permission));
+
+        /// <summary>Every record above <paramref name="start"/> that the climb visited and read (its FiledUnder entries).</summary>
+        public IEnumerable<FiledParent> Ancestors((string Table, Guid Id) start, IReadOnlySet<(string, Guid)> visited)
+        {
+            var seen = new HashSet<(string, Guid)>();
+            var queue = new Queue<(string Table, Guid Id)>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var row = queue.Dequeue();
+                if (!decisions.TryGetValue(row, out var d))
+                    continue;
+                foreach (var parent in d.FiledUnder)
+                {
+                    if (!seen.Add((parent.Table, parent.Id)))
+                        continue;
+                    yield return parent;
+                    if (visited.Contains((parent.Table, parent.Id)))
+                        queue.Enqueue((parent.Table, parent.Id));
+                }
+            }
+        }
+    }
+
+    /// <summary>Reads the filing of every row in <paramref name="rows"/> into <paramref name="into"/>. Never throws a read
+    /// fault: a row (or, batched, a chunk) that cannot be read is recorded as faulted.</summary>
+    private static async Task ReadFactsIntoAsync(
+        IGenericEntityService dataverse, ILogger logger, IReadOnlyList<(string Table, Guid Id)> rows,
+        Dictionary<(string Table, Guid Id), FactsRead> into, bool batched, CancellationToken ct)
+    {
+        foreach (var group in rows.GroupBy(r => r.Table))
+        {
+            foreach (var chunk in batched ? group.Chunk(IdsPerQuery) : group.Select(r => new[] { r }))
+            {
+                if (chunk.Length == 1)
+                {
+                    // One row: the one-record query, as before #1410.
+                    var (rowTable, rowId) = chunk[0];
+                    try
+                    {
+                        into[chunk[0]] = new FactsRead(await ReadFactsAsync(dataverse, rowTable, rowId, ct).ConfigureAwait(false), false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId} could not be read.", rowTable, rowId);
+                        into[chunk[0]] = new FactsRead(null, true);
+                    }
+
+                    continue;
+                }
+
                 try
                 {
-                    facts = await ReadFactsAsync(dataverse, rowTable, rowId, ct).ConfigureAwait(false);
+                    var found = await ReadFactsOfManyAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct)
+                        .ConfigureAwait(false);
+                    foreach (var row in chunk)
+                        into[row] = new FactsRead(found.TryGetValue(row.Id, out var f) ? f : null, false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
-                    logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId} could not be read.", rowTable, rowId);
-                    unknown ??= level == 1
-                        ? "the record could not be read"
-                        : $"what the {rowTable} it is filed under is itself filed under could not be read";
-                    continue;
-                }
-
-                if (facts is null)
-                    continue; // a record that does not exist confers nothing
-
-                if (level > maxDepth)
-                {
-                    // Past the bound: a row that is still filed under something ends the climb UNDECIDED (fail closed).
-                    if (facts.Typed.Values.Any(v => v is not null) || !string.IsNullOrWhiteSpace(facts.PairId))
-                        unknown ??= $"it is filed under a chain of more than {maxDepth} matters or projects, which is not followed further";
-                    continue;
-                }
-
-                var (answer, filedUnder) = await DecideParentsCoreAsync(dataverse, logger, facts, recordTypes, ct)
-                    .ConfigureAwait(false);
-                unknown ??= answer.Unverifiable;
-                foreach (var parent in answer.SecureParents)
-                {
-                    if (!secure.Any(s => string.Equals(s.Table, parent.Table, StringComparison.OrdinalIgnoreCase) && s.Id == parent.Id))
-                        secure.Add(parent);
-                }
-
-                // The direct question (maxDepth 1, the sharee rule) stops here. The walls climb on: only a work assignment or
-                // project is itself filed under something; a matter ends the chain.
-                foreach (var parent in maxDepth > 1 ? filedUnder : Array.Empty<(string Table, Guid Id)>())
-                {
-                    if (Inherits(parent.Table) && visited.Add((parent.Table, parent.Id)))
-                        next.Add(parent);
+                    logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} rows could not be read.", chunk.Length, group.Key);
+                    foreach (var row in chunk)
+                        into[row] = new FactsRead(null, true);
                 }
             }
+        }
+    }
 
-            frontier = next;
+    /// <summary>Decides what each of <paramref name="rows"/> is filed under, into <paramref name="into"/>: the one-record
+    /// decision (<see cref="DecideParentsCoreAsync"/>) per row, or — batched — the same decision
+    /// (<see cref="DecideNamedParents"/>) over parent flags read in chunks. Never throws a read fault.</summary>
+    /// <param name="faultedTypes">Batched only (#1410 F3): pair types whose read faulted earlier in this call; a later row
+    /// naming one is "could not be read" without another read (a throttle or fault never becomes N sequential reads).</param>
+    private static async Task DecideParentsIntoAsync(
+        IGenericEntityService dataverse, ILogger logger, IReadOnlyList<FilingFacts> rows,
+        ConcurrentDictionary<Guid, string?> recordTypes, HashSet<Guid> faultedTypes,
+        Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> into,
+        bool batched, CancellationToken ct, bool absentIsUnknown = false)
+    {
+        if (!batched)
+        {
+            foreach (var row in rows)
+                into[(row.Table, row.Id)] = await DecideParentsCoreAsync(dataverse, logger, row, recordTypes, ct, absentIsUnknown: absentIsUnknown)
+                    .ConfigureAwait(false);
+            return;
         }
 
-        return new SecureParentsAnswer(secure, unknown);
+        // #1630: the intermediates every row is filed under, read in chunks first (chunk-granular faults, as below).
+        var intermediates = new IntermediateReads();
+        await ReadIntermediatesIntoAsync(dataverse, logger, rows.SelectMany(IntermediatesOf), intermediates, batched: true, ct)
+            .ConfigureAwait(false);
+
+        var named = new List<(FilingFacts Row, NamedParents Naming)>();
+        foreach (var row in rows)
+        {
+            var naming = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes, intermediates, absentIsUnknown)
+                .ConfigureAwait(false);
+            named.Add((row, naming));
+        }
+
+        var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
+        foreach (var group in named.SelectMany(n => n.Naming.Named).Distinct().GroupBy(p => p.Table))
+        {
+            foreach (var chunk in group.Chunk(IdsPerQuery))
+            {
+                try
+                {
+                    var found = await ReadParentsOfManyAsync(dataverse, group.Key, chunk.Select(p => p.Id).ToArray(), ct)
+                        .ConfigureAwait(false);
+                    foreach (var parent in chunk)
+                        reads[parent] = new ParentRead(found.TryGetValue(parent.Id, out var p) ? p : (ParentRow?)null, false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} rows could not be read.", chunk.Length, group.Key);
+                    foreach (var parent in chunk)
+                        reads[parent] = new ParentRead(null, true);
+                }
+            }
+        }
+
+        foreach (var (row, naming) in named)
+            into[(row.Table, row.Id)] = DecideNamedParents(naming, reads, absentIsUnknown);
     }
 
     /// <summary>
@@ -2330,8 +3047,9 @@ public sealed class SecureRootInheritance
     internal const int MaxFilingDepth = 4;
 
     /// <summary>
-    /// The work assignments and projects filed under any of <paramref name="parents"/> (typed lookups, and the pair), with
-    /// their flag. A pair match counts only when its TYPE names the matched record's table (a pair naming the id of a matter
+    /// The work assignments and projects filed under any of <paramref name="parents"/> (typed lookups, #1630 an invoice or
+    /// event that belongs to one — <see cref="IntermediateFilingColumns"/> — and the pair), with their flag. A pair match
+    /// counts only when its TYPE names the matched record's table (a pair naming the id of a matter
     /// with an invoice type is not filed under the matter); one whose type cannot be read is returned as an unconfirmed
     /// candidate (<see cref="FiledRootRef.Confirmed"/> false). One page per query; a read that cannot complete THROWS
     /// (nothing is decided on part of it).
@@ -2412,6 +3130,17 @@ public sealed class SecureRootInheritance
                 }
             }
 
+            // #1630 (owner Option A): filed through an INTERMEDIATE (an invoice or event) that belongs to an asked-for matter or
+            // project — the decision side's own rule (NameParentsAsync) read in the child direction. The rows filed under ANY
+            // intermediate are listed (few: a work assignment is rarely filed so), then their intermediates are read and kept
+            // only when one belongs to an asked-for record. Both are typed lookups, so such a row is Confirmed. A read that
+            // cannot complete throws, as every listing here does.
+            foreach (var row in await ListFiledThroughIntermediatesAsync(dataverse, table, columns, parents, ct).ConfigureAwait(false))
+            {
+                if (!(found.TryGetValue((table, row.Id), out var typedRow) && typedRow.Confirmed))
+                    found[(table, row.Id)] = Ref(table, row, nameColumn);
+            }
+
             // The pair: its id is TEXT. Every spelling the decision side accepts (Guid.TryParse of the trimmed text — "D",
             // "B", "P", "N", "X", padded, any case) must be found (task 158 r1), so the query matches the one fragment every
             // spelling carries verbatim — the first 8 hex digits — and each row is then parsed exactly as the decision side
@@ -2442,7 +3171,11 @@ public sealed class SecureRootInheritance
                     }
                     else if (parents.Any(p => p.Id == pairId && string.Equals(p.Table, pairTable, StringComparison.OrdinalIgnoreCase)))
                     {
-                        found[(table, row.Id)] = Ref(table, row, nameColumn);
+                        // #1616: a work assignment's pair alone files it under nothing (no typed lookup repeats it — a typed
+                        // one would have confirmed it above): a candidate the per-record decision reports, never "filed under".
+                        found[(table, row.Id)] = PairNamesAParentOnItsOwn(table)
+                            ? Ref(table, row, nameColumn)
+                            : Ref(table, row, nameColumn) with { Confirmed = false };
                     }
                 }
             }
@@ -2452,6 +3185,76 @@ public sealed class SecureRootInheritance
 
         static FiledRootRef Ref(string table, Entity row, string nameColumn) =>
             new(table, row.Id, row.GetAttributeValue<string>(nameColumn), row.GetAttributeValue<bool?>(IsSecureColumn) == true);
+    }
+
+    /// <summary>Pages of a listing of the rows filed under any intermediate (<see cref="ListFiledThroughIntermediatesAsync"/>).</summary>
+    private const int IntermediateListPageSize = 5000;
+
+    /// <summary>The page ceiling of that listing; past it the listing throws (nothing is decided on part of it).</summary>
+    private const int IntermediateListMaxPages = 20;
+
+    /// <summary>
+    /// #1630: the rows of <paramref name="table"/> filed by a typed intermediate lookup (<see cref="IntermediateFilingColumns"/>)
+    /// under an invoice or event that belongs to one of <paramref name="parents"/> (<see cref="IntermediateParentColumns"/>),
+    /// with <paramref name="columns"/>. Empty for a table with no intermediate lookups. Paged; a read that cannot complete —
+    /// a page past the ceiling, an intermediate chunk that faults or does not fit one page — THROWS.
+    /// </summary>
+    private static async Task<IReadOnlyList<Entity>> ListFiledThroughIntermediatesAsync(
+        IGenericEntityService dataverse, string table, string[] columns, IReadOnlyCollection<(string Table, Guid Id)> parents,
+        CancellationToken ct)
+    {
+        var intermediateColumns = IntermediateFilingColumns.TryGetValue(table, out var c) ? c : Array.Empty<(string, string)>();
+        var asked = parents.Where(p => IsParent(p.Table)).Select(p => (Table: p.Table.Trim().ToLowerInvariant(), p.Id)).ToHashSet();
+        if (intermediateColumns.Count == 0 || asked.Count == 0)
+            return Array.Empty<Entity>();
+
+        var query = Query(table, columns.Concat(intermediateColumns.Select(i => i.Column)).Distinct().ToArray());
+        var anyIntermediate = new FilterExpression(LogicalOperator.Or);
+        foreach (var (column, _) in intermediateColumns)
+            anyIntermediate.AddCondition(column, ConditionOperator.NotNull);
+        query.Criteria.AddFilter(anyIntermediate);
+        query.PageInfo = new PagingInfo { Count = IntermediateListPageSize, PageNumber = 1 };
+        var rows = new List<Entity>();
+        for (var page = 1; ; page++)
+        {
+            if (page > IntermediateListMaxPages)
+            {
+                throw new InvalidOperationException(
+                    $"{table} still had rows filed under an invoice or event to list after {IntermediateListMaxPages} pages; " +
+                    "nothing is decided on part of them.");
+            }
+
+            var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            rows.AddRange(result.Entities);
+            if (!result.MoreRecords)
+                break;
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+
+        if (rows.Count == 0)
+            return rows;
+
+        IEnumerable<(string Table, Guid Id)> IntermediatesOfRow(Entity row) => intermediateColumns
+            .Select(i => (Table: i.Item2, Id: row.GetAttributeValue<EntityReference>(i.Item1)?.Id ?? Guid.Empty))
+            .Where(i => i.Id != Guid.Empty);
+
+        var belongsTo = new Dictionary<(string Table, Guid Id), IReadOnlyList<(string Table, Guid Id)>>();
+        foreach (var group in rows.SelectMany(IntermediatesOfRow).Distinct().GroupBy(i => i.Table))
+        {
+            foreach (var chunk in group.Chunk(IdsPerQuery))
+            {
+                var read = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(i => i.Id).ToArray(), ct)
+                    .ConfigureAwait(false);
+                foreach (var (id, parentsOfIntermediate) in read)
+                    belongsTo[(group.Key, id)] = parentsOfIntermediate;
+            }
+        }
+
+        return rows
+            .Where(row => IntermediatesOfRow(row).Any(i =>
+                belongsTo.TryGetValue(i, out var ofIntermediate) && ofIntermediate.Any(asked.Contains)))
+            .ToList();
     }
 
     /// <summary>The table a listed row's pair type names, or <c>null</c> when it has none or it cannot be read.</summary>
@@ -2498,6 +3301,7 @@ public sealed class SecureRootInheritance
                 _logger.LogInformation(
                     "[SECURE-INHERIT] {Table} {RecordId} is filed under a secure record and is now secure (provisioned for its " +
                     "creator). TraceId={TraceId}", table, recordId, traceId);
+                await RecordInheritedSecureAsync(table, recordId, traceId, ct).ConfigureAwait(false);
                 return Result(table, recordId, SecureRootInheritOutcome.Secured, null, null);
 
             case ProblemHttpResult problem:
@@ -2526,6 +3330,30 @@ public sealed class SecureRootInheritance
         }
     }
 
+    /// <summary>
+    /// Task 175 fix round (verifier a): a record this rule has just secured gets its access record at once — its Secure is
+    /// INHERITED (the floor explains it) — so that when its parent is later un-secured it follows, even before the job has
+    /// seen it. Without a record the backfill rule would keep it secure for good. Best effort: never throws; the job writes
+    /// the same record on its next run.
+    /// </summary>
+    private async Task RecordInheritedSecureAsync(string table, Guid recordId, string traceId, CancellationToken ct)
+    {
+        try
+        {
+            var follow = await FollowParentsAsync(table, recordId, traceId, ct).ConfigureAwait(false);
+            if (!follow.IsComplete)
+            {
+                _logger.LogWarning("[SECURE-INHERIT] {Table} {RecordId}: its access record was not written after securing ({Code}); " +
+                    "the job writes it.", table, recordId, follow.ReasonCode);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId}: recording its inherited secure failed; the job writes it.",
+                table, recordId);
+        }
+    }
+
     private async Task<bool> IsIsolatedAsync(FilingFacts facts, CancellationToken ct)
     {
         if (facts.IsSecure != true || facts.OwningTeam is null || string.IsNullOrWhiteSpace(facts.ContainerId))
@@ -2537,7 +3365,8 @@ public sealed class SecureRootInheritance
 
     // ── Reads ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>What a row says it is filed under, and its own isolation facts.</summary>
+    /// <summary>What a row says it is filed under, and its own isolation facts. <see cref="Typed"/> holds every typed filing
+    /// lookup (<see cref="TypedLookupsOf"/>): the parent lookups and, #1630, the intermediate lookups.</summary>
     private sealed record FilingFacts(
         string Table,
         Guid Id,
@@ -2553,16 +3382,39 @@ public sealed class SecureRootInheritance
 
     private static async Task<FilingFacts?> ReadFactsAsync(IGenericEntityService dataverse, string table, Guid id, CancellationToken ct)
     {
-        var typed = TypedFilingColumns[table];
+        var typed = TypedLookupsOf(table);
         var query = Query(table,
             typed.Select(t => t.Column).Concat(new[] { IsSecureColumn, OwningTeamColumn, ContainerColumn, PairIdColumn, PairTypeColumn })
                 .ToArray());
         query.TopCount = 1;
         query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
         var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (row is null)
-            return null;
+        return row is null ? null : ToFacts(table, id, row);
+    }
 
+    /// <summary>#1410: the filing of every row of <paramref name="table"/> in <paramref name="ids"/> (at most
+    /// <see cref="IdsPerQuery"/>) in one query; a row that does not exist is absent. A fault propagates.</summary>
+    private static async Task<IReadOnlyDictionary<Guid, FilingFacts>> ReadFactsOfManyAsync(
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+    {
+        var query = Query(table,
+            TypedLookupsOf(table).Select(t => t.Column)
+                .Concat(new[] { IsSecureColumn, OwningTeamColumn, ContainerColumn, PairIdColumn, PairTypeColumn })
+                .ToArray());
+        query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
+        var found = new Dictionary<Guid, FilingFacts>();
+        foreach (var row in await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false))
+        {
+            if (ids.Contains(row.Id))
+                found[row.Id] = ToFacts(table, row.Id, row);
+        }
+
+        return found;
+    }
+
+    private static FilingFacts ToFacts(string table, Guid id, Entity row)
+    {
+        var typed = TypedLookupsOf(table);
         return new FilingFacts(
             table,
             id,
@@ -2580,7 +3432,8 @@ public sealed class SecureRootInheritance
     /// <summary>
     /// The secure matters / projects <paramref name="facts"/> names, and why any other could not be read. Typed lookups
     /// first; then the pair (agreement by identity with a typed lookup adds nothing; otherwise its type decides — a matter or
-    /// project is a parent, any other type is not this rule). Every named record is read even after one fails, so a readable
+    /// project is a parent where the pair is BFF-managed (<see cref="PairNamesAParentOnItsOwn"/>, #1616) and undetermined
+    /// anywhere else, any other type is not this rule). Every named record is read even after one fails, so a readable
     /// secure parent is never hidden behind an unreadable sibling (secure-if-any).
     /// </summary>
     private Task<SecureParentsAnswer> DecideParentsAsync(FilingFacts facts, CancellationToken ct) =>
@@ -2593,16 +3446,178 @@ public sealed class SecureRootInheritance
 
     /// <summary>The direct decision, and every record the row is filed under that exists (secure or not) — what the
     /// level-by-level climb (round 61 item 1) continues from.</summary>
-    private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)> DecideParentsCoreAsync(
+    private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> DecideParentsCoreAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
-        CancellationToken ct)
+        CancellationToken ct, IntermediateReads? intermediates = null, bool absentIsUnknown = false)
+    {
+        var naming = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct, intermediates: intermediates,
+            absentIsUnknown: absentIsUnknown).ConfigureAwait(false);
+
+        // Every named record is read on its own, even after one fails (secure-if-any).
+        var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
+        foreach (var (table, id) in naming.Named.Distinct())
+        {
+            try
+            {
+                reads[(table, id)] = new ParentRead(await ReadParentAsync(dataverse, table, id, ct).ConfigureAwait(false), false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {Id} could not be read.", table, id);
+                reads[(table, id)] = new ParentRead(null, true);
+            }
+        }
+
+        return DecideNamedParents(naming, reads, absentIsUnknown);
+    }
+
+    /// <summary>What <see cref="NameParentsAsync"/> answers for one row: the matters and projects it is filed under, why any
+    /// could not be named (<see cref="Unknown"/>; #1616's <see cref="Unrepeated"/> kept apart), and (#1630) those named ONLY
+    /// through an intermediate (<see cref="ViaIntermediateOnly"/>) — their names are not repeated to the record's readers, who
+    /// see the intermediate on the row, never the record it belongs to (task 174 verifier F1-d).</summary>
+    private sealed record NamedParents(
+        IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated,
+        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly);
+
+    /// <summary>#1630: an intermediate as read — the matters and projects it belongs to (<c>null</c> = it does not exist), or a
+    /// fault.</summary>
+    private readonly record struct IntermediateRead(IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted);
+
+    /// <summary>#1630: the intermediate rows one call has read (a row reached by several records is read once).</summary>
+    private sealed class IntermediateReads : Dictionary<(string Table, Guid Id), IntermediateRead>
+    {
+    }
+
+    /// <summary>
+    /// #1630: the matters and projects each of <paramref name="ids"/> (rows of the intermediate <paramref name="table"/>)
+    /// belongs to, by its <see cref="IntermediateParentColumns"/> — one query (one id, or an id list of at most
+    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>> ReadIntermediatesAsync(
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+    {
+        var columns = IntermediateParentColumns(table);
+        var query = Query(table, columns.Select(c => c.Column).ToArray());
+        IReadOnlyList<Entity> rows;
+        if (ids.Length == 1)
+        {
+            query.TopCount = 1;
+            query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, ids[0]);
+            rows = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
+        }
+        else
+        {
+            query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
+            rows = await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false);
+        }
+
+        var found = new Dictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>();
+        foreach (var row in rows)
+        {
+            if (!ids.Contains(row.Id))
+                continue;
+            found[row.Id] = columns
+                .Select(c => (Table: c.ParentTable, Id: row.GetAttributeValue<EntityReference>(c.Column)?.Id ?? Guid.Empty))
+                .Where(p => p.Id != Guid.Empty)
+                .Distinct()
+                .ToList();
+        }
+
+        return found;
+    }
+
+    /// <summary>#1630: reads every intermediate in <paramref name="refs"/> not already in <paramref name="into"/> — per table,
+    /// one row per query (<paramref name="batched"/> false) or in chunks of <see cref="IdsPerQuery"/>. Never throws a read
+    /// fault: a row (or chunk) that cannot be read is recorded as faulted.</summary>
+    private static async Task ReadIntermediatesIntoAsync(
+        IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> refs, IntermediateReads into,
+        bool batched, CancellationToken ct)
+    {
+        foreach (var group in refs.Where(r => !into.ContainsKey(r)).Distinct().GroupBy(r => r.Table))
+        {
+            foreach (var chunk in batched ? group.Chunk(IdsPerQuery) : group.Select(r => new[] { r }))
+            {
+                try
+                {
+                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct)
+                        .ConfigureAwait(false);
+                    foreach (var row in chunk)
+                        into[row] = new IntermediateRead(found.TryGetValue(row.Id, out var parents) ? parents : null, false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} row(s) a record is filed under could not be read.",
+                        chunk.Length, group.Key);
+                    foreach (var row in chunk)
+                        into[row] = new IntermediateRead(null, true);
+                }
+            }
+        }
+    }
+
+    /// <summary>#1630: the intermediates <paramref name="facts"/> is filed under (its set intermediate lookups).</summary>
+    private static IEnumerable<(string Table, Guid Id)> IntermediatesOf(FilingFacts facts) =>
+        (IntermediateFilingColumns.TryGetValue(facts.Table, out var columns) ? columns : Array.Empty<(string, string)>())
+            .Select(c => (Table: c.Item2, Id: facts.Typed.TryGetValue(c.Item1, out var id) ? id : null))
+            .Where(c => c.Id is { } i && i != Guid.Empty)
+            .Select(c => (c.Table, c.Id!.Value));
+
+    /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, #1630 the matters and
+    /// projects its intermediates belong to, then the pair), and why any could not be named. Reads only the pair's TYPE (cached
+    /// in <paramref name="recordTypes"/>) and each intermediate's parent columns (cached in <paramref name="intermediates"/>;
+    /// one not there yet is read on its own).</summary>
+    /// <param name="faultedTypes">When given (the batched walk, #1410 F3), types whose read already faulted in this call are
+    /// answered "could not be read" without reading again, and a new fault is added. <c>null</c>: every row reads (the
+    /// one-record shape, as before).</param>
+    /// <param name="absentIsUnknown">The READ path's opt-in (see <see cref="ReadSecureParentsAsync"/>; default <c>false</c>, the
+    /// write-time semantics): an intermediate the read did not return (deleted in a race, or invisible to the reader) makes the
+    /// answer unknown instead of naming no parents through that route, so the fold counts the record as secure.</param>
+    private static async Task<NamedParents> NameParentsAsync(
+        IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
+        CancellationToken ct, HashSet<Guid>? faultedTypes = null, IntermediateReads? intermediates = null,
+        bool absentIsUnknown = false)
     {
         var named = new List<(string Table, Guid Id)>();
         string? unknown = null;
+        string? unrepeated = null; // #1616: kept apart — see SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair
         foreach (var (column, parentTable) in TypedFilingColumns[facts.Table])
         {
             if (facts.Typed.TryGetValue(column, out var id) && id is { } parentId)
                 named.Add((parentTable, parentId));
+        }
+
+        // #1630 (owner Option A): an invoice or event the row is filed under by its typed lookup files it under the matters and
+        // projects THAT record belongs to — read live, never guessed (an unreadable one is unverifiable; a missing one confers
+        // nothing, like a missing parent).
+        var direct = named.ToHashSet();
+        var viaIntermediate = new HashSet<(string Table, Guid Id)>();
+        var filedIntermediates = IntermediatesOf(facts).ToList();
+        if (filedIntermediates.Count > 0)
+        {
+            intermediates ??= new IntermediateReads();
+            await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, intermediates, batched: false, ct)
+                .ConfigureAwait(false);
+            foreach (var intermediate in filedIntermediates)
+            {
+                var read = intermediates[intermediate];
+                if (read.Faulted)
+                {
+                    unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
+                    continue;
+                }
+
+                // The read path opts in (absentIsUnknown): an intermediate the read did not return is not "belongs to nothing",
+                // it is unknown (the same rule DecideNamedParents applies to a named matter or project).
+                if (read.Parents is null && absentIsUnknown)
+                    unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
+
+                foreach (var parent in read.Parents ?? Array.Empty<(string Table, Guid Id)>())
+                {
+                    named.Add(parent);
+                    if (!direct.Contains(parent))
+                        viaIntermediate.Add(parent);
+                }
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(facts.PairId))
@@ -2611,11 +3626,17 @@ public sealed class SecureRootInheritance
             {
                 unknown ??= $"its {PairIdColumn} does not hold a record identifier";
             }
-            else if (!named.Any(n => n.Id == pairId))
+            else if (!direct.Any(n => n.Id == pairId) && !filedIntermediates.Any(i => i.Id == pairId))
             {
+                // (#1630: a pair repeating a typed intermediate lookup agrees by identity, as one repeating a typed parent does —
+                // the typed lookup, not the pair's label, says what the record is.)
                 if (facts.PairType is not { } typeRef)
                 {
                     unknown ??= $"it names a record in {PairIdColumn} without that record's type";
+                }
+                else if (faultedTypes is not null && faultedTypes.Contains(typeRef))
+                {
+                    unknown ??= "the type of the record it is filed under could not be read";
                 }
                 else
                 {
@@ -2624,67 +3645,137 @@ public sealed class SecureRootInheritance
                         var pairTable = await ReadRecordTypeAsync(dataverse, recordTypes, typeRef, ct).ConfigureAwait(false);
                         if (pairTable is null)
                             unknown ??= "the type of the record it is filed under could not be determined";
-                        else if (IsParent(pairTable))
+                        else if (IsParent(pairTable) && PairNamesAParentOnItsOwn(facts.Table))
                             named.Add((pairTable, pairId));
+                        else if (IsParent(pairTable))
+                        {
+                            // #1616: the pair is text any user with Write can set through the Web API, bypassing the AppendTo
+                            // check a lookup costs. On a table whose pair is not BFF-managed it files the row under nothing on
+                            // its own — undetermined, so nothing is shared or un-secured from it (fail closed); a typed parent
+                            // that is readably secure still secures it (SecureParentsAnswer.WallsDecidable).
+                            unrepeated ??= PairWithoutTypedLookupReason(facts.Table, pairTable);
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} could not be read.", typeRef);
+                        faultedTypes?.Add(typeRef);
                         unknown ??= "the type of the record it is filed under could not be read";
                     }
                 }
             }
         }
 
+        return new NamedParents(named, unknown, unrepeated, viaIntermediate);
+    }
+
+    /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
+    /// reason wins): a faulted read or an EMPTY flag is unverifiable, a missing record confers nothing, a true flag is a
+    /// secure parent. Also every named record that exists (secure or not) — what the climb continues from.</summary>
+    private static (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder) DecideNamedParents(
+        NamedParents naming, IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads, bool absentIsUnknown = false)
+    {
+        var (named, unknown, unrepeated) = (naming.Named, naming.Unknown, naming.Unrepeated);
         var secure = new List<SecureFilingParent>();
-        var existing = new List<(string Table, Guid Id)>();
+        var existing = new List<FiledParent>();
+        FilingPermission? strictest = null;
         foreach (var (table, id) in named.Distinct())
         {
-            (bool? Flag, string? Name)? parent;
-            try
+            var read = reads[(table, id)];
+            if (read.Faulted)
             {
-                parent = await ReadParentAsync(dataverse, table, id, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {Id} could not be read.", table, id);
                 unknown ??= $"whether the {table} it is filed under is secure could not be read";
                 continue;
             }
 
-            if (parent is null)
-                continue; // a record that does not exist confers nothing
-            existing.Add((table, id));
-            if (parent.Value.Flag is null)
+            if (read.Row is not { } row)
+            {
+                // A record that does not exist confers nothing (the write-time guard's rule). The read path opts in
+                // (absentIsUnknown): a NAMED parent the read did not return - deleted in a race, or invisible to the reader -
+                // is not "not secure", it is unknown, so the answer is unverifiable and the fold counts the child as secure.
+                if (absentIsUnknown)
+                    unknown ??= $"the {table} it is filed under was not returned (missing, or not visible to the reader)";
+                continue;
+            }
+
+            // #1630: a parent named only through an intermediate keeps its name to itself (task 174 verifier F1-d: the record's
+            // readers see the intermediate on its row, not what that record belongs to).
+            var parent = naming.ViaIntermediateOnly.Contains((table, id)) ? row with { Name = null } : row;
+            existing.Add(new FiledParent(table, id, parent.Name, parent.Flag, parent.Permission));
+
+            // Task 174 (owner round 84): the parent's Access Permission, from the same row (a null value is Standard).
+            if (FilingPermission.Rank(parent.Permission) > 0)
+            {
+                strictest = FilingPermission.Stricter(strictest,
+                    new FilingPermission(parent.Permission!.Value, new SecureFilingParent(table, id, parent.Name)));
+            }
+
+            if (parent.Flag is null)
             {
                 unknown ??= $"the {table} it is filed under has no secure flag value (empty is never read as not secure)";
                 continue;
             }
 
-            if (parent.Value.Flag == true)
-                secure.Add(new SecureFilingParent(table, id, parent.Value.Name));
+            if (parent.Flag == true)
+                secure.Add(new SecureFilingParent(table, id, parent.Name));
         }
 
-        return (new SecureParentsAnswer(secure, unknown), existing);
+        return (new SecureParentsAnswer(secure, unknown ?? unrepeated)
+        {
+            UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
+            StrictestPermission = strictest,
+        }, existing);
     }
 
-    /// <summary>A matter's or project's flag and its name, or <c>null</c> when it does not exist.</summary>
-    private Task<(bool? Flag, string? Name)?> ReadParentAsync(string table, Guid id, CancellationToken ct) =>
-        ReadParentAsync(_dataverse, table, id, ct);
-
-    private static async Task<(bool? Flag, string? Name)?> ReadParentAsync(
+    /// <summary>A matter's or project's flag, name and Access Permission, or <c>null</c> when it does not exist.</summary>
+    private static async Task<ParentRow?> ReadParentAsync(
         IGenericEntityService dataverse, string table, Guid id, CancellationToken ct)
     {
-        var nameColumn = string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
-        var query = Query(table, new[] { IsSecureColumn, nameColumn });
+        var nameColumn = NameColumnOf(table);
+        var query = Query(table, new[] { IsSecureColumn, nameColumn, AccessPermissionColumn });
         query.TopCount = 1;
         query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
         var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (row is null)
-            return null;
-
-        return (row.GetAttributeValue<bool?>(IsSecureColumn), row.GetAttributeValue<string>(nameColumn));
+        return row is null ? null : ToParentRow(row, nameColumn);
     }
+
+    /// <summary>#1410: the flag, name and Access Permission of every row of <paramref name="table"/> in <paramref name="ids"/>
+    /// (at most <see cref="IdsPerQuery"/>) in one query — one id is the one-record query; a row that does not exist is absent.
+    /// A fault propagates.</summary>
+    private static async Task<IReadOnlyDictionary<Guid, ParentRow>> ReadParentsOfManyAsync(
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, ParentRow>();
+        if (ids.Length == 1)
+        {
+            if (await ReadParentAsync(dataverse, table, ids[0], ct).ConfigureAwait(false) is { } one)
+                found[ids[0]] = one;
+            return found;
+        }
+
+        var nameColumn = NameColumnOf(table);
+        var query = Query(table, new[] { IsSecureColumn, nameColumn, AccessPermissionColumn });
+        query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
+        foreach (var row in await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false))
+        {
+            if (ids.Contains(row.Id))
+                found[row.Id] = ToParentRow(row, nameColumn);
+        }
+
+        return found;
+    }
+
+    private static string NameColumnOf(string table) =>
+        string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
+
+    /// <summary>Task 174: <c>sprk_accesspermission</c> is a choice column; the SDK returns an <see cref="OptionSetValue"/>.
+    /// Absent or empty is Standard (the flag read's rule).</summary>
+    private static ParentRow ToParentRow(Entity row, string nameColumn) => new(
+        row.GetAttributeValue<bool?>(IsSecureColumn),
+        row.GetAttributeValue<string>(nameColumn),
+        row.Attributes.TryGetValue(AccessPermissionColumn, out var permission)
+            ? permission switch { OptionSetValue o => o.Value, int i => i, _ => null }
+            : null);
 
     private readonly ConcurrentDictionary<Guid, string?> _recordTypes = new();
 
@@ -2793,7 +3884,7 @@ public sealed class SecureRootInheritance
     {
         var logical = table.Trim().ToLowerInvariant();
         var typed = new Dictionary<string, Guid?>(
-            before?.Typed ?? TypedFilingColumns[logical].ToDictionary(t => t.Column, _ => (Guid?)null),
+            before?.Typed ?? TypedLookupsOf(logical).ToDictionary(t => t.Column, _ => (Guid?)null),
             StringComparer.OrdinalIgnoreCase);
         var pairId = before?.PairId;
         var pairType = before?.PairType;

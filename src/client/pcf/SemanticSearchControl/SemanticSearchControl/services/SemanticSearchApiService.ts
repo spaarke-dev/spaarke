@@ -7,7 +7,7 @@
  * @see spec.md for API contract details
  */
 
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import { SearchRequest, SearchResponse, SearchError } from '../types';
 
 /**
@@ -276,6 +276,18 @@ export class SemanticSearchApiService {
         throw error;
       }
 
+      // authenticatedFetch THROWS for every non-OK response (the `!response.ok` branch above never
+      // runs under it): AuthError once its 401 retries are spent, ApiError(status, problemDetails)
+      // otherwise. Give those the same status-specific copy and retryable flag.
+      if (isAuthFailure(error)) {
+        return this.throwForStatus(401, 'Search failed', 'HTTP_401');
+      }
+      if (isApiError(error)) {
+        const problem = problemOf(error);
+        const code = typeof problem?.code === 'string' ? problem.code : `HTTP_${error.status}`;
+        return this.throwForStatus(error.status, error.message || 'Search failed', code);
+      }
+
       // Handle network errors
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw this.createError(
@@ -383,7 +395,6 @@ export class SemanticSearchApiService {
   private async handleHttpError(response: Response): Promise<never> {
     let errorMessage = 'Search failed';
     let errorCode = `HTTP_${response.status}`;
-    let retryable = false;
 
     try {
       const errorData: ApiErrorResponse = await response.json();
@@ -403,7 +414,16 @@ export class SemanticSearchApiService {
       errorMessage,
     });
 
-    switch (response.status) {
+    return this.throwForStatus(response.status, errorMessage, errorCode);
+  }
+
+  /**
+   * Throw the SearchError for a failed request's HTTP status — the copy and `retryable` flag shared by a
+   * returned non-OK response ({@link handleHttpError}) and an error `authenticatedFetch` threw.
+   */
+  private throwForStatus(status: number, errorMessage: string, errorCode: string): never {
+    let retryable = false;
+    switch (status) {
       case 400:
         throw this.createError('Invalid search request. Please modify your query.', errorCode, false);
       case 401:

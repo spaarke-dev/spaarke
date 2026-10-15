@@ -28,8 +28,8 @@
 
 > **Version**: 3.0
 > **Created**: 2025-12-28
-> **Updated**: 2026-05-17 (Auth v2 callout added 2026-05-20)
-> **Last Reviewed**: 2026-05-17
+> **Updated**: 2026-10-06 (§9.2 / §9.4 Content Safety corrected — keyless; task 246) (Auth v2 callout added 2026-05-20)
+> **Last Reviewed**: 2026-05-17 (§9.2 / §9.4 Content Safety re-verified 2026-10-06)
 > **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1 + AI Platform Unification R2
 
 ---
@@ -79,7 +79,7 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 
 **R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
 - RAG knowledge index (`spaarke-knowledge-index-v2`) with hybrid search (3072-dim vectors)
-- Per-customer RAG deployment: `Dedicated` (the default — a dedicated AI Search service per customer) or `CustomerOwned` (BYOK, in the customer's own subscription). The former `Shared` value is **retired — never provision it**; see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
+- Per-customer RAG: a dedicated AI Search service per customer (each stamp's own), in Model 1 and Model 2 alike; the setting `Analysis:DefaultRagModel` stays at its code default `Shared`, which reads the stamp's own `AiSearch:KnowledgeIndexName` (`spaarke-files-index`, created by H2b); `Dedicated` reads `{tenantId}-knowledge`, which nothing creates — never set it (corrected 2026-10-08, T235; #1432). The former `CustomerOwned` value was removed (task 230b); see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
 - `IKnowledgeDeploymentService` for SearchClient routing
 - `IRagService` for hybrid search with semantic ranking
 - Redis caching for embeddings
@@ -312,6 +312,12 @@ pac solution list
 
 ## Phase 3: PCF Controls (R2)
 
+> **Removed — history only (2026-10-07).** The AnalysisBuilder and AnalysisWorkspace PCF controls were deleted from the
+> repository on 2026-03-15 (commit `ded4e037c2`, "remove 10 deprecated PCF controls"); `src/client/pcf/AnalysisBuilder/`
+> and `src/client/pcf/AnalysisWorkspace/` no longer exist. Sections 3.1 and 3.2 describe them for history only.
+> **Release any PCF control through `/pcf-deploy`** (solution ZIP import, `npm run build:prod`), never with
+> `pac pcf push` (a development inner-loop command) or `npm run build` (development mode — `.claude/FAILURE-MODES.md` AP-1).
+
 ### 3.1 AnalysisBuilder PCF Control
 
 **Purpose**: Modal dialog for configuring and executing AI document analyses
@@ -346,11 +352,7 @@ cd src/client/pcf/AnalysisBuilder
 # Install dependencies
 npm install
 
-# Build
-npm run build
-
-# Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
+# Historical (control removed). Releases: /pcf-deploy — never pac pcf push or npm run build.
 ```
 
 ### 3.2 AnalysisWorkspace PCF Control
@@ -383,11 +385,7 @@ cd src/client/pcf/AnalysisWorkspace
 # Install dependencies
 npm install
 
-# Build
-npm run build
-
-# Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
+# Historical (control removed). Releases: /pcf-deploy — never pac pcf push or npm run build.
 ```
 
 ### 3.3 Environment Variable Configuration
@@ -536,9 +534,7 @@ pac solution export \
   --name Spaarke_AI
 
 # Modify and reimport
-pac solution import \
-  --path Spaarke_AI_updated.zip \
-  --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath Spaarke_AI_updated.zip -SolutionUniqueName Spaarke_AI
 ```
 
 ---
@@ -578,7 +574,7 @@ az search index list \
 | `speFileId` | Edm.String | SharePoint Embedded file ID |
 | `fileName` | Edm.String | Original file name |
 | `deploymentId` | Edm.String | Deployment model ID |
-| `deploymentModel` | Edm.String | Shared/Dedicated/CustomerOwned |
+| `deploymentModel` | Edm.String | Shared/Dedicated |
 
 ### 6.2 RAG Services Registration
 
@@ -600,13 +596,14 @@ The following services are registered in `Program.cs` when AI Search is configur
 
 ### 6.3 Deployment Models
 
-The RAG system supports 3 deployment models configured per tenant:
+The RAG system supports 2 deployment models configured per tenant:
 
 | Model | Index Location | Configuration |
 |-------|---------------|---------------|
-| **Shared** | `spaarke-knowledge-index-v2` | Default, `tenantId` filter for isolation |
+| **Shared** | `spaarke-knowledge-index-v2` | 🔴 Retired — never provision (see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models)) |
 | **Dedicated** | `{tenantId}-knowledge` | Per-customer index, requires index creation |
-| **CustomerOwned** | Customer Azure AI Search | Requires Key Vault secret for API key |
+
+The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
 **Default Shared Index**: Configure via `Analysis__SharedIndexName` in App Service. Default: `spaarke-knowledge-index-v2`.
 
@@ -792,12 +789,21 @@ Add the following App Service settings for R2 services:
 | `CosmosPersistence__Endpoint` | `https://spaarke-cosmos-{env}.documents.azure.com:443/` | Cosmos DB account endpoint |
 | `CosmosPersistence__DatabaseName` | `spaarke-ai` | Target database name |
 
-**Azure AI Content Safety**:
+**Azure AI Content Safety** (keyless — corrected 2026-10-06, task 246):
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| `AiSafety__ContentSafety__Endpoint` | `https://spaarke-contentsafety-{env}.cognitiveservices.azure.com/` | Content Safety REST API endpoint |
-| `AiSafety__ContentSafety__ApiKey` | (from Key Vault) | Content Safety API key (supports dynamic rotation) |
+| `AiSafety__ContentSafety__Endpoint` | `https://{account}.cognitiveservices.azure.com/` | **Required** outside Development/Testing: the BFF refuses to start without it. There is no default. |
+| `AiSafety__ContentSafety__ManagedIdentity__Enabled` | `true` | Authenticate with the BFF's managed identity (Microsoft Entra bearer token). |
+| `AiSafety__PromptShield__ChatPipelineEnabled` | `true` / `false` | Pre-LLM Prompt Shield scan in the chat pipeline (template default `false`). Enable only after the endpoint and role are in place. |
+
+Where `{account}` is:
+- **Shared dev**: `spaarke-openai-dev` — the multi-service AIServices account (RG `spe-infrastructure-westus2`) also serves Content Safety. There is no `spaarke-contentsafety-dev` account.
+- **Customer stamps**: `sprk-{customer}-{env}-contentsafety` (kind `ContentSafety`, local auth disabled), deployed by `infrastructure/bicep/customer.bicep` via `modules/content-safety.bicep`. `customer.bicep` sets the endpoint setting and provisioning handler H4b re-applies it from H2a's `contentSafetyEndpoint` output — no manual step.
+
+**Role**: the BFF identity needs **Cognitive Services User** on the account. "Cognitive Services OpenAI User" does NOT cover Content Safety dataActions. Customer stamps grant it to the stamp's user-assigned managed identity in Bicep.
+
+**No API key**: do not create, store, or configure a Content Safety key for a deployed environment. `AiSafety__ContentSafety__ApiKey` is read only when set, for local development; if it is non-empty and managed identity is not enabled, the BFF sends the key instead of a token.
 
 ```bash
 # Set Cosmos DB configuration
@@ -808,13 +814,13 @@ az webapp config appsettings set \
     "CosmosPersistence__Endpoint=https://spaarke-cosmos-dev.documents.azure.com:443/" \
     "CosmosPersistence__DatabaseName=spaarke-ai"
 
-# Set Content Safety configuration
+# Set Content Safety configuration (shared dev BFF; customer stamps get it from customer.bicep + H4b)
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings \
-    "AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/" \
-    "AiSafety__ContentSafety__ApiKey=<api-key>"
+    "AiSafety__ContentSafety__Endpoint=https://spaarke-openai-dev.cognitiveservices.azure.com/" \
+    "AiSafety__ContentSafety__ManagedIdentity__Enabled=true"
 ```
 
 ### 9.3 SpaarkeAi Web Resource Deployment
@@ -841,8 +847,11 @@ npm run build:prod
 # 1. Verify Cosmos DB is accessible (check API startup logs)
 # Look for: "CosmosClient initialized" or no CosmosPersistence errors
 
-# 2. Verify Content Safety is configured
-# Look for: no "AiSafety:ContentSafety:ApiKey is not configured" warnings
+# 2. Verify Content Safety answers (keyless, read-only; your az login needs Cognitive Services User)
+.\scripts\Verify-ContentSafetyResource.ps1   # shared dev defaults: spe-infrastructure-westus2 / spaarke-openai-dev
+# Customer stamp: -SubscriptionId <sub> -ResourceGroup <stamp-rg> -ResourceName sprk-{customer}-{env}-contentsafety
+# A missing AiSafety__ContentSafety__Endpoint stops the BFF at startup (outside Development/Testing).
+# Coverage: run scripts/kql/ai-metering/shield-coverage.kql and confirm a non-zero completed count.
 
 # 3. Verify SpaarkeAi web resource is deployed
 pac solution list
@@ -961,7 +970,6 @@ curl https://{api-url}/healthz
 | Setting | Value | Description |
 |---------|-------|-------------|
 | `SharePointEmbedded__ContainerTypeId` | (configured) | SPE Container Type ID |
-| `DEFAULT_CT_ID` | (configured) | Default Container Type |
 
 ### AI Services (Legacy Ai__ namespace)
 
@@ -1202,7 +1210,7 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 
 **Resolution**:
 1. Republish Custom Page in Power Apps maker
-2. Run `pac solution publish-all`
+2. Publish the affected components only (`PublishXml`, scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish
 3. Hard refresh browser (Ctrl+Shift+R)
 4. Check version in control footer
 

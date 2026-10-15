@@ -90,6 +90,7 @@ public sealed class CommunicationRiActionService
     private readonly NotificationService _notifications;
     private readonly IGenericEntityService _entityService;
     private readonly ILogger<CommunicationRiActionService> _logger;
+    private readonly TimeProvider _clock;
 
     public CommunicationRiActionService(
         IActionSeam seam,
@@ -97,7 +98,8 @@ public sealed class CommunicationRiActionService
         SignalRDeliveryService delivery,
         NotificationService notifications,
         IGenericEntityService entityService,
-        ILogger<CommunicationRiActionService> logger)
+        ILogger<CommunicationRiActionService> logger,
+        TimeProvider? clock = null)
     {
         _seam = seam ?? throw new ArgumentNullException(nameof(seam));
         _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
@@ -105,6 +107,7 @@ public sealed class CommunicationRiActionService
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions (seam tests) need not supply one; DI supplies the registered TimeProvider
     }
 
     /// <summary>
@@ -189,21 +192,33 @@ public sealed class CommunicationRiActionService
             //    communication, owned by the responsible user). A Spaarke task is a sprk_event (event type = Task),
             //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
             //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
-            // 🔴 Due dates added 2026-09-29. Previously BOTH were left null, and
-            // DailyBriefingCollector's task channels read sprk_finalduedate first, fall back to sprk_duedate,
-            // and FILTER BY DATE — so every RI task ever created was outside the briefing's window and could
-            // never surface there, however correctly it was written. The day counts are DECLARED on the
+            // 🔴 Due dates added 2026-09-29. Before that both were left null, and DailyBriefingCollector's task
+            // channels select tasks BY DUE DATE, so no RI task could ever surface in the briefing, however correctly
+            // it was written. (Since D-27 those channels read sprk_duedate only; sprk_finalduedate is informational.)
+            // The day counts are DECLARED on the
             // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
             // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so
             // an operator retunes the SLA by editing a row rather than shipping code.
-            var createdAtUtc = DateTime.UtcNow;
+            // Task 098: sprk_duedate / sprk_finalduedate are Date Only. The days count from the RECIPIENT's today,
+            // in their own Dataverse time zone — the former createdAtUtc.AddDays(n) took the UTC date, so a signal raised
+            // after ~20:00 Eastern dated the task a day late (the two ONTOLOGY DEV SEED 005 values hand-corrected in the
+            // conversion). UTC midnight of that calendar date is what the SDK stores as the date (probed live).
+            var (recipientToday, todayFallback) = await DataverseUserTimeZone.TodayForUserAsync(
+                _entityService, recipientSystemUserId, _clock.GetUtcNow(), ct).ConfigureAwait(false);
+            if (todayFallback is not null)
+            {
+                _logger.LogWarning(
+                    "[comms-ri] Task due dates count from the UTC date ({Reason}) for communication {CommunicationId}.",
+                    todayFallback, signal.CommunicationId);
+            }
+
             var taskResult = await _seam.CreateTaskAsync(
                 new CreateTaskRequest
                 {
                     Subject = subject,
                     Description = BuildActionDescription(signal, decision),
-                    DueDate = createdAtUtc.AddDays(decision.TaskDueDays),
-                    FinalDueDate = createdAtUtc.AddDays(decision.TaskFinalDueDays),
+                    DueDate = recipientToday.AddDays(decision.TaskDueDays).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                    FinalDueDate = recipientToday.AddDays(decision.TaskFinalDueDays).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
                     RegardingObjectId = signal.CommunicationId,
                     RegardingObjectType = CommunicationEntity,
                     OwnerId = recipientSystemUserId,

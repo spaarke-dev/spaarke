@@ -86,7 +86,16 @@ public record UnsecureProjectResponse(
     SecureChildPassSummary? Children = null,
     IReadOnlyList<RelatedSecureRecord>? RelatedSecureRecords = null,
     IReadOnlyList<RelatedUnsecureOutcome>? RelatedRecordsUnsecured = null,
-    bool RelatedSecureRecordsUnreadable = false);
+    bool RelatedSecureRecordsUnreadable = false)
+{
+    /// <summary>
+    /// Task 175 fix round 3 (K1): the work assignments and projects below a matter or project, with no access record yet, that
+    /// were NOT recorded as inherited before its flag was cleared (past the inline cap of 50, or not written). They stay secure
+    /// and the secure-root inheritance job records them. <c>null</c> for a work assignment, or when the records below could not
+    /// all be read. Additive.
+    /// </summary>
+    public int? AccessRecordsNotRecorded { get; init; }
+}
 
 /// <summary>A work assignment or project filed under the record, still secure (task 158).</summary>
 public record RelatedSecureRecord(string RecordType, Guid RecordId, string? Name);

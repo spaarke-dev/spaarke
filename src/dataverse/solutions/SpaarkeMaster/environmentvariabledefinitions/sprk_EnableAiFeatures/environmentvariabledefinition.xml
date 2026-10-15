@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_EnableAiFeatures">
+  <defaultvalue>yes</defaultvalue>
+  <description default="Master toggle to enable/disable all AI-powered features. Set to No to disable AI features for compliance reasons.">
+    <label description="Master toggle to enable/disable all AI-powered features. Set to No to disable AI features for compliance reasons." languagecode="1033" />
+  </description>
+  <displayname default="Enable AI Features">
+    <label description="Enable AI Features" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000002</type>
+</environmentvariabledefinition>

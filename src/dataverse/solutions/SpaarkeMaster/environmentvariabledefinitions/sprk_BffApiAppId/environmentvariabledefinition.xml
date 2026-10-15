@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_BffApiAppId">
+  <defaultvalue>1e40baad-e065-4aea-a8d4-4b7ab273458c</defaultvalue>
+  <description default="Application (client) ID of the BFF API app registration. Used to construct OAuth scope.">
+    <label description="Application (client) ID of the BFF API app registration. Used to construct OAuth scope." languagecode="1033" />
+  </description>
+  <displayname default="BFF API App Registration ID">
+    <label description="BFF API App Registration ID" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

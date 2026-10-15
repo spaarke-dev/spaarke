@@ -250,8 +250,9 @@ Power BI workspace and the service principal are per customer in both.
    registration serving customer reports is **not** a fleet-level identity and does not qualify for D-13 §5's
    exemption. See `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
 2. *"Shared F-SKU pool"* — Power BI capacity holds customer reporting data and is **not** on D-12 §3's closed
-   two-item sharing exception list (Static Web Apps, Content Safety). ⚠️ **If a shared capacity pool is
-   wanted for cost reasons, that is a new owner decision**, not an inherited default — it is not decided here.
+   two-item sharing exception list (Static Web Apps, Content Safety). **Decided (owner, 2026-09-28): no BI in
+   the MVP; a per-customer Power BI F-SKU comes later and is not procured now.** No shared pool. Until then a
+   customer stamp provisions no Power BI capacity (placeholder only — `SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`).
 
 ⚠️ **Service-principal profiles remain the right mechanism** for isolating workspaces; what changes is that
 the identity they hang off is per customer, not shared.

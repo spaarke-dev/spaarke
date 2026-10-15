@@ -24,9 +24,10 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// Sync flow:
 ///   1. Query sprk_specontainertypeconfigs from Dataverse (all active configs, with their business units) and the
 ///      business-unit hierarchy.
-///   2. For each config, list its container type's containers with the config's own Graph client, and read each
-///      container's business-unit binding (<see cref="SpeContainerBusinessUnitStamp"/> — Graph returns it on a
-///      single-container read only).
+///   2. For each config, list its container type's containers with the config's type-wide Graph client, keep only this
+///      stamp's (SpeAdminGraphService.FilterOwnedAsync — task 227d: the listing holds every customer's containers), and
+///      read each kept container's business-unit binding (<see cref="SpeContainerBusinessUnitStamp"/> — Graph returns it
+///      on a single-container read only).
 ///   3. Attribute each container ONCE (<see cref="AttributeContainer"/>): to the config carrying its container type
 ///      whose business unit is the nearest ancestor-or-self of the container's stamped unit. One container type can
 ///      serve several customers (Model 1), so "the containers of this config's type" is NOT "this config's
@@ -548,8 +549,13 @@ public sealed class SpeDashboardSyncService : IScheduledJob
             IReadOnlyList<SpeAdminGraphService.SpeContainerSummary> containers;
             try
             {
-                graphClient = await _graphService.GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-                containers = await _graphService.ListContainersAsync(graphClient, config.ContainerTypeId, ct).ConfigureAwait(false);
+                graphClient = await _graphService.GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+                // Type-wide listing returns every customer's containers; keep only this stamp's before any per-container
+                // read (task 227d, owner D29).
+                containers = await _graphService.FilterOwnedAsync(
+                    await _graphService.ListContainersAsync(graphClient, config.ContainerTypeId, ct).ConfigureAwait(false),
+                    c => c.Id,
+                    ct).ConfigureAwait(false);
 
                 concerns.Add(new ConcernOutcome
                 {

@@ -72,6 +72,13 @@ public static class OfficeModule
         // unconditional GraphModule singletons — no §10 F.1 asymmetry.
         services.AddScoped<RecordCreationService>();
 
+        // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
+        // existing, unfiled communication files it to the save's record through the association engine's existing-row
+        // write. Concrete (ADR-010), SCOPED because SecureChildReconciler is; every dependency (IncomingAssociationResolver,
+        // IGenericEntityService, CallerRecordAccessProbe, SecureChildReconciler) is registered unconditionally — no §10 F.1
+        // asymmetry for the unconditional save route.
+        services.AddScoped<ReconciledEmailFiling>();
+
         // ============================================================================
         // Office Add-in Orchestrator Service
         // ============================================================================

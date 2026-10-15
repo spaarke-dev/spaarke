@@ -31,9 +31,13 @@ internal static class GrantPolicyTestDoubles
     {
         private readonly RootRecordFlags _defaultFlags;
 
-        public FlagStubParticipationService(RootRecordFlags defaultFlags)
+        /// <param name="defaultFlags">What an unseeded id answers.</param>
+        /// <param name="filing">Task 174: the filing world the effective-flag read walks; by default nothing is filed under
+        /// anything (every record's own flags are its effective flags).</param>
+        public FlagStubParticipationService(RootRecordFlags defaultFlags, Spaarke.Dataverse.IGenericEntityService? filing = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: filing ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
             _defaultFlags = defaultFlags;
         }
@@ -219,12 +223,52 @@ internal static class GrantPolicyTestDoubles
             var ids = RecordOrganizations
                 .Where(kv => kv.Value.Contains(organizationId)
                              && (RecordTables.TryGetValue(kv.Key, out var t) ? t : "sprk_project") == entityType
-                             && (Flags.TryGetValue(kv.Key, out var f) ? f : _defaultFlags).IsSecure)
+                             && StoredSecureFlag(kv.Key) == true)
                 .Select(kv => kv.Key)
                 .ToList();
             return Task.FromResult<(IReadOnlyList<Guid>, bool)>(
                 ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false));
         }
+
+        /// <summary>
+        /// Task 174: the NOT-flagged records of a table that reference the organization — the same derivation as the secure
+        /// read above, with the flag inverted.
+        /// </summary>
+        public override Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindUnflaggedRootsReferencingOrganizationAsync(
+            string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        {
+            if (ReverseReadsThrow)
+                throw new InvalidOperationException("Simulated reverse-read failure.");
+
+            var ids = RecordOrganizations
+                .Where(kv => kv.Value.Contains(organizationId)
+                             && (RecordTables.TryGetValue(kv.Key, out var t) ? t : "sprk_project") == entityType
+                             && MatchesFlagFilter(UnflaggedRootFilter, StoredSecureFlag(kv.Key)))
+                .Select(kv => kv.Key)
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<Guid>, bool)>(
+                ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false));
+        }
+
+        /// <summary>Task 174: records whose STORED <c>sprk_issecure</c> is blank (null) — what the reverse reads filter on.</summary>
+        public ConcurrentDictionary<Guid, bool> BlankSecureFlags { get; } = new();
+
+        private bool? StoredSecureFlag(Guid id) =>
+            BlankSecureFlags.ContainsKey(id) ? null : (Flags.TryGetValue(id, out var f) ? f : _defaultFlags).IsSecure;
+
+        /// <summary>
+        /// Evaluates a <c>sprk_issecure</c> OData filter of the shape production sends (<c>eq true</c>, <c>ne true</c>,
+        /// <c>eq null</c>, joined by <c>or</c>) with Dataverse's null semantics: <c>ne</c> never matches a null. So a double
+        /// cannot hide a filter that drops blank flags.
+        /// </summary>
+        internal static bool MatchesFlagFilter(string filter, bool? value)
+            => filter.Trim('(', ')').Split(" or ").Any(clause => clause.Trim() switch
+            {
+                "sprk_issecure eq true" => value == true,
+                "sprk_issecure ne true" => value == false,
+                "sprk_issecure eq null" => value is null,
+                var other => throw new InvalidOperationException($"Unmodelled flag filter clause: {other}"),
+            });
 
         /// <summary>Task 143: an organization's active member contacts.</summary>
         public override Task<(IReadOnlyList<Guid> ContactIds, bool Truncated)> FindWallMemberContactsAsync(
@@ -409,6 +453,8 @@ internal static class GrantPolicyTestDoubles
             Mock.Of<ISubjectStandingGrantReader>(),
             reader,
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
@@ -433,7 +479,8 @@ internal static class GrantPolicyTestDoubles
             Microsoft.Extensions.Configuration.IConfiguration? configuration)
             : base(new HttpClient(), cache,
                    configuration ?? new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-                   credential: null!, AccessorFor(context), NullLogger<ExternalParticipationService>.Instance)
+                   credential: null!, AccessorFor(context), NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

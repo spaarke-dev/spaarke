@@ -3,11 +3,12 @@
  *
  * R7 Wave 12 widget cutover (2026-06-30):
  *   Refactored to drive the entire widget from a single `POST /api/ai/daily-briefing/render`
- *   call. The legacy chain `useBriefingNotifications` → `appnotification` table →
- *   `useBriefingNarration` (gated by appnotification load + non-empty channels)
- *   is REMOVED from the widget data path. The previous "all caught up" early-exit
- *   that relied on `totalUnreadCount === 0` from appnotification is REMOVED —
- *   `/render` is the sole source of truth.
+ *   call. The legacy two-hook chain that fetched an `appnotification` table
+ *   and gated AI narration behind a successful, non-empty load is REMOVED
+ *   from the widget data path (those two hooks were themselves deleted as
+ *   dead code by ontology-platform-r1 task 010 / C-1, 2026-10-03). The
+ *   previous "all caught up" early-exit that relied on `totalUnreadCount === 0`
+ *   from appnotification is REMOVED — `/render` is the sole source of truth.
  *
  *   What remains from the pre-cutover composition:
  *     - `useBriefingPreferences` — still queries `sprk_userpreference` for
@@ -18,7 +19,7 @@
  *       (per FR-18 / FR-19).
  *
  *   Dropped (no appnotification surface to act on):
- *     - `useBriefingActions` (markChecked / markRemoved / extendTtl)
+ *     - The per-item mark-as-read / remove / extend-TTL action hook
  *     - Optimistic-update overlay state
  *     - handleCheck / handleRemove / handleKeep callbacks
  *     - FR-16 raw-notification fallback in ActivityNotesSection (no `channels`)
@@ -58,6 +59,7 @@ import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
+  describeSendFailure,
   RichFilePreviewDialog,
   OOB_MODAL_SIZES,
   cleanGuid,
@@ -889,11 +891,18 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             );
             closeEmailDialog();
           }}
+          // This host tells the user itself (the error toast below), so the composer's own
+          // "Email not sent" dialog is switched off — one report per failure.
+          sendFailureDisplay="host"
           onError={err => {
+            const failure = describeSendFailure(err);
             dispatchToast(
               <Toast>
-                <ToastTitle>Send failed</ToastTitle>
-                <ToastBody>{err.detail ?? 'The email could not be sent.'}</ToastBody>
+                <ToastTitle>{failure.title}</ToastTitle>
+                <ToastBody>
+                  {failure.message}
+                  {failure.reference ? ` Reference: ${failure.reference}` : ''}
+                </ToastBody>
               </Toast>,
               { intent: 'error', timeout: 8000 }
             );

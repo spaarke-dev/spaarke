@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="233" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>BFF TenancyModel enum names follow D-12 (Model1Shared/Model2Dedicated → Model1/Model2); stale tenancy wording in the schema script, the ARM-manifest workflow and its schema corrected</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T233 (G8)</phase>
+    <gate>after 232 (✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs (bff-api) and adds a BFF unit test (test-modifying override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical rename with a pinned integer mapping; no behaviour change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No .claude/ edits; touches one BFF file, one test, one script header, one workflow + its schema.</parallel-reason>
+    <tags>bff-api, provisioning, ci-workflows, testing, model1-dedicated</tags>
+    <deps>232</deps>
+  </metadata>
+
+  <prompt>Rename the BFF's own TenancyModel enum members to the D-12 names and remove the remaining stale tenancy wording.</prompt>
+
+  <role>SPAARKE platform developer (BFF registration services, CI workflow text).</role>
+
+  <goal>
+    The BFF, the L2 control plane and Dataverse use the same tenancy names — `Model1` (Spaarke-hosted dedicated stamp)
+    and `Model2` (customer-hosted dedicated stamp) — and no file still describes Model 1 as a shared tier or as failing
+    closed at H2a.
+  </goal>
+
+  <context>
+    <background>
+      Re-verified 2026-10-07 (code): plan G8 says the BFF enum "would not parse post-T224 Dataverse labels". It does
+      parse — `DataverseEnvironmentRecord.MapFromJson` reads `sprk_tenancymodel` by its INTEGER value, and T224 kept the
+      option values (Model1 = 0, Model2 = 1). What remains is drift: the BFF enum still says `Model1Shared` /
+      `Model2Dedicated` and its doc comment calls Model 1 "trial/SMB shared-platform tier" (retired by D-12). No BFF code
+      reads `TenancyModelValue` and the record is never returned by an endpoint (RegistrationEndpoints maps it to
+      DemoEnvironmentConfig), so the rename changes no contract. Same family of drift, found while scoping:
+      `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1` header line 32 lists the old names, and
+      `.github/workflows/publish-provisioning-arm-artifacts.yml` publishes a `resolutionHint` (and its schema
+      `.github/workflows/schemas/provisioning-arm-manifest.json` describes the `customer` entry) saying Model 1 fails closed
+      until tasks 225b + 228 — both done; `ArmDeploymentRunner` maps Model1 and Model2 to `customer`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs (enum at ~37, MapFromJson ~219)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/TenancyModel.cs (reference: the L2 enum, renamed by T224)</file>
+      <file>scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 (line 32)</file>
+      <file>.github/workflows/publish-provisioning-arm-artifacts.yml (~214); .github/workflows/schemas/provisioning-arm-manifest.json (~37)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (new test for MapFromJson's sprk_tenancymodel mapping)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/rules/bff-hygiene.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="schema">Integer values stay 0 = Model1, 1 = Model2 (Dataverse option values, T224).</constraint>
+    <constraint source="scope">No behaviour change; no new surface. Historical notes that record the rename (e.g. "renamed from Model1Shared by T224") stay.</constraint>
+    <constraint source="bff">BFF publish size measured against fresh master from short-path worktrees (rules/bff-hygiene.md 4).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Rename the BFF enum members, keep explicit values, rewrite the doc comment per D-12.</step>
+    <step order="2">Add a BFF unit test pinning MapFromJson: 0 → Model1, 1 → Model2, absent/non-number → null.</step>
+    <step order="3">Correct the schema-script header, the workflow resolutionHint and the manifest-schema description.</step>
+    <step order="4">Plan G8/T233 rows: record the corrected premise. Verify (BFF build 0 warnings, the new test + registration tests, ArchTests, actionlint if available); publish size; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git grep -n -E "Model1Shared|Model2Dedicated" -- src` finds only comments that record the T224 rename (no enum member, no code use).</criterion>
+    <criterion testable="true">The new test passes: sprk_tenancymodel 0 → Model1, 1 → Model2, missing or string → null.</criterion>
+    <criterion testable="true">No file states that Model 1 fails closed at H2a or that Model 1 is a shared tier (outside history/decision records).</criterion>
+    <criterion testable="true">BFF builds with 0 warnings; ArchTests pass; publish-size delta reported against fresh master.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-07 (SESSION 42).
+    - Premise corrected: the BFF never failed to parse T224's labels; it reads sprk_tenancymodel by integer value and T224
+      kept 0/1. Nothing in the BFF reads TenancyModelValue, and no endpoint returns the record. This was naming drift.
+      The registry holds no tenancy value today (Dev, Demo 1, trial-2026-08-18 all null; checked 2026-10-07), so
+      nothing needed migrating.
+    - BFF: enum Model1 = 0 / Model2 = 1, doc comments per D-12 (enum, KeyVaultName, TenancyModelValue).
+    - Tests (tests/unit/domain/Registration/DataverseEnvironmentRecordSchemaTests.cs): option value 0/1 → Model1/Model2;
+      absent / null / label-shaped → null.
+    - Stale wording fixed: L2 TenancyModel.cs parallel-enum note (it claimed the BFF would fail to parse); H1 and H10
+      comments; customer.bicep; Deploy-AllIndexes.ps1; deployment guide (sprk_tenancymodel row; marker paragraph);
+      completeness-sweeps runbook; Extend-DataverseEnvironmentSchema-v3.3.ps1 header; ARM-manifest workflow
+      resolutionHint + schema (2 descriptions); provision-environment and azure-deploy skills; operator-rbac-bootstrap
+      pattern (CHANGELOG entry). ControlPlane test names and fixtures moved to Model1/Model2 (H2a x2, RunsEndpoints,
+      serializer fixture, H4b fixture, DAG-parity note).
+    - Kept on purpose (AC1 reading): legacy Cosmos-document fixtures with "Model2Dedicated"
+      (ProvisioningRunProductionSerializerTests :83/:132), TenancyModelParserTests' retired-name rejections, history
+      comments and one history sentence in an H2b message.
+    - Handed to T252 (POML note): the Bicep descriptions calling BFF-API-ClientSecret the "shared multitenant BFF app-reg"
+      secret (controlplane-worker-app-service.bicep, platform-controlplane.bicep/.json). The right wording depends on
+      H6/H7's credential chain, which is T252's subject.
+    - Verified: BFF build 0 warnings; ControlPlane 2275/0 (1 skip); record tests 14/14; registration tests 125/125;
+      ArchTests 841/841; customer.bicep builds; manifest schema is valid JSON. Publish size: fresh master e6218e5ba 36.22 MB
+      / 192 files vs branch a43f52fd4 36.24 MB / 192 files (+0.02 MB, Compress-Archive, PDBs included); no package
+      changes.
+    - Step 9.5 (code-review + adr-check, independent reviewer): no ADR violations. Findings fixed: the stale L2 note and
+      current-tense claims listed above (F2), the AC1 test names and fixtures (F4), and the missing evidence (F4).
+      Known limits:
+      - K4: an out-of-range option number maps to an undefined enum value, not null; nothing consumes it.
+      - K4: the absent/null/label test shares one guard.
+  </notes>
+</task>

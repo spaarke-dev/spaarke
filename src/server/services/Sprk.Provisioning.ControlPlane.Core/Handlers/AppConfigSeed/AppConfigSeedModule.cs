@@ -5,10 +5,12 @@
 // (task 071 — wave Cp DAG-parallel with H12a).
 //
 // SCOPE:
-//   - Bind AppConfigSeed:{PwshExecutable, ScriptsDirectory, ManifestPath,
-//     SeederTimeout, DataGridScriptFileName, WorkspaceLayoutScriptFileName,
-//     DataverseRequestTimeout} options, with ValidateOnStart (task 151,
-//     NFR-05 parity with task 142's EnvVarValuesOptions wiring).
+//   - Bind AppConfigSeed:{DataverseRequestTimeout} options, with
+//     ValidateOnStart (task 151, NFR-05 parity with task 142's
+//     EnvVarValuesOptions wiring). Task 253 (G38) deleted the shell-out /
+//     disk-path options (PwshExecutable, ScriptsDirectory, ManifestPath,
+//     SeederTimeout, *ScriptFileName): nothing read them but H12b's manifest
+//     hash, which now comes from H12a's ISeedManifestReader (embedded).
 //   - Register the four IAppConfigSeeder instances. Task 151 (Wave G-5)
 //     ported two of the four from PowerShellAppConfigSeeder shell-outs to
 //     direct Dataverse Web API calls: DataverseWebApiDataGridSeeder +
@@ -53,8 +55,10 @@
 //   the local IAppConfigSeeder seam; no BFF-facade dependencies.
 // -----------------------------------------------------------------------------
 
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 
@@ -88,12 +92,7 @@ public static class AppConfigSeedModule
         // Bind AppConfigSeed options with fail-fast startup validation (task
         // 151, NFR-05 parity with task 142's EnvVarValuesOptions wiring — a
         // misconfigured DataverseRequestTimeout fails the Worker at boot
-        // rather than surfacing only on H12b's first dispatch). Defaults
-        // inside AppConfigSeedOptions cover the operator running from a
-        // workstation with pwsh on PATH + scripts/ under
-        // AppContext.BaseDirectory (vestigial — see PowerShellAppConfigSeeder.cs
-        // retirement note below). Production deployments override via App
-        // Service settings.
+        // rather than surfacing only on H12b's first dispatch).
         services.AddOptions<AppConfigSeedOptions>()
             .Bind(configuration.GetSection(ConfigSection))
             .Validate(o =>
@@ -163,6 +162,11 @@ public static class AppConfigSeedModule
             httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiChartDefSeeder.HttpClientName),
             options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
             logger: sp.GetRequiredService<ILogger<DataverseWebApiChartDefSeeder>>()));
+
+        // The seed-manifest reader H12b hashes for its idempotency key — H12a's (task 253: the embedded manifest).
+        // TryAdd: the Worker registers it for H12a first; this keeps the module self-contained without a duplicate.
+        services.AddOptions<AiSeedChainOptions>();
+        services.TryAddSingleton<ISeedManifestReader, EmbeddedSeedManifestReader>();
 
         // Handler — Scoped per IProvisioningHandler contract + parity with
         // IHandlerEnqueuer's Scoped registration + parity with H0/H0.5/H1/H2a

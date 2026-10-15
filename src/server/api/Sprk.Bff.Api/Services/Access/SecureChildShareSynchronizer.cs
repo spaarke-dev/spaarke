@@ -122,11 +122,27 @@ public enum InheritedShareAction
     /// <summary>On the No Access list of the record or a parent: nothing added.</summary>
     Walled,
 
+    /// <summary>
+    /// unified-access-control-r2 task 114 (owner round 67): the filed record is RESTRICTED and the principal is a user flagged
+    /// <c>sprk_isexternal = true</c> — <c>InternalShareEndpoints.ClassifyEligibility</c> refuses it, so nothing is added. A
+    /// KNOWN cause: the share is passed on again once the record is not Restricted.
+    /// </summary>
+    Restricted,
+
     /// <summary>The No Access list could not be checked: nothing added (held).</summary>
     Held,
 
     /// <summary>The write, or its read-back, failed.</summary>
     Failed,
+}
+
+/// <summary>
+/// Task 114: whether a filed secure root is Restricted, and the users flagged external its parents may not pass on to it.
+/// </summary>
+public sealed record RestrictedPrincipalsAnswer(bool IsRestricted, IReadOnlySet<DataversePrincipalRef> Barred)
+{
+    /// <summary>The record is not Restricted (or nobody to ask about): nobody is barred.</summary>
+    public static RestrictedPrincipalsAnswer NotRestricted { get; } = new(false, new HashSet<DataversePrincipalRef>());
 }
 
 /// <summary>One principal of a filed secure root's inherited mirror, with the masks before and after (task 158 r1).</summary>
@@ -210,8 +226,8 @@ public sealed record SecureRootsAbove(
 /// of non-secure roots are never touched. Roots are never mirrored: a root's own shares are provisioning's and the share
 /// endpoints'.</para>
 /// <para><b>The mirror.</b> For each principal (system user or team) with a direct share on the root: the root's rights
-/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete; never
-/// Share, never Assign (owner round 11 item 4: "ShareAccess is NOT mirrored onto children"). A child under SEVERAL secure
+/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete and Share,
+/// each only where the root share holds it; never Assign (Share since owner round 91, replacing round 11 item 4). A child under SEVERAL secure
 /// roots gets the INTERSECTION: a principal must be shared on every one of them, at the lowest rights (owner round 11
 /// item 4, fail closed). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
 /// missing one is granted. Inherited-only POA rows (mask 0) are neither read as shares nor touched.</para>
@@ -266,6 +282,8 @@ public sealed class SecureChildShareSynchronizer
     private const string OwningUserColumn = "owninguser";
     private const string IsSecureColumn = "sprk_issecure";
     private const int OwnerTeamType = SecureRecordOwnerTeam.OwnerTeamType;
+
+    private const string AccessPermissionColumn = "sprk_accesspermission";
 
     private readonly IGenericEntityService _dataverse;
     private readonly IDataverseRecordShareService _recordShare;
@@ -418,7 +436,7 @@ public sealed class SecureChildShareSynchronizer
     /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): mirrors ONE child — the row a browser writer just
     /// created or re-filed through the BFF — inline, so the people the secure record is shared with see it at once rather
     /// than at the next two-minute reconcile (owner round 11 item 2 remains the backstop). The same mirror the scheduled
-    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Share or Assign, a No Access
+    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Assign (Share only where the roots hold it, round 91), a No Access
     /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
     /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
     /// </summary>
@@ -686,10 +704,69 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>
+    /// <see cref="SecureRootsAboveAsync"/> for several independent groups of rows in ONE run: the same upward walk and the same
+    /// answer per group, but every parent row is read once for all groups (the run's read cache), so the cost is bounded by the
+    /// distinct parents rather than groups × walk. <paramref name="secureTeamId"/> is the Secure Record owner team the caller has
+    /// ALREADY identified with <see cref="ResolveSecureOwnerTeamAsync"/> (this method does not identify it again). A Dataverse
+    /// fault propagates (the caller decides nothing).
+    /// </summary>
+    /// <remarks>Ontology task 038 (component justification, CLAUDE.md section 11). Existing: <see cref="SecureRootsAboveAsync"/>,
+    /// whose run already caches reads. Extension: that method answers one union per call, so a caller that needs one answer per
+    /// group calls it per group and re-reads every shared parent in a fresh run. Cost of doing nothing: the worklist's read-time
+    /// witness rule (D-123) would walk each Signal's and each witness's lineage in its own run on every page load.
+    /// <para>uac-r2 K1 on ontology #1891: the parents and roots are read ahead level by level, one query per table per level
+    /// (<see cref="Run.PrefetchLineagesAsync"/>), and <paramref name="readRows"/> (optional) are child rows the caller has ALREADY
+    /// read, each with the column set it was read with: a row read with every column the walk reads is used instead of reading
+    /// it again; any other is ignored (read as usual). The answers are those of the row-by-row walk.</para></remarks>
+    internal async Task<IReadOnlyList<SecureRootsAbove>> SecureRootsAboveEachAsync(
+        IReadOnlyList<IReadOnlyCollection<Entity>> groups, Guid secureTeamId, CancellationToken ct,
+        IReadOnlyCollection<(Entity Row, ColumnSet ReadWith)>? readRows = null)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+        foreach (var row in groups.SelectMany(g => g))
+        {
+            if (!SecureChildLineage.IsChild(row.LogicalName))
+                throw new ArgumentOutOfRangeException(nameof(groups), row.LogicalName, "Not a secure-child table.");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        if (readRows is not null)
+            run.Seed(readRows);
+        await run.PrefetchLineagesAsync(groups.SelectMany(g => g)).ConfigureAwait(false);
+
+        var answers = new List<SecureRootsAbove>(groups.Count);
+        foreach (var group in groups)
+        {
+            var roots = new HashSet<RowRef>();
+            var undetermined = new List<string>();
+            var undeterminedRows = new List<(string Table, Guid Id)>();
+            foreach (var entity in group.DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id)))
+            {
+                var (reference, lineage) = await run.LineageOfReadRowAsync(entity).ConfigureAwait(false);
+                roots.UnionWith(lineage.SecureRoots);
+                if (lineage.Undetermined is { } why)
+                {
+                    undetermined.Add($"{reference}: {why}");
+                    undeterminedRows.Add((reference.Table, reference.Id));
+                }
+            }
+
+            answers.Add(new SecureRootsAbove(
+                SecureChildShareSyncStatus.Completed,
+                roots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).Select(r => (r.Table, r.Id)).ToList(),
+                undetermined,
+                null,
+                undeterminedRows));
+        }
+
+        return answers;
+    }
+
+    /// <summary>
     /// unified-access-control-r2 task 158 (owner round 6: "The parent's sharees can see it") — gives a secure work
     /// assignment or project that is FILED UNDER secure matters / projects (<paramref name="secureParents"/>) the internal
     /// sharees of those parents, by this class's mirror rule: each parent sharee's rights restricted to
-    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (never Share, never Assign), the INTERSECTION when there are two
+    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (Share only where the root holds it, round 91; never Assign), the INTERSECTION when there are two
     /// parents (owner round 11 item 4), a user the No Access list walls off the record or any parent dropped, an unverifiable
     /// wall held. Then the record's own children are brought into line with its shares (<see cref="SyncRootAsync"/>).
     /// </summary>
@@ -814,6 +891,22 @@ public sealed class SecureChildShareSynchronizer
         var outcomes = new Dictionary<DataversePrincipalRef, InheritedShareOutcome>();
         var from = isolatedParents.Select(p => (p.Table, p.Id)).ToList();
 
+        // Task 114 (owner round 67): the ONE share-eligibility rule — a RESTRICTED filed record is never given a parent's
+        // sharee who is flagged external. Read before any write; a read that fails gives nobody anything (ADR-003).
+        RestrictedPrincipalsAnswer restricted;
+        try
+        {
+            restricted = await RestrictedExternalPrincipalsOrThrowAsync(root.Table, root.Id, desired!.Keys, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-CHILD-SHARES] Whether {Root} is Restricted, or which of its parents' sharees are flagged external, could " +
+                "not be read; nothing was given.", root);
+            return SecureChildShareSyncResult.Failed(
+                "whether the record is Restricted, or who among its parents' sharees is flagged external, could not be read");
+        }
+
         foreach (var (principal, mask) in desired!.OrderBy(p => p.Key.Id))
         {
             var current = have.TryGetValue(principal, out var c) ? c : 0;
@@ -821,6 +914,14 @@ public sealed class SecureChildShareSynchronizer
             {
                 // Owner round 30: an operator removed it on this record — never re-added while the parent share persists.
                 outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Declined);
+                continue;
+            }
+
+            if (restricted.Barred.Contains(principal))
+            {
+                // Task 114: never copied onto a Restricted record — and, held already, not counted as passed on (it is the
+                // Restricted remover's to take). Recorded by the caller as the known cause, never as an operator's removal.
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Restricted);
                 continue;
             }
 
@@ -958,6 +1059,69 @@ public sealed class SecureChildShareSynchronizer
         };
     }
 
+    /// <summary>
+    /// Task 114 (owner round 67): which of <paramref name="principals"/> a RESTRICTED <paramref name="rootTable"/> record may not
+    /// be shared with — the users <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> bars
+    /// (a stored <c>sprk_isexternal = true</c>, disabled or not; a blank flag is not external). Empty when the
+    /// record is not Restricted (one read) or names no user. Teams are never barred here. Throws when the record or the users
+    /// cannot be read, so a caller never reads a fault as "nobody is barred".
+    /// </summary>
+    internal async Task<RestrictedPrincipalsAnswer> RestrictedExternalPrincipalsOrThrowAsync(
+        string rootTable, Guid rootId, IEnumerable<DataversePrincipalRef> principals, CancellationToken ct)
+    {
+        var users = principals.Where(p => p.Kind == DataversePrincipalKind.SystemUser).Select(p => p.Id).Distinct().ToList();
+        if (users.Count == 0)
+            return RestrictedPrincipalsAnswer.NotRestricted;
+
+        var rootQuery = new QueryExpression(rootTable)
+        {
+            ColumnSet = new ColumnSet(AccessPermissionColumn),
+            TopCount = 1,
+            NoLock = true,
+        };
+        rootQuery.Criteria.AddCondition(rootTable + "id", ConditionOperator.Equal, rootId);
+        var rootRow = (await _dataverse.RetrieveMultipleAsync(rootQuery, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var isRestricted = rootRow?.GetAttributeValue<OptionSetValue>(AccessPermissionColumn)?.Value
+                           == ExternalParticipationService.AccessPermissionRestricted;
+
+        // #1478 (task 175): Restricted THROUGH a parent counts (task 174's effective rule), so the mirror never shares a
+        // child of a Restricted matter with a person flagged external while the child's own column catches up. A chain that
+        // cannot be read throws (this method's contract: a fault is never "nobody is barred").
+        if (!isRestricted && rootRow is not null)
+        {
+            isRestricted = await Sprk.Bff.Api.Infrastructure.ExternalAccess.EffectiveRootFlags
+                .RestrictedThroughFilingAsync(_dataverse, _logger, rootTable, rootId, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"Whether {rootTable} {rootId:D} is Restricted through what it is filed under could not be read.");
+        }
+
+        if (!isRestricted)
+            return RestrictedPrincipalsAnswer.NotRestricted;
+
+        var barred = new HashSet<DataversePrincipalRef>();
+        foreach (var batch in users.Chunk(DescendantConditionsPerQuery))
+        {
+            var query = new QueryExpression("systemuser")
+            {
+                ColumnSet = new ColumnSet("systemuserid", "sprk_isexternal"),
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("systemuserid", ConditionOperator.In, batch.Cast<object>().ToArray());
+            foreach (var row in (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities)
+            {
+                if (!batch.Contains(row.Id))
+                    continue; // a row for any other user is not an answer about these
+                // Verifier V4: the ONE predicate — disabled or not, person or not — so the inheritance's barred set is the
+                // remover's and the materializer's, never a narrower "eligible AND external".
+                if (Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted(
+                        row.GetAttributeValue<bool?>("sprk_isexternal"), rootIsRestricted: true))
+                    barred.Add(DataversePrincipalRef.User(row.Id));
+            }
+        }
+
+        return new RestrictedPrincipalsAnswer(IsRestricted: true, barred);
+    }
+
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)
     {
         // A scoped run first proves from the record's OWN row that it can be secure, so an ordinary record is answered
@@ -1041,16 +1205,14 @@ public sealed class SecureChildShareSynchronizer
     internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
     {
-        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
-        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
-        if (businessUnits.Count > 1)
+        var secureBu = await ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
-        if (businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty)
+        if (secureBu.Id is not { } secureBuId)
             return (null, null);
 
         var teamQuery = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 2, NoLock = true };
-        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, businessUnits[0].Id);
+        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, secureBuId);
         teamQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
         teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
         teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
@@ -1058,6 +1220,25 @@ public sealed class SecureChildShareSynchronizer
         if (teams.Count > 1)
             return (null, "more than one Secure Record owner team carries the configured name");
         return teams.Count == 0 || teams[0].Id == Guid.Empty ? (null, null) : (teams[0].Id, null);
+    }
+
+    /// <summary>
+    /// WHICH business unit is the Secure Record BU, by id: the one named by <c>SecureRecord:BusinessUnitName</c>, read with
+    /// TOP 2 — <c>RecordOwnershipResolver.ResolveSecureBusinessUnitAsync</c>'s rule. Two matches are <c>Ambiguous</c> (the
+    /// caller refuses); none means this environment has no Secure Record BU, so no business unit is it. A Dataverse fault
+    /// propagates. Step 1 of <see cref="ResolveSecureOwnerTeamAsync"/>, and on its own the guard of
+    /// <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/> (UAC task 183), which refuses a row or a team in that
+    /// business unit — ANY team there, so the guard holds once each secure family has its own owner team (task 178).
+    /// </summary>
+    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
+        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
+        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
+        if (businessUnits.Count > 1)
+            return (null, true);
+        return businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty ? (null, false) : (businessUnits[0].Id, false);
     }
 
     /// <summary>
@@ -1101,7 +1282,13 @@ public sealed class SecureChildShareSynchronizer
         };
         query.Criteria.AddCondition(root.Table + "id", ConditionOperator.Equal, root.Id);
         var entity = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return RootFactsOf(entity);
+    }
 
+    /// <summary>A root's facts from its row as read with <see cref="OwningTeamColumn"/> and <see cref="IsSecureColumn"/>, or
+    /// <c>null</c> when there is no row.</summary>
+    private static RootFacts? RootFactsOf(Entity? entity)
+    {
         // An EMPTY sprk_issecure fails CLOSED (task 150, round 17 item 3), as in the ownership resolver: since the task 150
         // backfill every row holds true or false and the column is field-secured, so empty means this identity lost its
         // field-level Read and the real value was masked. Read as flagged: a root that is not isolated then leaves its
@@ -1298,6 +1485,93 @@ public sealed class SecureChildShareSynchronizer
         /// <summary>Seeds the run's cache with a root already read (the scoped run's own root).</summary>
         public void Remember(RowRef root, RootFacts? facts) => _roots[root] = facts;
 
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: seeds the run's cache with child rows the caller has already read. A row is used only
+        /// when it was read with every column the walk reads (<see cref="WalkColumns"/>); a row read with fewer is ignored and
+        /// read as usual, so a column the caller did not select never reads as absent.
+        /// </summary>
+        public void Seed(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
+        {
+            foreach (var (entity, readWith) in rows)
+            {
+                if (entity.Id == Guid.Empty || !SecureChildLineage.Children.TryGetValue(entity.LogicalName, out var table))
+                    continue;
+                if (!readWith.AllColumns
+                    && !WalkColumns(table).All(c => readWith.Columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+                    continue;
+
+                var row = ToRow(table, entity);
+                _otherRows.TryAdd(row.Ref, row);
+            }
+        }
+
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: reads ahead, in batches, every parent and root the upward walks from
+        /// <paramref name="entities"/> will ask for, so the walks themselves are answered from the run's cache. Each round walks
+        /// every row against the cache only (<see cref="LineageOfAsync"/> collecting its misses), which yields exactly the reads
+        /// the walk would make next, then reads them one query per table (<see cref="ReadManyAsync"/>). Each round reaches one
+        /// level further, so the rounds are bounded by the lineage depth; anything still missing after them is read row by
+        /// row by the walk itself. A fault propagates.
+        /// </summary>
+        public async Task PrefetchLineagesAsync(IEnumerable<Entity> entities)
+        {
+            var rows = entities
+                .DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id))
+                .Select(e => ToRow(SecureChildLineage.Children[e.LogicalName], e))
+                .ToList();
+            for (var round = 0; round <= MaxLineageDepth; round++)
+            {
+                var misses = new HashSet<RowRef>();
+                foreach (var row in rows)
+                    await LineageOfAsync(row, misses).ConfigureAwait(false);
+                if (misses.Count == 0)
+                    return;
+
+                await ReadManyAsync(misses).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: the rows named, read one query per table (an id <c>In</c> list, at most
+        /// <see cref="DescendantConditionsPerQuery"/> ids each) with the columns of the single reads (<see cref="RootAsync"/>,
+        /// <see cref="OtherRowAsync"/>), and cached as they would cache them: a row not returned is cached as absent. A
+        /// fault propagates.
+        /// </summary>
+        private async Task ReadManyAsync(IEnumerable<RowRef> references)
+        {
+            foreach (var group in references.GroupBy(r => r.Table, StringComparer.Ordinal))
+            {
+                var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
+                foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
+                {
+                    var ids = chunk.Select(r => r.Id).ToHashSet();
+                    var query = new QueryExpression(group.Key)
+                    {
+                        ColumnSet = table is null ? new ColumnSet(OwningTeamColumn, IsSecureColumn) : new ColumnSet(WalkColumns(table)),
+                        NoLock = true,
+                    };
+                    query.Criteria.AddCondition(
+                        table is null ? group.Key + "id" : table.IdColumn, ConditionOperator.In, ids.Cast<object>().ToArray());
+
+                    var found = new Dictionary<Guid, Entity>();
+                    foreach (var entity in (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities)
+                    {
+                        if (ids.Contains(entity.Id))
+                            found[entity.Id] = entity; // a row for any other id is not an answer about these
+                    }
+
+                    foreach (var reference in chunk)
+                    {
+                        var entity = found.GetValueOrDefault(reference.Id);
+                        if (table is null)
+                            _roots[reference] = RootFactsOf(entity);
+                        else
+                            _otherRows[reference] = entity is null ? null : ToRow(table, entity);
+                    }
+                }
+            }
+        }
+
         /// <summary>A root's owner and flag, or <c>null</c> when the row does not exist. A fault propagates.</summary>
         public async Task<RootFacts?> RootAsync(RowRef root)
         {
@@ -1319,7 +1593,7 @@ public sealed class SecureChildShareSynchronizer
             var table = SecureChildLineage.Children[reference.Table];
             var query = new QueryExpression(table.LogicalName)
             {
-                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                ColumnSet = new ColumnSet(WalkColumns(table)),
                 TopCount = 1,
                 NoLock = true,
             };
@@ -1330,6 +1604,10 @@ public sealed class SecureChildShareSynchronizer
             _otherRows[reference] = row;
             return row;
         }
+
+        /// <summary>The columns the walk reads of a child row: its lineage lookups and its owner.</summary>
+        private static string[] WalkColumns(SecureChildLineage.Table table) =>
+            table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
 
         private static Row ToRow(SecureChildLineage.Table table, Entity entity)
         {
@@ -1361,8 +1639,10 @@ public sealed class SecureChildShareSynchronizer
             return (row.Ref, await LineageOfAsync(row).ConfigureAwait(false));
         }
 
-        /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).</summary>
-        private async Task<Lineage> LineageOfAsync(Row row)
+        /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).
+        /// <paramref name="misses"/> (uac-r2 K1 on ontology #1891, <see cref="PrefetchLineagesAsync"/>): walk the cache only;
+        /// a parent or root the run does not hold yet is added to it and not followed, and nothing is read.</summary>
+        private async Task<Lineage> LineageOfAsync(Row row, HashSet<RowRef>? misses = null)
         {
             var roots = new HashSet<RowRef>();
             string? undetermined = null;
@@ -1378,6 +1658,12 @@ public sealed class SecureChildShareSynchronizer
 
                     if (SecureChildLineage.IsRoot(parent.Table))
                     {
+                        if (misses is not null && !_roots.ContainsKey(parent))
+                        {
+                            misses.Add(parent);
+                            continue;
+                        }
+
                         var facts = await RootAsync(parent).ConfigureAwait(false);
                         if (facts is null)
                             undetermined ??= $"its parent {parent} does not exist";
@@ -1391,6 +1677,12 @@ public sealed class SecureChildShareSynchronizer
                     if (depth + 1 >= MaxLineageDepth)
                     {
                         undetermined ??= $"its filing runs deeper than {MaxLineageDepth} levels";
+                        continue;
+                    }
+
+                    if (misses is not null && !_secureChildren.ContainsKey(parent) && !_otherRows.ContainsKey(parent))
+                    {
+                        misses.Add(parent);
                         continue;
                     }
 

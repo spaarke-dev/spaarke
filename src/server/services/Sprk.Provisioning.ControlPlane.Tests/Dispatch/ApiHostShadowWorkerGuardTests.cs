@@ -227,6 +227,9 @@ public sealed class ApiHostShadowWorkerGuardTests : IClassFixture<ApiHostShadowW
             // Provide a stub URL so boot succeeds — no HTTP is invoked in
             // these DI-inspection tests.
             builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com");
+            // T255: ReservedTenantsOptions is ValidateOnStart on both hosts (Spaarke's tenant + the CIAM tenant[s]).
+            builder.UseSetting("ReservedTenants:SpaarkeTenantId", "5a5a5a5a-0000-4000-8000-000000000001");
+            builder.UseSetting("ReservedTenants:CiamTenantIds:0", "c1a0c1a0-0000-4000-8000-000000000002");
 
             // Testing environment -- TelemetryModule's AzureMonitorGuard skips
             // exporter wiring silently on non-Development/Production envs.

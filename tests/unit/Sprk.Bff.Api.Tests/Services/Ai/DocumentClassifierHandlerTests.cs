@@ -27,7 +27,7 @@ public class DocumentClassifierHandlerTests
         _handler = new DocumentClassifierHandler(_openAiClientMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object);
 
         // Handler with RAG
-        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object, _ragServiceMock.Object);
+        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object, _ragServiceMock.Object, PermitAllRetrievalAccessTrim.Instance);
     }
 
     #region Handler Properties Tests

@@ -56,7 +56,7 @@ Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reus
 - **MUST** support dark mode and high-contrast
 - **MUST** match model-driven app interaction patterns
 - **MUST** export TypeScript types alongside components
-- **MUST** achieve 90%+ test coverage on shared components
+- **MUST** ship tests for the behaviour a consumer of each shared component would notice; coverage is observed, never targeted (ADR-038 — the former "90%+ coverage" rule was removed 2026-10-07)
 - **MUST** author components to be React 19-compatible (used in Code Pages)
 - **MUST** verify React 16/17 compatibility for components consumed by PCF
 - **MUST** use **runtime-context abstractions** for platform-specific operations (see Service Architecture below)

@@ -2,7 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -36,11 +36,10 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// stamped, which is common (verified live 2026-08-27: three of six business units have
 /// <c>sprk_containerid</c> unset) and mirrors the record path's identical case.</para>
 ///
-/// <para><b>Mocking note.</b> This file uses NSubstitute to match its sibling
-/// <c>RecordContainerResolverTests</c>, which substitutes the same two collaborators in the same idiom.
-/// <c>tests/CLAUDE.md</c> names Moq as the codebase standard; introducing a second framework into one test
-/// area would be worse than the deviation, and the substituted types are module boundaries
-/// (<c>IGenericEntityService</c> / <c>ISecurableEntityRegistry</c>), not the class under test's internals.</para>
+/// <para><b>Mocking note.</b> This file uses Moq (the codebase standard named in <c>tests/CLAUDE.md</c>), as does
+/// its sibling <c>RecordContainerResolverTests</c>, which mocks the same two collaborators in the same idiom.
+/// The mocked types are module boundaries (<c>IGenericEntityService</c> / <c>ISecurableEntityRegistry</c>), not
+/// the class under test's internals.</para>
 /// </summary>
 public class ActingUserContainerResolutionTests
 {
@@ -240,13 +239,12 @@ public class ActingUserContainerResolutionTests
         string? buContainer,
         List<QueryExpression>? capture = null)
     {
-        var registry = Substitute.For<ISecurableEntityRegistry>();
-        var svc = Substitute.For<IGenericEntityService>();
+        var registry = new Mock<ISecurableEntityRegistry>();
+        var svc = new Mock<IGenericEntityService>();
 
-        svc.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        svc.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
             {
-                var query = call.Arg<QueryExpression>();
                 capture?.Add(query);
 
                 var collection = new EntityCollection();
@@ -268,10 +266,10 @@ public class ActingUserContainerResolutionTests
         // The business-unit read. Returns a row that carries the container only when one was supplied, so
         // the "no container stamped" case is an ABSENT attribute rather than an empty string — which is how
         // Dataverse actually reports it (null-valued properties are omitted from the response).
-        svc.RetrieveAsync("businessunit", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        svc.Setup(s => s.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string[] _, CancellationToken _) =>
             {
-                var row = new Entity("businessunit", call.ArgAt<Guid>(1));
+                var row = new Entity("businessunit", id);
 
                 if (!string.IsNullOrWhiteSpace(buContainer))
                 {
@@ -282,6 +280,6 @@ public class ActingUserContainerResolutionTests
             });
 
         return new RecordContainerResolver(
-            registry, svc, NullLogger<RecordContainerResolver>.Instance);
+            registry.Object, svc.Object, NullLogger<RecordContainerResolver>.Instance);
     }
 }

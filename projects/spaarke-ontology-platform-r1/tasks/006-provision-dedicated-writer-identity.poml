@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Provision the dedicated least-privileged writer identity</title>
+    <phase>0 Foundations</phase>
+    <gate>owner confirms the Azure changes before they are made</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive identity and privilege change in shared Azure and Dataverse environments.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and privilege work with a fail-closed requirement; a mistake silently widens access.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes shared Azure and Dataverse identity configuration; main session, one step at a time.</parallel-reason>
+    <deps>none</deps>
+    <tags>auth,security,dataverse,azure</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the evaluator its own identity that holds only the Spaarke Ontology Service role, so the append-only guarantee binds the writer as well as human users.</prompt>
+  <role>SPAARKE platform engineer. Security fails closed; least privilege is the point, not a nicety.</role>
+  <goal>The principal that writes Signals and Decision Records holds Create on both and Assign on Signal, and no Write or Delete on sprk_decisionrecord, proven by the union check.</goal>
+
+  <context>
+    <background>OWNER DECISION 2026-10-03 (task 002 escalation, option A). Spaarke Ontology Service is today assigned only to SDAP-BFF-SPE-API, which is also a System Administrator; privileges are additive with no deny, so the writer holds Write and Delete on the ledger. The fix is a SEPARATE identity holding only Spaarke Ontology Service. Prefer a user-assigned managed identity (UAMI) attached to the BFF App Service: no client secret exists to leak or rotate, and BFF-API-ClientSecret must not be recreated.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/002-escalation-append-only-writer-principal.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file role="canonical-reference">docs/guides/auth-deployment-setup.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: STOP before each Azure or Dataverse change and get the owner's confirmation: creating the UAMI, attaching it to spaarke-bff-dev (this can restart the app), registering it as a Dataverse application user, and assigning the role. Each is outward-facing.</constraint>
+    <constraint source="project">Scope: the new identity holds ONLY Spaarke Ontology Service. Never System Administrator, System Customizer or any role with Write or Delete on sprk_decisionrecord.</constraint>
+    <constraint source="project">Scope: do NOT create or reference BFF-API-ClientSecret (deleted 2026-08-24; must not be recreated). Do not add any new client secret.</constraint>
+    <constraint source="project">Scope: do not remove System Administrator from the existing BFF identities; their broad access serves every Spaarke surface and changing it is not this project's decision.</constraint>
+    <constraint source="ADR-028">Scope: follow the canonical auth architecture: managed identity first, function-based contract.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Managed identity and Dataverse application users</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/002-escalation-append-only-writer-principal.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Write the exact plan (resource names, resource group, the role assignment, how the evaluator acquires a Dataverse token as the UAMI) and get owner confirmation.</step>
+    <step order="2">Create the user-assigned managed identity and attach it to the BFF App Service.</step>
+    <step order="3">Register it as a Dataverse application user in spaarkedev1 and assign ONLY Spaarke Ontology Service.</step>
+    <step order="4">Re-run the task 002 union check and confirm the new principal holds Create on sprk_signal and sprk_decisionrecord, Assign on sprk_signal, and no Write or Delete on sprk_decisionrecord.</step>
+    <step order="5">Record the identity, its client id and the verification in notes/security-roles.md, and tell task 030 which client id the writer must use.</step>
+    <step order="6">Update tasks/TASK-INDEX.md and this POML status to completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the BFF cannot acquire a Dataverse token as a second identity alongside its existing one, STOP and escalate rather than granting the existing identity narrower roles or falling back to the sysadmin identity.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Dataverse application user for the new identity exists and holds exactly one role: Spaarke Ontology Service.</criterion>
+    <criterion testable="true">The union check for that principal shows Create on sprk_signal and sprk_decisionrecord, Assign on sprk_signal, and NO Write or Delete on sprk_decisionrecord.</criterion>
+    <criterion testable="true">Negative: no client secret was created, and BFF-API-ClientSecret does not exist.</criterion>
+    <criterion testable="true">The client id task 030 must use is recorded in notes/security-roles.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner decision 2026-10-03, task 002 option A. Unblocks task 002's completion (its union check must pass for the writer) and task 030 (the writer authenticates as this identity).</notes>
+
+  <completion>COMPLETED 2026-10-04 (main session). UAMI mi-ontology-writer-dev (rg-spaarke-dev, westus2), client id 69040982-612e-469e-a85f-26d5172367c5, principal 6cf6d7b6-8dc2-4cfb-a971-649df8605be6, attached to spaarke-bff-dev alongside mi-bff-api-dev (every existing credential + KV reference stays pinned to mi-bff-api-dev; /healthz and /healthz/dataverse 200 after attach; /healthz/catalog 503 is pre-existing AI catalog drift logged since 2026-09-29). Dataverse app user # mi-ontology-writer-dev (3121bf1b-9fbf-f111-aaaf-0022482913fc), root BU, ONE directly assigned role Spaarke Ontology Service. Union check (RetrieveUserPrivileges, team-inherited included): Create Signal/DecisionRecord + Assign Signal present; NO Write/Delete on sprk_decisionrecord; nothing writable on policy/policyversion. Negative test on the wire: writer create 204, update 403 0x80040220, delete 403 0x80040220; admin control 204; test rows deleted. No secret: SP type ManagedIdentity, 0 password credentials. FINDINGS for 030: (a) effective set = Ontology Service + root default team roles (Console User, Basic User, Office Add In User), 722 privileges; Write on sprk_signal and all reads come only from the default team, so 030 should decide whether to fold them into Ontology Service; (b) NOT-EXISTS over a Basic-depth table (spendsnapshot, spendsignal, document, account, contact) is vacuously true for this principal and must fail closed. Token acquisition from inside the app is proven by 030 on first write. Record: notes/security-roles.md section 9, plan: notes/006-writer-identity-plan.md.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

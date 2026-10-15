@@ -22,7 +22,8 @@ public sealed record ThreadMembershipContext
     /// <summary>Open vs Private. Maps <c>sprk_privacystate</c>.</summary>
     public required ThreadPrivacyState Privacy { get; init; }
 
-    /// <summary>ADR-024 regarding anchor (denormalized pointer). Null for a Direct thread with no regarding.</summary>
+    /// <summary>ADR-024 regarding anchor: the id its TYPED regarding lookup names, never the denormalized pointer
+    /// (#1629, <c>ThreadResolver.ThreadAnchorOf</c>). Null for a thread no typed lookup anchors.</summary>
     public string? AnchorRecordId { get; init; }
 
     /// <summary>ADR-024 regarding anchor entity logical name (e.g. <c>sprk_matter</c>).</summary>

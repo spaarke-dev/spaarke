@@ -10,9 +10,13 @@
 //   syncs the Microsoft Graph application (app-only) permission catalog
 //   (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally via
 //   IGraphAppRolesRegistry — see that file's header for the L2/BFF
-//   assembly-isolation rationale) onto the UAMI service principal: the 11
-//   Entra-granted roles. The 4 mailbox roles are granted by H14a through
-//   Exchange, scoped to the customer's group (task 251) — never here.
+//   assembly-isolation rationale) onto the UAMI service principal: the
+//   Entra-granted roles (FileStorageContainer.Selected since task 261), and
+//   REMOVES every other Microsoft Graph app role on it (task 261 / G31 — a stamp
+//   in Spaarke's tenant must not hold tenant-wide directory, SharePoint or mail
+//   rights; evidence: notes/t261-stamp-graph-least-privilege.md). The mailbox
+//   roles are granted by H14a through Exchange, scoped to the customer's group
+//   (task 251) — never here.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-13 (H10
@@ -62,14 +66,21 @@
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)                  │ Resumable                 │
 //   │ Missing bffAppRegId/miClientId/miObjectId/  │ Resumable (upstream       │
-//   │ dataverseEnvUrl (H3/H2a/H5-H6 not done yet) │ handler hasn't run yet)   │
+//   │ dataverseEnvUrl (H3/H2a/H5 not done yet)    │ handler hasn't run yet)   │
 //   │ Run not found in Cosmos partition          │ Resumable                 │
 //   │ H10 escalation gate (null AppRoleId)       │ Resumable (no write yet)  │
 //   │ BFF/UAMI App User creation call failed     │ Resumable (idempotent op) │
+//   │ T259 displayName missing/invalid           │ Resumable (no write yet)  │
+//   │ T259 customer unit ambiguous / read fault  │ Resumable                 │
+//   │ T259 customer unit not under the root      │ QuarantineRequired        │
+//   │ T259 App User already in another unit      │ QuarantineRequired        │
 //   │ T2 post-condition mismatch (count != 1)    │ QuarantineRequired        │
 //   │ Graph role grant call(s) failed            │ RetryableWithCleanup      │
+//   │ Removing an extra Graph role failed (T261) │ RetryableWithCleanup      │
 //   │ T3 post-condition partial (still missing   │ QuarantineRequired        │
 //   │ roles after "successful" grant loop)       │                           │
+//   │ T3 extra role still present (T261)         │ QuarantineRequired        │
+//   │ T3 extras re-read failed (T261)            │ Resumable                 │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                 │
 //   │ Run row deleted mid-flight                 │ Resumable                 │
 //   └────────────────────────────────────────────┴───────────────────────────┘
@@ -82,7 +93,12 @@
 //           with every other Wave-C4 handler).
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase == "H10",
-//           IdempotencyKey == appuser-{customerId}). Match ⇒ Success no-op.
+//           IdempotencyKey == appuser-{customerId}-g{catalog fingerprint}). Match ⇒ Success no-op.
+//           The fingerprint (task 261) is a hash of the Entra-granted role ids: a run that
+//           completed H10 under an OLDER catalog (more roles) does not match, so a re-dispatch
+//           of H10 re-runs the reconcile and removes what that catalog granted. Every step is
+//           idempotent. (A run already past H10 is not re-dispatched by the reconciler: for a
+//           stamp provisioned before task 261 use scripts/provisioning/Remove-StampGraphExtraRoles.ps1.)
 //           Key format is customer-only (no version token) per POML
 //           constraint — App User registration is per-customer + version-
 //           independent (parity with H5's dvenv-{customerId}).
@@ -93,6 +109,15 @@
 //   Cosmos state (advancing CurrentPhase + CompletedPhases + InterStepState +
 //   GateStates) and returns Success; it does not enqueue anything directly.
 //
+// CUSTOMER BUSINESS UNIT (T259 — ISS-010 / #1486, owner decision 2026-10-09; INCOMING-145 §6 T1/T3):
+//   "For secure records, only users explicitly granted access should have access; no users are added to the secure
+//   business unit." Before registering anyone H10 finds or creates the customer's OWN business unit — named by intake
+//   displayName (CustomerBusinessUnitIntake), a DIRECT child of the Dataverse root and so a SIBLING of the Secure Record
+//   unit — and creates both App Users IN it with System Administrator (the unit's copy of the role). Deep depth in the
+//   customer unit never reaches its sibling. An App User found in another unit is QuarantineRequired, never moved (a
+//   business-unit change strips every role, and H6/H7/H7b sign in as the BFF App User). The unit id is written to
+//   InterStepState.CustomerBusinessUnitId for H7b (checks it) and H11 (puts guests in it).
+//
 // MODEL 1 / MODEL 2 CODE PATH (task 205d / punch row A41 — auth-v4 §10.1 Δ5):
 //   H10 itself is DELIBERATELY tenancy-model-agnostic — it always registers
 //   exactly the two systemuser rows named by whatever bffAppRegId/miClientId/
@@ -101,7 +126,7 @@
 //     - Model 1 (dedicated stamp in Spaarke's Azure tenant — D-12/D-13, 2026-09-28):
 //       the same shape as Model 2 below — a per-customer BFF app-reg (H3) and a
 //       per-stamp UAMI (H2a), so H10 writes this customer's own systemuser rows.
-//       (H2a refuses Model 1 runs until tasks 225b + 228 land — task 225a.)
+//       (H2a deploys Model 1 stamps since task 228.)
 //       The former shared shape (one multitenant app-reg + `sprk-{env}-shared-bff-uami`
 //       registered once per DV environment for every Model 1 customer) is retired:
 //       H3's shared branch by task 222, the shared stack by task 225a.
@@ -120,6 +145,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
@@ -220,7 +246,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         var run = read.Run;
         var etag = read.ETag;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, _rolesRegistry.GetEntraGranted());
 
         // (2) Level-3 idempotency: durable no-op on duplicate.
         if (run.CompletedPhases.Any(cp =>
@@ -271,9 +297,18 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,
-                "InterStepState.dataverseEnvUrl is not populated — H5/H6 (Dataverse env) must complete before H10.",
+                "InterStepState.dataverseEnvUrl is not populated — H5 (Dataverse env adoption) must complete before H10.",
                 cancellationToken).ConfigureAwait(false);
         }
+
+        // T259: the customer unit's name — the intake rule POST /api/runs applied, re-checked (defence in depth).
+        var displayName = CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName);
+        if (displayName is CustomerBusinessUnitIntakeOutcome.Invalid invalidName)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, invalidName.RejectionCode,
+                $"Run parameter {invalidName.Diagnostic} Nothing was written.", cancellationToken).ConfigureAwait(false);
+        }
+        var customerUnitName = ((CustomerBusinessUnitIntakeOutcome.Valid)displayName).Name;
 
         var bffAppRegId = interStep.BffAppRegId!;
         var uamiClientId = interStep.MiClientId!;
@@ -297,10 +332,43 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.EscalationGateNullAppRoleId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (9) Register the BFF app-reg as a Dataverse System Administrator App User.
+        // (8b) T259 — the customer's own business unit, directly under the root (INCOMING-145 §6 T1).
+        var unitOutcome = await _appUserCreator.EnsureCustomerBusinessUnitAsync(
+            dataverseEnvUrl, tenantId, customerUnitName, cancellationToken).ConfigureAwait(false);
+        Guid customerUnitId;
+        switch (unitOutcome)
+        {
+            case CustomerBusinessUnitOutcome.Success found:
+                customerUnitId = found.BusinessUnitId;
+                break;
+            case CustomerBusinessUnitOutcome.Ambiguous ambiguous:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitAmbiguous,
+                    $"{ambiguous.Count} business units are named '{customerUnitName}' — H10 does not guess which one is the " +
+                    "customer's. Rename or remove the extra one, then resume. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.WrongParent wrong:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.CustomerBusinessUnitWrongParent,
+                    $"Business unit '{customerUnitName}' ({wrong.BusinessUnitId}) has parent " +
+                    $"{wrong.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {wrong.RootBusinessUnitId}. " +
+                    "The customer's unit must be a DIRECT child of the root, a sibling of the Secure Record unit (INCOMING-145 " +
+                    "§6 T1); re-parenting a unit is an owner decision. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+            default:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitFailed,
+                    $"The customer business unit '{customerUnitName}' could not be read or created: " +
+                    $"{((CustomerBusinessUnitOutcome.Failure)unitOutcome).Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+        }
+
+        // (9) Register the BFF app-reg as a Dataverse System Administrator App User — IN the customer unit (T3).
         var bffOutcome = await _appUserCreator.EnsureAppUserAsync(
-            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, bffAppRegId, _options.SecurityRoleName),
+            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, bffAppRegId, _options.SecurityRoleName, customerUnitId),
             cancellationToken).ConfigureAwait(false);
+        if (bffOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit bffElsewhere)
+        {
+            return await ForeignUnitAsync(run, etag, "BFF app-reg", bffAppRegId, bffElsewhere, customerUnitId, cancellationToken)
+                .ConfigureAwait(false);
+        }
         if (bffOutcome is DataverseAppUserCreationOutcome.Failure bffFailure)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.BffAppUserCreationFailed,
@@ -319,13 +387,18 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // existence/count check below AND H13's independent re-verification
         // count check — only the app-only Dataverse call's oid-claim match
         // fails at first real use, 401ing every call for this customer. See
-        // DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+        // DataverseAppUserCreationRequest.SystemUserAzureActiveDirectoryObjectId's
         // remarks + mi-proof-dataverse-side.md for the full trap shape.
         var uamiOutcome = await _appUserCreator.EnsureAppUserAsync(
             new DataverseAppUserCreationRequest(
-                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName,
-                AzureActiveDirectoryObjectId: uamiObjectId),
+                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName, customerUnitId,
+                SystemUserAzureActiveDirectoryObjectId: uamiObjectId),
             cancellationToken).ConfigureAwait(false);
+        if (uamiOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit uamiElsewhere)
+        {
+            return await ForeignUnitAsync(run, etag, "UAMI", uamiClientId, uamiElsewhere, customerUnitId, cancellationToken)
+                .ConfigureAwait(false);
+        }
         if (uamiOutcome is DataverseAppUserCreationOutcome.Failure uamiFailure)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.UamiAppUserCreationFailed,
@@ -366,6 +439,34 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.GraphRoleGrantFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (12b) Task 261 (G31): REMOVE every Microsoft Graph app role on the stamp identity that is not in the
+        //       Entra-granted set — roles an earlier catalog granted (Directory.ReadWrite.All, User.ReadWrite.All,
+        //       Files.*, Sites.*, the mailbox roles before T251, …) or someone granted by hand. Every stamp lives in
+        //       Spaarke's tenant, so a leftover tenant-wide role reaches Spaarke's own directory. Each removal is
+        //       logged by the granter; assignments on other resources are untouched.
+        var removal = await _roleGranter.RemoveUnexpectedRolesAsync(
+            uamiObjectId, uamiClientId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+        if (removal is GraphAppRoleRemovalOutcome.Failure removalFailure)
+        {
+            var diagnostic =
+                $"Removing Graph app roles outside the stamp set failed: {removalFailure.Diagnostic}" +
+                (removalFailure.FailedRoleValues.Count > 0
+                    ? $" Still assigned: {string.Join(", ", removalFailure.FailedRoleValues)}."
+                    : string.Empty) +
+                " Each removal is idempotent (404 = already gone) — resume re-reads the assignments and removes only what " +
+                "is still extra.";
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                H10Rejections.GraphRoleRemovalFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+        var removedRoles = ((GraphAppRoleRemovalOutcome.Success)removal).RemovedRoleValues;
+        if (removedRoles.Count > 0)
+        {
+            _logger.LogWarning(
+                "H10 removed {RemovedCount} Graph app role(s) outside the stamp set from stamp identity SP {UamiSpId}: {RemovedRoles} " +
+                "(runId={RunId} customerId={CustomerId})",
+                removedRoles.Count, uamiObjectId, string.Join(", ", removedRoles), envelope.RunId, envelope.CustomerId);
+        }
+
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
             uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
@@ -382,6 +483,54 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.TrapT3VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (13b) T3, task 261 — independent re-read: nothing outside the Entra-granted set remains. Microsoft Graph is
+        //       eventually consistent, so a role this very call removed can still be listed for a few seconds: re-read
+        //       with a growing delay before deciding. The final decision is exhaustive — only None passes.
+        var attempts = Math.Max(1, _options.ExtrasRecheckAttempts);
+        GraphAppRoleExtrasResult extras = new GraphAppRoleExtrasResult.Unknown("The extras re-read did not run.");
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            extras = await _roleParityVerifier.FindUnexpectedRolesAsync(
+                uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+            if (extras is GraphAppRoleExtrasResult.None || attempt == attempts)
+            {
+                break;
+            }
+            if (_options.ExtrasRecheckDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(_options.ExtrasRecheckDelay * attempt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        switch (extras)
+        {
+            case GraphAppRoleExtrasResult.None:
+                break;
+            case GraphAppRoleExtrasResult.Found found when removedRoles.Count > 0:
+                // This call removed roles and the directory still lists extras after the bounded re-read: most likely
+                // replication lag, not a re-granter. Resumable — a retry re-reads and removes what is still there.
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    $"After removing {string.Join(", ", removedRoles)}, the directory still lists Graph app role(s) outside the " +
+                    $"stamp set after {attempts} read(s): {string.Join(", ", found.RoleValues)}. Likely replication lag — resume " +
+                    "re-reads and removes what remains.", cancellationToken).ConfigureAwait(false);
+            case GraphAppRoleExtrasResult.Found found:
+                // Nothing was removed by this call yet extras are listed: the removal pass read an older view, or
+                // something grants them concurrently. Quarantine — find the granter before resuming.
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.TrapT3UnexpectedRoles,
+                    $"T3 verification FAILED: the stamp identity (SP {uamiObjectId}) holds Graph app role(s) outside the stamp " +
+                    $"set that the removal pass did not see: {string.Join(", ", found.RoleValues)}. Something grants them " +
+                    "concurrently (an operator script, another pipeline) — find the granter before resuming; the stamp set is " +
+                    "projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md.",
+                    cancellationToken).ConfigureAwait(false);
+            case GraphAppRoleExtrasResult.Unknown unknown:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    $"Could not confirm that no Graph app role outside the stamp set remains: {unknown.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            default:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    "The extras re-read returned no recognisable result.", cancellationToken).ConfigureAwait(false);
+        }
+
         stopwatch.Stop();
         _logger.LogInformation(
             "H10 succeeded: runId={RunId} customerId={CustomerId} uamiSystemUserId={UamiSystemUserId} " +
@@ -390,21 +539,35 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate,
+            run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate, customerUnitId,
             envelope, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>T259: an App User already in another business unit — QuarantineRequired, nothing moved.</summary>
+    private Task<HandlerResult> ForeignUnitAsync(
+        ProvisioningRun run, string etag, string label, string applicationId,
+        DataverseAppUserCreationOutcome.InForeignBusinessUnit elsewhere, Guid customerUnitId, CancellationToken cancellationToken)
+        => FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.AppUserInForeignBusinessUnit,
+            $"The {label} App User (applicationid {applicationId}, systemuser {elsewhere.SystemUserId}) already exists in business " +
+            $"unit {elsewhere.BusinessUnitId}, not the customer's unit {customerUnitId}. H10 never moves it: a business-unit " +
+            "change strips every role, and H6/H7/H7b sign in as the BFF App User. Moving it (and re-granting System " +
+            "Administrator in the customer unit) is an owner decision; then resume.",
+            cancellationToken);
+
     /// <summary>
-    /// Computes the deterministic H10 idempotency key: <c>appuser-{customerId}</c>.
-    /// No version token per POML constraint — App User registration is
-    /// per-customer + version-independent (parity with H5's
-    /// <c>dvenv-{customerId}</c>). Exposed internal so unit tests can construct
-    /// expected keys without duplicating the format.
+    /// Computes the deterministic H10 idempotency key: <c>appuser-{customerId}-g{fingerprint}</c>, where the fingerprint
+    /// is the first 8 hex digits of SHA-256 over the sorted, lower-cased Entra-granted app-role ids (task 261). App User
+    /// registration is per-customer and otherwise version-independent (parity with H5's <c>dvenv-{customerId}</c>); the
+    /// Graph role set is the one part that changes, and a change must re-run the reconcile. Exposed internal so unit
+    /// tests can construct expected keys without duplicating the format.
     /// </summary>
-    internal static string BuildIdempotencyKey(string customerId)
+    internal static string BuildIdempotencyKey(string customerId, IReadOnlyList<GraphAppRoleEntry> entraRoles)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
-        return $"appuser-{customerId}";
+        ArgumentNullException.ThrowIfNull(entraRoles);
+        var ids = string.Join("|", entraRoles.Select(r => (r.AppRoleId ?? string.Empty).ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal));
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
+        return $"appuser-{customerId}-g{Convert.ToHexString(hash, 0, 4).ToLowerInvariant()}";
     }
 
     private static bool TryGetNonEmpty(
@@ -475,6 +638,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         string idempotencyKey,
         string uamiSystemUserId,
         string bffSystemUserId,
+        Guid customerUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -497,6 +661,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // returned by Dataverse Web API — no brace-wrapping to strip.
         run.InterStepState.SystemUserId = uamiSystemUserId;
         run.InterStepState.BffAppRegSystemUserId = bffSystemUserId;
+        run.InterStepState.CustomerBusinessUnitId = customerUnitId.ToString("D");   // T259 — read by H7b and H11
 
         run.GateStates[H10Gates.AppUserCreated] = new GateEntry
         {

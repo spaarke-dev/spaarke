@@ -1699,7 +1699,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
   // Safe to call at mount — the hook only allocates `useState`/`useCallback`; the
   // authenticated fetch fires lazily on click.
-  const { openInWeb, openInDesktop, isActing: isWordActing } = useDocumentActions({ bffBaseUrl });
+  // `wordActionError` ("Couldn't open the document: <reason>") goes to the banner stack; the hook clears it
+  // when the next action starts.
+  const {
+    openInWeb,
+    openInDesktop,
+    isActing: isWordActing,
+    actionError: wordActionError,
+  } = useDocumentActions({ bffBaseUrl });
 
   const [reanchorPanelOpen, setReanchorPanelOpen] = React.useState(false);
   const [pulledAnnotationCount, setPulledAnnotationCount] = React.useState(0);
@@ -5226,6 +5233,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             composeDraftError={composeDraftError}
             memoActionMessage={memoActionMessage}
             changeSummaryMessage={changeSummaryMessage}
+            wordActionError={wordActionError}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here

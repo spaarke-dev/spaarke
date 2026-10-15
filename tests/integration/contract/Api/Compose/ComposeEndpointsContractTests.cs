@@ -81,7 +81,7 @@ namespace Sprk.Bff.Api.Tests.Api.Compose;
 /// <remarks>
 /// <para>
 /// <b>KEEP-path category</b>: <c>endpoint-contract</c> per ADR-038 §2 +
-/// <c>tests/CLAUDE.md</c> §"Six KEEP path categories". One file per endpoint group —
+/// <c>tests/CLAUDE.md</c> "KEEP paths". One file per endpoint group —
 /// the 7 happy-path tests + the 7 auth-gate tests + a focused validation/dispatch set
 /// together meet the per-endpoint coverage rule.
 /// </para>

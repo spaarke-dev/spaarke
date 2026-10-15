@@ -21,25 +21,18 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 /// </summary>
 public sealed class KvSecretsPopulationOptions
 {
-    /// <summary>
-    /// Path to the <c>az</c> CLI executable. Defaults to <c>az</c> (resolved
-    /// via PATH). On Linux App Service the operator install path is
-    /// <c>/usr/bin/az</c>. Parity with
-    /// <see cref="BicepInfraDeploy.BicepInfraDeployOptions.AzCliExecutable"/>.
-    /// </summary>
-    public string AzCliExecutable { get; set; } = "az";
+    // Task 253 (G38): AzCliExecutable DELETED — SecretClientKvWriter uses the Key Vault SDK; the Worker host has no az.
 
     /// <summary>
-    /// Maximum time to wait for a single <c>az keyvault secret set/show</c>
-    /// invocation. Defaults to 90 seconds — KV writes are fast but RBAC
+    /// Maximum time to wait for a single Key Vault secret set/get call
+    /// (SecretClientKvWriter). Defaults to 90 seconds — KV writes are fast but RBAC
     /// propagation + throttle back-off can extend a single call.
     /// </summary>
     public TimeSpan KvOperationTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
     /// <summary>
-    /// Maximum time to wait for a single <c>az webapp update --set
-    /// keyVaultReferenceIdentity=...</c> invocation (T1 PATCH). Defaults to
-    /// 60 seconds per slot.
+    /// Maximum time to wait for a single <c>keyVaultReferenceIdentity</c> ARM
+    /// PATCH (T1 — ArmAppServiceIdentityPatcher). Defaults to 60 seconds per slot.
     /// </summary>
     public TimeSpan T1PatchTimeout { get; set; } = TimeSpan.FromSeconds(60);
 

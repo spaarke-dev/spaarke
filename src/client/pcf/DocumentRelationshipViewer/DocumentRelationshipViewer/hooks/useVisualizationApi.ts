@@ -21,7 +21,7 @@ export interface UseVisualizationApiOptions {
   apiBaseUrl: string;
   /** Source document GUID */
   documentId: string;
-  /** Tenant ID for multi-tenant routing */
+  /** Configured tenant — only gates the fetch; it is NOT sent to the BFF (the BFF uses the token's `tid`). */
   tenantId: string;
   /** Minimum similarity threshold (default: 0.65) */
   threshold?: number;
@@ -98,7 +98,6 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
   // Build query params
   const queryParams = React.useMemo(
     (): VisualizationQueryParams => ({
-      tenantId,
       threshold,
       limit,
       depth,
@@ -107,7 +106,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
       includeKeywords: true,
       includeParentEntity: true,
     }),
-    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes]
+    [threshold, limit, depth, documentTypes, relationshipTypes]
   );
 
   // Fetch function

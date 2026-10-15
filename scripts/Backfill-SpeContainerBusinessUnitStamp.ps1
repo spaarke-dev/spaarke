@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
     Stamps EXISTING SharePoint Embedded containers with the business unit that owns them — the backfill for owner
-    round 20 item 1 (unified-access-control-r2 task 165). Dry-run by default; every write is reversible.
+    round 20 item 1 (unified-access-control-r2 task 165). With -CustomerId it ALSO marks the same containers with their
+    customer (issue #1889). Dry-run by default; every write is reversible.
 
 .DESCRIPTION
     THE BINDING. Every SPE container carries its owning business unit as the fileStorageContainer custom property
@@ -33,23 +34,63 @@
     container no config lists is BIND-UNUSED. Any invalid -Bind entry stops the run before any container is read or
     anything is written (only the business-unit hierarchy, needed to validate it, has been read).
 
+    THE CUSTOMER MARKER (-CustomerId; issue #1889). The BFF's SpeContainerOwnershipGuard refuses (404
+    spe_container_not_owned) an app-only SPE call on any container that is neither configured in the BFF's app settings
+    nor marked with the custom property $SpeContainerCustomerMarkerProperty equal to the BFF's Customer__Id. The BFF writes
+    the marker only when IT creates a container, so per-record (secure) containers created BEFORE the marker shipped
+    (task 227d, 2026-10-08) carry none and are refused forever. -CustomerId makes this script mark them. THE MARKER IS WHAT
+    MAKES THE BFF SERVE A CONTAINER TO THIS CUSTOMER, and every customer stamp shares one container type, so marking the
+    wrong container exposes it across customers. The safety model is therefore stricter than the stamp's:
+      - Candidates are ONLY containers this script already treats as DERIVABLE from records (plus explicit -Bind
+        entries). An UNDERIVABLE container is never marked - in a shared container type other environments' containers
+        appear in the listing and must never be marked by this environment.
+      - NO MARKING FROM A RECORD CLAIM ALONE IN THE SAME PASS. A secure root's sprk_containerid is a field the customer can
+        write, so a record claim is not proof of ownership. A container is marked only when (a) it ALREADY carried a stamp
+        naming a unit of this environment's hierarchy at the first read of the run (an earlier, reviewed -Apply) and the
+        records derive it, or (b) an explicit -Bind names it and does not conflict. A container that is unstamped at the
+        first read and derivable from records alone is STAMPED by this run, listed as MARK-NEXT-RUN and NOT marked; the
+        operator reviews the stamp, then re-runs with -CustomerId to mark it. -Verify fails while it is unmarked.
+        THE OPERATOR REVIEWS THE DRY-RUN LIST BEFORE -Apply: the record claim is customer-writable.
+      - A container stamped with a unit of this environment but claimed by no record (bound by an earlier -Bind) is
+        listed as UNMARKED-NO-CLAIM unless it is already marked, and is never marked automatically; re-run with
+        -Bind '<containerId>=<businessUnitId>' to mark it. -Verify fails while it is unmarked.
+      - The marker is written only when ABSENT, and never overwritten. Equal to -CustomerId: already marked (no-op). A
+        different value (a case-differing one included): MARKER-FOREIGN, listed. Several or blank values:
+        MARKER-MALFORMED, listed. Neither is ever written.
+      - A container whose stamp is MISMATCH, FOREIGN or MALFORMED (or contradicted by -Bind) is disputed: listed, not marked.
+      - Each write is preceded by a manifest row (Kind = marker), read back (the marker must equal -CustomerId exactly),
+        and counts toward -MaxWritesPerRun. -RevertManifest removes a marker only where the container still carries the
+        value this run wrote.
+      - -Verify exits 1 while any derivable container is unmarked, MARK-NEXT-RUN, UNMARKED-NO-CLAIM, MARKER-FOREIGN or
+        MARKER-MALFORMED.
+      - -CustomerId must be the BFF's customerId, in the format the BFF's CustomerIdResolver accepts (checked before
+        anything is read): ^[a-z][a-z0-9]{2,7}$ after trimming (3-8 characters, lowercase letters and digits, a letter
+        first; case-sensitive). It comes from the BFF's Customer__Id app setting; when that setting is absent the BFF
+        DERIVES it from the App Service WEBSITE_RESOURCE_GROUP name 'rg-spaarke-{customerId}-{env}' (exactly two
+        segments after the prefix, lower-cased; 'platform', 'shared' and 'byok' are never a customer) - pass that id. An
+        explicit setting that breaks the format is NOT replaced by the derived id: the BFF treats it as unresolved.
+      - KNOWN LIMIT: the guard caches a "missing" marker for up to 10 minutes, so access can lag a passing -Verify by that long.
+    Without -CustomerId the script behaves exactly as before. This script never deletes a container.
+
     WHAT IT WILL NOT DO.
       - Stamp a container no authoritative record claims and no -Bind names. Those are LISTED as UNDERIVABLE and left
         unbound — and an unbound container is reached by NO admin route, so each must be bound (-Bind) or removed. In
         a shared Model 1 consuming tenant another environment's containers appear here too: they are underivable or
         FOREIGN and must never be stamped by this environment (do not -Bind a container you cannot attribute).
-      - Overwrite an existing stamp. A stamp that differs from the derivation (MISMATCH), names a unit this
+      - Overwrite an existing stamp (or customer marker). A stamp that differs from the derivation (MISMATCH), names a unit this
         environment does not know (FOREIGN) or is not one GUID (MALFORMED) is LISTED for an operator, never changed.
 
     SAFETY MODEL
       - Dry-run is the DEFAULT; -WhatIf forces a dry-run even with -Apply. A dry-run issues zero writes.
-      - WRITE-AHEAD REVERSAL MANIFEST: each container's id, config and the stamp about to be written are appended to
-        a CSV and flushed BEFORE the write. -RevertManifest <csv> -Apply removes exactly those stamps (only where the
-        container still carries the stamp this run wrote).
+      - MARKER BASIS (-CustomerId): a record claim alone never marks a container in the pass that stamps it (see THE
+        CUSTOMER MARKER); the operator reviews the dry-run list before -Apply.
+      - WRITE-AHEAD REVERSAL MANIFEST: each container's id, config and the stamp (or, with -CustomerId, the marker)
+        about to be written are appended to a CSV and flushed BEFORE the write. -RevertManifest <csv> -Apply removes
+        exactly those stamps and markers (only where the container still carries the value this run wrote).
       - READ-BACK: every write is re-read; Graph accepting a PATCH is not evidence of the stamp.
       - SAMPLE FIRST: -MaxWritesPerRun bounds a run.
       - Idempotent: a stamped container is no longer a candidate; a re-run reports ToStamp: 0.
-      - -Verify: read-only. LISTS every container still unbound (UNBOUND: derivable but unstamped, underivable, or
+      - -Verify: read-only (with -CustomerId, also unmarked / MARK-NEXT-RUN / UNMARKED-NO-CLAIM / MARKER-FOREIGN / MARKER-MALFORMED containers). LISTS every container still unbound (UNBOUND: derivable but unstamped, underivable, or
         malformed) and exits 1 while ANY is, while a container carries a stamp other than its records derive, a binding
         cannot be read, or a config's containers could not be listed at all (SKIPPED-CONFIG: an incomplete config, or an
         owning-app secret the vault does not return) — a pass must not claim containers it never saw.
@@ -77,6 +118,18 @@
     Read-only verification: lists every unbound container; exit 1 if any container is unbound or stamped other than its
     records derive, a binding is unreadable, or a config's containers could not be listed.
 
+.PARAMETER CustomerId
+    Optional. The BFF's customerId, EXACTLY (the BFF compares it ordinally and case-sensitively; this script trims it and
+    compares the same way). It must match the BFF's CustomerIdResolver format ^[a-z][a-z0-9]{2,7}$ (3-8 characters,
+    lowercase letters and digits, a letter first); a blank or non-matching value exits 2 before anything is read. Take it
+    from the BFF's Customer__Id app setting; when that setting is absent the BFF derives it from the App Service
+    WEBSITE_RESOURCE_GROUP name 'rg-spaarke-{customerId}-{env}' (the segment after 'rg-spaarke-', lower-cased; never
+    'platform', 'shared' or 'byok') - pass that. When given, the script also marks containers that carry no customer
+    marker (issue #1889: the per-record containers created before the marker shipped) - but never from a record claim
+    alone in the pass that stamps them (they are listed MARK-NEXT-RUN; review the stamp, re-run to mark). The guard
+    caches a missing marker for up to 10 minutes, so access can lag -Verify by that long. Omit it and no marker is read
+    or written.
+
 .PARAMETER Bind
     Explicit owners for containers no record claims: one or more '<containerId>=<businessUnitId>' (split at the LAST
     '='). Validated against the business-unit hierarchy before any container is read; written only with -Apply (a dry run
@@ -89,7 +142,8 @@
     Cap on actual writes in one -Apply run (0 = unlimited).
 
 .PARAMETER RevertManifest
-    A manifest from an earlier -Apply run. With -Apply, removes every stamp in it that is still in place.
+    A manifest from an earlier -Apply run. With -Apply, removes every stamp and customer marker in it that is still in
+    place (a manifest from before -CustomerId existed holds stamps only).
 
 .PARAMETER LogPath
     Per-run log. Defaults to scripts/logs/backfill-spe-container-stamp-<timestamp>.log.
@@ -109,6 +163,25 @@
 .EXAMPLE
     .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify
     Exit 0 only when NO container is unbound and every stamp matches its records.
+
+.EXAMPLE
+    .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <the BFF's Customer__Id>
+    Issue #1889 - DRY RUN of the marker pass: lists every stamped, derivable container that carries no customer marker
+    (ToMark), every unstamped one that will be stamped and marked only on the NEXT run (MARK-NEXT-RUN), and any
+    UNMARKED-NO-CLAIM / MARKER-FOREIGN / MARKER-MALFORMED one. Review this list before -Apply: the record claim is
+    customer-writable. Pre-marker per-record containers (created before task 227d) carry no marker and the BFF's
+    ownership guard refuses them.
+
+.EXAMPLE
+    .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <the BFF's Customer__Id> -Apply -MaxWritesPerRun 1
+    The SAMPLE for the marker pass: makes one write (a stamp or a marker), read back; a reversal manifest is written
+    first. Re-run without -MaxWritesPerRun to do the rest, then once more to mark what that run stamped.
+
+.EXAMPLE
+    .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <the BFF's Customer__Id> -Verify
+    Exit 0 only when every derivable container is stamped AND marked (a container stamped by the last run is marked by
+    the next one). Run this on every environment that holds pre-marker
+    containers BEFORE the guard-carrying BFF is deployed there.
 #>
 
 [CmdletBinding()]
@@ -133,12 +206,31 @@ param(
 
     [string[]]$Bind = @(),
 
+    [string]$CustomerId,
+
     [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent -or $Verify.IsPresent
+
+# ── -CustomerId (issue #1889): validated BEFORE any read or write. Given => the customer-marker pass runs. ───────────
+$MarkerPass = $PSBoundParameters.ContainsKey('CustomerId')
+# The BFF's rule, EXACTLY: Sprk.Bff.Api/Configuration/CustomerIdResolver.CustomerIdPattern, applied to the trimmed value
+# with a case-SENSITIVE match (the BFF's Regex has no IgnoreCase).
+$CustomerIdPattern = '^[a-z][a-z0-9]{2,7}$'
+if ($MarkerPass) {
+    if ([string]::IsNullOrWhiteSpace($CustomerId)) {
+        Write-Host '-CustomerId is blank - pass the BFF''s Customer__Id app setting (or omit -CustomerId). Nothing was read or written.' -ForegroundColor Red
+        exit 2
+    }
+    $CustomerId = $CustomerId.Trim()   # compared ordinally and case-sensitively (-ceq) from here on, as the BFF does
+    if ($CustomerId -cnotmatch $CustomerIdPattern) {
+        Write-Host "-CustomerId '$CustomerId' does not match the BFF's customerId format $CustomerIdPattern (3-8 characters, lowercase letters and digits, a letter first). Pass the BFF's Customer__Id app setting, or - when it is unset - the id derived from its WEBSITE_RESOURCE_GROUP 'rg-spaarke-{customerId}-{env}'. Nothing was read or written." -ForegroundColor Red
+        exit 2
+    }
+}
 
 # ── The binding: THE PowerShell constant (scripts/common/SpeContainerBinding.ps1), pinned equal to the C# one by
 #    SpeAdminContainerBindingGuardTests. Never spelled again here. ──────────────────────────────────────────────────
@@ -239,6 +331,79 @@ function Read-ContainerBinding {
 function Write-ContainerStamp {
     param([string]$Token, [string]$ContainerId, [AllowNull()][string]$BusinessUnitId)
     Set-SpeContainerStamp -Token $Token -ContainerId $ContainerId -BusinessUnitId $BusinessUnitId -GraphBase $GraphBase
+}
+
+function Remove-ContainerMarker {
+    param([string]$Token, [string]$ContainerId)
+    Remove-SpeContainerCustomerMarker -Token $Token -ContainerId $ContainerId -GraphBase $GraphBase
+}
+
+function ConvertTo-CsvField { param([string]$Value) return '"' + ($Value -replace '"', '""') + '"' }
+
+# The customer-marker pass for ONE container (issue #1889). The decision itself is the pure
+# Get-SpeContainerMarkerDecision (common/SpeContainerBinding.ps1, unit-tested); this applies it. The marker is written
+# only when absent; every write is manifest-first, read back and counted toward -MaxWritesPerRun.
+function Invoke-MarkerPass {
+    # $StampState is the stamp as read at the FIRST read of this run (a container this run stamps stays 'Unstamped').
+    # $BindNamed: an explicit -Bind names the container (callers pass it only when it does not conflict).
+    # $StampWritten: this run has already written the stamp (only changes the wording of MARK-NEXT-RUN).
+    param($Token, [string]$ContainerId, [string]$Label, [string]$ConfigId, $Binding, [bool]$Derivable, [string]$StampState, [bool]$BindNamed = $false, [bool]$StampWritten = $false)
+    $decision = Get-SpeContainerMarkerDecision -CustomerId $CustomerId -Derivable $Derivable -StampState $StampState `
+        -Marker $Binding.Marker -MarkerMalformed ([bool]$Binding.MarkerMalformed) -BindNamed $BindNamed
+    switch ($decision) {
+        'SkipUnderivable' { return }
+        'UnmarkedNoClaim' {
+            $stats.UnmarkedNoClaim++
+            $listed.Add("UNMARKED-NO-CLAIM $Label — stamped for this environment but no record claims it; re-run with -Bind '$ContainerId=$($Binding.Stamp)' to mark")
+            $unmarked.Add("UNMARKED $Label — stamped but no record claims it (not marked automatically)")
+            return
+        }
+        'MarkNextRun' {
+            $stats.MarkNextRun++
+            $listed.Add("MARK-NEXT-RUN $Label — $(if ($StampWritten) { 'stamped this run from records' } else { 'unstamped: would be stamped from records' }); review the stamp, then re-run with -CustomerId to mark")
+            $unmarked.Add("UNMARKED $Label — not marked in the pass that stamps it (a record claim alone is customer-writable)")
+            return
+        }
+        'SkipDisputedStamp' {
+            # Only listed: ownership is disputed (the stamp line is already in the list). Verify still fails while unmarked.
+            if ($Binding.Marker -cne $CustomerId) { $unmarked.Add("UNMARKED $Label — the stamp is disputed ($StampState): not marked, only listed.") }
+            return
+        }
+        'MarkerMalformed' {
+            $stats.MarkerMalformed++
+            $listed.Add("MARKER-MALFORMED $Label — the customer marker is present but ambiguous (several entries or a blank value); fix by hand. Not written.")
+            $unmarked.Add("UNMARKED $Label — malformed marker")
+            return
+        }
+        'AlreadyMarked' { $stats.AlreadyMarked++; return }
+        'MarkerForeign' {
+            $stats.MarkerForeign++
+            $listed.Add("MARKER-FOREIGN $Label — marked '$($Binding.Marker)', not '$CustomerId' (another customer's container, or a case-differing id?). Never overwritten.")
+            $unmarked.Add("UNMARKED $Label — marked for a different customer")
+            return
+        }
+        'Mark' {
+            $stats.ToMark++
+            Write-StampLog "PLAN-MARK $Label -> customer '$CustomerId'"
+            if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $script:writes -ge $MaxWritesPerRun)) {
+                $unmarked.Add("UNMARKED $Label — to mark for customer '$CustomerId'")
+                return
+            }
+            # WRITE-AHEAD: the reversal row (Kind = marker) is on disk before the write it reverses.
+            $manifest.WriteLine("$ContainerId,$ConfigId,,,$((Get-Date).ToUniversalTime().ToString('o')),marker,$(ConvertTo-CsvField $CustomerId)")
+            $manifest.Flush()
+            $script:writes++
+            try {
+                Set-SpeContainerCustomerMarker -Token $Token -ContainerId $ContainerId -CustomerId $CustomerId -GraphBase $GraphBase
+                $after = Read-ContainerBinding $Token $ContainerId
+                if ($after.Marker -cne $CustomerId) { throw "read-back: '$($after.Marker)'" }
+                $stats.Marked++; Write-StampLog "MARKED $Label -> customer '$CustomerId'"
+            } catch {
+                $stats.Failed++; Write-StampLog "FAIL-MARK ${Label}: $($_.Exception.Message)"
+                $unmarked.Add("UNMARKED $Label — the marker write failed: $($_.Exception.Message)")
+            }
+        }
+    }
 }
 
 # ══ Load the authoritative records ═══════════════════════════════════════════════════════════════════════════
@@ -355,13 +520,29 @@ function Get-ConfigToken {
 
 if ($RevertManifest) {
     $rows = Import-Csv $RevertManifest
-    Write-Host "Revert: $($rows.Count) stamp(s) from $RevertManifest ($(if ($IsDryRun) { 'DRY RUN' } else { 'APPLY' }))"
+    $markerRows = @($rows | Where-Object { $_.PSObject.Properties['Kind'] -and $_.Kind -ceq 'marker' }).Count
+    Write-Host "Revert: $($rows.Count - $markerRows) stamp(s)$(if ($markerRows -gt 0) { " and $markerRows customer marker(s)" }) from $RevertManifest ($(if ($IsDryRun) { 'DRY RUN' } else { 'APPLY' }))"
     $removed = 0; $skipped = 0; $failed = 0
     foreach ($r in $rows) {
         $config = $configById[(ConvertTo-CleanGuid $r.ConfigId)]
         if (-not $config) { $failed++; Write-StampLog "REVERT-FAIL $($r.ContainerId): config $($r.ConfigId) not loaded"; continue }
         $token = Get-ConfigToken $config
         $current = Read-ContainerBinding $token $r.ContainerId
+        # A customer-marker row (Kind = marker; a manifest from before -CustomerId has no Kind column and is all stamps).
+        if ($r.PSObject.Properties['Kind'] -and $r.Kind -ceq 'marker') {
+            # Remove ONLY a marker still equal to the one this run wrote - a later deliberate change is not clobbered.
+            if (-not $current.Found -or $current.MarkerMalformed -or [string]::IsNullOrWhiteSpace($r.NewMarker) -or $current.Marker -cne $r.NewMarker.Trim()) {
+                $skipped++; Write-StampLog "REVERT-SKIP $($r.ContainerId): customer marker is no longer '$($r.NewMarker)'"; continue
+            }
+            if ($IsDryRun) { Write-StampLog "REVERT-PLAN $($r.ContainerId): remove $SpeContainerCustomerMarkerProperty"; continue }
+            try {
+                Remove-ContainerMarker $token $r.ContainerId
+                $after = Read-ContainerBinding $token $r.ContainerId
+                if ($after.Marker -or $after.MarkerMalformed) { throw "read-back still carries a marker ($($after.Marker))" }
+                $removed++; Write-StampLog "REVERTED-MARKER $($r.ContainerId)"
+            } catch { $failed++; Write-StampLog "REVERT-FAIL $($r.ContainerId): $($_.Exception.Message)" }
+            continue
+        }
         # Remove ONLY a stamp still equal to the one this run wrote — a later deliberate change is not clobbered.
         if (-not $current.Found -or $current.Stamp -ne (ConvertTo-CleanGuid $r.NewStamp)) {
             $skipped++; Write-StampLog "REVERT-SKIP $($r.ContainerId): stamp is no longer $($r.NewStamp)"; continue
@@ -384,14 +565,19 @@ $manifestPath = Join-Path $logDir "spe-container-stamp-manifest-$stamp.csv"
 $manifest = $null
 if (-not $IsDryRun) {
     $manifest = [System.IO.StreamWriter]::new($manifestPath, $false, [System.Text.Encoding]::UTF8)
-    $manifest.WriteLine('ContainerId,ConfigId,PreviousStamp,NewStamp,WrittenAtUtc')
+    # With -CustomerId the manifest also carries marker rows: Kind (stamp | marker) and NewMarker. Without it, as before.
+    $manifest.WriteLine($(if ($MarkerPass) { 'ContainerId,ConfigId,PreviousStamp,NewStamp,WrittenAtUtc,Kind,NewMarker' } else { 'ContainerId,ConfigId,PreviousStamp,NewStamp,WrittenAtUtc' }))
     $manifest.Flush()
 }
 
 $stats = [ordered]@{ ConfigsSkipped = 0; Containers = 0; AlreadyStamped = 0; ToStamp = 0; Stamped = 0; Failed = 0; Underivable = 0; Mismatch = 0; Foreign = 0; Malformed = 0; Unreadable = 0; BindConflict = 0; BindUnused = 0 }
+if ($MarkerPass) { $stats['ToMark'] = 0; $stats['Marked'] = 0; $stats['AlreadyMarked'] = 0; $stats['MarkerForeign'] = 0; $stats['MarkerMalformed'] = 0; $stats['MarkNextRun'] = 0; $stats['UnmarkedNoClaim'] = 0 }
 $listed = [System.Collections.Generic.List[string]]::new()
 # Every container still unbound after this pass (round 35 item 2: -Verify lists them all; no admin route reaches one).
 $unbound = [System.Collections.Generic.List[string]]::new()
+# Every derivable container the BFF would still refuse (-CustomerId only): unmarked, MARKER-FOREIGN, MARKER-MALFORMED,
+# or disputed and unmarked. -Verify exits 1 while any is listed.
+$unmarked = [System.Collections.Generic.List[string]]::new()
 $seen = @{}
 $writes = 0
 
@@ -421,7 +607,8 @@ foreach ($config in $configs) {
 
             try { $binding = Read-ContainerBinding $token $containerId }
             catch { $stats.Unreadable++; $listed.Add("UNREADABLE $containerId ($($c.displayName)): $($_.Exception.Message)"); continue }
-            if (-not $binding.Found) { continue }
+            # Listed a moment ago, 404 now: deleted in between. Nothing to stamp or mark; say so rather than skip silently.
+            if (-not $binding.Found) { $listed.Add("GONE $containerId ($($c.displayName)): listed, then not found on read (deleted meanwhile?). Not examined."); continue }
 
             $derived = Get-DerivedOwner $containerId
             $label = "$containerId ($($c.displayName)) config $cid"
@@ -432,20 +619,26 @@ foreach ($config in $configs) {
                 $stats.Malformed++
                 $listed.Add("MALFORMED $label — the stamp is not one business-unit GUID; fix by hand.")
                 $unbound.Add("UNBOUND $label — malformed stamp")
+                if ($MarkerPass) { Invoke-MarkerPass $token $containerId $label $cid $binding ([bool]($derived.Unit -or $operatorUnit)) 'Malformed' ([bool]$operatorUnit) }
                 continue
             }
 
             if ($binding.Stamp) {
+                $stampState = 'Stamped'
                 if (-not $parentOf.ContainsKey($binding.Stamp)) {
+                    $stampState = 'Foreign'
                     $stats.Foreign++; $listed.Add("FOREIGN $label — stamped $($binding.Stamp), a unit this environment does not know (another environment's container?). Untouched.")
                 } elseif ($derived.Unit -and $derived.Unit -ne $binding.Stamp) {
+                    $stampState = 'Mismatch'
                     $stats.Mismatch++; $listed.Add("MISMATCH $label — stamped $($binding.Stamp), records derive $($derived.Unit) [$($derived.Why)]. Untouched.")
                 } else {
                     $stats.AlreadyStamped++
                 }
                 if ($operatorUnit -and $operatorUnit -ne $binding.Stamp) {
+                    $stampState = 'Mismatch'
                     $stats.BindConflict++; $listed.Add("BIND-CONFLICT $label — -Bind names $operatorUnit but the container is already stamped $($binding.Stamp). A stamp is never overwritten.")
                 }
+                if ($MarkerPass) { Invoke-MarkerPass $token $containerId $label $cid $binding ([bool]($derived.Unit -or $operatorUnit)) $stampState ([bool]$operatorUnit) }
                 continue
             }
 
@@ -473,13 +666,15 @@ foreach ($config in $configs) {
             Write-StampLog "PLAN $label -> $target ($($unitName[$target])) [$why]"
             if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $writes -ge $MaxWritesPerRun)) {
                 $unbound.Add("UNBOUND $label — to stamp $target [$why]")
+                if ($MarkerPass) { Invoke-MarkerPass $token $containerId $label $cid $binding $true 'Unstamped' ([bool]$operatorUnit) }
                 continue
             }
 
             # WRITE-AHEAD: the reversal row is on disk before the write it reverses.
-            $manifest.WriteLine("$containerId,$cid,,$target,$((Get-Date).ToUniversalTime().ToString('o'))")
+            $manifest.WriteLine("$containerId,$cid,,$target,$((Get-Date).ToUniversalTime().ToString('o'))$(if ($MarkerPass) { ',stamp,' })")
             $manifest.Flush()
             $writes++
+            $stampFailed = $false
             try {
                 Write-ContainerStamp $token $containerId $target
                 $after = Read-ContainerBinding $token $containerId
@@ -488,7 +683,12 @@ foreach ($config in $configs) {
             } catch {
                 $stats.Failed++; Write-StampLog "FAIL ${label}: $($_.Exception.Message)"
                 $unbound.Add("UNBOUND $label — the stamp write failed: $($_.Exception.Message)")
+                $stampFailed = $true
             }
+            # A container whose stamp just failed is left alone (its ownership state is uncertain). One this run stamped is
+            # still 'Unstamped' (its state at the FIRST read): marked now only when an explicit -Bind named it; a record claim
+            # alone leaves it MARK-NEXT-RUN for the operator to review.
+            if ($MarkerPass -and -not $stampFailed) { Invoke-MarkerPass $token $containerId $label $cid $binding $true 'Unstamped' ([bool]$operatorUnit) $true }
         }
         $uri = $page.'@odata.nextLink'
     }
@@ -503,6 +703,7 @@ foreach ($container in $explicitBind.Keys) {
 
 foreach ($line in $listed) { Write-StampLog $line }
 foreach ($line in $unbound) { Write-StampLog $line }
+foreach ($line in $unmarked) { Write-StampLog $line }
 if ($manifest) { $manifest.Dispose() }
 $script:LogWriter.Dispose()
 
@@ -518,12 +719,16 @@ if ($unbound.Count -gt 0) {
     Write-Host "Containers still UNBOUND ($($unbound.Count)) — no SPE admin route reaches them:"
     $unbound | ForEach-Object { Write-Host "  $_" }
 }
+if ($unmarked.Count -gt 0) {
+    Write-Host "Containers still UNMARKED for customer '$CustomerId' ($($unmarked.Count)) — the BFF refuses them (spe_container_not_owned):"
+    $unmarked | ForEach-Object { Write-Host "  $_" }
+}
 if (-not $IsDryRun) { Write-Host "Reversal manifest: $manifestPath  (undo: -RevertManifest `"$manifestPath`" -Apply)" }
 Write-Host "Log: $LogPath"
 
 if ($Verify) {
     # Round 35 item 2: NO container may be unbound (derivable-unstamped, underivable, malformed); every stamp must match
     # its records; every binding must be readable; every config's containers must have been listed.
-    exit ([int](($unbound.Count + $stats.Mismatch + $stats.Unreadable + $stats.ConfigsSkipped + $stats.BindConflict + $stats.BindUnused) -gt 0))
+    exit ([int](($unbound.Count + $stats.Mismatch + $stats.Unreadable + $stats.ConfigsSkipped + $stats.BindConflict + $stats.BindUnused + $unmarked.Count) -gt 0))
 }
 exit ([int](($stats.Failed + $stats.BindConflict + $stats.BindUnused) -gt 0))

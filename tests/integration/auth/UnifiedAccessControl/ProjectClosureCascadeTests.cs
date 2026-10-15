@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -266,7 +267,7 @@ public class ProjectClosureCascadeTests
             new CloseProjectRequest(projectId ?? ProjectId),
             client.Object,
             spe?.Object ?? new SpeContainerMembershipService(
-                Mock.Of<IGraphClientFactory>(),
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()),
                 NullLogger<SpeContainerMembershipService>.Instance),
             // Task 137: the closure invalidates through the ONE routine, run here for real over this test's cache and
             // the request's tid, so the RemoveAsync verifications below still read what the production code removed.
@@ -321,7 +322,7 @@ public class ProjectClosureCascadeTests
         List<(string ContainerId, IReadOnlyCollection<string> Emails)> calls)
     {
         var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveMembershipsAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
@@ -591,7 +592,7 @@ public class ProjectClosureCascadeTests
         ArrangeGranteeIdentities(client);
 
         var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveMembershipsAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Graph unreachable"));

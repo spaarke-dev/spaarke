@@ -48,6 +48,33 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
+    /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
+    /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
+    /// </summary>
+    [Fact]
+    public void TheDecisionRecordRow_HoldsTheSubjectLookups_AndTheTypedCores_ButNoServiceRequest()
+    {
+        var decisionRecord = SecureChildLineage.Children["sprk_decisionrecord"].Lookups;
+        var signalSubjects = SecureChildLineage.Children["sprk_signal"].Lookups
+            .Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
+            .ToDictionary(l => l.Key, l => l.Value);
+
+        signalSubjects.Should().HaveCount(8);
+        decisionRecord.Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
+            .ToDictionary(l => l.Key, l => l.Value)
+            .Should().BeEquivalentTo(signalSubjects);
+        decisionRecord.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_matter"] = "sprk_matter",
+            ["sprk_project"] = "sprk_project",
+            ["sprk_workassignment"] = "sprk_workassignment",
+        });
+        decisionRecord.Should().HaveCount(11);
+        decisionRecord.Keys.Should().NotContain("sprk_regardingservicerequest");
+    }
+
+    /// <summary>
     /// The mirror follows the ownership resolver: every table it treats as a reparentable child is mirrored, except
     /// <c>sprk_servicerequest</c>, which the resolver treats as a root of its own.
     /// </summary>
@@ -60,24 +87,28 @@ public class SecureChildLineageTests
 
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────
 
+    // Owner round 91 (2026-10-10, task 179): Share is carried where the root share holds it; never Assign or Create.
     [Theory]
-    [InlineData(1, 1)]               // View Only
-    [InlineData(262167, 23)]         // Collaborate → no Share
-    [InlineData(327703, 65559)]      // Full Access → Delete kept, no Share
-    [InlineData(23, 23)]             // legacy Collaborate
-    [InlineData(1 | 524288, 1)]      // a UI share carrying Assign → no Assign
-    [InlineData(1 | 32, 1)]          // Create means nothing on a share
-    public void ChildMirrorMask_KeepsOnlyReadWriteAppendAppendToAndDelete(int rootMask, int childMask)
+    [InlineData(1, 1)]                    // View Only
+    [InlineData(262167, 262167)]          // Collaborate → Share kept (round 91)
+    [InlineData(327703, 327703)]          // Full Access → Delete and Share kept
+    [InlineData(23, 23)]                  // legacy Collaborate: no Share on the root, none on the child
+    [InlineData(1 | 524288, 1)]           // a UI share carrying Assign → no Assign
+    [InlineData(1 | 32, 1)]               // Create means nothing on a share
+    [InlineData(262167 | 524288, 262167)] // Collaborate + Assign → Assign dropped, Share kept
+    public void ChildMirrorMask_KeepsTheRootsRights_ExceptAssignAndCreate(int rootMask, int childMask)
         => RecordShareLevels.ChildMirrorMask(rootMask).Should().Be(childMask);
 
     [Fact]
-    public void ChildMirrorRights_WritesTheCanonicalLiteral_AndRefusesShare()
+    public void ChildMirrorRights_WritesTheCanonicalLiteral_AndRefusesAssign()
     {
         RecordShareLevels.ChildMirrorRights(65559).AccessRightsCsv
             .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess");
+        RecordShareLevels.ChildMirrorRights(262167).AccessRightsCsv
+            .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess");
         RecordShareLevels.ChildMirrorRights(1).AccessRightsCsv.Should().Be("ReadAccess");
 
-        var withShare = () => RecordShareLevels.ChildMirrorRights(262167);
-        withShare.Should().Throw<ArgumentOutOfRangeException>("a child mirror never carries Share");
+        var withAssign = () => RecordShareLevels.ChildMirrorRights(1 | 524288);
+        withAssign.Should().Throw<ArgumentOutOfRangeException>("a child mirror never carries Assign");
     }
 }

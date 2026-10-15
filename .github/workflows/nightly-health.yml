@@ -2,14 +2,22 @@ name: nightly-health
 
 # Nightly health checks for the Spaarke repo. Runs on master, reports to a
 # tracking issue. Catches problems that the per-PR SDAP CI doesn't surface:
-#   - flake-hunt:    runs unit tests 3x sequentially; flags tests that didn't
-#                    pass all 3 runs (intermittent failures = flakes)
+#   - flake-hunt:    runs unit tests 3x (3 parallel runs, each split in 4 shards);
+#                    flags tests that didn't pass all 3 runs (intermittent failures
+#                    = flakes)
 #   - bundle-size:   builds key client artifacts; flags >10% size regressions
 #                    vs the recorded baseline in .github/baseline-bundle-sizes.json
 #   - vuln-scan:     dotnet list package --vulnerable + npm audit per client pkg
 #
-# Reports as a single rolling issue titled "Nightly Health — YYYY-MM-DD".
-# Failures stay open; clean nights close it. No Slack/Teams bridge by design.
+# The legacy per-night comment on the rolling issue "Nightly Health — YYYY-MM-DD" is
+# OFF by default (dispatch input post_tracking_comment); the quality alerts below and
+# the Issues & Quality dashboard replace it. No Slack/Teams bridge by design.
+#
+# Raises one quality alert per check (the `alerts` job at the bottom, see
+# .github/actions/quality-alert and docs/procedures/ci-cd-workflow.md "Quality
+# alerts"). A cancelled or timed-out job is a failure to observe, never a pass: that
+# is how this workflow was cancelled in 13 of its last 30 runs without anyone being
+# told. The rolling issue above is a log; the alert issues are the dashboard.
 #
 # Operator notes:
 #   - To temporarily silence a specific flake: add a [Trait("Category","Flaky")]
@@ -25,6 +33,16 @@ on:
     inputs:
       update_baseline:
         description: 'Update .github/baseline-bundle-sizes.json with current sizes (commit to master)'
+        required: false
+        type: boolean
+        default: false
+      dry_run_alerts:
+        description: 'Quality alerts: print what would be posted instead of opening/updating/closing issues'
+        required: false
+        type: boolean
+        default: false
+      post_tracking_comment:
+        description: 'Also append the legacy per-night comment to the rolling "Nightly Health" issue (off by default; alerts + dashboard replace it)'
         required: false
         type: boolean
         default: false
@@ -45,18 +63,53 @@ env:
 
 jobs:
   # -------------------------------------------------------------------------
-  # flake-hunt: run unit tests 3x; surface any test that didn't pass all 3
+  # flake-hunt: run the unit tests 3x; surface any test that didn't pass all 3.
+  #
+  # PARALLEL, not sequential (2026-10-13). The three runs used to execute one after
+  # another on a single runner under a 60-minute cap, and ONE run of
+  # Sprk.Bff.Api.Tests took ~42 minutes there (19.5k tests, 1,084 of them failing on
+  # LFS pointer fixtures; see below). So the job was cancelled at its cap every night (13 of the last
+  # 30 nightly runs) and the analysis step never ran: a flake hunt that never
+  # reports. Now each of the 3 runs is its own matrix leg, and each leg is further
+  # split into the same 4 namespace shards `ci-tier2-advisory.yml` uses for the PR
+  # run, so every leg has its own cap and a leg takes a few minutes less than a
+  # quarter of the suite. `flake-hunt` (below) downloads every TRX and runs the
+  # unchanged analysis.
+  #
+  # KEEP THE SHARD FILTERS IN SYNC with `full-unit-tests-shard` in
+  # ci-tier2-advisory.yml and with `coverage-shard` below: `rest` is the complement
+  # of the other three, so a test in a new namespace always runs somewhere.
+  #
+  # `lfs: true`: tests/fixtures/compose-corpus/*.docx are Git-LFS pointers
+  # (.gitattributes). Without the smudge ~1,084 Compose seam tests failed on every
+  # nightly run for the wrong reason (129-byte "docx" fixtures) and buried real
+  # failures. The PR run has had `lfs: true` since 2026-08-13.
   # -------------------------------------------------------------------------
-  flake-hunt:
-    name: Flake hunt (3x unit tests)
+  flake-hunt-run:
+    name: Flake hunt run ${{ matrix.run }} / ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    outputs:
-      flakes_found: ${{ steps.analyze.outputs.flakes_found }}
-      flake_summary: ${{ steps.analyze.outputs.flake_summary }}
+    # Measured 2026-10-13 (run 38432551839): 6.7-12.9 min per leg including a ~3 min
+    # build. Cap = ~2x the slowest leg.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3]
+        shard: [api-office, api-insights-integration, api-seam, rest]
+        include:
+          - shard: api-office
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
+          - shard: api-insights-integration
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-seam
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+          - shard: rest
+            filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -68,52 +121,100 @@ jobs:
           dotnet restore
           dotnet build -c Release --no-restore
 
-      - name: Run unit tests 3x
+      - name: Run unit tests (run ${{ matrix.run }}, shard ${{ matrix.shard }})
+        shell: bash
+        env:
+          RUN_NO: ${{ matrix.run }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_FILTER: ${{ matrix.filter }}
         run: |
-          set +e  # don't abort on test failure
+          set -uo pipefail
           mkdir -p flake-runs
-          for run in 1 2 3; do
-            echo "::group::Run $run / 3"
-            dotnet test tests/unit/Sprk.Bff.Api.Tests/ \
-              -c Release --no-build \
-              --filter "Category!=Flaky" \
-              --logger "trx;LogFileName=flake-run-${run}.trx" \
-              --results-directory flake-runs/ \
-              || echo "Run $run had test failures (expected for flake hunt)"
-            echo "::endgroup::"
-          done
+          # Test failures are the data the analysis needs, so they do not fail the leg...
+          dotnet test tests/unit/Sprk.Bff.Api.Tests/ \
+            -c Release --no-build \
+            --filter "(${SHARD_FILTER})&Category!=Flaky" \
+            --logger "trx;LogFileName=flake-run-${RUN_NO}--${SHARD}.trx" \
+            --results-directory flake-runs/ \
+            || echo "Run ${RUN_NO} / ${SHARD} had test failures (expected for flake hunt)"
+          # ...but a leg that produced no TRX at all (host crash, filter typo) is a
+          # broken measurement, and must not read as a clean one.
+          if [ ! -s "flake-runs/flake-run-${RUN_NO}--${SHARD}.trx" ]; then
+            echo "::error::No TRX produced for run ${RUN_NO} / ${SHARD}: dotnet test crashed or the shard filter matched nothing"
+            exit 1
+          fi
+
+      - name: Upload TRX artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-trx-run${{ matrix.run }}-${{ matrix.shard }}
+          path: flake-runs/
+          retention-days: 14
+
+  flake-hunt:
+    name: Flake hunt (3x unit tests)
+    needs: flake-hunt-run
+    # Analyse whatever TRX exist even when a leg timed out: a partial answer plus a
+    # loud "incomplete" beats the silence the old single job produced.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      flakes_found: ${{ steps.analyze.outputs.flakes_found }}
+      flake_summary: ${{ steps.analyze.outputs.flake_summary }}
+      incomplete: ${{ steps.analyze.outputs.incomplete }}
+    steps:
+      - name: Download TRX artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-trx-run*
+          merge-multiple: true
+          path: flake-runs
 
       - name: Analyze for flakes
         id: analyze
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p flake-runs
 
-          # Parse the 3 TRX files; identify tests that PASSED in some runs and FAILED in others
+          # Parse the TRX files (3 runs x 4 shards); identify tests that PASSED in some
+          # runs and FAILED in others. The shards of one run are merged into that run.
           python3 <<'PY'
           import xml.etree.ElementTree as ET
           import json
           import os
+          import re
           from collections import defaultdict
           from pathlib import Path
 
+          EXPECTED_RUNS = 3
+          EXPECTED_SHARDS = 4
+
           runs = {}
+          shards_seen = defaultdict(set)
           for trx in sorted(Path("flake-runs").glob("flake-run-*.trx")):
               tree = ET.parse(trx)
               ns = {"x": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
-              run_id = trx.stem
-              outcomes = {}
+              m = re.match(r"flake-run-(\d+)--(.+)$", trx.stem)
+              run_id = f"flake-run-{m.group(1)}" if m else trx.stem
+              shards_seen[run_id].add(m.group(2) if m else trx.stem)
+              outcomes = runs.setdefault(run_id, {})
               for r in tree.findall(".//x:UnitTestResult", ns):
                   name = r.get("testName") or ""
                   outcome = r.get("outcome") or "Unknown"
                   outcomes[name] = outcome
-              runs[run_id] = outcomes
 
           if not runs:
               print("::warning::No TRX files found; skipping flake analysis")
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                  f.write("flakes_found=0\nflake_summary=No TRX files found\n")
+                  f.write("flakes_found=0\nincomplete=1\nflake_summary=No TRX files found: every flake-hunt leg failed or was cancelled\n")
               raise SystemExit(0)
+
+          legs = sum(len(s) for s in shards_seen.values())
+          incomplete = len(runs) < EXPECTED_RUNS or legs < EXPECTED_RUNS * EXPECTED_SHARDS
 
           all_tests = set()
           for outcomes in runs.values():
@@ -128,30 +229,29 @@ jobs:
                   flakes.append({"name": test, "runs": results})
 
           summary_lines = []
+          if incomplete:
+              summary_lines.append(
+                  f"⚠️ Incomplete: {legs} of {EXPECTED_RUNS * EXPECTED_SHARDS} run/shard results were produced "
+                  f"({len(runs)} of {EXPECTED_RUNS} runs). The legs that are missing failed, timed out or were cancelled.")
           if flakes:
               summary_lines.append(f"Found {len(flakes)} flaky test(s):")
               for f in flakes[:30]:  # cap at 30 to avoid issue body length issues
                   summary_lines.append(f"- `{f['name']}` runs={'/'.join(f['runs'])}")
               if len(flakes) > 30:
                   summary_lines.append(f"...and {len(flakes) - 30} more")
-          else:
+          elif not incomplete:
               summary_lines.append("No flakes detected ✅")
+          else:
+              summary_lines.append("No flakes detected in the results that exist.")
 
           summary = "\n".join(summary_lines)
           # Escape for GITHUB_OUTPUT (multi-line)
           delimiter = f"NIGHTLY_FLAKE_EOF_{os.urandom(4).hex()}"
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"flakes_found={len(flakes)}\n")
+              f.write(f"incomplete={1 if incomplete else 0}\n")
               f.write(f"flake_summary<<{delimiter}\n{summary}\n{delimiter}\n")
           PY
-
-      - name: Upload TRX artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-trx
-          path: flake-runs/
-          retention-days: 14
 
   # -------------------------------------------------------------------------
   # bundle-size: build key client artifacts, check vs baseline
@@ -464,16 +564,39 @@ jobs:
   # coverage-observation: Tier 3 — measure coverage across unit + integration.
   # OBSERVATION ONLY. NEVER a gate, NEVER fails the build on a coverage threshold.
   # Per ADR-038 + spec FR-A04 MUST NOT (binding for ≥6 months).
+  #
+  # SHARDED (2026-10-13). One `dotnet test --collect` over the whole solution ran
+  # past its 30-minute cap every night (cancelled at 27+ min in the test step), so
+  # the coverage number was never produced. The Sprk.Bff.Api.Tests suite is now split
+  # into the same 4 namespace shards as flake-hunt-run / ci-tier2-advisory.yml, and the
+  # other test projects of Spaarke.sln run in a fifth shard. `coverage-observation`
+  # merges every shard's Cobertura files (per source line, a line is covered when ANY
+  # shard hit it) and reports the single number it always reported.
   # -------------------------------------------------------------------------
-  coverage-observation:
-    name: Coverage observation (Tier 3, never a gate)
+  coverage-shard:
+    name: Coverage shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      coverage_pct: ${{ steps.measure.outputs.coverage_pct }}
+    # Measured 2026-10-13 (run 38432551839): 4.5-20.4 min per shard (api-seam is the
+    # slowest). Cap = ~2x the slowest shard.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [api-office, api-insights-integration, api-seam, rest, other-projects]
+        include:
+          - shard: api-office
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
+          - shard: api-insights-integration
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-seam
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+          - shard: rest
+            filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -487,40 +610,109 @@ jobs:
 
       - name: Run tests with coverage
         shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_FILTER: ${{ matrix.filter }}
         run: |
-          set +e  # coverage observation NEVER blocks even on test failures
+          set -uo pipefail
+          # coverage observation NEVER blocks even on test failures
           mkdir -p coverage-results
-          dotnet test \
-            -c Release --no-build \
-            --collect:"XPlat Code Coverage" \
-            --settings config/coverlet.runsettings \
-            --results-directory coverage-results/ \
-            || echo "Tests had failures (coverage observation continues)"
+          if [ "$SHARD" = "other-projects" ]; then
+            # Every test project of Spaarke.sln that lives under tests\ except the big
+            # one (which the four shards above cover), so a new project added there is
+            # picked up without editing this workflow. NOT covered: a test project outside
+            # tests\ (today src/server/services/Sprk.Provisioning.ControlPlane.Tests);
+            # widen the grep below if its coverage should be counted.
+            grep -oE 'tests\\[^"]+\.csproj' Spaarke.sln | tr '\\' '/' | grep -v '/Sprk\.Bff\.Api\.Tests/' > test-projects.txt
+            cat test-projects.txt
+            while IFS= read -r proj; do
+              dotnet test "$proj" \
+                -c Release --no-build \
+                --collect:"XPlat Code Coverage" \
+                --settings config/coverlet.runsettings \
+                --results-directory coverage-results/ \
+                || echo "Tests had failures in $proj (coverage observation continues)"
+            done < test-projects.txt
+          else
+            dotnet test tests/unit/Sprk.Bff.Api.Tests/ \
+              -c Release --no-build \
+              --filter "$SHARD_FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --settings config/coverlet.runsettings \
+              --results-directory coverage-results/ \
+              || echo "Tests had failures (coverage observation continues)"
+          fi
+          # A shard that produced no coverage file at all is a broken measurement.
+          if ! find coverage-results -name 'coverage.cobertura.xml' | grep -q .; then
+            echo "::error::Shard ${SHARD} produced no coverage.cobertura.xml (host crash or filter matched nothing)"
+            exit 1
+          fi
+
+      - name: Upload shard coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-coverage-shard-${{ matrix.shard }}
+          path: coverage-results/
+          retention-days: 14
+
+  coverage-observation:
+    name: Coverage observation (Tier 3, never a gate)
+    needs: coverage-shard
+    # Aggregate whatever shards finished; a missing shard is reported as incomplete.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      coverage_pct: ${{ steps.measure.outputs.coverage_pct }}
+      shards_found: ${{ steps.measure.outputs.shards_found }}
+    steps:
+      - name: Download shard coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-coverage-shard-*
+          merge-multiple: true  # per-run GUID directories never collide
+          path: coverage-results
 
       - name: Aggregate coverage
         id: measure
         shell: bash
         run: |
           set -euo pipefail
-          # Combine all cobertura.xml files into a single line-rate average
+          mkdir -p coverage-results
+          # Merge all Cobertura files by source line: a line counts as covered when any
+          # shard / test project hit it, and each line is counted once.
           python3 <<'PY'
           import xml.etree.ElementTree as ET
           import os
           from pathlib import Path
 
-          total_lines = covered_lines = 0
+          best = {}  # (file, line) -> max hits
+          files = 0
           for cob in Path("coverage-results").rglob("coverage.cobertura.xml"):
               try:
                   tree = ET.parse(cob)
               except ET.ParseError:
                   continue
-              root = tree.getroot()
-              # Cobertura: <coverage line-rate="..." lines-valid="..." lines-covered="...">
-              lv = int(root.get("lines-valid") or 0)
-              lc = int(root.get("lines-covered") or 0)
-              total_lines += lv
-              covered_lines += lc
+              files += 1
+              for cls in tree.getroot().iter("class"):
+                  fname = cls.get("filename") or ""
+                  for ln in cls.iter("line"):
+                      key = (fname, ln.get("number"))
+                      hits = int(ln.get("hits") or 0)
+                      if hits > best.get(key, -1):
+                          best[key] = hits
 
+          total_lines = len(best)
+          covered_lines = sum(1 for h in best.values() if h > 0)
+          if files == 0:
+              # No shard artifact at all is a broken measurement, not 0.0% coverage.
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("coverage_pct=?\n")
+                  f.write("shards_found=0\n")
+              print("::error::No coverage.cobertura.xml found in any shard artifact")
+              raise SystemExit(1)
           if total_lines == 0:
               pct = "0.0"
           else:
@@ -528,7 +720,8 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"coverage_pct={pct}\n")
-          print(f"Aggregated coverage: {pct}% (observation only, no gate)")
+              f.write(f"shards_found={files}\n")
+          print(f"Aggregated coverage: {pct}% from {files} cobertura file(s) (observation only, no gate)")
           PY
 
       - name: Upload coverage artifact
@@ -684,7 +877,7 @@ jobs:
 
   # -----------------------------------------------------------------------
   # customer-provisioning-orchestration-r1 task 067 — Nightly Graph app-role
-  # parity for UAMI SP ↔ GraphAppRoles.cs (14 roles). T3 silent-fail-trap
+  # parity for UAMI SP ↔ GraphAppRoles.cs (the stamp set, task 261). T3 silent-fail-trap
   # safety net. Coord-PR spec: projects/customer-provisioning-orchestration-r1
   # /notes/graph-app-role-parity-coord-pr.md (detail) + notes/phase-h-ci-wiring-coord-pr.md §3 (umbrella).
   # -----------------------------------------------------------------------
@@ -692,8 +885,13 @@ jobs:
     name: Graph App-Role Parity (UAMI SP vs GraphAppRoles.cs)
     runs-on: ubuntu-latest
     # Advisory during rollout window (per r3 deferral doc — do NOT flip
-    # blocking until zero-findings baseline holds ≥ 7 nightly runs).
-    continue-on-error: true
+    # blocking until zero-findings baseline holds ≥ 7 nightly runs). The advisory
+    # behaviour is `continue-on-error` on the STEPS below, not on this job: a job-level
+    # continue-on-error makes `needs.<job>.result` report `success` even when the job
+    # failed, so the alerts leg could never see the failure. The `verdict` step turns
+    # the step outcomes into the explicit job output `failed`, which the alerts leg reads.
+    outputs:
+      failed: ${{ steps.verdict.outputs.failed }}
     permissions:
       id-token: write         # OIDC federated credential for Azure login
       contents: read
@@ -744,7 +942,9 @@ jobs:
           global-json-file: global.json
 
       - name: Azure login (OIDC federated MI)
+        id: login
         if: steps.guard.outputs.configured == 'true'
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.NIGHTLY_GRAPH_READER_CLIENT_ID }}
@@ -752,19 +952,42 @@ jobs:
           subscription-id: ${{ secrets.NIGHTLY_SUBSCRIPTION_ID }}
 
       - name: Restore + build nightly test project
-        if: steps.guard.outputs.configured == 'true'
+        id: build
+        if: steps.guard.outputs.configured == 'true' && steps.login.outcome == 'success'
+        continue-on-error: true
         run: |
           dotnet restore tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/
           dotnet build tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
             -c Release --no-restore
 
       - name: Run Graph app-role parity test
-        if: steps.guard.outputs.configured == 'true'
+        id: parity
+        if: steps.guard.outputs.configured == 'true' && steps.build.outcome == 'success'
+        continue-on-error: true
         # xunit forwards the diff-formatted Assert.Fail message into the
         # workflow log — no --logger-html needed for triage.
         run: |
           dotnet test tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
             -c Release --no-build --logger "console;verbosity=normal"
+
+      # Explicit verdict for the alerts leg (see the job comment above). Not configured
+      # (secrets absent) is a skip, not a failure; any configured step that did not
+      # succeed (login, build, or the parity test itself) is a failure.
+      - name: Record verdict
+        id: verdict
+        if: always()
+        shell: bash
+        env:
+          CONFIGURED: ${{ steps.guard.outputs.configured }}
+          LOGIN: ${{ steps.login.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PARITY: ${{ steps.parity.outcome }}
+        run: |
+          failed=0
+          if [ "$CONFIGURED" = "true" ]; then
+            if [ "$LOGIN" != "success" ] || [ "$BUILD" != "success" ] || [ "$PARITY" != "success" ]; then failed=1; fi
+          fi
+          echo "failed=${failed}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
   # report: create/update single tracking issue
@@ -779,7 +1002,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Off by default since the quality alerts + the Issues & Quality dashboard replaced
+      # this log (the rolling issue had collected ~100 unread comments). The code is kept
+      # so the log can be restored: dispatch with post_tracking_comment=true.
       - name: Compose + post report
+        if: ${{ inputs.post_tracking_comment == true }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FLAKE_SUMMARY: ${{ needs.flake-hunt.outputs.flake_summary }}
@@ -858,7 +1085,7 @@ jobs:
           ## Graph app-role parity (UAMI SP vs GraphAppRoles.cs — advisory)
           - Result: **${GRAPH_PARITY_RESULT:-?}**
 
-          Job carries \`continue-on-error: true\` during rollout (per
+          Job steps carry \`continue-on-error: true\` during rollout (per
           customer-provisioning-orchestration-r1 task 067/088 coord-notes) —
           SKIPPED is expected until \`NIGHTLY_UAMI_SP_OBJECT_ID\` /
           \`NIGHTLY_AZURE_TENANT_ID\` / \`NIGHTLY_GRAPH_READER_CLIENT_ID\` /
@@ -898,3 +1125,137 @@ jobs:
               gh issue close "$issue" --comment "All checks clean ✅ — closing."
             fi
           fi
+
+  # -------------------------------------------------------------------------
+  # alerts: one quality alert per check (see .github/actions/quality-alert).
+  #
+  # What this adds to the `report` job above (which is kept as the nightly log): the
+  # report appends a comment per night to one rolling issue, and that issue has
+  # collected ~100 comments nobody reads. An alert is ONE issue per check, assigned
+  # to the owner (so GitHub emails them), edited in place while the check keeps
+  # failing and closed by the first green night. `label:quality-alert is:open` is the
+  # dashboard.
+  #
+  # A job that is not `success` is a failing check, whatever the reason: failure,
+  # CANCELLED or timed out (a job that hits its timeout-minutes reports `cancelled`)
+  # or skipped. On top of that two checks can fail while their job succeeds, because
+  # their test commands run under `set +e` to keep the report rendering:
+  #   - flake-hunt: any flake found, or any run/shard result missing;
+  #   - full-integration: any failed test.
+  # Vulnerability and Trivy counts are NOT alerted here: they are a standing backlog
+  # (non-zero every night), not a regression, and an alert that can never close teaches
+  # the owner to ignore the label.
+  # -------------------------------------------------------------------------
+  alerts:
+    name: Alert ${{ matrix.check }}
+    needs: [flake-hunt-run, flake-hunt, bundle-size, vuln-scan, full-integration, coverage-shard, coverage-observation, trivy-fs, dep-audit, graph-app-role-parity]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: nightly-health/flake-hunt
+            jobs: flake-hunt-run flake-hunt
+          - check: nightly-health/bundle-size
+            jobs: bundle-size
+          - check: nightly-health/vuln-scan
+            jobs: vuln-scan
+          - check: nightly-health/full-integration
+            jobs: full-integration
+          - check: nightly-health/coverage-observation
+            jobs: coverage-shard coverage-observation
+          - check: nightly-health/trivy-fs
+            jobs: trivy-fs
+          - check: nightly-health/dep-audit
+            jobs: dep-audit
+          - check: nightly-health/graph-app-role-parity
+            jobs: graph-app-role-parity
+    steps:
+      - name: Checkout (local action only)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Decide status
+        id: decide
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          CHECK: ${{ matrix.check }}
+          CHECK_JOBS: ${{ matrix.jobs }}
+        run: |
+          set -euo pipefail
+          status=ok
+          summary=""
+
+          for j in $CHECK_JOBS; do
+            result="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
+            if [ "$result" != "success" ]; then
+              status=failing
+              case "$result" in
+                cancelled) why="was **cancelled**, which is what a job that hits its \`timeout-minutes\` reports" ;;
+                *)         why="finished **${result}**" ;;
+              esac
+              summary+="- Job \`${j}\` ${why}. A check that did not complete is a failing check, not a pass."$'\n'
+            fi
+          done
+
+          if [ "$CHECK" = "nightly-health/flake-hunt" ]; then
+            flakes="$(jq -r '.["flake-hunt"].outputs.flakes_found // "0"' <<<"$NEEDS_JSON")"
+            incomplete="$(jq -r '.["flake-hunt"].outputs.incomplete // "0"' <<<"$NEEDS_JSON")"
+            if [ -z "$flakes" ]; then
+              status=failing
+              summary+="- The flake analysis produced no result (the flake-hunt job did not reach its analysis step)."$'\n'
+            elif [ "$flakes" != "0" ] || [ "$incomplete" = "1" ]; then
+              status=failing
+              body="$(jq -r '.["flake-hunt"].outputs.flake_summary // ""' <<<"$NEEDS_JSON")"
+              summary+=$'\n'"${body}"$'\n'
+            fi
+          fi
+
+          if [ "$CHECK" = "nightly-health/full-integration" ]; then
+            failed="$(jq -r '.["full-integration"].outputs.failed_count // "0"' <<<"$NEEDS_JSON")"
+            passed="$(jq -r '.["full-integration"].outputs.passed_count // "0"' <<<"$NEEDS_JSON")"
+            if [ "$failed" != "0" ]; then
+              status=failing
+              summary+="- ${failed} integration test(s) failed (${passed} passed). The job itself stays green by design (\`set +e\`), so this is the only place the failure surfaces."$'\n'
+            elif [ "$passed" = "0" ]; then
+              status=failing
+              summary+="- The integration suite reported 0 passed and 0 failed tests: it did not run (no project found, a build break or a host crash before any result). That is a failing check, not a pass."$'\n'
+            fi
+          fi
+
+          if [ "$CHECK" = "nightly-health/graph-app-role-parity" ]; then
+            pfailed="$(jq -r '.["graph-app-role-parity"].outputs.failed // "0"' <<<"$NEEDS_JSON")"
+            if [ "$pfailed" != "0" ]; then
+              status=failing
+              summary+="- The Graph app-role parity test (or its Azure login / build) failed. The job's steps are \`continue-on-error\` during the rollout window, so this output is the only place the failure surfaces."$'\n'
+            fi
+          fi
+
+          if [ "$status" = "failing" ]; then
+            summary+=$'\n'"Re-run the failing job from the workflow run linked above; artifacts (TRX, coverage) are attached to it."$'\n'
+          else
+            summary="All jobs for this check succeeded."
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "summary<<${delimiter}"
+            printf '%s\n' "$summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Raise or clear the alert
+        uses: ./.github/actions/quality-alert
+        with:
+          check: ${{ matrix.check }}
+          status: ${{ steps.decide.outputs.status }}
+          summary: ${{ steps.decide.outputs.summary }}
+          dry-run: ${{ inputs.dry_run_alerts == true || github.ref_name != github.event.repository.default_branch }}

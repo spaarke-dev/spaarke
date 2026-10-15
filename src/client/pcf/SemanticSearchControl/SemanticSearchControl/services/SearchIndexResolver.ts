@@ -38,7 +38,8 @@ import { IInputs } from '../generated/ManifestTypes';
  *
  * Behaviour contract:
  *   - Reads the lookup via `_sprk_ai_search_index_value` +
- *     `$expand=sprk_ai_search_index($select=sprk_searchindexname)`.
+ *     `$expand=sprk_AI_Search_Index($select=sprk_searchindexname)` (PascalCase: the
+ *     associatednavigationproperty name, NOT the lowercase column logical name).
  *   - Returns `null` on any failure — BFF tenant default takes over.
  *   - Pure read; no writes; no side-effects beyond the WebAPI call.
  *

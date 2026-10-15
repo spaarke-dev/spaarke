@@ -209,11 +209,15 @@ public class OfficeJobStatusService
     /// is treated as "no duplicate", as before: the save then runs, and the name-collision and content-dedup checks
     /// downstream still protect the stored file.
     /// </remarks>
-    public async Task<JobStatusResponse?> FindExistingAsync(string idempotencyKey, CancellationToken ct)
+    /// <param name="callerObjectId">Task 121: the caller's Entra object id. Only the caller's own jobs count: an email key names
+    /// the message by its RFC Message-ID, the same in every recipient's mailbox, so another user's job under the same key is
+    /// never this caller's duplicate — and a newer one must not hide the caller's own (the query filters, it does not
+    /// compare after a top-1).</param>
+    public async Task<JobStatusResponse?> FindExistingAsync(string idempotencyKey, string callerObjectId, CancellationToken ct)
     {
         try
         {
-            var row = await _jobService.GetProcessingJobByIdempotencyKeyAsync(idempotencyKey, ct);
+            var row = await _jobService.GetCallersProcessingJobByIdempotencyKeyAsync(idempotencyKey, callerObjectId, ct);
             if (row is null)
             {
                 return null;

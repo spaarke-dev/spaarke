@@ -70,7 +70,8 @@ The BROKEN script body below is preserved for audit-trail continuity only.
 #
 # BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): a test container is a container
 # like any other — it is stamped with -TestContainerBusinessUnitId (required with -CreateTestContainer), read back, and
-# REMOVED if the stamp did not land. The BFF's SPE admin plane reaches no unbound container.
+# REMOVED if the stamp did not land. The BFF's SPE admin plane reaches no unbound container. It is also marked with
+# -TestContainerCustomerId (the BFF's Customer__Id; tasks 227d/227e), which the BFF's app-only calls require.
 
 param(
     [string]$OwningAppId = $env:API_APP_ID,
@@ -90,7 +91,9 @@ param(
     [string]$Description = "Container type for document storage - owned by BFF API app",
     [switch]$CreateTestContainer = $false,
     # The business unit that owns the test container (task 165, round 35 item 1). Required with -CreateTestContainer.
-    [string]$TestContainerBusinessUnitId
+    [string]$TestContainerBusinessUnitId,
+    # The customer the test container belongs to: the BFF's Customer__Id (tasks 227d/227e). Required with -CreateTestContainer.
+    [string]$TestContainerCustomerId
 )
 
 . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
@@ -101,6 +104,9 @@ if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID 
 if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 if ($CreateTestContainer -and -not (ConvertTo-SpeBindingGuid $TestContainerBusinessUnitId)) {
     throw "-CreateTestContainer requires -TestContainerBusinessUnitId <business-unit GUID>: every container is stamped with its owning business unit (task 165, round 35 item 1); nothing has been created."
+}
+if ($CreateTestContainer -and [string]::IsNullOrWhiteSpace($TestContainerCustomerId)) {
+    throw "-CreateTestContainer requires -TestContainerCustomerId <the BFF's Customer__Id>: every container is marked with its customer (tasks 227d/227e); nothing has been created."
 }
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
@@ -254,7 +260,7 @@ try {
 
         # Bind it (task 165, round 35 item 1): stamp, read back, or remove — throws (caught below) on failure.
         Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $testContainer.id `
-            -BusinessUnitId $TestContainerBusinessUnitId -GraphBase 'https://graph.microsoft.com/beta'
+            -BusinessUnitId $TestContainerBusinessUnitId -CustomerId $TestContainerCustomerId -GraphBase 'https://graph.microsoft.com/beta'
 
         Write-Host "TEST CONTAINER CREATED!" -ForegroundColor Green
         Write-Host ""
@@ -277,7 +283,7 @@ try {
     Write-Host "   az keyvault secret set --vault-name <name> --name 'Spe--ContainerTypeId' --value '$newContainerTypeId'" -ForegroundColor Gray
     Write-Host ""
     Write-Host "2. Create a container for the root business unit:" -ForegroundColor White
-    Write-Host "   .\New-BusinessUnitContainer.ps1 -ContainerTypeId '$newContainerTypeId' ..." -ForegroundColor Gray
+    Write-Host "   .\New-BusinessUnitContainer.ps1 -ContainerTypeId '$newContainerTypeId' -BusinessUnitId <bu> -BusinessUnitName <name> -CustomerId <the BFF's Customer__Id> ..." -ForegroundColor Gray
     Write-Host ""
     Write-Host "3. Test file upload via BFF API:" -ForegroundColor White
     Write-Host "   PUT /api/containers/{containerId}/files/test.txt" -ForegroundColor Gray

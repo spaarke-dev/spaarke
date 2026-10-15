@@ -26,8 +26,6 @@ $ErrorActionPreference = 'Stop'
 # -- Environment config -------------------------------------------------------
 if ($DataverseUrl) {
     $orgUrl = $DataverseUrl
-} elseif ($Environment -eq 'prod') {
-    $orgUrl = 'https://spaarke-demo.crm.dynamics.com'
 } else {
     Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
     exit 1

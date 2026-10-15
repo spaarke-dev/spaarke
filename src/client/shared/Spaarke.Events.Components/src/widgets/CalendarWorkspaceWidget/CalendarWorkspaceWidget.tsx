@@ -128,6 +128,7 @@ import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Compo
 import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../../../Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
 import { getXrm } from '../../../../Spaarke.UI.Components/src/utils/xrmContext';
+import { formatDateOnly, parseDueDate } from '../../../../Spaarke.UI.Components/src/utils/dateLocal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
@@ -156,23 +157,25 @@ declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event status values (mirror sprk_event_ribbon_commands.js — task 115)
+// Event status = sprk_event.statuscode (D-28, task 066: the second status column is deprecated and no longer
+// filtered on). The values are the LIVE option set (Spaarke.Dataverse.EventStatusCode); the BFF test
+// EventStatusDeprecationTests pins them against the data-model row verified from the live describe.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const EventStatus = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
-  REASSIGNED: 6,
-  ARCHIVED: 7,
+  DRAFT: 1,
+  OPEN: 659490001,
+  COMPLETED: 659490002,
+  CLOSED: 659490003,
+  ON_HOLD: 659490006,
+  REASSIGNED: 659490007,
+  NO_FURTHER_ACTION: 2,
+  CANCELLED: 659490004,
+  TRANSFERRED: 659490005,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Status options (Task 130) — hard-coded because sprk_eventstatus is an
-// integer field with no Dataverse choice metadata attached.
+// Event Status options (Task 130) — hard-coded: the host filter has no option-set metadata for statuscode.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface IStatusOption {
@@ -186,9 +189,10 @@ const STATUS_OPTIONS: IStatusOption[] = [
   { value: EventStatus.COMPLETED, label: 'Completed' },
   { value: EventStatus.CLOSED, label: 'Closed' },
   { value: EventStatus.ON_HOLD, label: 'On Hold' },
-  { value: EventStatus.CANCELLED, label: 'Cancelled' },
   { value: EventStatus.REASSIGNED, label: 'Reassigned' },
-  { value: EventStatus.ARCHIVED, label: 'Archived' },
+  { value: EventStatus.NO_FURTHER_ACTION, label: 'No Further Action' },
+  { value: EventStatus.CANCELLED, label: 'Cancelled' },
+  { value: EventStatus.TRANSFERRED, label: 'Transferred' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -429,15 +433,19 @@ const useStyles = makeStyles({
 // own window/parent/top chain inside ONE try, so a cross-origin parent
 // stopped the walk before `top` was tried. Typed as the @types/xrm surface.
 function getHostXrmFor(capability: 'webApi' | 'navigation'): typeof Xrm | null {
-  return (getXrm(capability) as unknown as typeof Xrm | undefined) ?? null;
+  const xrm = getXrm(capability);
+  return isHostXrm(xrm, capability) ? xrm : null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Date helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function toIsoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/**
+ * Whether `value` exposes the @types/xrm member this widget uses for `capability` — `WebApi` (event-type options) or
+ * `Navigation` (the event-detail modal). A type guard rather than the former `as unknown as typeof Xrm` double cast
+ * (task 081 review R4-5, applied by task 098 — the same approach as `hasEntityMetadata` in XrmDataverseClient).
+ */
+function isHostXrm(value: unknown, capability: 'webApi' | 'navigation'): value is typeof Xrm {
+  const host = value as { WebApi?: unknown; Navigation?: unknown } | undefined;
+  const member = capability === 'webApi' ? host?.WebApi : host?.Navigation;
+  return typeof member === 'object' && member !== null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -509,9 +517,11 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       for (const r of records) {
         const dateStr = (r.sprk_duedate as string | undefined) || (r.createdon as string | undefined);
         if (!dateStr) continue;
-        const d = new Date(dateStr);
-        if (Number.isNaN(d.getTime())) continue;
-        const key = toIsoDate(d);
+        // Task 098: sprk_duedate is a calendar date ("YYYY-MM-DD", Date Only) — its dot belongs on THAT day.
+        // new Date("YYYY-MM-DD") is UTC midnight, the previous day west of UTC. createdon stays an instant.
+        const d = parseDueDate(dateStr);
+        if (!d) continue;
+        const key = formatDateOnly(d);
         counts.set(key, (counts.get(key) ?? 0) + 1);
         eventDateObjects.push(d);
       }
@@ -624,7 +634,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
     if (applied.eventStatusValue !== null) {
       conditions.push({
-        attribute: 'sprk_eventstatus',
+        attribute: 'statuscode',
         operator: 'eq',
         value: applied.eventStatusValue,
       });

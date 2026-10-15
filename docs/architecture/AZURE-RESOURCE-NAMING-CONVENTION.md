@@ -37,34 +37,44 @@ All new resources **MUST** follow these conventions. The existing dev environmen
 
 ## Azure Subscription Organization
 
-Each environment gets its own Azure subscription for clean cost allocation, quota isolation, and RBAC boundaries.
+Every customer gets its own Azure subscription (ADR-027, amended 2026-09-28: one subscription **per customer**, not per environment). Spaarke's own environments keep their own subscriptions. Subscriptions are grouped in two **management groups** so that common policy is assigned once and inherited by every customer subscription (ADR-027: "MUST use Azure Management Groups for common policy across customer subscriptions").
 
 ```
-Billing Account: Spaarke
-└── Management Group: Spaarke Environments
-    ├── Subscription: spaarke-dev            ← Development (existing: "Spaarke SPE Subscription 1")
-    │   └── Dev resources (legacy names, not renamed)
-    │
-    ├── Subscription: spaarke-demo           ← Beta/demo environment
-    │   └── rg-spaarke-demo                  ← All demo resources
-    │
-    ├── Subscription: spaarke-prod           ← Production (future - shared infra for paying customers)
-    │   ├── rg-spaarke-prod                  ← Shared prod BFF API, AI services
-    │   └── rg-spaarke-prod-{customer}       ← Per-customer resources (future)
-    │
-    └── Subscription: spaarke-{customer}     ← Dedicated customer (future, if needed)
-        └── rg-spaarke-{customer}            ← All customer resources
+Tenant Root Group (tenant id)
+├── Management Group: Spaarke Environments      id: spaarke-environments
+│   ├── Subscription: Spaarke Devlopment Environment   ← dev, the dev control plane (legacy names, not renamed)
+│   ├── Subscription: Spaarke Shared Production        ← rg-spaarke-shared-prod (SPE billing account — never delete), add-in/SPA sites
+│   │
+│   └── Management Group: Spaarke Customers     id: spaarke-customers   ← common customer policy assigned HERE
+│       ├── Subscription: Spaarke Demo Environment     ← the T186 customer stamp's subscription (owner 2026-10-09)
+│       └── Subscription: <one per customer>           ← rg-spaarke-{customerId}-{env} (customer.bicep)
+│
+├── Subscription: SPRK Power Platform 1         ← stays at the root: Power Platform, not a Spaarke environment
+└── Subscription: Spaarke Legal Rules Solution  ← stays at the root: a separate solution
 ```
 
-**Cost tracking**: Each subscription has independent billing. Use Azure Cost Management > Cost Analysis to see per-subscription spend. Tag all resources with `environment` and `component` tags for drill-down.
+- **Ids** are lowercase-hyphenated and immutable once created; display names as shown. Source of truth:
+  `scripts/provisioning-prereqs/spaarke-constants.yaml` `management_groups`; created by
+  `infrastructure/bicep/management-groups.bicep` through `scripts/provisioning/Deploy-ManagementGroups.ps1`.
+- **Common customer policy**: `infrastructure/bicep/customer-policy.bicep` at `spaarke-customers` — built-in definitions
+  only, reporting (Audit / DoNotEnforce), never blocking: allowed regions, resource-group tags, storage HTTPS + TLS 1.2,
+  Key Vault RBAC + purge protection. No policy is assigned at `spaarke-environments` today.
+- **A new customer subscription joins `spaarke-customers` before its first run** (prerequisite PRQ-S-06).
+- The two subscriptions left at the root are outside the platform; moving them would only subject them to future
+  environment-wide policy they were not built for.
 
-**Required tags on all resources**:
+**Cost tracking**: each subscription is its own billing boundary, so per-customer spend is the subscription's spend (Azure Cost Management > Cost Analysis). Tags drill down inside a subscription.
+
+**Tags a customer stamp sets** (`customer.bicep` param `tags`, on the resource group and every resource):
 
 | Tag | Values | Purpose |
 |-----|--------|---------|
-| `environment` | `dev`, `demo`, `prod`, `{customer}` | Cost allocation |
-| `component` | `bff-api`, `ai`, `storage`, `cache`, `messaging` | Component-level costs |
-| `managedBy` | `bicep`, `manual`, `script` | Track how resource was created |
+| `customer` | `{customerId}` | Which customer (audited on resource groups by `customer-policy.bicep`) |
+| `environment` | `prod` (default), `{environmentName}` | Environment within the customer (audited) |
+| `application` | `spaarke` | Product |
+| `managedBy` | `bicep` | Track how the resource was created (audited) |
+
+`component` (bff-api, ai, storage, …) was named here before but no template sets it; it is not required.
 
 ---
 
@@ -110,7 +120,7 @@ Container Type Owner:  BFF API app registration for that environment
 Container Display:     {BusinessUnit} Documents           e.g., "Root BU Documents"
 ```
 
-| SPE Resource | Pattern | Dev Example | Demo Example |
+| SPE Resource | Pattern | Dev Example | Former Demo Example (retired 2026-10-14) |
 |-------------|---------|-------------|--------------|
 | Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` (legacy) | `Spaarke Demo Documents` |
 | Container Type Owner | BFF API app for that env | `170c98e1-...` (legacy PCF app) | `{demo-bff-app-id}` |
@@ -147,7 +157,7 @@ sprk-{env}:{area}:{key}     e.g., sprk-demo:graph:token:{hash}
 
 Each environment gets its **own app registrations** to ensure credential and scope isolation.
 
-| Registration | Pattern | Dev | Demo |
+| Registration | Pattern | Dev | Former Demo (retired 2026-10-14) |
 |-------------|---------|-----|------|
 | BFF API | `Spaarke BFF API - {Env}` | `spe-bff-api` (legacy) | `Spaarke BFF API - Demo` |
 | UI SPA (MSAL) | `Spaarke UI - {Env}` | _(existing)_ | `Spaarke UI - Demo` |
@@ -161,7 +171,7 @@ Each environment gets its **own app registrations** to ensure credential and sco
 
 Each environment gets **one resource group** containing ALL its resources. No shared platform resources across environments — each environment is fully self-contained for data separation.
 
-| Resource Type | Max Length | Pattern | Demo Example | Prod Example |
+| Resource Type | Max Length | Pattern | Former Demo Example (retired 2026-10-14) | Prod Example |
 |--------------|------------|---------|--------------|--------------|
 | Resource Group | 90 | `rg-spaarke-{env}` | `rg-spaarke-demo` | `rg-spaarke-prod` |
 | Key Vault | 24 | `sprk-{env}-kv` | `sprk-demo-kv` | `sprk-prod-kv` |
@@ -187,13 +197,17 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | Managed Identity (User-Assigned) | 128 | `mi-{purpose}-{env}` | `mi-bff-api-demo` | `mi-bff-api-prod` |
 | Cosmos DB account (Serverless, SQL API) | 44 | `spaarke-cosmos-{purpose}-{env}` | `spaarke-cosmos-demo-ai` | `spaarke-cosmos-prod-ai` |
 
+> **The old demo environment was retired and deleted on 2026-10-14.** The "Former Demo Example" column keeps the pattern readable by showing the names the old demo used; those App Service, OpenAI, Document Intelligence, Service Bus, Cosmos, Redis, App Insights, Log Analytics, managed identity and app-registration resources no longer exist. The demo is now the dedicated customer stamp **ACME Corporation** (`customerId` `acme`), produced by the provisioning control plane (T186), not a hand-named per-env stack.
+
 **API Scope URI**: Always use the Application ID GUID, not a friendly name. This avoids coupling scope URIs to human-readable names.
 
 **Managed Identity + Cosmos DB**: User-Assigned Managed Identities (UAMI) follow `mi-{purpose}-{env}` (e.g., `mi-bff-api-dev`, `mi-bff-api-demo`). Cosmos DB accounts use Serverless + SQL API; the database is named `spaarke-ai` with 5 containers (`sessions`, `prompts`, `audit`, `memory`, `feedback`) partitioned on `/tenantId`. See [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 5 task 060 (demo prep) for the canonical step-by-step provisioning of a new environment, including Graph app-role grants, Cosmos data-plane RBAC, and the full App Settings configuration block.
 
 ---
 
-### Demo Environment Full Resource Inventory (`rg-spaarke-demo`)
+### Former Demo Environment Resource Inventory (`rg-spaarke-demo`) — retired 2026-10-14
+
+> The old demo environment was retired on 2026-10-14. These resources were deleted: App Service Plan `spaarke-demo-plan`, App Service `spaarke-bff-demo`, Azure OpenAI `spaarke-openai-demo`, Document Intelligence `spaarke-docintel-demo`, Service Bus `spaarke-demo-sbus`, Redis `spaarke-bff-redis-demo`, App Insights `spaarke-demo-insights`, Log Analytics `spaarke-demo-logs`, Cosmos `spaarke-cosmos-demo-ai` and managed identity `mi-bff-api-demo`. The resource group stays for the website function apps, `WestUS2Plan`, storage `sprkdemosa`, key vault `sprk-demo-kv` and the Syntex account. The demo is now the ACME stamp built by provisioning (T186). The table is kept as the record of what the old naming produced.
 
 | Resource Type | Name | Purpose |
 |--------------|------|---------|
@@ -329,7 +343,7 @@ at runtime (`CustomerIdResolver`).
 
 ### SharePoint Embedded (SPE) Resources
 
-| SPE Resource | Pattern | Dev (Legacy) | Demo |
+| SPE Resource | Pattern | Dev (Legacy) | Former Demo (retired 2026-10-14) |
 |-------------|---------|--------------|------|
 | Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` | `Spaarke Demo Documents` |
 | Container Type Owner | BFF API app for env | `170c98e1-...` (legacy) | Demo BFF API app ID |
@@ -347,7 +361,7 @@ Each environment gets its **own Container Type** owned by that environment's BFF
 | Environment | URL Pattern | Dataverse Type | Purpose |
 |-------------|-------------|----------------|---------|
 | Dev | `spaarkedev1.crm.dynamics.com` | Sandbox | Development/testing (legacy name) |
-| Demo | `spaarke-demo.crm.dynamics.com` | Production | Beta testers, demos |
+| Demo (retired 2026-10-14) | `spaarke-demo.crm.dynamics.com` (deleted) | — | Replaced by the ACME customer stamp built by provisioning (T186) |
 | Prod | `spaarke-prod.crm.dynamics.com` | Production | Paying customers (future) |
 | Customer | `spaarke-{customer}.crm.dynamics.com` | Production | Dedicated customer (future) |
 
@@ -356,6 +370,8 @@ Each environment gets its **own Container Type** owned by that environment's BFF
 ## Current State & Migration Plan
 
 ### Existing Resources (R1 Deployment — March 2026)
+
+> Historical (March 2026). The demo resources named in the migration tables below were later created and then retired on 2026-10-14; see the retirement note above.
 
 R1 created resources using v2 naming with `-prod` suffix. These need to be migrated to v3 naming.
 
@@ -484,7 +500,10 @@ resource name**.
    template, seeder, IaC, and tokens doc. Canonical casing for **new** KV secrets is **kebab-case**
    (`communication-webhook-signing-key`); existing PascalCase live secrets (`BFF-API-ClientSecret`) are
    grandfathered but MUST NOT gain a second casing. Never two casings for one value simultaneously.
-3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`). **Codified legacy exception
+3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`) for platform environments, and
+   `sprk-{customerId}-{env}-kv` (e.g. `sprk-acme-prod-kv`, at most 24 characters) for a customer stamp — the form
+   `customer.bicep` composes (T230a, 2026-10-06). The customerId segment may not be a reserved id (`platform`, `shared`,
+   `byok`) or an env token, so `sprk-platform-prod-kv` / `sprk-demo-prod-kv` remain drift. **Codified legacy exception
    (DO-NOT-RENAME): `spaarke-spekvcert`** — the only live dev vault; bicep accepts the vault name as a
    parameter rather than hardcoding a divergent form. `kv-sdap-{env}`, `spaarke-kv-dev`,
    `sprkshareddev-kv`, and `sprk-{workload}-{env}-kv` are drift.
@@ -502,7 +521,9 @@ KV references use the Key Vault-reference form with an env-parameterized vault n
 
 `scripts/naming-conformance-check.ps1` implements rules R1–R3 (read-only; renames nothing). It runs
 `-SelfTest` (a seeded env-token/casing violation MUST fail, conformant names MUST pass) and scans the
-canonical secret-name sources. **Activation is per-surface + advisory-until-remediated**: because the
+canonical secret-name sources. **Since 2026-10-06 (customer-provisioning-orchestration-r1 T230a) it is a
+merge-blocking job in `.github/workflows/ci-tier1-blocking.yml`** (self-test, then the scan) — the repository is at zero
+violations, and H13 no longer re-runs it per customer. *History:* **activation was per-surface + advisory-until-remediated**: because the
 live environments still carry the 017-census drift (r1's remediation backlog), the gate runs
 **advisory** (reports, does not block) until `customer-provisioning-orchestration-r1` applies the
 current→canonical rename map; it flips to **blocking** per-surface as each surface reaches zero

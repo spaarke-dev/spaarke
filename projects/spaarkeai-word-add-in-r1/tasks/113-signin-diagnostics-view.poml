@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Dev-only sign-in Diagnostics view for the guest sign-in test (customer-provisioning-orchestration-r1 request R1)</title>
+    <phase>6 — cross-project request (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts`/`.tsx` (App, toolbar, shell, AuthService), webpack and the deploy workflow; auth-adjacent (decodes the access token for display).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-adjacent; must never expose the token.</model-tier-reason>
+    <effort>high</effort>
+    <deps>—</deps>
+    <tags>frontend, office-addins, typescript, auth, unit-test</tags>
+  </metadata>
+
+  <prompt>customer-provisioning-orchestration-r1, second message (2026-10-07), R1: a dev-only diagnostics view showing the backend access token's tid, oid, acct, idp, iss and aud (not idtyp; no /me/memberOf — their directory endpoint replaces it), for the owner's guest sign-in test in Outlook and Word, desktop and web. Check with the owner before deploying to the shared dev site. Record: `notes/113-signin-diagnostics-view.md`.</prompt>
+
+  <goal>A diagnostics-enabled build offers "⋮ → Diagnostics", which shows the named claims of the backend token plus the Office host, the sign-in path (NAA or popup) and the authority, with Copy and Refresh — never the token.</goal>
+
+  <constraints>
+    <constraint source="R1">Claims tid, oid, acct (0 member / 1 guest), idp (absent = not a guest), iss, aud.</constraint>
+    <constraint source="security">Decode for display only; never render, log or copy the token; no new Graph permission; no app-registration change.</constraint>
+    <constraint source="build">Off by default (`ADDIN_DIAGNOSTICS_ENABLED`, exact "true"); only the dev deploy workflow sets it; a production build must not.</constraint>
+    <constraint source="owner">Deploying (merge to master) waits for the owner's go.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Menu entry only with the flag; the view shows the six claims + host, sign-in path, authority; Copy text has no token.</criterion>
+    <criterion testable="true">Gates: full add-in jest green; lint 0; typecheck 0 production; test-file debt not increased.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>The ⋮ menu, AuthService (authority + NAA state already held by @spaarke/auth).</existing>
+    <extension>Yes — one optional AuthService accessor, one menu item, one lazy view, one pure decoder.</extension>
+    <cost-of-doing-nothing>The guest sign-in test that decides the multi-customer add-in design cannot be read in Outlook/Word.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="new">src/client/office-addins/shared/taskpane/services/tokenDiagnostics.ts</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/views/DiagnosticsView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</file>
+    <file role="edit">src/client/office-addins/shared/services/AuthService.ts</file>
+    <file role="edit">src/client/office-addins/webpack.config.js</file>
+    <file role="edit">.github/workflows/deploy-office-addins.yml</file>
+  </relevant-files>
+</task>

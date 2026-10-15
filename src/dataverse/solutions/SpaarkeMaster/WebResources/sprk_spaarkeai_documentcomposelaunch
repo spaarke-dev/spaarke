@@ -1,0 +1,169 @@
+"use strict";
+var Sprk = Sprk || {};
+Sprk.SpaarkeAi = Sprk.SpaarkeAi || {};
+Sprk.SpaarkeAi.DocumentComposeLaunch = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/ribbon/DocumentComposeLaunch.ts
+  var DocumentComposeLaunch_exports = {};
+  __export(DocumentComposeLaunch_exports, {
+    openInCompose: () => openInCompose
+  });
+
+  // src/utils/launch-resolver.ts
+  function buildLaunchUrl(params) {
+    const record = {};
+    if (params.entityLogicalName) {
+      record["entityLogicalName"] = params.entityLogicalName;
+    }
+    if (params.entityId) {
+      record["entityId"] = params.entityId.replace(/^\{|\}$/g, "");
+    }
+    if (params.matterId) {
+      record["matterId"] = params.matterId.replace(/^\{|\}$/g, "");
+    }
+    if (params.analysisId) {
+      record["analysisId"] = params.analysisId.replace(/^\{|\}$/g, "");
+    }
+    if (params.worktype) {
+      record["worktype"] = params.worktype;
+    }
+    if (params.regarding) {
+      record["regarding"] = params.regarding.replace(/^\{|\}$/g, "");
+    }
+    const composeParams = params;
+    if (composeParams.composeMode) {
+      record["composeMode"] = composeParams.composeMode;
+    }
+    if (composeParams.sprkDocumentId) {
+      record["sprkDocumentId"] = composeParams.sprkDocumentId.replace(/^\{|\}$/g, "");
+    }
+    if (composeParams.speDriveItemId) {
+      record["speDriveItemId"] = composeParams.speDriveItemId;
+    }
+    if (composeParams.speDriveId) {
+      record["speDriveId"] = composeParams.speDriveId;
+    }
+    if (composeParams.speFileName) {
+      record["speFileName"] = composeParams.speFileName;
+    }
+    if (composeParams.activeWorkType) {
+      record["activeWorkType"] = composeParams.activeWorkType;
+    }
+    return new URLSearchParams(record).toString();
+  }
+  function openSpaarkeAiCompose(params) {
+    var _a;
+    if (typeof Xrm === "undefined") {
+      console.warn(
+        "[launch-resolver] Xrm global not available. SpaarkeAi Compose must be opened via direct URL."
+      );
+      return;
+    }
+    const data = buildLaunchUrl({
+      ...params,
+      composeMode: (_a = params.composeMode) != null ? _a : "editor"
+    });
+    void Xrm.Navigation.navigateTo(
+      {
+        pageType: "webresource",
+        webresourceName: "sprk_spaarkeai",
+        data
+      },
+      {
+        // Always modal (target=2) — see header comment for rationale.
+        target: 2,
+        width: { value: 80, unit: "%" },
+        height: { value: 80, unit: "%" }
+      }
+    );
+  }
+
+  // src/ribbon/DocumentComposeLaunch.ts
+  var FIELD_DOCUMENT_ID = "sprk_documentid";
+  var FIELD_GRAPH_ITEM_ID = "sprk_graphitemid";
+  var FIELD_DRIVE_ID = "sprk_graphdriveid";
+  var FIELD_DISPLAY_NAME = "sprk_filename";
+  async function openInCompose(primaryControl) {
+    let documentId;
+    try {
+      documentId = primaryControl.data.entity.getId();
+    } catch (err) {
+      console.warn(
+        "[DocumentComposeLaunch] Could not read record id from primaryControl:",
+        err
+      );
+      openSpaarkeAiCompose({});
+      return;
+    }
+    const normalizedDocumentId = documentId.replace(/^\{|\}$/g, "");
+    if (!normalizedDocumentId) {
+      console.warn(
+        "[DocumentComposeLaunch] Record id is empty (likely an unsaved form). Opening empty Compose."
+      );
+      openSpaarkeAiCompose({});
+      return;
+    }
+    const select = `?$select=${FIELD_DOCUMENT_ID},${FIELD_GRAPH_ITEM_ID},${FIELD_DRIVE_ID},${FIELD_DISPLAY_NAME}`;
+    try {
+      const record = await Xrm.WebApi.retrieveRecord(
+        "sprk_document",
+        normalizedDocumentId,
+        select
+      );
+      const speDriveItemId = record[FIELD_GRAPH_ITEM_ID];
+      const speDriveId = record[FIELD_DRIVE_ID];
+      const speFileName = record[FIELD_DISPLAY_NAME];
+      if (!speDriveItemId || !speDriveId) {
+        console.warn(
+          "[DocumentComposeLaunch] Incomplete SPE pointer on record",
+          normalizedDocumentId,
+          `(sprk_graphitemid=${speDriveItemId != null ? speDriveItemId : "null"}, sprk_graphdriveid=${speDriveId != null ? speDriveId : "null"})`,
+          "\u2014 opening Compose in empty state."
+        );
+        openSpaarkeAiCompose({
+          entityLogicalName: "sprk_document",
+          entityId: normalizedDocumentId,
+          sprkDocumentId: normalizedDocumentId
+        });
+        return;
+      }
+      openSpaarkeAiCompose({
+        entityLogicalName: "sprk_document",
+        entityId: normalizedDocumentId,
+        sprkDocumentId: normalizedDocumentId,
+        speDriveItemId,
+        speDriveId,
+        speFileName: speFileName != null ? speFileName : void 0
+      });
+    } catch (err) {
+      console.error(
+        "[DocumentComposeLaunch] retrieveRecord failed for sprk_document",
+        normalizedDocumentId,
+        err
+      );
+      openSpaarkeAiCompose({
+        entityLogicalName: "sprk_document",
+        entityId: normalizedDocumentId,
+        sprkDocumentId: normalizedDocumentId
+      });
+    }
+  }
+  return __toCommonJS(DocumentComposeLaunch_exports);
+})();

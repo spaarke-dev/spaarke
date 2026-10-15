@@ -1,9 +1,89 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 5 · **Last Updated**: 2026-10-02
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 5)
+> **Version**: 13 · **Last Updated**: 2026-10-14
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 15)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+>
+> **v13 (2026-10-14, `customer-provisioning-orchestration-r1` T186 — first live run of every recipe, customer `acme`)**:
+> the first full prerequisite pass failed 12 checks, 9 of them recipe defects (the recipe disagreed with the code it guards).
+> Fixed to mirror the code: `PRQ-S-00` counts only `rg-spaarke-{id}-{env}` groups of another id, exactly H1's rule
+> (`SubscriptionDedication.cs`); `PRQ-S-01` reads the quota id from ARM (`az account show` omits it on az 2.77); `PRQ-S-03`
+> lists the namespaces `customer.bicep` and its modules deploy plus H1's (no `Microsoft.ContainerRegistry`; `Microsoft.EventGrid`,
+> `Microsoft.SignalRService`, `Microsoft.Communication` added — and the same four added to H1's default list,
+> `SubscriptionReadinessOptions.cs`); `PRQ-T-02` uses the v1.0 `containerTypeRegistrations` Graph path (the beta path never
+> existed); `PRQ-T-03` checks the shared client apps H3 pre-authorizes (the per-host "Outlook/Word Add-in {env}" apps never
+> existed); `PRQ-C-08` reads the group through Microsoft Graph (`Connect-ExchangeOnline` needs an interactive window);
+> `PRQ-C-10` reads az's two values robustly (az 2.77 prints a list as two lines). **Retired**: `PRQ-T-04` (one app serves
+> Outlook and Word — `PRQ-T-03`), `PRQ-E-05` (H2a creates the grant), `PRQ-E-13` (skill Step 1f creates the row after the
+> prerequisite pass), `PRQ-C-06` (H6 applies the org-settings contract itself before the import). Rule: every recipe is run
+> once against a real target before it is relied on; a recipe that mirrors a handler rule copies the handler's code, and
+> its Pester case names that code.
+>
+> **v12 (2026-10-10, `customer-provisioning-orchestration-r1` T263 — owner decision 2026-10-10, #1562)**: H14m creates
+> each customer's Spaarke-tenant shared mailbox `sprk-{customerId}-mail` at the intake `communicationDefaultMailbox`
+> address and adds it to the `PRQ-C-08` group. `PRQ-C-08`: the group's name **must** be `Spaarke-AppAccess-{customerId}`
+> (H14m refuses another customer's group), and L2 now adds exactly one member, its own mailbox. `PRQ-E-15`: H14m needs
+> two more Exchange roles on `Spaarke Exchange Admin` — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13 (deployment guide §4.2.1 step 5;
+> H14m diagnostics call them `PRQ-E-16`). On a tenant without them, H14m fails Resumable and creates nothing.
+>
+> **v11 (2026-10-09, `customer-provisioning-orchestration-r1` T262 — G36, owner approval 2026-10-09)**: `PRQ-S-06`
+> **added** — the customer's subscription is a direct member of the `spaarke-customers` management group, where the
+> common customer policy (`infrastructure/bicep/customer-policy.bicep`, ADR-027) is assigned. New recipe token
+> `{customerManagementGroupId}` (`spaarke-constants.yaml` `management_groups.customers.id`). `PRQ-S-00`'s remediation
+> names the group. `validate.ps1`'s `grep -i -F` lint (listed under v10) was inert until this version — its code sat on
+> a comment line — and now runs.
+>
+> **v10 (2026-10-08, `customer-provisioning-orchestration-r1` T206 + T207 re-measured)**: every check recipe now decides by
+> exit code and asserts the condition its `expect` field describes (before: 33 of 36 active recipes had no `exit 1`, so a
+> failing check printed a result and passed). Recipes that were wrong rather than merely unguarded: `PRQ-E-01` /
+> `PRQ-E-02` / `PRQ-E-09` named resources that do not exist (`sprk{env}artifacts`, `sprk{env}acr`, `sprk-{env}-kv`; the
+> real names are `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`, `sprk-controlplane-{env}-kv`); `PRQ-E-07` queried
+> the Graph service principal's own `appRoleAssignments` instead of the L2 identity's; `PRQ-E-08` / `PRQ-E-13` used `pac`
+> commands and a column (`sprk_environmentid`) that do not exist; `PRQ-C-01` / `PRQ-C-02` still checked `gpt-5` /
+> `GlobalStandard` instead of the three `DataZoneStandard` pins in `openai.bicep` / `PinnedModelCatalog.cs`;
+> `PRQ-C-07` ran PowerShell `Select-String` under `bash -c`. **Rescoped** `once_per_tenant` -> `once_per_env`:
+> `PRQ-T-01` … `PRQ-T-05` (they use `{containerTypeId}` / `{env}`, which are unknown while skill Step 0.5 runs the tenant
+> scope, so they could never resolve there). `validate.ps1` now lints every recipe for the defect classes above
+> (token available at the step that runs its scope, no undefined bash variable, explicit `exit 1`, no PowerShell cmdlet
+> under bash, no parenthesis in an `az` argument, no `grep -i -F`), and `tests/scripts/Prereqs-Recipes.Tests.ps1` runs
+> the recipes against fake `az` / `curl` / `pac` and proves each exits 1 on the defect it exists to catch.
+> **Same version, 2026-10-09:** `PRQ-T-05` (Copilot bot app — superseded by the T257 design: one shared OAuth client
+> app, no bot) and `PRQ-T-06` (Power BI service principal — BI is out of scope for r1) **retired**. The skill now RUNS
+> the `once_per_customer` recipes: Step 1e-ter, after the intake names the customer and before Step 1f writes anything,
+> with the same HARD STOP as Step 0.5 (previously no step ran them).
+> **Same version, 2026-10-09 (manifest_version 13; owner decision relayed by `spaarke-SPA-external-access-platform-r3`, its
+> design §4.6 item 7 / C7):** `PRQ-C-14` **added** — the **customer** tenant's cross-tenant access settings allow its users
+> to become B2B guests in Spaarke's tenant (outbound B2B collaboration). A required customer approval; Spaarke cannot read
+> another tenant's policy, so the check is a customer **attestation** (intake `customerOutboundB2BAttested`). New recipe
+> token `{customerOutboundB2BAttested}`.
+> **Same version, T255 — INCOMING-141 (2026-10-09):** `PRQ-C-13` **added** — the customer's workforce tenant id(s),
+> intake `customerWorkforceTenantIds` (required for every run). H4b writes them as `WorkforceIdentity__CustomerTenantIds__N`
+> on both BFF slots; without them the stamp denies every first sign-in of a customer employee.
+> **Same version, T253 — G38 (2026-10-08):** `PRQ-C-07` **retired** — the CI-built
+> SpaarkeMaster needs no Power BI Extensions and H6 installs no application. `PRQ-C-06`: H6 applies the org-settings
+> contract through the Dataverse Web API (the L2 Worker host has no pac).
+>
+> **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
+> users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
+> `sprk-{customerId}-users` — intake `environmentSecurityGroupId`), `PRQ-C-11` **added** (the environment linked to a
+> pay-as-you-go billing policy on the stamp subscription), `PRQ-C-12` **added** (guest access allowed —
+> `restrictGuestUserAccess` off). All three are checked by the skill (Step 1e-bis) as the operator — including that the
+> group is the one SET ON the environment (Power Platform admin API). H11 re-checks the group's name and guest access
+> server-side; the group binding and the billing link are visible only to a Power Platform admin, which L2 is not.
+>
+> **v8 (2026-10-06, `customer-provisioning-orchestration-r1` T228 — owner D4 / Q1)**: the operator creates the customer's
+> subscription and Dataverse environment; L2 creates neither. `PRQ-S-00` **added** (the customer's own subscription —
+> Enabled, holding no other customer's `rg-spaarke-*`), `PRQ-C-09` **added** (the operator-created environment, domain
+> `spaarke-{customerId}`, with the L2 Worker identity as a System Administrator application user), `PRQ-C-04` **retired**
+> (environment-creation rate — L2 no longer creates environments). `PRQ-S-04` is now **Owner** (owner decision
+> 2026-10-06 — customer.bicep writes role assignments), granted with `modules/controlplane-subscription-rbac.bicep` at the
+> customer's subscription. With one subscription per customer, every `PRQ-S-*` is `once_per_customer` and reads
+> `{stampSubscriptionId}` — never the operator's current `az account`; like every `once_per_customer` entry, skill Step 0.5
+> does not run them (H1 and H2a enforce what matters server-side).
+>
+> **v7 (2026-10-06, `customer-provisioning-orchestration-r1` T227a)**: `PRQ-C-05` **retired** — Model 2 only (out of scope, D-12), and its check read a shared BFF app id that no longer exists (each customer's BFF app registration is created by H3 during the run).
 >
 > **v6 (2026-10-04, `customer-provisioning-orchestration-r1` T251)**: `PRQ-E-15` **added** — the Exchange admin app
 > (`Spaarke Exchange Admin`, federated credential trusting the L2 Worker UAMI, no secret or certificate) and its narrowed
@@ -67,15 +147,14 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 34 prereqs across 4 scopes (32 active)
+## Summary — 43 prereqs across 3 scopes (32 active)
 
 | Scope | Count | IDs |
 |---|---|---|
-| `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
-| `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
-| `once_per_env` | 12 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 10 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **34** (32 active) | Authoritative count: `validate.ps1` over the YAML |
+| `once_per_tenant` | 0 active (+2 retired) | ~~`PRQ-T-06`~~ **retired 2026-10-09** (BI out of scope for r1); ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
+| `once_per_env` | 15 active (+3 retired) | `PRQ-T-01` … `PRQ-T-03` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05` and `PRQ-E-06`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-T-04`~~ **retired 2026-10-14** (T186: one shared client app serves Outlook and Word — `PRQ-T-03`), ~~`PRQ-T-05`~~ **retired 2026-10-09** (T257: no bot), ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_customer` | 17 active (+6 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-S-06` (T262: the subscription is in the `spaarke-customers` management group), `PRQ-C-01` … `PRQ-C-14` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~, ~~`PRQ-C-06`~~, ~~`PRQ-C-07`~~ retired; C-10 … C-12 T232; C-13 T255; C-14 customer attestation, 2026-10-09); ~~`PRQ-E-05`~~ **retired 2026-10-14** (T186: H2a creates the grant) and ~~`PRQ-E-13`~~ **retired 2026-10-14** (T186: skill Step 1f creates the row) |
+| **Total** | **43** (32 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -84,7 +163,7 @@ Owner enumeration: "SPE container-types, Office add-in apps, Copilot bot apps, P
 | Owner-named prereq | Codified as |
 |---|---|
 | SPE container-types (KEEP) | `PRQ-T-01`, `PRQ-T-02` |
-| Office add-in Entra apps | `PRQ-T-03` (Outlook), `PRQ-T-04` (Word) |
+| Office add-in Entra apps | `PRQ-T-03` (the shared client app `Spaarke Office Add-in (Production)` that serves Outlook and Word and that H3 pre-authorizes; ~~`PRQ-T-04`~~ retired) |
 | Copilot bot Entra apps | `PRQ-T-05` |
 | Power BI service principals | `PRQ-T-06` |
 | Azure subscription (EA/MCA) | `PRQ-S-01` (billing type), `PRQ-S-02` (support plan) |
@@ -99,16 +178,16 @@ Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-
 
 Grouped by scope. Programmatic check recipes in the YAML.
 
-### Once-per-tenant (6 active, 1 retired)
+### Once-per-tenant (0 active, 2 retired) — plus PRQ-T-01 … PRQ-T-05, which are `once_per_env` since 2026-10-08 and listed here for continuity
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
 | PRQ-T-01 | SPE container-type registered | Spaarke platform admin | H8 fails 404; downstream file-storage broken. **never_delete: true** |
-| PRQ-T-02 | SPE container-type application permissions granted | Customer tenant admin (M2) / Spaarke (M1) | H8 succeeds but subsequent 403 |
-| PRQ-T-03 | Office Outlook add-in Entra app-reg | Spaarke platform admin | Outlook add-in deploy fails; email intake broken |
-| PRQ-T-04 | Office Word add-in Entra app-reg | Spaarke platform admin | Word add-in deploy fails |
-| PRQ-T-05 | Copilot bot Entra app-reg (optional per profile) | Spaarke platform admin | M365 Copilot surface non-functional |
-| PRQ-T-06 | Power BI service principal (if Power BI Embedded used) | Power BI tenant admin | Power BI Embedded reports unauthorized |
+| PRQ-T-02 | SPE container-type application permissions granted (Graph v1.0 `storage/fileStorage/containerTypeRegistrations/{id}/applicationPermissionGrants`: a grant with `full`, or `readContent` + `writeContent`; HTTP 403 for the Azure CLI token = SKIP, H0 verifies with the L2 credential; 404 = not registered in this tenant) | Customer tenant admin (M2) / Spaarke (M1) | H8 succeeds but subsequent 403 |
+| PRQ-T-03 | Shared client apps H3 pre-authorizes exist: the L2 Worker settings `EntraAppRegOptions__PreAuthorizedClientAppIds__N` (at least one; each resolves to a service principal in the tenant; one is `Spaarke Office Add-in (Production)`, appId `1958aec2-0218-495e-8e3c-37133e9b8357`, the single client the Outlook AND Word add-ins use) | Spaarke platform admin | H3 pre-authorizes a client that does not exist; the add-in cannot get a token for the customer BFF; email intake and the Word add-in are non-functional |
+| ~~PRQ-T-04~~ | **RETIRED 2026-10-14 (T186)** — was *Office Word add-in Entra app-reg* (no `Spaarke Word Add-in {env}` app exists; one shared client app serves both hosts — `PRQ-T-03`) | — | None |
+| ~~PRQ-T-05~~ | **RETIRED 2026-10-09** — was *Copilot bot Entra app-reg* (superseded by T257: one shared OAuth client app, no bot) | — | None |
+| ~~PRQ-T-06~~ | **RETIRED 2026-10-09** — was *Power BI service principal* (BI is out of scope for r1) | — | None |
 | ~~PRQ-T-07~~ | 🔴 **RETIRED 2026-09-28 (D-12 + D-13)** — was *"Multitenant BFF app-reg (Model 1 tier only)"*, `never_delete: true` | — | **None.** See the retirement note below. |
 
 > **PRQ-T-07 retirement note (2026-09-28, `unified-access-control-r2`)**
@@ -127,17 +206,19 @@ Grouped by scope. Programmatic check recipes in the YAML.
 > Machine-readable source updated in the same change: `scripts/provisioning-prereqs/prereqs.yaml`
 > (manifest_version 2).
 
-### Once-per-subscription (5)
+### The customer's subscription (7 — `once_per_customer` since T228)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
-| PRQ-S-01 | Azure subscription billing-agreement type | Spaarke admin | Cost-envelope estimation unreliable |
+| PRQ-S-00 | The customer's own subscription exists (operator creates it; its id is the intake value `subscriptionId`), Enabled, holding no other customer's stamp resource group — exactly H1's rule (`SubscriptionDedication.cs`): a group named `rg-spaarke-{id}-{env}` whose `{id}` is not this customer's; `rg-spaarke-demo` and other names are ignored, `rg-spaarke-other-prod` / `rg-spaarke-platform-dev` count as foreign | Spaarke admin (Model 1) | POST /api/runs 400 `subscription-id-required`; H1 `subready-subscription-not-dedicated` / `-unreachable` |
+| PRQ-S-01 | Azure subscription billing-agreement type (`subscriptionPolicies.quotaId`, read from ARM `GET /subscriptions/{id}` — `az account show` omits it on az 2.77) | Spaarke admin | Cost-envelope estimation unreliable |
 | PRQ-S-02 | Support Plan (Basic minimum) | Spaarke admin | F9 — auto-support-ticket path unavailable when quota bump denied |
-| PRQ-S-03 | Resource-provider registration | Spaarke admin | F6 — `az deployment sub create` fails on unregistered provider |
-| PRQ-S-04 | L2 UAMI subscription Contributor | Spaarke admin | H2a `ArmDeploymentRunner` 403s |
-| PRQ-S-05 | Operator has Owner OR Contributor+UAA on sub | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
+| PRQ-S-03 | Resource-provider registration (H1 also registers them): `Microsoft.Web`, `Storage`, `KeyVault`, `CognitiveServices`, `Search`, `ServiceBus`, `Cache`, `DocumentDB`, `OperationalInsights`, `Insights`, `ManagedIdentity`, `EventGrid`, `SignalRService`, `Communication` — the namespaces `customer.bicep` and its modules deploy (EventGrid / Communication / SignalRService serve the conditional ACS and SignalR modules). H1's list also holds `Microsoft.ManagedServices` (Model 2 Lighthouse) — not checked here. No `Microsoft.ContainerRegistry`: no customer stamp deploys it | Spaarke admin | F6 — `az deployment sub create` fails on unregistered provider |
+| PRQ-S-04 | L2 UAMI **Owner** on the customer's subscription (`modules/controlplane-subscription-rbac.bicep`; owner decision 2026-10-06) | Spaarke admin | H1 `subready-subscription-listing-failed`; H2a cannot write customer.bicep's role assignments |
+| PRQ-S-05 | Operator has Owner OR Contributor+UAA on the customer's subscription | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
+| PRQ-S-06 | The customer's subscription is a direct member of the `spaarke-customers` management group (ADR-027 common customer policy; T262). Place it with `az account management-group subscription add --name spaarke-customers --subscription <id>` (the group itself comes from the one-time `scripts/provisioning/Deploy-ManagementGroups.ps1 -Apply`) | Spaarke admin (management-group write on `spaarke-customers` + Owner on the subscription) | Nothing in the run fails; the stamp does not inherit `customer-policy.bicep` (regions, resource-group tags, storage HTTPS + TLS 1.2, Key Vault RBAC + purge protection), so its drift is never reported |
 
-### Once-per-env (11 active + 1 retired)
+### Once-per-env (12 active + 1 retired)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -146,29 +227,35 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-03 | L2 UAMI Storage Blob Data Reader on artifacts storage | Spaarke admin | H2a/H9 artifact download 403 |
 | PRQ-E-04 | L2 UAMI AcrPull on platform ACR | Spaarke admin | Sidecar image pull fails at H14a dispatch |
 | ~~PRQ-E-06~~ | 🔴 **RETIRED 2026-09-30 (T226)** — was *"L2 UAMI service-specific RBAC on 6 shared source services"* (for the H4-shared handler) | — | **None.** No handler reads a shared service's keys; H4b never depended on these roles. |
-| PRQ-E-07 | L2 UAMI Graph app-role grants | Spaarke admin (script) | L2 H7/H10/H11/H12c 403 silently on every Graph call |
+| PRQ-E-07 | L2 UAMI Graph app-role grants — `ControlPlaneGraphAppRoles.cs` (task 261), granted by `Grant-ControlPlaneIdentity.ps1` | Spaarke admin (script) | H3/H10/H11 403 on their Graph calls (H3 and H10 need `Application.ReadWrite.OwnedBy` / `AppRoleAssignment.ReadWrite.All`) |
 | PRQ-E-08 | L2 UAMI Dataverse App User (Path X) on admin env | Spaarke admin | L2 cannot read/write `sprk_dataverseenvironment` registry rows |
 | PRQ-E-09 | Platform KV secrets pre-seeded | Spaarke admin (script) | L2 config validation returns garbage strings (T1-family silent fail) |
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
-| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4) |
-| PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault |
+| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) + the T263 shared-mailbox roles (§4.2.1 step 5 — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4). Without step 5, H14m fails Resumable (`h14m-mailbox-ensure-failed`, names PRQ-E-16) and creates nothing |
+| PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault; without `sprk_bffappid` H13's promoted-columns PATCH is rejected (registry stale) |
 
-### Once-per-customer (10)
+### Once-per-customer (10 active + 6 retired, besides the subscription entries above)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
-| PRQ-C-01 | OpenAI regional TPM headroom (frontier models) | Spaarke admin | `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs |
+| PRQ-C-01 | OpenAI regional TPM headroom for the pinned deployments (gpt-4o 150, gpt4.1-mini 200, text-embedding-3-large 350 — DataZoneStandard) | Spaarke admin | `InsufficientQuota - <model> - DataZoneStandard` on a subscription without the grant |
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
-| PRQ-C-04 | Dataverse env-creation rate quota | Spaarke admin | H5 fails with rate-limit; waits for quota window |
-| PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
-| PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
-| PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
-| PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
-| PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
-| PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
+| ~~PRQ-C-04~~ | **Retired 2026-10-06 (T228).** Dataverse environment-creation rate — L2 no longer creates environments (PRQ-C-09). | — | — |
+| ~~PRQ-C-05~~ | **Retired 2026-10-06 (T227a).** Model 2 only (out of scope, D-12), and the customer's BFF app registration does not exist before the run (H3 creates it), so no pre-run check could hold its id. | — | — |
+| ~~PRQ-C-06~~ | **Retired 2026-10-14 (T186).** Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) — H6 applies it itself before every import (Dataverse Web API `organization` PATCH, T253; `H6SolutionImportHandler` step 7.6), so a pre-run check would fail on every new environment for a value the run sets anyway. | — | — |
+| ~~PRQ-C-07~~ | **Retired 2026-10-08 (T253).** Required applications (Power BI Extensions) — the CI-built SpaarkeMaster depends on no application a fresh environment lacks (`SpaarkeMasterApplicationDependencyTests`); H6 installs none. | — | — |
+| PRQ-C-09 | The customer's Dataverse environment, created by the operator: domain `spaarke-{customerId}` (or `-{environmentName}`), URL = intake `dataverseEnvUrl`; the L2 Worker identity is its System Administrator application user (T228) | Spaarke admin (Power Platform admin) | POST /api/runs 400 `dataverse-env-url-invalid`; H5 `worker-not-app-user` / `env-health-check-failed` |
+| PRQ-C-10 | The environment's security group `sprk-{customerId}-users` (Entra security group, assigned membership) exists and is set on the Dataverse environment; its object id is the intake value `environmentSecurityGroupId` (T232) | Spaarke admin (Entra + Power Platform admin) | POST /api/runs 400 `userprov-missing-security-group-id`; H11 `userprov-security-group-rejected`; **not set on the environment → every user of Spaarke's tenant (other customers' guests included) is admitted** |
+| PRQ-C-11 | The environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Spaarke pays guest access; no per-user licences — owner 2026-10-07, T232) | Spaarke admin (Power Platform admin) | Guests are refused at sign-in; L2 cannot detect it (billing is not visible to Dataverse) |
+| PRQ-C-12 | Guest access allowed in the environment (`organization.restrictGuestUserAccess = false`; new environments default to restricted) (T232) | Spaarke admin (System Administrator of the environment) | H11 `userprov-guest-access-restricted` before any invitation |
+| PRQ-C-13 | The customer's workforce tenant id(s) — the tenant(s) its staff sign in from (Model 1: their HOME tenant, never Spaarke's) — intake `customerWorkforceTenantIds`, every run (T255, INCOMING-141) | Spaarke admin, with the customer's IT | POST /api/runs 400 `workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`; a wrong but valid tenant → the stamp denies every customer employee's first sign-in (`workforce_tenant_not_customer`) |
+| PRQ-C-14 | **Customer attestation.** The CUSTOMER tenant's cross-tenant access settings (outbound B2B collaboration — default settings, or an organizational setting for Spaarke's tenant id) allow its users to become B2B guests in Spaarke's tenant. Model 1 / every B2BGuest run; the customer's Entra admin does it ([Microsoft Learn: cross-tenant access settings, B2B collaboration](https://learn.microsoft.com/entra/external-id/cross-tenant-access-settings-b2b-collaboration)). Recorded as intake `customerOutboundB2BAttested: true`; the check fails on false/absent and SKIPs (exit 0) for a non-B2BGuest run | The customer's Entra admin (the Spaarke operator records the attestation) | Licence-free staff who self-register via the join link (sign in at the home tenant → auto-approved when that tenant is in `customerWorkforceTenantIds` → invited as guests into Spaarke's tenant) and licensed staff invited by H11 both fail; Spaarke cannot read another tenant's policy, so nothing detects it before the run |
+| PRQ-C-08 | Exchange mail-enabled security group **`Spaarke-AppAccess-{customerId}`** scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251). H14m adds the customer's shared mailbox to it (T263). The check reads the group through Microsoft Graph (operator token, non-interactive; email address via `$filter=mail eq`, or object id): exactly one group, `mailEnabled` and `securityEnabled` true, no `Unified` in `groupTypes` (a Microsoft 365 group is refused) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4); another name → H14m Drift `h14m-mailbox-drift` (quarantine, nothing changed) |
+| ~~PRQ-E-05~~ | **Retired 2026-10-14 (T186).** L2 UAMI Website Contributor on the customer stamp's BFF App Service — an H2a postcondition (`customer.bicep` → `modules/customer-l2-bff-rbac.bicep`, from `controlPlaneUamiPrincipalId`), so it cannot hold before the run; H4b (Kudu log fetch) and H9 fail visibly without it — re-run H2a | — | — |
+| ~~PRQ-E-13~~ | **Retired 2026-10-14 (T186).** `sprk_dataverseenvironment` placeholder record — the skill's Step 1f creates it AFTER the customer prerequisite pass and verifies it by an alternate-key round trip, so as a prerequisite it always failed | — | — |
 
 ---
 

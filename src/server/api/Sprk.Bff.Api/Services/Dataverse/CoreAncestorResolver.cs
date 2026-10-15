@@ -202,7 +202,10 @@ public sealed class CoreAncestorResolver
     /// <c>sprk_analysis</c> (2026-10-02).
     /// </summary>
     /// <remarks>
-    /// Only these four tables carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
+    /// Ontology task 144 adds <c>sprk_signal</c> and <c>sprk_decisionrecord</c>, stamped OUTSIDE the access taxonomy
+    /// (<see cref="StampedOutsideAccessTaxonomy"/>), so the restamper and the reconciliation job keep their stamp equal to
+    /// their subject's current root.
+    /// Of the tables in the access taxonomy, only these carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
     /// assignment, a project and a contact carry none, so they are never re-stamped (a work assignment's
     /// <c>sprk_regardingmatter</c> is its own, user-chosen filing — task 155 interpretation iii). A service request is
     /// CORE: a to-do's <c>sprk_regardingservicerequest</c> is a root column, not a source. <c>sprk_analysis</c>'s
@@ -248,7 +251,25 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingagreement", "sprk_agreement"),
                 ("sprk_regardingbudget", "sprk_budget"), ("sprk_reportcard", "sprk_reportcard"),
             ],
+            // Ontology task 144 (D-131, child-record contract C2): a Signal and a Decision Record are stamped children OUTSIDE
+            // the access taxonomy (StampedOutsideAccessTaxonomy). Their stamp lives in the four sprk_regarding{core} columns (the
+            // To Do convention) and follows their SUBJECT: these are the subject lookups that name an intermediate (live
+            // spaarkedev1 2026-10-12, ontology task 140; solution source sprk_Signal / sprk_DecisionRecord). A subject that is
+            // itself a core (sprk_regarding{matter,project,workassignment,servicerequest}) is the row's own root, never a
+            // source, so ClassifyStampSource reads such a row as filed under no intermediate and nothing re-stamps it. The
+            // typed sprk_matter / sprk_project / sprk_workassignment and the decision context (sprk_corerecordid,
+            // sprk_corerecordtype, the policy version, the snapshot) are not stamp columns and are never written here (D-34).
+            ["sprk_signal"] = OntologySubjectSources(),
+            ["sprk_decisionrecord"] = OntologySubjectSources(),
         };
+
+    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.</summary>
+    private static IReadOnlyList<(string Column, string Intermediate)> OntologySubjectSources() =>
+    [
+        ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
+        ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
+        ("sprk_regardingtodo", "sprk_todo"),
+    ];
 
     /// <summary>
     /// The typed PARTY regarding lookups of each table that carries the polymorphic pair (task 155 f5, from the f3 / f4
@@ -281,7 +302,55 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
                 ("sprk_regardingtimekeeper", "sprk_timekeeper"),
             ],
+            // spaarke-SPA-external-access-platform-r3 task 031 (owner decision 2026-10-11: a service request regarding a
+            // secure record stores its documents in that record's container), so the storage resolver now reads the
+            // service request's own row, pair included. Its party regarding lookups, from the solution source
+            // (Entities/sprk_ServiceRequest/Entity.xml; Other/Relationships/{Account,Contact,sprk_Organization}.xml).
+            // sprk_requestedby (→ contact) is the requester, not a regarding: no builder pairs it with the pair id.
+            ["sprk_servicerequest"] =
+            [
+                ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+                ("sprk_regardingaccount", "account"),
+            ],
         };
+
+    /// <summary>
+    /// The stamped tables that are OUTSIDE the access taxonomy (ontology task 144; the exemption unified-access-control-r2
+    /// chose, option A): they carry the stamp (<see cref="StampSourceColumns"/>), but they are not in
+    /// <see cref="ChildRecordEntities"/> (nor the TypeScript <c>CHILD_RECORD_ENTITIES</c>), never an intermediate
+    /// (<see cref="IntermediateRootColumns"/>), and never read by the storage resolver. <b>The one source</b> every guard over
+    /// the stamp topology reads (<c>CoreAncestorResolverTests.StampSourceTopology_IsClosed</c>,
+    /// <c>CoreAncestorStampTopologyLockstepTests</c>, the <c>StampFreshness</c> theory); pinned both ways, and
+    /// <c>StampedOutsideAccessTaxonomyGuardTests</c> fails the build if anything links TO one of them. Why:
+    /// <see cref="StampedOutsideAccessTaxonomyReason"/>.
+    /// </summary>
+    public static readonly IReadOnlyList<string> StampedOutsideAccessTaxonomy =
+    [
+        "sprk_signal",
+        "sprk_decisionrecord",
+    ];
+
+    /// <summary>Why <see cref="StampedOutsideAccessTaxonomy"/> exists — the claim its guards hold the code to.</summary>
+    public const string StampedOutsideAccessTaxonomyReason =
+        "Ontology Signals and Decision Records (D-131, child-record contract C2) carry the sprk_regarding{core} stamp so it "
+        + "follows their subject's family when the subject is re-filed. The stamp is never an access input for them: access "
+        + "is D-130 ownership through RecordOwnershipResolver, which reads the stamp only as one more parent (a secure parent "
+        + "wins), and no reader grants on it (SignalCoreRecordAccess reads the row and its immutable core as the caller). "
+        + "They are not in the CHILD access taxonomy and are not intermediates; nothing in the stamp or storage topology is "
+        + "filed under them, so the storage resolver never reads one, and the only lineage edge into one is Signal to "
+        + "Decision Record, which only narrows (a secure Decision Record makes its Signal secure). "
+        + "The re-own a re-stamp leads to fails closed: the restamper writes stamp columns only, "
+        + "never the owner; the owner moves only through SecureChildReconciler. A refused re-own into a secure parent keeps "
+        + "the previous owner until the reconciler succeeds, and a persistent refusal fails every 2-minute run (the root stays "
+        + "in incompleteRoots with Success=false, and AfterRefileAsync logs an Error after its second attempt). A refused "
+        + "release out of isolation leaves the row isolated: a refusal never puts a row on a wider owner.";
+
+    private static readonly HashSet<string> StampedOutsideAccessTaxonomySet =
+        new(StampedOutsideAccessTaxonomy, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when <paramref name="entityLogicalName"/> is in <see cref="StampedOutsideAccessTaxonomy"/>.</summary>
+    public static bool IsStampedOutsideAccessTaxonomy(string entityLogicalName) =>
+        !string.IsNullOrWhiteSpace(entityLogicalName) && StampedOutsideAccessTaxonomySet.Contains(entityLogicalName);
 
     /// <summary>The party regarding column names of <paramref name="entity"/> (empty when it has none).</summary>
     public static IReadOnlyList<string> PartyRegardingColumnNames(string entity) =>
@@ -478,7 +547,16 @@ public sealed class CoreAncestorResolver
     public async Task<CoreAncestorResult> ResolveStampsAsync(
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        // Ontology task 042 (uac-r2 re-check F1): the result records the target it was derived for, so a caller that hands it back to
+        // StampAsync can only have it reused for the SAME target. Set here, in the one public derivation, and nowhere else.
+        (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false))
+            with { For = (targetEntityLogicalName, targetRecordId) };
+
+    private async Task<CoreAncestorResult> DeriveStampsAsync(
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetEntityLogicalName))
         {
@@ -556,13 +634,14 @@ public sealed class CoreAncestorResolver
             _logger.LogError(ex,
                 "Core-ancestor read failed for {Entity}({Id}); failing closed per NFR-01.",
                 targetEntityLogicalName, targetRecordId);
-            return CoreAncestorResult.Failed(
-                $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}");
+            var failure = $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}";
+            // Ontology task 142: a target that does not exist is a data condition, not a fault (still Error, still no write).
+            return IsRecordNotFound(ex) ? CoreAncestorResult.Refused(failure) : CoreAncestorResult.Failed(failure);
         }
 
         if (row is null)
         {
-            return CoreAncestorResult.Failed(
+            return CoreAncestorResult.Refused(
                 $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).");
         }
 
@@ -586,7 +665,7 @@ public sealed class CoreAncestorResolver
                     _logger.LogError(
                         "{Entity}({Id}) names two different {Root} records ({First}, {Second}); refusing to derive a stamp.",
                         targetEntityLogicalName, targetRecordId, rootEntity, already.RecordId, reference.Id);
-                    return CoreAncestorResult.Failed(
+                    return CoreAncestorResult.Refused(
                         $"{targetEntityLogicalName}({targetRecordId}) names two different {rootEntity} records, so its "
                         + "root cannot be determined.");
                 }
@@ -606,6 +685,18 @@ public sealed class CoreAncestorResolver
         }
 
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
+    }
+
+    /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -727,12 +818,13 @@ public sealed class CoreAncestorResolver
         Entity child,
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        CoreAncestorResult? alreadyDerived = null)
     {
         ArgumentNullException.ThrowIfNull(child);
 
         var (result, hostColumns, failure) =
-            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct)
+            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct, alreadyDerived)
                 .ConfigureAwait(false);
         if (failure is not null)
         {
@@ -740,7 +832,22 @@ public sealed class CoreAncestorResolver
         }
 
         var unstampable = ApplyStamps(child, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
-        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+
+        // Task 173 (owner round 81): the inherited Access Permission rides the same payload, from every filing parent the
+        // payload now names (the target, its stamps, and any carrier the writer set) — never Standard by default.
+        var inherited = await InheritedAccessPermissionAsync(
+            child.LogicalName,
+            ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
+            targetEntityLogicalName, targetRecordId, ct, self: child.Id).ConfigureAwait(false);
+        if (inherited is { } level)
+        {
+            child[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        }
+
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
     }
 
     /// <summary>
@@ -766,7 +873,21 @@ public sealed class CoreAncestorResolver
 
         var unstampable = ApplyStamps(
             fields, hostEntityLogicalName, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
-        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+
+        // Task 173 (owner round 81): see the Entity overload.
+        var inherited = await InheritedAccessPermissionAsync(
+            hostEntityLogicalName,
+            ParentLineage.ParentsIn(hostEntityLogicalName, c => fields.TryGetValue(c, out var v) ? v as EntityReference : null),
+            targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        if (inherited is { } level)
+        {
+            fields[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        }
+
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
     }
 
     /// <summary>
@@ -812,7 +933,204 @@ public sealed class CoreAncestorResolver
             }
         }
 
-        return new CoreAncestorStampOutcome(result.Status, stampable, unstampable, null);
+        // Task 173 (owner round 81): the caller emits it in its own payload shape, as it emits the stamps.
+        var inherited = await InheritedAccessPermissionAsync(
+            hostEntityLogicalName,
+            stampable.Select(s => (s.EntityType, s.RecordId)).ToList(),
+            targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+
+        return new CoreAncestorStampOutcome(result.Status, stampable, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): the Access Permission a row of <paramref name="hostEntityLogicalName"/> filed under
+    /// <paramref name="parents"/> takes from them (<see cref="InheritedAccessPermission"/>), or <see langword="null"/> when
+    /// it takes none — the host is not one of the four tables or lacks the column, the row names no parent (its own value
+    /// stands), or the parents could not be read (logged as a warning; nothing is written, and the reconcile job corrects
+    /// it within its cycle). Never throws (cancellation aside): the value is display-only, so it never fails a write.
+    /// </summary>
+    /// <remarks>
+    /// For a writer that UPDATES an existing row with a field dictionary it did not hand to
+    /// <see cref="StampAsync(IDictionary{string, object}, string, string, Guid, CancellationToken)"/> (the inbound association
+    /// engine, which adds regarding lookups and never clears one). The row's parents are what it holds AFTER the update: each
+    /// filing lookup from <paramref name="fields"/> when the update writes it, otherwise as stored on
+    /// <paramref name="existingRowId"/> — so an added parent never hides one the row already has.
+    /// </remarks>
+    public async Task<int?> ResolveInheritedAccessPermissionAsync(
+        string hostEntityLogicalName, IReadOnlyDictionary<string, object> fields, Guid existingRowId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        Entity? stored = null;
+        if (existingRowId != Guid.Empty)
+        {
+            try
+            {
+                // No read when the value could not be written anyway (the environment lacks the column).
+                if (!(await _columnProbe(hostEntityLogicalName, ct).ConfigureAwait(false)).Contains(InheritedAccessPermission.Column))
+                    return null;
+
+                var walk = new ParentLineageWalk(_entityService, _columnProbe, []);
+                var columns = await walk.FilingLookupsOfAsync(hostEntityLogicalName, ct).ConfigureAwait(false);
+                stored = columns.Count == 0
+                    ? new Entity(hostEntityLogicalName, existingRowId)
+                    : await _entityService.RetrieveAsync(hostEntityLogicalName, existingRowId, columns.ToArray(), ct)
+                        .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[INHERITED-ACCESS-PERMISSION] {Host} {Id}'s stored filing could not be read; its inherited Access " +
+                    "Permission is not written here, and the secure-child reconciliation job corrects it within its cycle.",
+                    hostEntityLogicalName, existingRowId);
+                return null;
+            }
+        }
+
+        var parents = ParentLineage.ParentsIn(hostEntityLogicalName, column =>
+            fields.TryGetValue(column, out var value) ? value as EntityReference : stored?.GetAttributeValue<EntityReference>(column));
+        return await InheritedAccessPermissionAsync(hostEntityLogicalName, parents, null, Guid.Empty, ct, self: existingRowId)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): set the inherited Access Permission on a payload from EVERY filing parent it names now —
+    /// for a writer that adds a parent after its <c>StampAsync</c> call (the Office To Do's carrier, set after the record
+    /// regarding was stamped). Leaves the payload as it is when the row is parentless or the parents cannot be decided.
+    /// Never throws (cancellation aside).
+    /// </summary>
+    public async Task<int?> ApplyInheritedAccessPermissionAsync(Entity child, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        var inherited = await InheritedAccessPermissionAsync(
+            child.LogicalName,
+            ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
+            null, Guid.Empty, ct, self: child.Id).ConfigureAwait(false);
+        if (inherited is { } level)
+            child[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        return inherited;
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): after a BFF write that created a row or changed what it is filed under, through a writer
+    /// whose payload did not pass through <c>StampAsync</c> (the client's generic create and re-file,
+    /// <c>/api/v1/child-records/{table}</c>), set the row's <c>sprk_accesspermission</c> to the value its parents give it,
+    /// when it differs. Reads the row as stored, so every filing parent counts. A parentless row is never written (its own
+    /// value stands). Never throws (cancellation aside): a failure is logged and the reconcile job corrects it within its
+    /// cycle.
+    /// </summary>
+    /// <returns>The value the row now holds from its parents, or <see langword="null"/> when it takes none or it could not
+    /// be decided.</returns>
+    public async Task<int?> RefreshInheritedAccessPermissionAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct = default)
+    {
+        var table = entityLogicalName?.Trim().ToLowerInvariant();
+        if (!InheritedAccessPermission.AppliesTo(table) || recordId == Guid.Empty)
+            return null;
+
+        try
+        {
+            var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
+            var columns = await walk.ColumnsForAsync(table!, ct).ConfigureAwait(false);
+            if (!columns.Contains(InheritedAccessPermission.Column))
+                return null; // the environment lacks the column (the schema script adds it)
+
+            var row = await _entityService.RetrieveAsync(table!, recordId, columns.ToArray(), ct).ConfigureAwait(false);
+            var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
+            if (parents.Count == 0)
+                return null;
+
+            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table!, recordId)).ConfigureAwait(false);
+            if (answer.Status != ParentTopsStatus.Found || answer.Value is not { } level)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
+                    "left as it is, and the secure-child reconciliation job looks at it again.", table, recordId, answer.Reason);
+                return null;
+            }
+
+            if (row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value != level)
+            {
+                await _entityService.UpdateAsync(table!, recordId,
+                    new Dictionary<string, object> { [InheritedAccessPermission.Column] = new OptionSetValue(level) }, ct)
+                    .ConfigureAwait(false);
+            }
+
+            return level;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission could not be set; the secure-child " +
+                "reconciliation job corrects it within its cycle.", table, recordId);
+            return null;
+        }
+    }
+
+    private async Task<int?> InheritedAccessPermissionAsync(
+        string hostEntityLogicalName,
+        IReadOnlyList<(string Table, Guid Id)> payloadParents,
+        string? targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct,
+        Guid self = default)
+    {
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        // The writer's target is a parent when the host can be filed under its table (a contact, an organization or a
+        // service request is not: the lineage says so).
+        var parents = payloadParents.ToList();
+        if (targetEntityLogicalName is not null && targetRecordId != Guid.Empty
+            && ParentLineage.CanBeFiledUnder(hostEntityLogicalName, targetEntityLogicalName))
+        {
+            parents.Add((targetEntityLogicalName, targetRecordId));
+        }
+
+        if (parents.Count == 0)
+            return null; // parentless: the row's own value is the user's (round 81)
+
+        try
+        {
+            var hostColumns = await _columnProbe(hostEntityLogicalName, ct).ConfigureAwait(false);
+            if (!hostColumns.Contains(InheritedAccessPermission.Column))
+            {
+                // Writing a column the environment lacks would fail the create; the schema script adds it.
+                _logger.LogWarning(
+                    "{Host} has no {Column} column in this environment; its inherited Access Permission is not written.",
+                    hostEntityLogicalName, InheritedAccessPermission.Column);
+                return null;
+            }
+
+            var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
+            var answer = await InheritedAccessPermission.ResolveAsync(
+                walk, parents, ct, self == Guid.Empty ? null : (hostEntityLogicalName, self)).ConfigureAwait(false);
+            if (answer.Status == ParentTopsStatus.Found)
+                return answer.Value;
+
+            if (answer.Status == ParentTopsStatus.Undetermined)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] A {Host} filed under {Parents} is written without its inherited Access " +
+                    "Permission: {Reason}. The secure-child reconciliation job corrects it within its cycle.",
+                    hostEntityLogicalName, string.Join(", ", parents.Select(p => $"{p.Table} {p.Id:D}")), answer.Reason);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[INHERITED-ACCESS-PERMISSION] A {Host}'s inherited Access Permission could not be resolved; it is written " +
+                "without it, and the secure-child reconciliation job corrects it within its cycle.", hostEntityLogicalName);
+            return null;
+        }
     }
 
     private async Task<(CoreAncestorResult? Result, IReadOnlySet<string>? HostColumns, CoreAncestorStampOutcome? Failure)>
@@ -820,12 +1138,24 @@ public sealed class CoreAncestorResolver
             string hostEntityLogicalName,
             string targetEntityLogicalName,
             Guid targetRecordId,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAncestorResult? alreadyDerived = null)
     {
-        var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        // Ontology task 042 (K2): a caller that has ALREADY derived this target's stamps (a writer that needed the core before it could
+        // build its payload) hands the successful result in, so the derivation is not paid for twice. A failed or absent result derives here.
+        // Reused only when it SUCCEEDED and was derived for THIS target (case-insensitive entity, same id): a result built with the public
+        // constructor, or derived for another record, can carry no target and is never reused (uac-r2 re-check F1). Everything else derives here.
+        var result = alreadyDerived is { Succeeded: true, For: { } derivedFor }
+            && string.Equals(derivedFor.Entity, targetEntityLogicalName, StringComparison.OrdinalIgnoreCase)
+            && derivedFor.Id == targetRecordId
+            ? alreadyDerived
+            : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed."));
+            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
+            {
+                IsPermanent = result.IsPermanent,
+            });
         }
 
         if (result.Stamps.Count == 0)
@@ -927,8 +1257,25 @@ public sealed record CoreAncestorResult(
     /// <summary>True when the caller may proceed with the write.</summary>
     public bool Succeeded => Status != CoreAncestorStatus.Error;
 
+    /// <summary>
+    /// Ontology task 142: on an <see cref="CoreAncestorStatus.Error"/>, true when the failure is a DATA condition a retry does not
+    /// change (the target names two different records of one root table, or the target row does not exist), false for a fault (a
+    /// timeout, a throttle, a metadata read). Either way the caller does not write; a caller that reports the failure may say
+    /// "cannot" rather than "try again". Additive: <see cref="Status"/> stays <see cref="CoreAncestorStatus.Error"/>, so every
+    /// caller that checks <see cref="Succeeded"/> is unchanged.
+    /// </summary>
+    public bool IsPermanent { get; init; }
+
+    /// <summary>The target this result was derived for, set only by <see cref="CoreAncestorResolver.ResolveStampsAsync"/>. A result with
+    /// no target (built with the public constructor) is never reused by <c>StampAsync(..., alreadyDerived)</c> (ontology task 042).</summary>
+    internal (string Entity, Guid Id)? For { get; init; }
+
     internal static CoreAncestorResult Failed(string error) =>
         new(CoreAncestorStatus.Error, [], error);
+
+    internal static CoreAncestorResult Refused(string error) =>
+        Failed(error) with { IsPermanent = true };
+
 }
 
 /// <summary>
@@ -950,6 +1297,17 @@ public sealed record CoreAncestorStampOutcome(
 {
     /// <summary>True when the caller may proceed with the write.</summary>
     public bool Succeeded => Status != CoreAncestorStatus.Error;
+
+    /// <summary>
+    /// Task 173 (owner round 81): the <c>sprk_accesspermission</c> the host row takes from the records it is filed under —
+    /// already applied by <c>StampAsync</c>; a <c>DeriveForHostAsync</c> caller emits it in its own payload. <see langword="null"/>
+    /// when the row takes none (not a To Do / Event / Communication / Document, parentless, or undetermined): write
+    /// nothing then.
+    /// </summary>
+    public int? InheritedAccessPermission { get; init; }
+
+    /// <summary>On a failure, true when it is a data condition, not a fault (<see cref="CoreAncestorResult.IsPermanent"/>).</summary>
+    public bool IsPermanent { get; init; }
 
     internal static CoreAncestorStampOutcome Failed(string error) =>
         new(CoreAncestorStatus.Error, [], [], error);

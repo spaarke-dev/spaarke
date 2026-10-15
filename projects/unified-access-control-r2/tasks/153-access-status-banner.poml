@@ -4,7 +4,7 @@
     <title>Access-status indicator — a red form banner when a project, matter or work assignment is SECURE and/or under a No Access restriction, a No Access banner on Organization and Contact forms that entries name, and a clickable indicator in TrackingFieldTrio that opens Manage Access; fed by one read-tier BFF summary that renders "unavailable", never "not restricted", when it cannot answer</title>
     <phase>Register-driven (authored 2026-10-01, session 27; owner round 3b UX requirements; disposition row 3 of notes/session27-ux-research-ethical-wall-secure.md)</phase>
     <gate>blocked — requires 064 (with its UX amendment: the record-scoped No Access read AND its Read-gated SUMMARY route, which covers organization and contact records), 067 (with its UX amendment: open Manage Access directly at the No Access section), 150 (sprk_issecure field-level security, readers unmasked) and 154 (the Organization/Contact NO ACCESS sections the org/contact banner points at) merged. Rebase after 138 (edits TrackingFieldTrio.tsx :335-367 and the PCF index.ts :945-963). Escalation trigger (O1) needs the owner's answer before step 4 and step 6 (O1 is under owner investigation, research note :75-77). (O2) was ACCEPTED as recommended on 2026-10-01 (research note :74); step 0 confirms the recorded answer still stands.</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends a BFF route on the authorization read path (disclosure to readers), .ts/.tsx changes to a shared component and a PCF, a new form web resource; tags bff-api, auth, security, pcf, frontend.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies TrackingFieldTrio.tsx/types.ts and src/client/pcf/TrackingFieldTrio/index.ts (shared with 138, 139, 142) and consumes AccessGrantModal's section prop added by 067 (AccessGrantModal.tsx shared with 138, 139, 140, 142). Extends 064's summary route and DTO (064 owns them; 143 also edits NoAccessListReader.cs, which this task does not touch). Registers a library on the project/matter/work-assignment main forms (142 registers sprk_assignedaccess_postsave.js and 150 adds ribbon commands there) and on the Organization/Contact main forms (154 edits them first). Run after 138, 067, 150 and 154.</parallel-reason>
-    <deps>064, 067, 150, 154</deps>
+    <deps>064, 150, 154</deps>
     <tags>bff-api, auth, security, pcf, frontend, fluent-ui, webresource, dataverse, testing</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <origin>Owner round 3b (notes/session27-owner-decisions-and-research.md:78-86): "a red notification banner on any record subject to a No Access restriction, linking to a No Access list modal" and "a red notification banner showing a record is secure, linking to Share/Manage Access if possible". Disposition row 3 and open question O1 (notes/session27-ux-research-ethical-wall-secure.md:69, :74).</origin>
@@ -80,7 +80,6 @@ WHAT EXISTS TODAY (verified 2026-10-01 against this branch).
     </relevant-files>
     <dependencies>
       <dependency task="064" status="pending">Its UX amendment (disposition row 1, research note :67) supplies the record-scoped No Access read for root, organization and contact records, the Read-gated SUMMARY route and its fail-closed rules. This task extends that route and composer; it never builds a second deny reader, a second composer or a second summary route.</dependency>
-      <dependency task="067" status="pending">Its UX amendment (disposition row 2, :68) adds an optional initial section to `onOpenGrantModal`, the PCF host and `IAccessGrantModalProps`, and opens the modal at the No Access section. The TrackingFieldTrio indicator calls that plumbing; without it the click lands on the wrong section.</dependency>
       <dependency task="150" status="pending">Field-level security on sprk_issecure with Read for every user and the BFF app identity. The banner's Secure signal reads the flag app-only and must distinguish "false" from "absent".</dependency>
       <dependency task="154" status="pending">Builds the Organization and Contact NO ACCESS sections the org/contact banner text points at, and applies O2 (who can read entries; accepted as recommended 2026-10-01).</dependency>
       <dependency task="138" status="pending (rebase)">Edits TrackingFieldTrio.tsx :335-367, the PCF index.ts :945-963/:1204 and RootRecordFlags (ExternalCallerContext.cs:139-153). Rebase onto it; do not reintroduce what it changes.</dependency>
@@ -352,5 +351,11 @@ The banner deliberately never shows who is walled, why, or how many: the list st
   </amendments>
   <amendments>
     <amendment n="Q12" date="2026-10-01" source="owner — BINDING">Escalation (g) ANSWERED: one-time cleanup of NULL sprk_issecure to No (live 2026-10-01: 9 projects, 18 matters, 11 work assignments), and the column default set to No in the solution. Run it as an operator script that records the before/after counts and ids, under an identity that 150's field-level security permits, BEFORE the banner publishes; coordinate with 150 if the lock lands first. Escalation (f) ANSWERED: option (A). The summary route alone passes a Read-only sprk_organization → sprk_organizations resolution to its filter, with a comment citing both invariants, recorded as a project-scoped section 6.5 path-A exception in design.md and the PR. Never widen the shared EntityAccessFilter map.</amendment>
+  </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 153)">
+    <verdict>KEEP, REDUCED (owner round 59 item 3). Covers project, matter and work assignment only.</verdict>
+    <amendment n="1" title="Scope">064's narrowed route (one route for the 3 root types) plus a thin sprk_accessstatus_banner.js registered on the 3 root forms: a red, text-only setFormNotification when the record is Secure and/or under No Access, with the 'Access status unavailable' fallback.</amendment>
+    <amendment n="2" title="Cut">The Organization/Contact banners and their shared-map path-A exception (walls there are visible in 154's subgrids); all PCF work (138 already shipped the red Secure pill and the modal bar; O1-final removed the PCF indicator); the dark-mode and carry-over checks.</amendment>
+    <amendment n="3" title="Dependencies">No longer depends on 067: the indicator-to-section plumbing it needed is cut. Depends on 064, 150 (the sprk_issecure field lock is live first) and 154 (O2). Escalation trigger (c) applies to the 3 root types only. Deploy: BFF deploy; script registration on 3 forms in live session C.</amendment>
   </amendments>
 </task>

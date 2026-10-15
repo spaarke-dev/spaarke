@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Eval.AssistantR4;
 /// <para>
 /// <b>Merge-gate wiring</b> (identical to <c>AssistantEnhancementsR1EvalTests</c>): the
 /// <c>Category=GoldenUtteranceEval</c> trait joins the dedicated <c>eval-gate</c> job in
-/// <c>.github/workflows/sdap-ci.yml</c> with zero CI-YAML change — the trait IS the registration. E2
+/// <c>.github/workflows/ci-tier1-blocking.yml</c> with zero CI-YAML change — the trait IS the registration. E2
 /// (task 024) + E3 (task 033) extend THIS family with their FR-04/06/09 cases; they add case data + the
 /// families/vocabularies they need, never a parallel harness (§11 reuse-first).
 /// </para>

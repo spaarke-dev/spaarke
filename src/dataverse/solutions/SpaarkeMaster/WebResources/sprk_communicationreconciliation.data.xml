@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{1e191e05-cc96-f111-b8dc-7ced8ddc4a05}</WebResourceId>
+  <Name>sprk_communicationreconciliation</Name>
+  <DisplayName>Communication Reconciliation</DisplayName>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_communicationreconciliation1E191E05-CC96-F111-B8DC-7CED8DDC4A05</FileName>
+</WebResource>

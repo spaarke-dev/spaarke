@@ -119,11 +119,11 @@ public sealed record SystemUserNoAccessSubjects(NoAccessSubjects Subjects, strin
 /// the static <c>ResolveSubjectsAsync</c>:
 /// the <c>sprk_primarycontact</c> link plus every contact bound to U's oid, each read status-first, and those contacts'
 /// wall organizations. This guard calls it; the systemuser-plane read-time veto
-/// (<see cref="AccessibleRecordSetService"/>) calls it for every SECURE candidate — adding the principal's derived contact,
-/// so the contact whose grants were composed is always among the subjects — and removes every secure candidate when it
-/// reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
-/// contact C represent") over the same two links. On a non-secure record the veto checks only the derived contact and its
-/// organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
+/// (<see cref="AccessibleRecordSetService"/>) calls it whenever a candidate is SECURE or sits below a secure parent (GitHub
+/// #1410, owner round 82) — adding the principal's derived contact, so the contact whose grants were composed is always among
+/// the subjects — and removes every such candidate when it reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
+/// contact C represent") over the same two links. On a non-secure record's OWN list the veto checks only the derived contact
+/// and its organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
 /// normalizer could not derive contributed no grant to remove. Task 149's <c>SecureChildShareSynchronizer</c> asks
 /// <see cref="CheckAsync"/> about each of a child's secure ROOTS before any child grant or widening, and drops a user it
 /// refuses (walled or unverifiable).</para>
@@ -201,14 +201,19 @@ public sealed class SecureShareNoAccessGuard
         // Round 61 item 1: the supplied filing names the DIRECT secure parents (as a write will leave it); every secure
         // record above each of them is asked as well, through the same bounded, cycle-safe climb.
         var ancestors = new List<Sprk.Bff.Api.Services.Access.SecureFilingParent>(parents.SecureParents);
-        var unverifiable = parents.Unverifiable;
+        // #1616: an unrepeated pair is kept apart from a real gap (SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair).
+        var unknown = parents.UnknownOnlyThroughAnUnrepeatedPair ? null : parents.Unverifiable;
+        var unrepeated = parents.UnknownOnlyThroughAnUnrepeatedPair ? parents.Unverifiable : null;
         foreach (var parent in parents.SecureParents)
         {
             var above = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
                 .ReadSecureParentsAsync(_dataverse, _logger, parent.Table, parent.Id, ct,
                     maxDepth: Sprk.Bff.Api.Services.Access.SecureRootInheritance.MaxFilingDepth)
                 .ConfigureAwait(false);
-            unverifiable ??= above.Unverifiable;
+            if (above.UnknownOnlyThroughAnUnrepeatedPair)
+                unrepeated ??= above.Unverifiable;
+            else
+                unknown ??= above.Unverifiable;
             foreach (var ancestor in above.SecureParents)
             {
                 if (!ancestors.Any(a => string.Equals(a.Table, ancestor.Table, StringComparison.OrdinalIgnoreCase) && a.Id == ancestor.Id))
@@ -217,7 +222,10 @@ public sealed class SecureShareNoAccessGuard
         }
 
         return await CheckOwnAndAncestorsAsync(entityLogicalName, recordId, systemUserId, scope,
-            new Sprk.Bff.Api.Services.Access.SecureParentsAnswer(ancestors, unverifiable), ct, prospectiveOrganizations)
+            new Sprk.Bff.Api.Services.Access.SecureParentsAnswer(ancestors, unknown ?? unrepeated)
+            {
+                UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
+            }, ct, prospectiveOrganizations)
             .ConfigureAwait(false);
     }
 
@@ -230,7 +238,14 @@ public sealed class SecureShareNoAccessGuard
     {
         var own = scope switch
         {
-            SecureWallRecordScope.AsFlagged => await CheckAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false),
+            // Task 174 (owner rounds 82/84: Q4's "secure" is the record or any filing ancestor): a record with a secure
+            // ancestor is asked as the secure record it is, whatever its own flag reads; otherwise its own flag decides — the
+            // walk in hand already says no ancestor is secure (or could not be read, which refuses below), so it is not read
+            // again.
+            SecureWallRecordScope.AsFlagged => parents.HasSecureParent
+                ? await CheckForSecuringAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false)
+                : await CheckCoreAsync(entityLogicalName, recordId, systemUserId, WallScope.AsFlaggedOwnOnly, null, ct)
+                    .ConfigureAwait(false),
             SecureWallRecordScope.BeingSecured =>
                 await CheckForSecuringAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false),
             SecureWallRecordScope.Prospective => await CheckProspectiveAsync(entityLogicalName, recordId,
@@ -240,7 +255,9 @@ public sealed class SecureShareNoAccessGuard
         };
 
         var decisions = new List<SecureShareWallDecision> { own };
-        if (!parents.IsKnown)
+        // #1616: an unrepeated pair beside a readably secure typed parent names nothing the record is filed under — its
+        // walls are the typed parents' (SecureParentsAnswer.WallsDecidable); any other gap refuses.
+        if (!parents.WallsDecidable)
             decisions.Add(SecureShareWallDecision.Unreadable(parents.Unverifiable!) with { FilingUnreadable = true });
 
         foreach (var parent in parents.SecureParents)
@@ -298,8 +315,13 @@ public sealed class SecureShareNoAccessGuard
     /// <summary>Whether the record's own flag decides the scope (a share) or the record is being secured (task 158 r1).</summary>
     private enum WallScope
     {
-        /// <summary><see cref="CheckAsync"/>: the record's flag decides — not secure = nothing applies (Q4).</summary>
+        /// <summary><see cref="CheckAsync"/>: the record's EFFECTIVE Secure flag decides — not secure = nothing applies (Q4).
+        /// Task 174: secure when its own flag is, or when any record it is filed under is (the single-record walk).</summary>
         AsFlagged,
+
+        /// <summary>Task 174: the record's OWN flag decides — for a caller that has already walked its filing and found no
+        /// secure ancestor.</summary>
+        AsFlaggedOwnOnly,
 
         /// <summary>The record is being made secure: the wall applies whatever the flag reads now.</summary>
         BeingSecured,
@@ -327,7 +349,7 @@ public sealed class SecureShareNoAccessGuard
 
         try
         {
-            if (scope == WallScope.AsFlagged)
+            if (scope is WallScope.AsFlagged or WallScope.AsFlaggedOwnOnly)
             {
                 var flags = await _participations
                     .GetRootRecordFlagsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
@@ -337,6 +359,18 @@ public sealed class SecureShareNoAccessGuard
                 if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
                 {
                     return Refuse("flags", entityLogicalName, recordId, systemUserId);
+                }
+
+                // Task 174: not flagged secure (yet) — secure all the same when a record it is filed under is (fail closed:
+                // an undecidable filing refuses).
+                if (!f.IsSecure && scope == WallScope.AsFlagged)
+                {
+                    f = await EffectiveRootFlags.FoldOneAsync(_dataverse, _logger, entityLogicalName, recordId, f, ct)
+                        .ConfigureAwait(false);
+                    if (f.IsUnreadable)
+                    {
+                        return Refuse("filing", entityLogicalName, recordId, systemUserId);
+                    }
                 }
 
                 if (!f.IsSecure)

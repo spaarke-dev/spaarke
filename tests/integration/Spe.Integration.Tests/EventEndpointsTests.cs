@@ -333,9 +333,10 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
             RegardingRecordId: Guid.NewGuid(),
             RegardingRecordName: "Test Record",
             RegardingRecordType: 1,
-            ScheduledStart: DateTime.UtcNow,
-            ScheduledEnd: DateTime.UtcNow.AddHours(1),
-            DueDate: DateTime.UtcNow.AddDays(7),
+            // Task 098: sprk_event's date columns are DateOnly; the contract carries calendar dates.
+            ScheduledStart: DateOnly.FromDateTime(DateTime.UtcNow),
+            ScheduledEnd: DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1),
+            DueDate: DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7),
             Priority: Spaarke.Dataverse.EventPriority.High
         );
 

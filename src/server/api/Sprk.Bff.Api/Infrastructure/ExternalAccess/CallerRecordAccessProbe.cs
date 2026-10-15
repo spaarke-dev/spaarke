@@ -87,13 +87,20 @@ public class CallerRecordAccessProbe
     /// 2s/4s/8s schedule is far too slow to sit in front of an authorization decision, hence a separate,
     /// much shorter one here.</para>
     ///
-    /// <para><b>The tradeoff, stated.</b> Under OBO, Dataverse answers "not found" both for a record
-    /// that does not exist yet AND for one the caller cannot see at all — the two are indistinguishable
-    /// by design (Dataverse hides existence). So this backoff also lands on genuine no-access denials,
-    /// costing them ~1.6s. That is acceptable here and only here: these are six low-volume admin
-    /// mutations plus the Office save gate, none latency-sensitive, and a caller who can SEE the record
-    /// but lacks rights gets a 200 with a rights string — no retry, no delay. The common denial is not
-    /// the one being slowed.</para>
+    /// <para><b>What Dataverse actually answers</b> (corrected by task 064, measured live on spaarkedev1
+    /// 2026-10-07/08). <c>RetrievePrincipalAccess</c> answers 404 <c>0x80040217</c> ONLY for a record that does
+    /// not exist (or has not replicated yet). A record that exists but that the caller cannot see answers 403
+    /// <c>0x80048306</c>, and a record the caller can see answers 200 with a rights string. An earlier version of
+    /// this remark said Dataverse answers "not found" for a record the caller cannot see; it does not. So this
+    /// backoff lands on unknown ids only, costing them ~1.6s, which on its own would make a uniform "not found"
+    /// answer a TIMING oracle: an unknown id would come back ~1.6s after a denied one.</para>
+    ///
+    /// <para><b>Equalised on the authorization gates</b> (task 064). A gate that promises "an unknown id and a
+    /// denied one cannot be told apart" asks through <see cref="GetCallerRightsForAuthorizationGateAsync"/>,
+    /// which gives a 403 (<c>0x80048306</c> or any other) the SAME schedule (same re-asks, same delays) as a 404, so both
+    /// reach the gate's uniform denial after the same work. Every other use of the probe is unchanged: the
+    /// not-found retry stays (it exists for replication lag right after a create) and a no-access answer is
+    /// returned at once.</para>
     ///
     /// <para>Pure and <c>internal</c> so the schedule is assertable without a transport mock (ADR-038
     /// ban B1) — the alternative was leaving the one piece of timing logic here untested.</para>
@@ -242,6 +249,50 @@ public class CallerRecordAccessProbe
         return await RetrievePrincipalAccessAsync(
             dataverseToken, callerSystemUserId.Value, entitySet, recordId, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Set while an authorization gate is asking (<see cref="GetCallerRightsForAuthorizationGateAsync"/>): a
+    /// no-access answer then follows the not-found schedule. Flows with the async call, so it applies to THIS
+    /// question only, even when the probe instance is shared.
+    /// </summary>
+    private static readonly AsyncLocal<bool> EqualizeNoAccessWithNotFound = new();
+
+    /// <summary>
+    /// <see cref="GetCallerRightsAsync"/>, for an authorization gate whose denial must not tell an unknown record
+    /// from one the caller cannot see (task 064 · NFR-01 "not distinguishable in any channel"): a 403 (no access is
+    /// <c>0x80048306</c>) from Dataverse is re-asked on the SAME schedule as a 404 (<see cref="NotFoundRetryDelay"/>),
+    /// so both denials take the same time. The answer itself is unchanged: still <see cref="AccessRights.None"/>
+    /// for both, and a record the caller CAN see is answered at once, as before.
+    /// </summary>
+    /// <remarks>Deliberately NOT virtual: it only scopes the schedule and calls the virtual <see cref="GetCallerRightsAsync"/>,
+    /// so every test double that substitutes that method (subclass or Moq) is still the one asked.</remarks>
+    public async Task<AccessRights> GetCallerRightsForAuthorizationGateAsync(
+        string? callerBearerToken,
+        string entitySet,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        EqualizeNoAccessWithNotFound.Value = true;
+        try
+        {
+            return await GetCallerRightsAsync(callerBearerToken, entitySet, recordId, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            EqualizeNoAccessWithNotFound.Value = false;
+        }
+    }
+
+    /// <summary>
+    /// Whether one non-success <c>RetrievePrincipalAccess</c> answer is re-asked after <see cref="NotFoundRetryDelay"/>:
+    /// always for 404 (replication lag); for ANY 403 only when <paramref name="equalizeNoAccess"/> (an authorization
+    /// gate). The no-access 403 is <c>0x80048306</c>; every 403 is equalised, not only that code, because a 403 for
+    /// any other reason (a missing table privilege, say) arrives as fast and would reopen the same oracle. Pure, so the
+    /// rule is asserted without a transport double.
+    /// </summary>
+    internal static bool FollowsNotFoundSchedule(System.Net.HttpStatusCode status, bool equalizeNoAccess)
+        => status == System.Net.HttpStatusCode.NotFound
+           || (equalizeNoAccess && status == System.Net.HttpStatusCode.Forbidden);
 
     /// <summary>
     /// Most <see cref="RetrievePrincipalAccessAsync"/> calls <see cref="GetCallerRightsForRecordsAsync"/> runs at once.
@@ -633,27 +684,23 @@ public class CallerRecordAccessProbe
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
-                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                var (status, body) = await SendPrincipalAccessRequestAsync(url, dataverseToken, ct).ConfigureAwait(false);
 
-                using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-
-                if (!response.IsSuccessStatusCode)
+                if (((int)status) < 200 || ((int)status) > 299)
                 {
                     // "Not found" is the replication-lag signature: the wizard provisions seconds after
-                    // creating the project, and a caller may grant on a record they just created. It is
-                    // ALSO how Dataverse reports "you cannot see this record" — see NotFoundRetryDelay
-                    // for why paying that cost here is the right trade.
-                    if (response.StatusCode == System.Net.HttpStatusCode.NotFound &&
+                    // creating the project, and a caller may grant on a record they just created. On an
+                    // authorization gate a no-access 403 follows the same schedule, so an unknown id and a
+                    // denied one take the same time (task 064; see NotFoundRetryDelay).
+                    if (FollowsNotFoundSchedule(status, EqualizeNoAccessWithNotFound.Value) &&
                         NotFoundRetryDelay(attempt) is { } delay)
                     {
                         _logger.LogInformation(
-                            "[DELEGATION] {EntitySet}({RecordId}) not found on attempt {Attempt} — retrying in " +
-                            "{DelayMs}ms in case the record has not replicated yet.",
-                            entitySet, recordId, attempt, delay.TotalMilliseconds);
+                            "[DELEGATION] {EntitySet}({RecordId}) answered {StatusCode} on attempt {Attempt} — asking " +
+                            "again in {DelayMs}ms.",
+                            entitySet, recordId, (int)status, attempt, delay.TotalMilliseconds);
 
-                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                        await DelayAsync(delay, ct).ConfigureAwait(false);
                         continue;
                     }
 
@@ -661,12 +708,11 @@ public class CallerRecordAccessProbe
                         "[{Marker}] RetrievePrincipalAccess returned {StatusCode} for {EntitySet}({RecordId}) " +
                         "after {Attempts} attempt(s). Denying — there is no read-probe fallback here, because " +
                         "a read proves Read and Read is not licence to grant.",
-                        FallbackMarker, (int)response.StatusCode, entitySet, recordId, attempt);
+                        FallbackMarker, (int)status, entitySet, recordId, attempt);
 
                     return AccessRights.None;
                 }
 
-                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 using var document = JsonDocument.Parse(body);
 
                 var rightsString = document.RootElement.TryGetProperty("AccessRights", out var rights)
@@ -697,6 +743,25 @@ public class CallerRecordAccessProbe
             }
         }
     }
+
+    /// <summary>
+    /// One <c>RetrievePrincipalAccess</c> GET: its status and body (the wire seam, task 064 — a test answers it from
+    /// memory instead of a transport double, ADR-038).
+    /// </summary>
+    protected virtual async Task<(System.Net.HttpStatusCode Status, string Body)> SendPrincipalAccessRequestAsync(
+        string url, string dataverseToken, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        return (response.StatusCode, body);
+    }
+
+    /// <summary>The wait between re-asks (the seam a test replaces so it never really sleeps).</summary>
+    protected virtual Task DelayAsync(TimeSpan delay, CancellationToken ct) => Task.Delay(delay, ct);
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));

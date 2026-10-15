@@ -35,6 +35,7 @@ import {
   _resetRecordNumberFieldCacheForTests,
   _resetDisplayNameFieldCacheForTests,
 } from '../../../services/PolymorphicResolverService';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -202,7 +203,8 @@ function stubFetchNavProps() {
  * file-upload pipeline, unlike `InvoiceService`).
  */
 function stubAuthenticatedFetch(): jest.Mock {
-  return jest.fn(async () => ({
+  // authenticatedFetch THROWS ApiError for a non-2xx: the double turns the 404 answer into that failure.
+  return throwingAuthenticatedFetch(async () => ({
     ok: false,
     status: 404,
     statusText: 'Not Found',

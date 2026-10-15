@@ -725,6 +725,7 @@ public class ClientChildFixUpTests
                 var webApi = webApiNeeded ? NoCascadeRowsWebApi.Create() : null;
                 services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => World, Shares, webApi!));
                 services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(() => World, Shares));
+                services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World)); // task 173: as the host registers it
                 _provider = services.BuildServiceProvider();
                 _job = new SecureChildReconciliationJob(
                     _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,

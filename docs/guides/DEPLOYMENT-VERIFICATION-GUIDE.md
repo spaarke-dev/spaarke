@@ -274,7 +274,7 @@ Then in Power Apps maker portal, open the solution and verify the component coun
 ### Step 2: Publish Customizations
 
 ```bash
-pac solution publish
+# Publish only what you changed: PublishXml via scripts/lib/Publish-SolutionComponents.ps1 (never a tenant-wide publish)
 ```
 
 ### Step 3: Browser Verification

@@ -47,8 +47,24 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public CollisionFlag? Flag { get; set; }
+
+        /// <summary>Task 184: <c>sprk_externalinvitedon</c> — the pending-invite marker (field-secured; only the BFF writes it).</summary>
+        public DateTimeOffset? InvitedOn { get; set; }
+
+        /// <summary>
+        /// Task 185: <c>sprk_externalinvitecodehash</c> — the current invite code's stored value (field-secured, no Reader
+        /// access). Written with the marker, cleared by the consuming bind.
+        /// </summary>
+        public string? InviteCodeHash { get; set; }
+
         public int Version { get; set; }
     }
+
+    /// <summary>
+    /// A contact-level <c>sprk_externalrecordaccess</c> row. Task 185 (option (c)): the identity store never READS grants
+    /// (no bind is decided on one); the rows are seeded only so a test can show a grant changes nothing.
+    /// </summary>
+    public sealed record Grant(Guid ContactId, int StateCode, DateOnly? ExpiresOn);
 
     public sealed class SystemUser
     {
@@ -68,6 +84,32 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public Dictionary<Guid, Contact> Contacts { get; } = new();
     public Dictionary<Guid, SystemUser> SystemUsers { get; } = new();
 
+    /// <summary>Contact-level grant rows (never read by this store; see <see cref="Grant"/>).</summary>
+    public List<Grant> Grants { get; } = new();
+
+    /// <summary>
+    /// Task 184: the marker read (marker + code hash, one query) ends this way. <see cref="LookupStatus.ColumnMissing"/>
+    /// also makes the marker WRITE answer <see cref="StoreWriteStatus.ColumnMissing"/> — an environment before the schema
+    /// script.
+    /// </summary>
+    public LookupStatus InviteMarkerStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>
+    /// Task 185: the hash column is not provisioned (the marker column is): the marker read, which selects both, answers
+    /// <see cref="LookupStatus.ColumnMissing"/>, and the marker-and-hash WRITE answers
+    /// <see cref="StoreWriteStatus.ColumnMissing"/> naming the hash column.
+    /// </summary>
+    public bool InviteCodeHashColumnMissing { get; set; }
+
+    /// <summary>Task 185: every bind (plain or consuming) that the <c>If-Match</c> version refused with 412.</summary>
+    public int BindPreconditionFailures { get; private set; }
+
+    /// <summary>Task 184: the intent read throws (a transport fault the store did not convert into a status).</summary>
+    public bool ThrowOnIntentRead { get; set; }
+
+    /// <summary>Task 184: the marker write fails with this status (null = it behaves like the platform).</summary>
+    public StoreWriteStatus? MarkerWriteFailure { get; set; }
+
     /// <summary>(operation, rowId, detail) for every write that LANDED.</summary>
     public List<(string Op, Guid? RowId, string Detail)> Writes { get; } = new();
 
@@ -80,6 +122,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
+    /// <summary>Task 181: <see cref="LookupStatus.ColumnMissing"/> makes <c>GetContactAsync</c> answer that a binding column is not provisioned.</summary>
+    public LookupStatus GetContactStatus { get; set; } = LookupStatus.Read;
     public bool FailBind { get; set; }
     public bool FailCreate { get; set; }
     public bool FailFlagWrites { get; set; }
@@ -132,6 +176,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             EmailLookupStatus = LookupStatus.Read;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
+            Grants.Clear();
+            InviteMarkerStatus = LookupStatus.Read;
+            InviteCodeHashColumnMissing = false;
+            BindPreconditionFailures = 0;
+            ThrowOnIntentRead = false;
+            MarkerWriteFailure = null;
             FailOidLookupOnceFor.Clear();
             BeforeCreate = null;
             BeforeBind = null;
@@ -149,7 +199,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// seeds a binding with NO mirror (a binding an operator wrote by hand).
     /// </summary>
     public Contact AddContact(Guid id, string? email = null, string? oid = null, IdentityPlaneMarker? plane = null,
-        int stateCode = 0, CollisionFlag? flag = null, string? keyMirror = null, bool deriveKeyMirror = true)
+        int stateCode = 0, CollisionFlag? flag = null, string? keyMirror = null, bool deriveKeyMirror = true,
+        DateTimeOffset? invitedOn = null, string? inviteCodeHash = null)
     {
         var mirror = keyMirror
             ?? (deriveKeyMirror && oid is not null && Guid.TryParse(oid.Trim(), out var g) && g != Guid.Empty
@@ -158,7 +209,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         var c = new Contact
         {
             Id = id, Email = email, Oid = oid, KeyMirror = mirror, Plane = plane is { } p ? (int)p : null,
-            StateCode = stateCode, Flag = flag, Version = NextVersion(),
+            StateCode = stateCode, Flag = flag, InvitedOn = invitedOn, InviteCodeHash = inviteCodeHash, Version = NextVersion(),
         };
         Contacts[id] = c;
         return c;
@@ -175,6 +226,14 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         };
         SystemUsers[id] = u;
         return u;
+    }
+
+    /// <summary>Seeds a contact-level grant row (active and unexpired by default). Never read by this store.</summary>
+    public Grant AddGrant(Guid contactId, int stateCode = 0, DateOnly? expiresOn = null)
+    {
+        var g = new Grant(contactId, stateCode, expiresOn ?? DateOnly.MaxValue);
+        Grants.Add(g);
+        return g;
     }
 
     public IEnumerable<Contact> ContactsBoundTo(Guid oid)
@@ -234,6 +293,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             Reads.Add("contact");
             AfterRead?.Invoke("contact");
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
+            if (GetContactStatus == LookupStatus.ColumnMissing) return Task.FromResult(ContactLookup.ColumnMissing);
             return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
         }
     }
@@ -277,40 +337,116 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
-    // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
-
-    public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
+    public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct)
     {
         lock (_gate)
         {
-            if (FailBind) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected"));
+            // ONE read (task 185): the marker and its code hash, selected together. No grant is read.
+            Reads.Add("intent");
+            AfterRead?.Invoke("intent");
+            if (ThrowOnIntentRead) throw new HttpRequestException("injected intent-read fault");
+            var status = InviteCodeHashColumnMissing ? LookupStatus.ColumnMissing : InviteMarkerStatus;
+            var row = status == LookupStatus.Read && Contacts.TryGetValue(contactId, out var c) ? c : null;
+            return Task.FromResult(new BindIntentLookup(contactId, status, row?.InvitedOn)
+            {
+                InviteCodeHash = row?.InviteCodeHash,
+            });
+        }
+    }
+
+    // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
+
+    public Task<StoreWriteResult> MarkInvitedAsync(
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (MarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
+            if (InviteMarkerStatus == LookupStatus.ColumnMissing)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'."));
+            }
+
+            if (InviteCodeHashColumnMissing)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'."));
+            }
+
+            // If-Match: the version when given, "*" otherwise — a missing row is 404, never created.
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is not null && !VersionMatches(etag, c.Version))
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            }
+
+            // ONE write: the marker and the new code's hash together (a re-invite replaces both).
+            c.InvitedOn = invitedOn;
+            c.InviteCodeHash = inviteCodeHash;
+            c.Version = NextVersion();
+            Writes.Add(("invite-marker", contactId, invitedOn.UtcDateTime.ToString("O") + "|code-hash"));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
+        => Task.FromResult(Bind(contactId, etag, oid, plane, consumeInvite: false));
+
+    /// <summary>
+    /// Task 185: the plain bind PLUS the invite-code hash cleared, in the ONE conditional write (recorded as one "bind" whose
+    /// detail ends <c>|invite-code-hash=null</c>). Same rules as <see cref="BindOidAsync"/>: no row version, no write.
+    /// </summary>
+    public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
+        Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
+        => Task.FromResult(Bind(contactId, etag, oid, plane, consumeInvite: true));
+
+    private StoreWriteResult Bind(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, bool consumeInvite)
+    {
+        lock (_gate)
+        {
+            if (FailBind) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
+
+            // The consuming bind names the hash column: where it is not provisioned the platform refuses the whole PATCH.
+            if (consumeInvite && (InviteCodeHashColumnMissing || InviteMarkerStatus == LookupStatus.ColumnMissing))
+            {
+                return new StoreWriteResult(StoreWriteStatus.Failed,
+                    Error: "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'.");
+            }
             // Mirrors DataverseContactIdentityStore: no row version, no write (never an unconditional bind).
             if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
             {
                 Writes.Add(("refused-unversioned-bind", contactId, string.Empty));
-                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the bind"));
+                return new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the bind");
             }
 
-            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            if (!Contacts.TryGetValue(contactId, out var c)) return new StoreWriteResult(StoreWriteStatus.NotFound);
             var hook = BeforeBind;
             BeforeBind = null; // one-shot
             hook?.Invoke(c);
-            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            if (!VersionMatches(etag, c.Version))
+            {
+                BindPreconditionFailures++;
+                return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
+            }
 
             // The unique index is on the MIRROR (B2), and it counts rows of every state: another contact holding the
             // oid there makes the platform refuse the whole write with the duplicate-key fault.
             if (KeyDefined && Contacts.Values.Any(o => o.Id != contactId && OidEquals(o.KeyMirror, oid)))
             {
                 Writes.Add(("refused-duplicate-key-bind", contactId, oid.ToString("D")));
-                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.KeyConflict, Error: "0x80060892 duplicate key"));
+                return new StoreWriteResult(StoreWriteStatus.KeyConflict, Error: "0x80060892 duplicate key");
             }
 
             c.Oid = oid.ToString("D");
             c.KeyMirror = oid.ToString("D");
             c.Plane = (int)plane;
+            if (consumeInvite)
+            {
+                c.InviteCodeHash = null;
+            }
+
             c.Version = NextVersion();
-            Writes.Add(("bind", contactId, $"{c.Oid}|{plane}"));
-            return Task.FromResult(StoreWriteResult.Written);
+            Writes.Add(("bind", contactId, consumeInvite ? $"{c.Oid}|{plane}|invite-code-hash=null" : $"{c.Oid}|{plane}"));
+            return StoreWriteResult.Written;
         }
     }
 

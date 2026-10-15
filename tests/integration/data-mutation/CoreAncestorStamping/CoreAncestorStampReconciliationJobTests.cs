@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -510,11 +510,11 @@ public class CoreAncestorStampReconciliationJobTests
     private static Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore TaskCore(
         StampWorld world, IReadOnlyDictionary<string, Guid>? recordTypes = null)
     {
-        var lookup = NSubstitute.Substitute.For<ICommunicationDataverseService>();
-        lookup.QueryRecordTypeRefAsync(NSubstitute.Arg.Any<string>(), NSubstitute.Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult<Microsoft.Xrm.Sdk.Entity?>(
-                recordTypes is not null && recordTypes.TryGetValue(call.ArgAt<string>(0), out var refId)
-                    ? new Microsoft.Xrm.Sdk.Entity("sprk_recordtype_ref", refId) { ["sprk_recorddisplayname"] = call.ArgAt<string>(0) }
+        var lookup = new Mock<ICommunicationDataverseService>();
+        lookup.Setup(l => l.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string logicalName, CancellationToken _) => Task.FromResult<Microsoft.Xrm.Sdk.Entity?>(
+                recordTypes is not null && recordTypes.TryGetValue(logicalName, out var refId)
+                    ? new Microsoft.Xrm.Sdk.Entity("sprk_recordtype_ref", refId) { ["sprk_recorddisplayname"] = logicalName }
                     : null));
 
         return new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore(
@@ -522,7 +522,7 @@ public class CoreAncestorStampReconciliationJobTests
             world.Resolver,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
-            lookup,
+            lookup.Object,
             NullLogger.Instance);
     }
 
@@ -580,9 +580,153 @@ public class CoreAncestorStampReconciliationJobTests
             "the typed pair names an invoice the row no longer carries, and the copy equals that invoice's matter");
     }
 
+    private static readonly Guid OntologyRow = Guid.Parse("14400000-0000-0000-0000-000000000501");
+    private static readonly Guid TodoOfCommunication = Guid.Parse("14400000-0000-0000-0000-000000000101");
+    private static readonly Guid SignalOfTodo = Guid.Parse("14400000-0000-0000-0000-000000000502");
+
+    /// <summary>
+    /// Ontology task 144: the communication was re-filed A → B out of band. A to-do under it and a <paramref name="table"/> row
+    /// about it both still say A, and a Signal about the to-do says A too (it follows the to-do one hop further down).
+    /// </summary>
+    private static StampWorld StaleOntologyWorld(string table) => new StampWorld()
+        .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+        .Row(table, OntologyRow,
+            [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+            pairId: Communication.ToString())
+        .Row("sprk_todo", TodoOfCommunication,
+            [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+            pairId: Communication.ToString())
+        .Row("sprk_signal", SignalOfTodo,
+            [("sprk_regardingtodo", "sprk_todo", TodoOfCommunication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+            pairId: TodoOfCommunication.ToString());
+
+    [Theory(DisplayName = "Ontology task 144: with writes ON and no setting, a stale Signal / Decision Record is reported and sampled but NEVER written - directly or by the cascade - while every other table repairs")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task ReportOnlyTables_ByDefault_ReportTheOntologyRows_AndRepairEveryOtherTable(string table)
+    {
+        var world = StaleOntologyWorld(table);
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_todo", TodoOfCommunication, "sprk_regardingmatter").Should().Be(MatterB,
+            "every other stamped table keeps repairing (the storage resolver's 409-stale recovery depends on it)");
+        world.Lookup(table, OntologyRow, "sprk_regardingmatter").Should().Be(MatterA, "a report-only table is never written");
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterA,
+            "nor by the cascade below the to-do the job repaired");
+        world.Patches.Should().OnlyContain(p => p.Entity == "sprk_todo");
+        Counts(run).GetProperty("mode").GetString().Should().Be("write");
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(1);
+        Counts(run).GetProperty("reportOnlyTables").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("sprk_decisionrecord", "sprk_signal");
+        Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain($"{table}:{OntologyRow:D}");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: an EMPTY report-only setting lets the job write Signals and Decision Records (must-fire control)")]
+    public async Task ReportOnlyTables_Empty_RepairsTheOntologyRows()
+    {
+        var world = StaleOntologyWorld("sprk_decisionrecord");
+
+        var run = await Job(world, reportOnlyTables: "").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_decisionrecord", OntologyRow, "sprk_regardingmatter").Should().Be(MatterB);
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterB);
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Ontology task 145 (uac-r2 K4): the setting \",\" - what the backfill's -Apply writes, because App Service can drop an EMPTY app setting - holds nothing, so Signals and Decision Records are written")]
+    public async Task ReportOnlyTables_ACommaAlone_HoldsNothing_TheBackfillRelease()
+    {
+        var world = StaleOntologyWorld("sprk_signal");
+
+        var run = await Job(world, reportOnlyTables: ",").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_signal", OntologyRow, "sprk_regardingmatter").Should().Be(MatterB, "\",\" names no table: the hold is released");
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterB);
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(0);
+        Counts(run).GetProperty("reportOnlyTables").EnumerateArray().Should().BeEmpty();
+        Counts(run).GetProperty("status").GetString().Should().NotBe("partial", "\",\" is not an unknown table");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: a report-only setting naming a table the job does not stamp fails closed - the defaults stay held and the run is partial")]
+    public async Task ReportOnlyTables_WithAnUnknownTable_KeepsTheDefaultHolds()
+    {
+        var world = StaleOntologyWorld("sprk_signal");
+
+        var run = await Job(world, reportOnlyTables: "sprk_signals").ExecuteAsync(Context(), CancellationToken.None);
+
+        world.Lookup("sprk_signal", OntologyRow, "sprk_regardingmatter").Should().Be(MatterA, "a typo never releases the hold");
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterA);
+        world.Lookup("sprk_todo", TodoOfCommunication, "sprk_regardingmatter").Should().Be(MatterB);
+        run.Success.Should().BeFalse("a misconfigured hold is reported, never a clean run");
+        run.ErrorMessage.Should().Contain("sprk_signals");
+        Counts(run).GetProperty("status").GetString().Should().Be("partial");
+        Counts(run).GetProperty("reportOnlyTables").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("sprk_decisionrecord", "sprk_signal", "sprk_signals");
+    }
+
+    private static readonly Guid SignalOfTodoUnderEvent = Guid.Parse("14400000-0000-0000-0000-000000000503");
+
+    [Fact(DisplayName = "Ontology task 144 (uac-r2 K2): a stale chain event -> to-do -> Signal repaired from the EVENT writes the to-do, HOLDS the Signal two hops down (the depth >= 2 cascade honours the hold), and the job then reports it")]
+    public async Task ReportOnlySignal_TwoHopsBelowTheRepairedRow_IsHeld_AndReported()
+    {
+        // The communication was re-filed A -> B out of band: the event, the to-do under it and a Signal about the to-do all say A.
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_event", Event,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString())
+            .Row("sprk_todo", TodoUnderEvent,
+                [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Event.ToString())
+            .Row("sprk_signal", SignalOfTodoUnderEvent,
+                [("sprk_regardingtodo", "sprk_todo", TodoUnderEvent), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: TodoUnderEvent.ToString());
+
+        // Repair from the event with Signal report-only: event (the row), to-do (depth 1) and Signal (depth 2).
+        var report = await world.Restamper.RestampChildAsync(
+            "sprk_event", Event, holdTables: new HashSet<string>(["sprk_signal"], StringComparer.OrdinalIgnoreCase));
+
+        report.Complete.Should().BeTrue();
+        world.Lookup("sprk_event", Event, "sprk_regardingmatter").Should().Be(MatterB);
+        world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterB,
+            "the to-do is not report-only: the cascade writes it");
+        world.Lookup("sprk_signal", SignalOfTodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA,
+            "a Signal two hops below the repaired row is held by the cascade, not written");
+        world.Patches.Should().NotContain(p => p.Entity == "sprk_signal");
+        world.Patches.Should().Contain(p => p.Entity == "sprk_todo" && p.Id == TodoUnderEvent);
+
+        // The job's own scan then finds the held Signal stale and REPORTS it (default holds), still without writing it.
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(1);
+        Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain($"sprk_signal:{SignalOfTodoUnderEvent:D}");
+        world.Lookup("sprk_signal", SignalOfTodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA);
+        world.Patches.Should().NotContain(p => p.Entity == "sprk_signal");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: with writes OFF, a stale Signal is reported and nothing at all is written")]
+    public async Task WritesOff_ReportsTheOntologyRow_AndWritesNothing()
+    {
+        var world = StaleOntologyWorld("sprk_signal");
+
+        var run = await Job(world, writesEnabled: "false").ExecuteAsync(Context(), CancellationToken.None);
+
+        world.Patches.Should().BeEmpty();
+        Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain($"sprk_signal:{OntologyRow:D}");
+    }
+
     private static CoreAncestorStampReconciliationJob Job(
         StampWorld world,
         string? writesEnabled = null,
+        string? reportOnlyTables = null,
         IIdempotencyService? idempotency = null,
         IDistributedCache? cursors = null,
         int? pageSize = null,
@@ -599,6 +743,11 @@ public class CoreAncestorStampReconciliationJobTests
         if (writesEnabled is not null)
         {
             settings[CoreAncestorStampReconciliationJob.WritesEnabledConfigKey] = writesEnabled;
+        }
+
+        if (reportOnlyTables is not null)
+        {
+            settings[CoreAncestorStampReconciliationJob.ReportOnlyTablesConfigKey] = reportOnlyTables;
         }
 
         return new CoreAncestorStampReconciliationJob(

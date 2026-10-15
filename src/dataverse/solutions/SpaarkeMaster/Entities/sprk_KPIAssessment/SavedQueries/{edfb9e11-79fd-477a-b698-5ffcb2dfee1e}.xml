@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{edfb9e11-79fd-477a-b698-5ffcb2dfee1e}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_kpiname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_kpiassessmentid">
+          <cell name="sprk_performancearea" width="200" />
+          <cell name="sprk_kpiname" width="300" />
+          <cell name="sprk_kpigradescore" width="100" />
+          <cell name="sprk_assessmentnotes" width="300" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_kpiassessment">
+          <attribute name="sprk_kpiassessmentid" />
+          <attribute name="sprk_kpiname" />
+          <attribute name="createdon" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_performancearea" />
+          <attribute name="sprk_kpigradescore" />
+          <attribute name="sprk_assessmentnotes" />
+          <order attribute="createdon" descending="true" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active KPI Assessments" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

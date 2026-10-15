@@ -20,7 +20,7 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 
 **Philosophy:**
 - `adr-aware` (this skill) = **BEFORE** - Load relevant ADRs when starting work
-- `adr-check` = **AFTER** - Validate completed work against all ADRs
+- `adr-check` = **AFTER** - Validate completed work against every ADR that applies (mapping + a pass over the whole index)
 
 ---
 
@@ -156,7 +156,7 @@ Reference this table for common constraints. The source of truth is:
 | ADR-007 | SpeFileStore Facade | No Graph types above facade | `Microsoft.Graph` in API controllers |
 | ADR-008 | Endpoint Filters | No global auth middleware | `app.UseAuthorization()` for resources |
 | ADR-009 | Redis-First | No hybrid L1+L2 without proof | `IMemoryCache` cross-request |
-| ADR-010 | DI Minimalism | ≤15 DI registrations | Interface for single implementation |
+| ADR-010 | DI Minimalism | Feature modules; ~15 Program.cs lines is a target | Interface for single implementation |
 | ADR-011 | Dataset PCF | PCF for data grids | Native subgrid with custom actions |
 | ADR-012 | Shared Components | Reuse @spaarke/ui-components | Duplicate component implementations |
 | ADR-013 | AI Architecture | No hidden/orphaned AI elements | Undocumented AI endpoints/jobs |

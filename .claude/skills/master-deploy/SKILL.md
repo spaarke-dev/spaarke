@@ -2,6 +2,7 @@
 
 > **Category**: Operations (Tier 3) — end-to-end unified-master deploy
 > **Created**: 2026-06-11 (after the 4-parallel-session deploy collision was resolved)
+> **Last Reviewed**: 2026-10-11 — Step 0.5 clobber check + restore point, ~13 missing surfaces added, no `git stash`, read-back verification (first full run under these rules: 28 pages + 1 JS on 2026-10-11, 0 clobbers)
 > **When to use**: After multiple PRs have merged to master and the entire deployable surface needs to land on `spaarkedev1` from one unified master HEAD. The single source of truth for "deploy everything from master."
 > **When NOT to use**: A single small change to one Code Page → use that surface's individual `Deploy-*.ps1` directly. A BFF-only change → use `/bff-deploy`.
 
@@ -28,7 +29,21 @@
 
 The 12 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar, PlaybookLibrary, DocumentUpload, AllDocuments, WorkspaceLayoutWizard, sprk_wizard_commands.
 
-**Excluded** (intentional): `sprk_tododetailsidepane` (deleted by #373), `sprk_corporateworkspace` (retired by OC-R4-05).
+**Also deployed by this skill (added 2026-10-11 — these were missing, so a "master deploy" left them stale on dev for months):**
+
+| Surface | Web resource | Build | Deploy mechanism |
+|---|---|---|---|
+| NavigatorPane | `sprk_NavigatorPane.html` | `src/solutions/NavigatorPane` → `dist/index.html` | `src/solutions/NavigatorPane/Deploy-NavigatorPane.ps1` |
+| Events / Invoices / KPI / Communications pages | `sprk_eventspage.html`, `sprk_invoicespage.html`, `sprk_kpiassessmentspage.html`, `sprk_communicationspage.html` | each solution → `dist/index.html` | `scripts/Deploy-AllDataGridConsumers.ps1` (one PublishXml) |
+| Conversation page | `sprk_communicationconversationpage.html` | `src/solutions/sprk_communicationconversationpage` → `dist/index.html` | `scripts/Deploy-WebResourceInline.ps1` |
+| Notepad | `sprk_notepad` | `src/solutions/Notepad` → `dist/notepad.html` | `scripts/Deploy-WebResourceInline.ps1` |
+| Email page, Communication reconciliation | `sprk_emailpage`, `sprk_communicationreconciliation` | `dist/sprk_emailpage.html`, `dist/sprk_communicationreconciliation.html` | `scripts/Deploy-WebResourceInline.ps1` |
+| Webpack code pages | `sprk_documentrelationshipviewer`, `sprk_semanticsearch`, `sprk_playbookbuilder` | `src/client/code-pages/<X>`: `npm run build` then `pwsh -File build-webresource.ps1` → `out/<name>.html` | `scripts/Deploy-PlaybookBuilder.ps1` for PlaybookBuilder; `scripts/Deploy-WebResourceInline.ps1` for the other two |
+| Classic JS web resources | e.g. `sprk_subgrid_parent_rollup.js`, `sprk_/scripts/*.js` | none (source file) | `scripts/Deploy-WebResourceInline.ps1 -WebResourceType 3`, only those the Step 0.5 check shows as `STALE_MASTER` or differing from master |
+
+`scripts/Deploy-WebResourceInline.ps1` PATCHes the exact bytes and publishes **only that web resource** (scoped `PublishXml`), like every other script here.
+
+**Excluded** (intentional): `sprk_tododetailsidepane` (deleted by #373), `sprk_corporateworkspace` (retired by OC-R4-05), `sprk_analysisbuilder` / `sprk_analysisworkspace` (no source on master), PCF controls (`/pcf-deploy` — each needs a version bump).
 
 ## Pre-flight (Step 0 — always run)
 
@@ -46,9 +61,26 @@ State to record at the start of the run (use TodoWrite):
 - Branch we're on (must be on master or have master fully merged in)
 - Open PRs (sanity check — are we forgetting anyone?)
 
+**Deploy from a clean, detached worktree of `origin/master`** — never from a project branch or the main checkout: `git worktree add --detach C:/wtdeploy origin/master` (or, if it exists, `git -C C:/wtdeploy fetch origin && git -C C:/wtdeploy checkout --detach origin/master` — that worktree is only ever detached). Record its SHA.
+
 **Hard stops:**
-- Uncommitted changes to `src/client/shared/**` or `src/solutions/**` → require commit first or `git stash` (auto-stash if obviously noise like package-locks).
+- Any tracked-file modification in the deploy worktree before building → stop and find out why. **Never `git stash`** (the stash stack is shared by every worktree). `npm install` rewriting `package-lock.json` *during* the build is expected: restore those files with `git restore -- <paths>` after the deploy.
 - BFF code uncommitted → require commit first (no exceptions — affects production).
+
+## Step 0.5 — Clobber check and restore point (always run; added 2026-10-11)
+
+Master is the only deploy source, but sessions do deploy branch builds while they test. Before writing anything:
+
+1. **Restore point + classification:**
+   ```bash
+   git fetch origin
+   python scripts/master-deploy/check-dev-drift.py --out <scratchpad>/drift   # exit 2 = BRANCH_ONLY found
+   ```
+   It saves the exact current bytes of every Spaarke web resource (the rollback source) and classifies each against git. **`BRANCH_ONLY` is a hard stop**: someone's unmerged work is live — find the owner and get it merged (or their OK) first. `STALE_MASTER` is safe to overwrite.
+2. **Who deployed recently:** for anything modified on the environment in the last few days, find the session that did it (deploy logs in `projects/*/notes/deploy-log.md`, the PRs it names) and confirm the build came from master or a since-merged branch.
+3. **Running work:** check whether another session is mid-rollout on the same environment (open PRs that say "deploying", a project's `current-task.md`). Do not redeploy the BFF over a rollout in progress; if dev's BFF already equals master, skip Step 6.
+4. **Code pages need a build-and-compare:** `CURRENT` for a code page usually means it matches the committed `SpaarkeMaster/WebResources` mirror, a snapshot. After Step 2, compare each built file with the live copy in `<out>/live/` and deploy only the ones that differ (identical rebuilds prove the build is reproducible).
+5. Just before each write, re-read the target's `modifiedon`; if it changed since the restore point, skip it and investigate.
 
 ## Step 1 — Build shared libs
 
@@ -62,6 +94,8 @@ Order matters (each later one consumes earlier ones via path-mapped dist):
 6. `src/client/shared/Spaarke.AI.Widgets` — same. tsc may report 70+ TS2307 errors in shared-lib path resolution; these are advisory and the emitted dist is still usable.
 7. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
 8. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
+
+The list above is the core; on 2026-10-11 a clean worktree needed **all 15** `src/client/shared/*` libs installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, DocumentOperations, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components and LegalWorkspace. `tsc` failures in AI.Widgets and LegalWorkspace are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
 
 ## Step 2 — Build all Vite solutions
 
@@ -148,6 +182,8 @@ If the script's first `az webapp deploy` returns 400 but hash-verify still passe
 
 ## Step 7 — Verification
 
+**Read back every web resource you wrote** (`webresourceset?$filter=name eq '<name>'&$select=content`) and compare its SHA-256 with the file you deployed; a mismatch is a failed deploy. Then the BFF:
+
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.net/healthz   # expect 200
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.net/ping       # expect 200
@@ -217,7 +253,7 @@ When triggered with no explicit blockers from the user:
 2. Run Step 0 pre-flight — report findings briefly
 3. Execute Steps 1-7 sequentially without prompts
 4. Use the F-1 through F-6 fixes inline as they trigger — do not ask the user
-5. Final report: surface table with size + status for all 19 web resources + BFF
+5. Final report: surface table with size + status (deployed / identical, skipped / skipped: changed since restore point) for every surface in both manifest tables + BFF, plus the restore-point path
 6. If a step has a HARD STOP, stop and surface the diagnostic — but only at the hard stops listed above
 
 ## Related skills
@@ -230,6 +266,6 @@ When triggered with no explicit blockers from the user:
 
 ## Audit / next iteration
 
-- **Deploy ledger** (`~/.spaarke-deploy-ledger.json`): proposed but not built. Would record `{branch, commit, deployed_at}` per web resource and warn on cross-branch overwrites. ~60-90 min of work.
+- **Deploy ledger** (`~/.spaarke-deploy-ledger.json`): proposed but not built. Would record `{branch, commit, deployed_at}` per web resource and warn on cross-branch overwrites. ~60-90 min of work. Partly covered since 2026-10-11 by Step 0.5 (`check-dev-drift.py` detects branch-only content by git blob hash; it cannot attribute built code pages).
 - **Per-PR pre-flight CI**: detect when a PR adds a transitive `@spaarke/*` import that consumers don't declare. Would prevent the F-1 firefight at deploy time.
 - **`Build-AllClientComponents.ps1` as this skill's build path**: its F-2 root cause was fixed 2026-06-11 and its clean-checkout defects 2026-10-05 (see F-2). The Node script stays this skill's canonical Vite build until someone deliberately switches it; the PS1 is what `Deploy-Release.ps1` uses.

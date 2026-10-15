@@ -24,6 +24,11 @@ export interface IComposerActionBarProps {
   isSavingDraft: boolean;
   /** View mode only — whether the underlying record is still a Draft (enables Edit). */
   isDraftRecord?: boolean;
+  /**
+   * Whether the host can persist drafts (EmailComposer passes `!!onSaveDraftRequest`). When false the
+   * Save Draft button is not rendered (owner decision 2026-10-09). Defaults to true.
+   */
+  canSaveDraft?: boolean;
   onSaveDraft: () => void;
   onCancel: () => void;
   onEdit?: () => void;
@@ -61,6 +66,7 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
   isSending,
   isSavingDraft,
   isDraftRecord,
+  canSaveDraft = true,
   onSaveDraft,
   onCancel,
   onEdit,
@@ -101,23 +107,25 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
   }
 
   // Send moved to the compose header's From row (owner UAT 2026-08-03 item 1 —
-  // `ComposerSendButton`). This bar now owns Cancel (left) + Save Draft (right) only.
+  // `ComposerSendButton`). This bar now owns Cancel (left) + Save Draft (right, only when `canSaveDraft`).
   return (
     <div className={styles.bar} role="region" aria-label="Composer actions">
       <Button appearance="secondary" onClick={onCancel} disabled={busy}>
         Cancel
       </Button>
       <div className={styles.rightGroup}>
-        <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
-          {isSavingDraft ? (
-            <span className={styles.spinnerRow}>
-              <Spinner size="tiny" />
-              Saving...
-            </span>
-          ) : (
-            'Save Draft'
-          )}
-        </Button>
+        {canSaveDraft && (
+          <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
+            {isSavingDraft ? (
+              <span className={styles.spinnerRow}>
+                <Spinner size="tiny" />
+                Saving...
+              </span>
+            ) : (
+              'Save Draft'
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

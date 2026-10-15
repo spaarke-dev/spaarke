@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_DocumentIntelligenceEndpoint">
+  <description default="Azure AI Document Intelligence endpoint for PDF/image text extraction. Format: https://{region}.api.cognitive.microsoft.com/">
+    <label description="Azure AI Document Intelligence endpoint for PDF/image text extraction. Format: https://{region}.api.cognitive.microsoft.com/" languagecode="1033" />
+  </description>
+  <displayname default="Document Intelligence Endpoint">
+    <label description="Document Intelligence Endpoint" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

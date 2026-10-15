@@ -22,6 +22,7 @@
 import * as React from "react";
 import type { IChatMessage } from "@spaarke/ui-components";
 import { getXrm } from "@spaarke/ui-components";
+import { isApiError, isAuthFailure } from "@spaarke/auth";
 
 export interface PlaybookOptionsPayloadShape {
   candidates: Array<{
@@ -91,6 +92,19 @@ export function usePlaybookOptions(deps: PlaybookOptionsDeps): PlaybookOptionsHa
 
   const handleSelectPlaybook = React.useCallback(
     (playbookId: string, sessionAttachmentIds: string[]): void => {
+      /** The dispatcher answered with a failure status — tell the user rather than leave the click inert. */
+      const reportDispatchFailure = (status: number): void => {
+        console.error("[ConversationPane] playbook-dispatch failed — status:%d", status);
+        inject({
+          role: "Assistant",
+          content:
+            status === 404
+              ? "I'm not able to run that playbook yet — the dispatcher endpoint is still being wired up."
+              : "I couldn't start that playbook. Please try again.",
+          timestamp: new Date().toISOString(),
+        });
+      };
+
       void (async () => {
         try {
           const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/playbook-dispatch/execute`;
@@ -104,21 +118,21 @@ export function usePlaybookOptions(deps: PlaybookOptionsDeps): PlaybookOptionsHa
               sessionId: chatSessionId ?? null,
             }),
           });
+          // A fetch that RETURNS failures arrives here.
           if (!response.ok) {
-            console.error(
-              "[ConversationPane] playbook-dispatch failed — status:%d",
-              response.status
-            );
-            inject({
-              role: "Assistant",
-              content:
-                response.status === 404
-                  ? "I'm not able to run that playbook yet — the dispatcher endpoint is still being wired up."
-                  : "I couldn't start that playbook. Please try again.",
-              timestamp: new Date().toISOString(),
-            });
+            reportDispatchFailure(response.status);
           }
         } catch (err) {
+          // `@spaarke/auth`'s authenticatedFetch THROWS for a non-2xx (ApiError, or AuthError once its
+          // 401 retries are spent) instead of returning it — the user still gets the same message.
+          if (isApiError(err)) {
+            reportDispatchFailure(err.status);
+            return;
+          }
+          if (isAuthFailure(err)) {
+            reportDispatchFailure(401);
+            return;
+          }
           // Log structurally only — error objects can leak headers/URLs.
           console.error(
             "[ConversationPane] playbook-dispatch threw:",

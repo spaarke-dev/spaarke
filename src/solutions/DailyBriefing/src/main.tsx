@@ -15,18 +15,8 @@ import {
   AppErrorBoundary,
   AppInsightsService,
 } from "@spaarke/ui-components";
-
-// ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09):
-// Initialize Application Insights so AppErrorBoundary.componentDidCatch can
-// route errors to the "Failures" pane via reportClientError(). Key is sourced
-// from a build-time Vite env var; absent in dev → no-op (boundary still logs
-// to console). Override: VITE_APP_INSIGHTS_KEY=<key> npm run build
-const _appInsightsKey: string = import.meta.env.VITE_APP_INSIGHTS_KEY ?? "";
-if (_appInsightsKey) {
-  AppInsightsService.initialize(_appInsightsKey);
-}
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
-import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
+import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from "@spaarke/auth";
 import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
 import { browsePlaybooks } from "./browsePlaybooks";
 import { setRuntimeConfig } from "./config/runtimeConfig";
@@ -38,6 +28,11 @@ import { ensureAuthInitialized } from "./services/authInit";
  */
 async function bootstrapAuth(): Promise<void> {
   const config = await resolveRuntimeConfig();
+  // Application Insights, so AppErrorBoundary.componentDidCatch routes errors to the
+  // "Failures" pane via reportClientError(). #1537: the connection string is THIS
+  // environment's, from the BFF at runtime (cached) — never a build-time key. Not
+  // awaited and never rejects: a failed lookup means telemetry off, not a broken page.
+  void AppInsightsService.initializeFromRuntime(() => getTelemetryConnectionString(config.bffBaseUrl));
   setRuntimeConfig(config);
   await ensureAuthInitialized();
 

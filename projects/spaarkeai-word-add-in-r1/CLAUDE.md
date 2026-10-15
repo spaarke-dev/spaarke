@@ -280,7 +280,50 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Business-unit layout** (owner, 2026-10-06): each customer has ONE primary business unit; the secure-record business unit is a SIBLING of the primary one (not a child). Unified-access-control-r2 owns this design — ask them for detail.
 - **Dev data is not indicative** (2026-09-10 / 2026-09-25): legacy/existing documents don't matter. Root-BU users and records are a setup artifact. Verify ownership/BU behaviour as **Test User 1** (`testuser1@spaarke.com`, BU `cb15f587…`), the only child-BU account.
 
+### Multi-customer add-in (Model 1) — owner decisions 2026-10-07/08
+- **One shared add-in for all Model 1 customers**: one production site (`swa-spaarke-office-addins-prod`, **https://addins.spaarke.com**, built by provisioning) and one production add-in app registration (**`1958aec2-0218-495e-8e3c-37133e9b8357`** "Spaarke Office Add-in (Production)", created 2026-10-07); each customer backend has its own app registration (provisioning) that pre-authorizes the add-in client (provisioning H3). `c1258e2d…` is the DEV client only. Notes 113/114.
+- **Customer staff are B2B guests in Spaarke's tenant**; their Outlook/Word run in their HOME tenant, so each customer's IT installs the package there (Integrated apps). The add-in signs in to Spaarke's tenant (`TENANT_ID`) — verified working for a guest in Outlook on the web (2026-10-08).
+- **NOT multi-tenant**: the add-in apps stay single-tenant; the package carries **no `webApplicationInfo`** (task 115 — it made customer-tenant deployment fail with AADSTS700016; the add-in never uses Office SSO). `mergeUnifiedManifest` refuses it. Revisit only for Model 2.
+- **First production deploy waits** for provisioning's directory endpoint (their 240c) + the add-in's runtime customer selection (`{authority, bffApiScope, apiBaseUrl}` into `AuthService.initialize`), its own package ID/name (dev + prod both install in Spaarke's tenant), and a manual prod deploy job. Store (AppSource) publishing is the recommended production distribution, after that.
+- **Server Graph cannot reach a guest's mailbox** (home tenant): email body + attachments are captured IN THE ADD-IN with Office.js (task 116) — never reintroduce a server-only Graph fetch for content.
+- **Office on the web has no `openBrowserWindow`**: anything that opens Spaarke must fall back to `window.open` from the click (task 120).
+- **The add-in is for licensed core users only** (owner 2026-10-13). Workforce contact users (customer staff without a Power Apps licence) use the external SPA, not the Office add-ins.
+  - **Sign-in model: ADR-028 Amendment A9** (owner-approved 2026-10-13; PR #1810).
+    - Licensed core users stay B2B guests on A8's single-tenant Spaarke-tenant client (NAA, then popup).
+    - Workforce contacts sign in to the browser SPA only, through a multitenant Spaarke SPA client at their customer's home directory. They are not guests.
+    - Partners use CIAM.
+  - **Ownership:**
+    - SPA-r3 owns workforce sign-in and registration end to end, including the BFF token acceptance and the stored link.
+    - UAC-r2 owns the baseline role.
+    - Provisioning owns app registrations and consent.
+  - **Terms:** say "Spaarke tenant" and "customer's home directory". A bare "tenant" means the Spaarke tenant.
+  - **The add-in changes nothing.** A9 forbids moving the add-in's sign-in to the multitenant client or to an `organizations`/`common` authority. `/api/office/*` stays Spaarke-tenant only.
+  - **Live-test risk:** a licensed guest signing in to the add-in from their own home Office, with the authority pinned to the Spaarke tenant.
+    - Outlook on the web was verified on 2026-10-08.
+    - Desktop Office and Word are not yet verified.
+    - Microsoft does not document NAA for a guest whose authority is another directory.
+    - If it fails, raise it with the owner before any workaround.
+  - **Teams is in scope (owner 2026-10-13; ADR-028 A9 as updated by SPA-r3 `63b7c575b`).**
+    - The Teams host (the legal front door SPA) signs in workforce contacts AND licensed users through the A9 multitenant client: NAA, with the authority = the Teams context tid.
+    - Licensed users in Teams resolve to their systemuser through the stored link.
+    - External partners (CIAM) get no Teams access.
+    - SPA-r3 owns all of it. The Office add-ins are unchanged (A8).
+  - **Anti-conflict rule:** ADR-028 is the single authority. Before recording an owner auth decision, merge master and check it against ADR-028. On a conflict, raise the §6.5 block before writing it down.
+  - **Dropped work:** the T126 home-tenant scheme of 2026-10-12 was dropped. It is parked on the local branch `wip/t126-workforce-customer`; review findings are in `notes/126-message-to-uac-r2.md`.
+- **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.
+
+### Guest sign-in, PCFs and telemetry — owner decisions 2026-10-08/09 (tasks 121-127)
+- **Dataverse-hosted surfaces sign in against the ENVIRONMENT's tenant, never `/organizations`** (#1453, task 122): `@spaarke/auth` fails closed (`AuthError('tenant_unresolved')`) in a Dataverse host. Tenant precedence is defined once in `Spaarke.Auth/src/tenant.ts`.
+- **PCF sign-in identity: environment variables FIRST, form properties only as a fallback** (`resolveSignInIdentity`, task 123): shipped forms carry static DEV values (the Matter main form binds the dev tenant + App Insights key).
+- **Every BFF-calling PCF declares `external-service-usage enabled="true"`** (owner 2026-10-09), with SemanticSearchControl's domains.
+- **Browser telemetry gets its App Insights connection string from `GET /api/config/client`** (task 127, #1537) — never from a form property or a build-time `VITE_*` key. Remaining old paths: #1551.
+- **A save that reconciles to an existing UNFILED communication files it to the picked record** (owner 2026-10-09, task 121), through the resolver's filing write; never move a filed one; never fail the save.
+- **Base roles are alternatives, not stacked** (owner 2026-10-09): a user holds Spaarke Core User OR Basic User — "Core User without Basic User" is normal.
+- **PCF deploys** (owner 2026-10-09): the new version must be strictly greater than dev's in ALL locations (an un-incremented version imports but does not load) and is re-checked in `customcontrol.version` after import. Deploy from a fresh short-path worktree of master; first compare dev's version/`modifiedon` with master's last change so another session's unmerged deploy is held, not overwritten. Use `/pcf-deploy`.
+
 ### Git, PRs, CI
+- **`gh pr merge` is refused until `Router` reports** (2026-10-07): a watcher that merges on "no failures" can fire early; use `gh pr merge N --auto --merge` and watch the PR state + the deploy run for the exact merge SHA.
+- **Long bash commands with several heredocs mis-parse** ("unexpected EOF while looking for matching `'`") — write multi-file text with the Write tool and run a small Python script for edits (2026-10-07/08).
 - **Merge with `gh pr merge N --merge`** (a merge commit, not squash); **never `--delete-branch`** — the branch continues (2026-09-30).
 - **Only `Router` is a required check** (2026-09-21 / 2026-09-30). `Tier 2 (Advisory) / Full Unit Tests` cancelled at its 30-min cap is not a failure; do not make it blocking. Read `gh pr checks N` and require pending == 0 before trusting a verdict.
 - **One build-heavy agent per worktree** (2026-09-21): concurrent agents' commits swallowed each other through the shared `.git/index`. Verify a commit with `git diff <base> HEAD -- <paths>`, never `git show --stat` or a derived count.
@@ -292,6 +335,9 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Handoffs never pin the HEAD SHA** (2026-09-19): it self-invalidates on the commit that writes it. Use `git log -1`; cite only landmark/merge commits.
 - **Never touch other sessions' measurement worktrees**: `C:/tmp/bffsize/{m,b}`, `C:\wt097`, `C:\wt097r` (2026-10-04 / 2026-10-06). Our own short-path worktrees are `C:\code_files\wtNNNx`, removed after use.
 - **Before a commit, check untracked files** — no blind `git add -A` (2026-09-21).
+- **GitHub GraphQL rate limit is shared across sessions** (2026-10-09): `gh pr create` / `gh pr merge --auto` fail with "API rate limit already exceeded". Fallback: create the PR with REST (`gh api repos/spaarke-dev/spaarke/pulls -X POST …`) and merge with REST (`gh api …/pulls/N/merge -X PUT -f merge_method=merge`) only after `Router` passes on the HEAD sha. Don't push new commits to a branch whose REST-merge watcher is pending.
+- **This worktree has a stray `src/client/shared/Spaarke.UI.Components/node_modules`** (a second React) that makes 7 office-addins jest suites fail locally with "reading 'useContext'" — move it aside for the run and restore it; CI is unaffected (2026-10-09).
+- **Dataverse MCP `read_query` shows datetimes in local time (EDT)**, not UTC (2026-10-09).
 - **Overlap with another branch: compare by function, not by line numbers** (2026-10-04).
 - **`jq` is not installed** — use `gh … --jq`; `gh --jq` accepts no `--arg` (2026-10-06). In PowerShell, `R` is the `Invoke-History` alias — never name a helper function `R`.
 - **Shell traps** (2026-09-19):
@@ -324,6 +370,8 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
   - Linux cold start is 90–120 s — a `/healthz` timeout after a passing hash check is not a reason to redeploy.
   - Probe an authed route → 401 (404 = incomplete package).
 - **A failed Kudu upload can leave the app STOPPED** after the script's recovery (2026-09-19): check state after every deploy and start it if not `Running`.
+- **`pac solution import` exits 0 when the import fails** (2026-10-10, #1591), so `Import-SolutionScoped.ps1` can report "Imported and scoped-published" and publish the OLD bundle. After every import, read back `solutions.version` (must equal the ZIP's) or the newest `importjob.progress` (must be 100). `customcontrols.version` does NOT move under the scoped publish (no PublishXml element for it); the served bundle is the published `cc_<ns>.<ctrl>/bundle.js`, so compare its content with the build and have the owner check the footer.
+- **A PCF manifest `*-key` attribute must not contain an apostrophe** (Dataverse XSD; ArchTest `PcfManifestKeyAttributeGuardTests` since #1597). In a fresh worktree VisualHost also needs `npm install` in `src/client/shared/Spaarke.Visuals`.
 - **M365 Admin Center refuses a non-greater manifest/package version** ("Please update the version number") (2026-09-19): bump before any re-upload; never ask for a same-version re-upload.
 
 ### Dataverse / platform facts (measured — do not re-derive)

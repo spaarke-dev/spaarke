@@ -11,6 +11,33 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class GraphModule
 {
     /// <summary>
+    /// App settings naming this stamp's own SharePoint Embedded containers. Written by provisioning (H4b, from
+    /// H8's container — task 227c) or an operator; never by the customer. The ownership guard treats them as
+    /// owned without reading a marker (task 227d). Only <c>SharePointEmbedded:OwnedContainerIds</c> is a list
+    /// (separated by <c>,</c> or <c>;</c>); the other two are single ids, taken verbatim.
+    /// </summary>
+    /// <remarks>
+    /// <c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
+    /// marker (dev, demo): an operator lists them there. Provisioned stamps never need it — the BFF marks every
+    /// container it creates, and H4b writes the other two.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> StampContainerSettingKeys = new[]
+    {
+        "EmailProcessing:DefaultContainerId",
+        "Communication:ArchiveContainerId",
+        OwnedContainerIdsKey,
+    };
+
+    private const string OwnedContainerIdsKey = "SharePointEmbedded:OwnedContainerIds";
+
+    /// <summary>The stamp's configured container ids (see <see cref="StampContainerSettingKeys"/>).</summary>
+    internal static IEnumerable<string> StampContainerIds(IConfiguration configuration)
+        => StampContainerSettingKeys.SelectMany(key => key == OwnedContainerIdsKey
+                ? (configuration[key] ?? string.Empty).Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : new[] { configuration[key]?.Trim() ?? string.Empty })
+            .Where(id => id.Length > 0);
+
+    /// <summary>
     /// Adds Graph API resilience handler, named HttpClient, GraphServiceClient factory,
     /// and Dataverse service.
     /// </summary>
@@ -42,6 +69,17 @@ public static class GraphModule
 
         // Singleton GraphServiceClient factory (uses IHttpClientFactory with resilience handler)
         services.AddSingleton<IGraphClientFactory, GraphClientFactory>();
+
+        // The only source of app-only Graph clients for SharePoint Embedded work: refuses containers this
+        // stamp does not own before Graph is called (owner D28/D29, task 227d). Singleton: stateless apart
+        // from the shared GraphMetadataCache. The stamp's configured containers are read HERE, not in the
+        // guard, so the Graph plumbing layer originates no container id.
+        services.AddSingleton(sp => new SpeContainerOwnershipGuard(
+            sp.GetRequiredService<IGraphClientFactory>(),
+            StampContainerIds(configuration),
+            sp.GetRequiredService<CustomerIdentity>(),
+            sp.GetRequiredService<ILogger<SpeContainerOwnershipGuard>>(),
+            sp.GetService<GraphMetadataCache>()));
 
         // Dataverse service - Singleton for ServiceClient connection reuse
         services.AddSingleton<IDataverseService>(sp =>

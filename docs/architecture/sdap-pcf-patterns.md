@@ -145,7 +145,7 @@ Adaptive editor that detects the AI scope entity type from the form context and 
 - **MUST** use Fluent UI v9 exclusively — no v8 components (ADR-021)
 - **MUST** use React 16 APIs in PCF (`ReactDOM.render`, not `createRoot`) except UniversalQuickCreate which bundles its own React 18 (ADR-022)
 - **MUST** include a version footer in every PCF control UI for deployment verification
-- **MUST** update version in 4 locations on release: source manifest, UI footer, solution manifest, solution control manifest
+- **MUST** update version in every location the `pcf-deploy` skill's version table lists on release (source manifest, UI footer, solution manifest, solution control manifest, pack.ps1)
 - **MUST NOT** create standalone dialogs as Custom Page + PCF wrapper — use Code Pages instead (ADR-006)
 - **MUST NOT** mix Fluent UI v8 and v9 in the same control
 - **MUST NOT** hardcode Dataverse entity schemas or client IDs

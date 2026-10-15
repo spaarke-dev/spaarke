@@ -1,12 +1,16 @@
 /**
  * Unit tests for SearchCommandBar component
  *
+ * Layout under test: [Refresh] [Columns] [Delete] [... overflow]. The overflow menu hosts
+ * Email a Link / Open in Web / Open in Desktop / Download / Send to Index / Save Search.
+ *
  * Covers:
- *   - Always-visible Refresh button
- *   - Selection-dependent button disabled states (0, 1, multiple selections)
- *   - Document-only commands visibility (hidden for non-document domains)
- *   - Callback invocations with correct arguments
- *   - Tooltip content based on selection state
+ *   - Always-visible toolbar buttons (Refresh, Columns, Delete)
+ *   - Selection-dependent enabled/disabled states (0, 1, multiple selections)
+ *   - Document-only overflow commands are shown only in the documents domain
+ *   - Callback invocations with the correct arguments
+ *   - Column picker: checked state mirrors hiddenColumns; toggling reports the new hidden set
+ *   - Save Search is always available
  */
 
 import React from 'react';
@@ -14,24 +18,17 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SearchCommandBar, type SearchCommandBarProps } from '../../components/SearchCommandBar';
 import type { SearchDomain } from '../../types';
-
-// ---------------------------------------------------------------------------
-// Mock icons
-// ---------------------------------------------------------------------------
-
-jest.mock('@fluentui/react-icons', () => ({
-  DeleteRegular: () => <span data-testid="icon-delete" />,
-  ArrowClockwiseRegular: () => <span data-testid="icon-refresh" />,
-  MailRegular: () => <span data-testid="icon-mail" />,
-  OpenRegular: () => <span data-testid="icon-open" />,
-  DesktopRegular: () => <span data-testid="icon-desktop" />,
-  ArrowDownloadRegular: () => <span data-testid="icon-download" />,
-  DatabaseSearchRegular: () => <span data-testid="icon-index" />,
-}));
+import type { IDatasetColumn } from '../../hooks/useSearchViewDefinitions';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const COLUMNS: IDatasetColumn[] = [
+  { name: 'name', displayName: 'Name', dataType: 'SingleLine.Text', isPrimary: true },
+  { name: 'similarity', displayName: 'Similarity', dataType: 'Decimal' },
+  { name: 'modified', displayName: 'Modified', dataType: 'DateAndTime.DateOnly' },
+];
 
 const DEFAULT_PROPS: SearchCommandBarProps = {
   selectedIds: [],
@@ -43,6 +40,10 @@ const DEFAULT_PROPS: SearchCommandBarProps = {
   onOpenInDesktop: jest.fn(),
   onDownload: jest.fn(),
   onSendToIndex: jest.fn(),
+  onSaveSearch: jest.fn(),
+  columns: [],
+  hiddenColumns: new Set<string>(),
+  onHiddenColumnsChange: jest.fn(),
 };
 
 function renderCommandBar(props: Partial<SearchCommandBarProps> = {}) {
@@ -51,6 +52,33 @@ function renderCommandBar(props: Partial<SearchCommandBarProps> = {}) {
       <SearchCommandBar {...DEFAULT_PROPS} {...props} />
     </FluentProvider>
   );
+}
+
+/** Open the "..." overflow menu (secondary actions render only while it is open). */
+function openOverflow() {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+}
+
+/**
+ * The Delete toolbar button. Its accessible name is the Tooltip (relationship="label") text, which
+ * tells the user why it is disabled: "Select items to delete" with no selection, "Delete selected" otherwise.
+ */
+function deleteButton(hasSelection: boolean) {
+  return screen.getByRole('button', { name: hasSelection ? 'Delete selected' : 'Select items to delete' });
+}
+
+/** The overflow menu item with this accessible name. */
+function overflowItem(name: string) {
+  return screen.getByRole('menuitem', { name });
+}
+
+/** Fluent MenuItem exposes its disabled state through aria-disabled (it stays focusable). */
+function expectDisabled(el: HTMLElement) {
+  expect(el).toHaveAttribute('aria-disabled', 'true');
+}
+
+function expectEnabled(el: HTMLElement) {
+  expect(el).not.toHaveAttribute('aria-disabled', 'true');
 }
 
 // ---------------------------------------------------------------------------
@@ -62,63 +90,76 @@ describe('SearchCommandBar', () => {
     jest.clearAllMocks();
   });
 
-  // ---- Always-visible buttons ----
+  // ---- Always-visible toolbar buttons ----
 
-  it('renders Refresh button', () => {
+  it('renders Refresh, Columns, Delete (with its why-disabled tooltip label) and the overflow trigger on the toolbar', () => {
     renderCommandBar();
 
-    expect(screen.getByText('Refresh')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose columns' })).toBeInTheDocument();
+    expect(deleteButton(false)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More actions' })).toBeInTheDocument();
   });
 
-  it('calls onRefresh when Refresh is clicked', () => {
-    const onRefresh = jest.fn();
-    renderCommandBar({ onRefresh });
+  it('keeps secondary actions out of the toolbar until the overflow menu is opened', () => {
+    renderCommandBar();
 
-    fireEvent.click(screen.getByText('Refresh'));
+    expect(screen.queryByRole('menuitem', { name: 'Email a Link' })).not.toBeInTheDocument();
+
+    openOverflow();
+
+    expect(overflowItem('Email a Link')).toBeInTheDocument();
+  });
+
+  it('calls onRefresh when Refresh is clicked, regardless of selection', () => {
+    const onRefresh = jest.fn();
+    renderCommandBar({ onRefresh, selectedIds: [] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders Delete and Email a Link buttons', () => {
-    renderCommandBar();
-
-    expect(screen.getByText('Delete')).toBeInTheDocument();
-    expect(screen.getByText('Email a Link')).toBeInTheDocument();
   });
 
   // ---- No selection (disabled states) ----
 
   describe('with no selection', () => {
-    it('disables Delete button', () => {
+    it('disables Delete', () => {
       renderCommandBar({ selectedIds: [] });
 
-      const deleteBtn = screen.getByText('Delete').closest('button');
-      expect(deleteBtn).toBeDisabled();
+      expect(deleteButton(false)).toBeDisabled();
     });
 
-    it('disables Email a Link button', () => {
-      renderCommandBar({ selectedIds: [] });
-
-      const emailBtn = screen.getByText('Email a Link').closest('button');
-      expect(emailBtn).toBeDisabled();
-    });
-
-    it('disables document-only buttons when no selection', () => {
-      renderCommandBar({ selectedIds: [], activeDomain: 'documents' });
-
-      expect(screen.getByText('Open in Web').closest('button')).toBeDisabled();
-      expect(screen.getByText('Open in Desktop').closest('button')).toBeDisabled();
-      expect(screen.getByText('Download').closest('button')).toBeDisabled();
-      expect(screen.getByText('Send to Index').closest('button')).toBeDisabled();
-    });
-
-    it('does not call onDelete when Delete is clicked with no selection', () => {
+    it('does not call onDelete when the disabled Delete is clicked', () => {
       const onDelete = jest.fn();
       renderCommandBar({ selectedIds: [], onDelete });
 
-      fireEvent.click(screen.getByText('Delete'));
+      fireEvent.click(deleteButton(false));
 
       expect(onDelete).not.toHaveBeenCalled();
+    });
+
+    it('disables Email a Link and every document command in the overflow menu', () => {
+      renderCommandBar({ selectedIds: [], activeDomain: 'documents' });
+      openOverflow();
+
+      expectDisabled(overflowItem('Email a Link'));
+      expectDisabled(overflowItem('Open in Web'));
+      expectDisabled(overflowItem('Open in Desktop'));
+      expectDisabled(overflowItem('Download'));
+      expectDisabled(overflowItem('Send to Index'));
+    });
+
+    it('does not call a handler when a disabled overflow command is clicked', () => {
+      const onEmailLink = jest.fn();
+      const onSendToIndex = jest.fn();
+      renderCommandBar({ selectedIds: [], activeDomain: 'documents', onEmailLink, onSendToIndex });
+      openOverflow();
+
+      fireEvent.click(overflowItem('Email a Link'));
+      fireEvent.click(overflowItem('Send to Index'));
+
+      expect(onEmailLink).not.toHaveBeenCalled();
+      expect(onSendToIndex).not.toHaveBeenCalled();
     });
   });
 
@@ -127,90 +168,51 @@ describe('SearchCommandBar', () => {
   describe('with single selection', () => {
     const singleSelection = ['record-abc-123'];
 
-    it('enables Delete button', () => {
-      renderCommandBar({ selectedIds: singleSelection });
+    it('enables Delete and every overflow command', () => {
+      renderCommandBar({ selectedIds: singleSelection, activeDomain: 'documents' });
 
-      const deleteBtn = screen.getByText('Delete').closest('button');
-      expect(deleteBtn).not.toBeDisabled();
+      expect(deleteButton(true)).not.toBeDisabled();
+
+      openOverflow();
+      expectEnabled(overflowItem('Email a Link'));
+      expectEnabled(overflowItem('Open in Web'));
+      expectEnabled(overflowItem('Open in Desktop'));
+      expectEnabled(overflowItem('Download'));
+      expectEnabled(overflowItem('Send to Index'));
     });
 
-    it('enables Email a Link button', () => {
-      renderCommandBar({ selectedIds: singleSelection });
-
-      const emailBtn = screen.getByText('Email a Link').closest('button');
-      expect(emailBtn).not.toBeDisabled();
-    });
-
-    it('calls onDelete with selected IDs', () => {
+    it('calls onDelete with the selected IDs', () => {
       const onDelete = jest.fn();
       renderCommandBar({ selectedIds: singleSelection, onDelete });
 
-      fireEvent.click(screen.getByText('Delete'));
+      fireEvent.click(deleteButton(true));
 
+      expect(onDelete).toHaveBeenCalledTimes(1);
       expect(onDelete).toHaveBeenCalledWith(['record-abc-123']);
     });
 
-    it('calls onEmailLink with the single selected ID', () => {
-      const onEmailLink = jest.fn();
-      renderCommandBar({
-        selectedIds: singleSelection,
-        onEmailLink,
-        activeDomain: 'documents',
-      });
+    it.each([
+      ['Email a Link', 'onEmailLink'],
+      ['Open in Web', 'onOpenInWeb'],
+      ['Open in Desktop', 'onOpenInDesktop'],
+      ['Download', 'onDownload'],
+    ] as const)('%s calls %s with the single selected ID', (label, handlerName) => {
+      const handler = jest.fn();
+      renderCommandBar({ selectedIds: singleSelection, activeDomain: 'documents', [handlerName]: handler });
+      openOverflow();
 
-      fireEvent.click(screen.getByText('Email a Link'));
+      fireEvent.click(overflowItem(label));
 
-      expect(onEmailLink).toHaveBeenCalledWith('record-abc-123');
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith('record-abc-123');
     });
 
-    it('calls onOpenInWeb with single ID in documents domain', () => {
-      const onOpenInWeb = jest.fn();
-      renderCommandBar({
-        selectedIds: singleSelection,
-        onOpenInWeb,
-        activeDomain: 'documents',
-      });
-
-      fireEvent.click(screen.getByText('Open in Web'));
-
-      expect(onOpenInWeb).toHaveBeenCalledWith('record-abc-123');
-    });
-
-    it('calls onOpenInDesktop with single ID in documents domain', () => {
-      const onOpenInDesktop = jest.fn();
-      renderCommandBar({
-        selectedIds: singleSelection,
-        onOpenInDesktop,
-        activeDomain: 'documents',
-      });
-
-      fireEvent.click(screen.getByText('Open in Desktop'));
-
-      expect(onOpenInDesktop).toHaveBeenCalledWith('record-abc-123');
-    });
-
-    it('calls onDownload with single ID in documents domain', () => {
-      const onDownload = jest.fn();
-      renderCommandBar({
-        selectedIds: singleSelection,
-        onDownload,
-        activeDomain: 'documents',
-      });
-
-      fireEvent.click(screen.getByText('Download'));
-
-      expect(onDownload).toHaveBeenCalledWith('record-abc-123');
-    });
-
-    it('calls onSendToIndex with selected IDs in documents domain', () => {
+    it('calls onSendToIndex with the selected IDs (array)', () => {
       const onSendToIndex = jest.fn();
-      renderCommandBar({
-        selectedIds: singleSelection,
-        onSendToIndex,
-        activeDomain: 'documents',
-      });
+      renderCommandBar({ selectedIds: singleSelection, activeDomain: 'documents', onSendToIndex });
+      openOverflow();
 
-      fireEvent.click(screen.getByText('Send to Index'));
+      fireEvent.click(overflowItem('Send to Index'));
 
       expect(onSendToIndex).toHaveBeenCalledWith(['record-abc-123']);
     });
@@ -221,93 +223,167 @@ describe('SearchCommandBar', () => {
   describe('with multiple selection', () => {
     const multiSelection = ['id-1', 'id-2', 'id-3'];
 
-    it('enables Delete button', () => {
+    it('enables Delete', () => {
       renderCommandBar({ selectedIds: multiSelection });
 
-      expect(screen.getByText('Delete').closest('button')).not.toBeDisabled();
+      expect(deleteButton(true)).not.toBeDisabled();
     });
 
-    it('disables Email a Link (requires single selection)', () => {
-      renderCommandBar({ selectedIds: multiSelection });
+    it('disables the single-record commands (Email a Link, Open in Web/Desktop, Download)', () => {
+      renderCommandBar({ selectedIds: multiSelection, activeDomain: 'documents' });
+      openOverflow();
 
-      expect(screen.getByText('Email a Link').closest('button')).toBeDisabled();
+      expectDisabled(overflowItem('Email a Link'));
+      expectDisabled(overflowItem('Open in Web'));
+      expectDisabled(overflowItem('Open in Desktop'));
+      expectDisabled(overflowItem('Download'));
     });
 
-    it('disables single-select document commands with multiple selection', () => {
-      renderCommandBar({
-        selectedIds: multiSelection,
-        activeDomain: 'documents',
-      });
+    it('keeps Send to Index enabled (it accepts many records)', () => {
+      renderCommandBar({ selectedIds: multiSelection, activeDomain: 'documents' });
+      openOverflow();
 
-      expect(screen.getByText('Open in Web').closest('button')).toBeDisabled();
-      expect(screen.getByText('Open in Desktop').closest('button')).toBeDisabled();
-      expect(screen.getByText('Download').closest('button')).toBeDisabled();
-    });
-
-    it('enables Send to Index with multiple selection', () => {
-      renderCommandBar({
-        selectedIds: multiSelection,
-        activeDomain: 'documents',
-      });
-
-      expect(screen.getByText('Send to Index').closest('button')).not.toBeDisabled();
+      expectEnabled(overflowItem('Send to Index'));
     });
 
     it('calls onDelete with all selected IDs', () => {
       const onDelete = jest.fn();
       renderCommandBar({ selectedIds: multiSelection, onDelete });
 
-      fireEvent.click(screen.getByText('Delete'));
+      fireEvent.click(deleteButton(true));
 
       expect(onDelete).toHaveBeenCalledWith(['id-1', 'id-2', 'id-3']);
     });
 
     it('calls onSendToIndex with all selected IDs', () => {
       const onSendToIndex = jest.fn();
-      renderCommandBar({
-        selectedIds: multiSelection,
-        onSendToIndex,
-        activeDomain: 'documents',
-      });
+      renderCommandBar({ selectedIds: multiSelection, activeDomain: 'documents', onSendToIndex });
+      openOverflow();
 
-      fireEvent.click(screen.getByText('Send to Index'));
+      fireEvent.click(overflowItem('Send to Index'));
 
       expect(onSendToIndex).toHaveBeenCalledWith(['id-1', 'id-2', 'id-3']);
+    });
+
+    it('does not call onEmailLink for a multi-selection', () => {
+      const onEmailLink = jest.fn();
+      renderCommandBar({ selectedIds: multiSelection, onEmailLink });
+      openOverflow();
+
+      fireEvent.click(overflowItem('Email a Link'));
+
+      expect(onEmailLink).not.toHaveBeenCalled();
     });
   });
 
   // ---- Domain-specific command visibility ----
 
   describe('document-only commands', () => {
-    it('shows document-only commands when activeDomain is documents', () => {
+    it('shows the document commands in the overflow menu for the documents domain', () => {
       renderCommandBar({ activeDomain: 'documents' });
+      openOverflow();
 
-      expect(screen.getByText('Open in Web')).toBeInTheDocument();
-      expect(screen.getByText('Open in Desktop')).toBeInTheDocument();
-      expect(screen.getByText('Download')).toBeInTheDocument();
-      expect(screen.getByText('Send to Index')).toBeInTheDocument();
+      expect(overflowItem('Open in Web')).toBeInTheDocument();
+      expect(overflowItem('Open in Desktop')).toBeInTheDocument();
+      expect(overflowItem('Download')).toBeInTheDocument();
+      expect(overflowItem('Send to Index')).toBeInTheDocument();
     });
 
-    it.each<SearchDomain>(['matters', 'projects', 'invoices'])('hides document-only commands for %s domain', domain => {
+    it.each<SearchDomain>(['matters', 'projects', 'invoices'])('hides the document commands for the %s domain', domain => {
       renderCommandBar({ activeDomain: domain });
+      openOverflow();
 
-      expect(screen.queryByText('Open in Web')).not.toBeInTheDocument();
-      expect(screen.queryByText('Open in Desktop')).not.toBeInTheDocument();
-      expect(screen.queryByText('Download')).not.toBeInTheDocument();
-      expect(screen.queryByText('Send to Index')).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Open in Web' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Open in Desktop' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Download' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Send to Index' })).not.toBeInTheDocument();
     });
 
-    it('always shows Refresh, Delete, Email a Link regardless of domain', () => {
-      const domains: SearchDomain[] = ['documents', 'matters', 'projects', 'invoices'];
-      domains.forEach(domain => {
-        const { unmount } = renderCommandBar({ activeDomain: domain });
+    it.each<SearchDomain>(['documents', 'matters', 'projects', 'invoices'])(
+      'always offers Refresh, Delete, Email a Link and Save Search (%s domain)',
+      domain => {
+        renderCommandBar({ activeDomain: domain });
 
-        expect(screen.getByText('Refresh')).toBeInTheDocument();
-        expect(screen.getByText('Delete')).toBeInTheDocument();
-        expect(screen.getByText('Email a Link')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^(Delete selected|Select items to delete)$/ })).toBeInTheDocument();
 
-        unmount();
+        openOverflow();
+        expect(overflowItem('Email a Link')).toBeInTheDocument();
+        expect(overflowItem('Save Search')).toBeInTheDocument();
+      }
+    );
+  });
+
+  // ---- Save Search ----
+
+  describe('Save Search', () => {
+    it('is enabled with no selection and calls onSaveSearch', () => {
+      const onSaveSearch = jest.fn();
+      renderCommandBar({ selectedIds: [], onSaveSearch });
+      openOverflow();
+
+      expectEnabled(overflowItem('Save Search'));
+      fireEvent.click(overflowItem('Save Search'));
+
+      expect(onSaveSearch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ---- Column picker ----
+
+  describe('column picker', () => {
+    function openColumns() {
+      fireEvent.click(screen.getByRole('button', { name: 'Choose columns' }));
+    }
+
+    it('lists every column as a checkbox item', () => {
+      renderCommandBar({ columns: COLUMNS });
+      openColumns();
+
+      COLUMNS.forEach(col => {
+        expect(screen.getByRole('menuitemcheckbox', { name: col.displayName })).toBeInTheDocument();
       });
+    });
+
+    it('checks visible columns and leaves hidden columns unchecked', () => {
+      renderCommandBar({ columns: COLUMNS, hiddenColumns: new Set(['similarity']) });
+      openColumns();
+
+      expect(screen.getByRole('menuitemcheckbox', { name: 'Name' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('menuitemcheckbox', { name: 'Modified' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('menuitemcheckbox', { name: 'Similarity' })).toHaveAttribute('aria-checked', 'false');
+    });
+
+    it('reports the new hidden set when a visible column is unchecked', () => {
+      const onHiddenColumnsChange = jest.fn();
+      renderCommandBar({ columns: COLUMNS, hiddenColumns: new Set<string>(), onHiddenColumnsChange });
+      openColumns();
+
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Similarity' }));
+
+      expect(onHiddenColumnsChange).toHaveBeenCalledTimes(1);
+      expect(Array.from(onHiddenColumnsChange.mock.calls[0][0] as Set<string>)).toEqual(['similarity']);
+    });
+
+    it('reports an emptied hidden set when a hidden column is checked again', () => {
+      const onHiddenColumnsChange = jest.fn();
+      renderCommandBar({ columns: COLUMNS, hiddenColumns: new Set(['similarity']), onHiddenColumnsChange });
+      openColumns();
+
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Similarity' }));
+
+      expect(onHiddenColumnsChange).toHaveBeenCalledTimes(1);
+      expect((onHiddenColumnsChange.mock.calls[0][0] as Set<string>).size).toBe(0);
+    });
+
+    it('preserves other hidden columns when one more is hidden', () => {
+      const onHiddenColumnsChange = jest.fn();
+      renderCommandBar({ columns: COLUMNS, hiddenColumns: new Set(['modified']), onHiddenColumnsChange });
+      openColumns();
+
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Name' }));
+
+      expect(Array.from(onHiddenColumnsChange.mock.calls[0][0] as Set<string>).sort()).toEqual(['modified', 'name']);
     });
   });
 });

@@ -502,9 +502,9 @@ public class OutboundAttachmentArchiveTests
         var gcf = Mock.Of<IGraphClientFactory>();
         var speMock = new Mock<SpeFileStore>(
             MockBehavior.Loose,
-            new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>()),
-            new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>(), metadataCache),
-            new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+            new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
+            new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>(), metadataCache),
+            new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
             null!);
 

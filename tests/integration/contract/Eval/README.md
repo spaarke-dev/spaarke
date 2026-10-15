@@ -49,15 +49,15 @@ The quality spine of the AI architecture redesign. Every case is a golden uttera
 
 ## CI wiring and the merge gate (ACTIVE since task 026)
 
-**Pass 1 (informational)**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and runs inside the root `dotnet test` of `.github/workflows/sdap-ci.yml` (`build-test` job, test pass 1) on every PR. The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; `*.json` edits under `tests/**` are NOT in the workflow's `paths-ignore`, so BA-only case edits trigger a CI run.
+**Pass 1 (informational)**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and runs inside the `dotnet test` shards of Tier 2 `Full Unit Tests (Debug)` (`.github/workflows/ci-tier2-advisory.yml`, test pass 1, advisory) on every PR that changes BFF paths (the Router dispatches the shards only then). The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; the CI Router has no `paths:` filter, so BA-only case edits trigger a CI run.
 
-**Merge gate (blocking — NFR-02)**: the dedicated `eval-gate` job in `sdap-ci.yml` runs
+**Merge gate (blocking — NFR-02)**: the dedicated `eval-gate` job in `.github/workflows/ci-tier1-blocking.yml` runs
 
 ```
 dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "Category=GoldenUtteranceEval"
 ```
 
-with **no `continue-on-error`**. Placement rationale (deviation from the original task-011 sketch, which put a step inside `build-test`): the `build-test` job carries job-level `continue-on-error: true` (2026-06-24 informational posture), which swallows any step failure inside it — and branch protection is currently disabled on the repo, so the workflow-run conclusion is the only mechanical merge signal. A separate no-tolerance job is the only additive change that turns a red eval into a red workflow run. When branch protection / rulesets are re-enabled, mark **"Eval Gate (Golden Utterances)"** as a REQUIRED status check to hard-block merge.
+with **no `continue-on-error`**. Placement rationale (history: the gate was a separate no-tolerance job in the retired `sdap-ci.yml`, because that workflow's `build-test` job carried job-level `continue-on-error: true` and would have swallowed a step failure; `sdap-ci.yml` was retired 2026-10-14). It now lives in Tier 1, which is blocking: a red eval fails the required `Router` check, so no separate required-check registration is needed. The job name is **"Eval Gate (Golden Utterances)"**.
 
 Verified 2026-07-05 (task 026): a deliberately failing scratch case made `dotnet test --filter "Category=GoldenUtteranceEval"` exit 1; the scratch case was then removed.
 
@@ -84,7 +84,7 @@ A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtte
 
 ## Eval-suite-green merge gate — full family scope (r2 task 071 / FR-D-02, NFR-02)
 
-The `eval-gate` job in `sdap-ci.yml` gates on the `Category=GoldenUtteranceEval` trait, which now spans **every** in-scope R2 family: the golden-utterance suite + P2 loop/injection, the D-F0(e) Resourcefulness family (task 031), the Origin-classification family (task 033), the ContextEnvelope budget-breach-fails-eval check (task 054, FR-B-05), and the memory-write capture→recall family (task 057). Any single family red fails the merge — no family is exempt, and no second gate mechanism exists.
+The `eval-gate` job in `ci-tier1-blocking.yml` gates on the `Category=GoldenUtteranceEval` trait, which now spans **every** in-scope R2 family: the golden-utterance suite + P2 loop/injection, the D-F0(e) Resourcefulness family (task 031), the Origin-classification family (task 033), the ContextEnvelope budget-breach-fails-eval check (task 054, FR-B-05), and the memory-write capture→recall family (task 057). Any single family red fails the merge — no family is exempt, and no second gate mechanism exists.
 
 **Memory-poisoning eval families are explicitly OUT OF SCOPE and MUST NOT be added to this gate.** They are DEFERRED to the separate memory-governance project per spec FR-B-10 (`projects/spaarke-ai-architecture-redesign-r2/spec.md` item 38 + the Memory hard-governance rules deferral). This is a deliberate scope boundary, not an oversight — do not add a `[Trait("Category", "GoldenUtteranceEval")]` memory-poisoning case here until the governance project ships one.
 

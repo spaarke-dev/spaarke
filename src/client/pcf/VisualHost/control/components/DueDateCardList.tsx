@@ -82,7 +82,11 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         // Execute the resolved FetchXML (from override, custom, or view)
         const encodedFetchXml = encodeURIComponent(fetchXml);
         const result = await webApi.retrieveMultipleRecords(resolved.entityName, `?fetchXml=${encodedFetchXml}`);
-        setCards(result.entities.map(record => mapEventToCardProps(record)));
+        setCards(
+          result.entities
+            .map(record => mapEventToCardProps(record))
+            .filter((c): c is IEventDueDateCardProps => c !== null)
+        );
       } else {
         // Fallback: FetchXML query with link-entity for event type
         // Uses attribute names (not navigation property names) for reliable cross-environment support
@@ -117,7 +121,11 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
 
         const encodedFallback = encodeURIComponent(fallbackFetchXml);
         const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFallback}`);
-        setCards(result.entities.map(record => mapEventToCardProps(record)));
+        setCards(
+          result.entities
+            .map(record => mapEventToCardProps(record))
+            .filter((c): c is IEventDueDateCardProps => c !== null)
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

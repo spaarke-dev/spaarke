@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{769dbc97-face-4046-99e3-9038b83c51f9}</savedqueryid>
+    <layoutxml>
+      <grid name="sprk_contacttype_refs" jump="sprk_contacttypename" select="1" icon="1" preview="1">
+        <row name="sprk_contacttype_ref" id="sprk_contacttype_refid">
+          <cell name="sprk_contacttypename" width="300" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>2</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_contacttype_ref">
+          <attribute name="sprk_contacttype_refid" />
+          <attribute name="sprk_contacttypename" />
+          <attribute name="createdon" />
+          <order attribute="sprk_contacttypename" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Contact Type Associated View" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

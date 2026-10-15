@@ -60,16 +60,31 @@ public sealed class TemplateEngine : ITemplateEngine
                     ? args[0]!.ToString()
                     : args.ElementAtOrDefault(1)?.ToString() ?? ""));
 
-        // Register `joinIds` helper: {{joinIds arr}} → comma-separated string suitable for
-        // FetchXML `operator='in' value='...'` clauses. Used by playbooks consuming
-        // LookupUserMembership node output (FR-1B.2 + FR-3H1.2, R3 task 002).
+        // Register `joinIds` helper: {{joinIds arr}} → comma-separated string (FR-1B.2 + FR-3H1.2, R3 task 002).
+        // ⚠️ NOT for FetchXML (ISS-018, #1452): Dataverse ignores the `value` attribute of a list operator, so
+        // `operator="in" value="{{joinIds …}}"` is a condition with NO values and the query fails ("The value passed
+        // for ConditionOperator.In is empty") for every list, empty or not. FetchXML uses `fetchInGuids` below; the
+        // FetchXmlShapeValidator rejects joinIds inside FetchXML. The comma shape suits only an Azure AI Search
+        // `search.in(field, '{{joinIds …}}', ',')` filter.
         // Behavior:
         //   - IEnumerable (List<string>, List<Guid>, arrays, JsonElement-derived List<object>) → "a,b,c"
         //   - Null / UndefinedBindingResult (unresolved binding) / non-enumerable scalar → ""
         //   - Empty enumerable → ""
-        //   - Null elements within enumerable → empty token (preserves position, harmless for FetchXML IN)
+        //   - Null elements within enumerable → empty token (preserves position)
         _handlebars.RegisterHelper("joinIds", (writer, ctx, args) =>
             writer.WriteSafeString(JoinIds(args.Length > 0 ? args[0] : null)));
+
+        // ISS-018 (#1452, owner decision D-77): {{fetchInGuids arr}} writes a GUID list the way FetchXML list
+        // operators read it — one <value> child per id — for use as
+        //   <condition attribute="sprk_regardingmatter" operator="in">{{fetchInGuids myMatters.ids}}</condition>
+        // GUID-only, so it never writes caller text into the query markup (each id is re-emitted in canonical "D"
+        // form). Fails CLOSED, selecting nothing: an empty / null / unresolved list, or ANY element that is not a
+        // GUID, emits the single impossible match <value>00000000-0000-0000-0000-000000000000</value>, so the
+        // condition stays valid (an `in` with zero values is a Dataverse error) and the other OR branches still
+        // work. Duplicates are removed; output is sorted so the rendered text is deterministic. For `in` ONLY: under
+        // `not-in` the impossible match would match every row, so the shape check refuses the helper there.
+        _handlebars.RegisterHelper(Nodes.FetchXmlShapeValidator.ListHelperName, (writer, ctx, args) =>
+            writer.WriteSafeString(FetchInGuids(args.Length > 0 ? args[0] : null, _logger)));
 
         // R7 Wave 11 task 112 (Option B Layer 1 helpers): the standard set required by
         // the DAILY-BRIEFING-NARRATE playbook's runtime template expressions + future
@@ -437,6 +452,59 @@ public sealed class TemplateEngine : ITemplateEngine
 
         // Non-enumerable scalar (number, bool, object) — caller likely passed wrong shape.
         return string.Empty;
+    }
+
+    /// <summary>The value a fail-closed <c>fetchInGuids</c> writes: no Dataverse row has an empty id.</summary>
+    internal const string ImpossibleMatchValue = "<value>00000000-0000-0000-0000-000000000000</value>";
+
+    /// <summary>
+    /// <c>{{fetchInGuids arr}}</c> core (ISS-018). One <c>&lt;value&gt;</c> per distinct GUID, sorted; the single
+    /// impossible match when the list is empty/unresolved or when any element is not a GUID (never a broader query).
+    /// </summary>
+    internal static string FetchInGuids(object? value, ILogger? logger = null)
+    {
+        if (value is null || value is UndefinedBindingResult || value is string || value is not IEnumerable enumerable)
+        {
+            return ImpossibleMatchValue;
+        }
+
+        var ids = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var item in enumerable)
+        {
+            var text = item switch
+            {
+                null => null,
+                Guid g => g.ToString("D"),
+                JsonElement { ValueKind: JsonValueKind.String } je => je.GetString(),
+                _ => item.ToString(),
+            };
+
+            if (text is null || !Guid.TryParse(text.Trim(), out var id))
+            {
+                // Fail closed: one bad element means the list is not what the author thinks it is.
+                logger?.LogWarning(
+                    "fetchInGuids: a list element is not a GUID; the condition selects nothing (impossible match) instead of a partial list");
+                return ImpossibleMatchValue;
+            }
+
+            if (id != Guid.Empty)
+            {
+                ids.Add(id.ToString("D"));
+            }
+        }
+
+        if (ids.Count == 0)
+        {
+            return ImpossibleMatchValue;
+        }
+
+        var builder = new System.Text.StringBuilder(ids.Count * 52);
+        foreach (var id in ids)
+        {
+            builder.Append("<value>").Append(id).Append("</value>");
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>

@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{d8a53823-6e24-f111-88b5-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_/icons/entity/analysischatmessage.svg</Name>
+  <DisplayName>sprk_analysischatmessage Icon</DisplayName>
+  <Description>Fluent UI icon: ChatBubblesQuestion20Regular - Analysis chat message — conversation message in analysis context</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentityanalysischatmessagesvgD8A53823-6E24-F111-88B5-7C1E520AA4DF</FileName>
+</WebResource>

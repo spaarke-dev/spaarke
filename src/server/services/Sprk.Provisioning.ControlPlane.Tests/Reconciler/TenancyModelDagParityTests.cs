@@ -137,7 +137,8 @@ public sealed class TenancyModelDagParityTests
     //                                         tenancyModel; both models take the unified per-customer creation
     //                                         path. Kept in inventory as a historical record.)
     //     - H12cRuntimeReferencesHandler     (switch Model1Shared / Model2Dedicated, ~line 286)
-    //     - ArmCostEnvelopeChecker (H0)      (SelectExpectedEnvelope by tenancyModel)
+    //     - ArmCostEnvelopeChecker (H13)     (RETIRED 2026-10-06 task 229 — one envelope for every model; the
+    //                                         per-model SelectExpectedEnvelope is gone)
     //     - AiSearchTenantFilterInvariantProbe (H13 sub-probe; Model1 branch)
     //     - ArmDeploymentRunner (H2a)        (template-key selection — the only selector since task 245b
     //                                         deleted FileBicepTemplateInspector; ArmTemplateInspector
@@ -152,7 +153,7 @@ public sealed class TenancyModelDagParityTests
     //     - H4KvSecretsPopulationHandler
     //     - (H4SharedKvSecretsPopulationHandler was listed here; RETIRED T226 2026-09-30.)
     //     - H4bBulkAppSettingsHandler
-    //     - H5DataverseEnvCreationHandler
+    //     - H5DataverseEnvAdoptionHandler
     //     - H6SolutionImportHandler
     //     - H7DataverseEnvVarValuesHandler
     //     - H8SpeContainerHandler (H8-B rewrite per task 214, 2026-08-30)
@@ -162,7 +163,7 @@ public sealed class TenancyModelDagParityTests
     //     - H12bAppConfigSeedHandler
     //     - H13E2EAcceptanceGateHandler
     //     - H14IntegrationWiringHandler
-    //     - H05ConsentCaptureHandler  (Model 2 entry-point ONLY — should reject Model1Shared)
+    //     - H05ConsentCaptureHandler  (Model 2 entry-point ONLY — should reject Model1)
     //
     //   TEST DEFERRED TO MAIN-SESSION INTEGRATION LANE — per EXEC-09
     //   proposed_fix, each of the above handlers needs a Model1Shared

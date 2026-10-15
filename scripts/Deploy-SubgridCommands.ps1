@@ -15,7 +15,12 @@ Write-Host "====================================="
 
 $orgUrl = $DataverseUrl
 $webResourceName = "sprk_subgrid_commands"
-$jsFilePath = "C:\code_files\spaarke\src\client\pcf\UniversalQuickCreate\solution\src\WebResources\sprk_subgrid_commands.js"
+# Canonical source, resolved relative to the repo root (this script lives in scripts/).
+$jsFilePath = Join-Path $PSScriptRoot "..\src\solutions\DocumentUploadWizard\sprk_subgrid_commands.js"
+if (-not (Test-Path $jsFilePath)) {
+    Write-Host "Error: source file not found: $jsFilePath" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "[1/4] Environment: $orgUrl"
 

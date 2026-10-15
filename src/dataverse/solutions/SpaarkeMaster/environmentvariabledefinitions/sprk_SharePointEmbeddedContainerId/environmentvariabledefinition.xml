@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_SharePointEmbeddedContainerId">
+  <defaultvalue>b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50</defaultvalue>
+  <description default="SharePoint Embedded Container ID">
+    <label description="SharePoint Embedded Container ID" languagecode="1033" />
+  </description>
+  <displayname default="SharePoint Embedded Container ID">
+    <label description="SharePoint Embedded Container ID" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

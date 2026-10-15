@@ -65,9 +65,11 @@ import {
 
 import { useExternalContext } from '../hooks/useExternalContext';
 import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
+import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { ODataProject, ODataDocument, ODataEvent } from '../api/web-api-client';
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
+import { TruncatedListNotice } from '../components/TruncatedListNotice';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -310,11 +312,15 @@ function formatRelativeDate(isoDate: string | null | undefined): string {
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/**
+ * An event due date is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 098): parsed as the local day
+ * (`new Date("yyyy-MM-dd")` is UTC midnight — the previous day west of UTC), and overdue only once that day has passed.
+ */
 function formatDueDate(isoDate: string | null | undefined): { label: string; isOverdue: boolean } {
   if (!isoDate) return { label: 'No due date', isOverdue: false };
-  const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return { label: 'Invalid date', isOverdue: false };
-  const isOverdue = date < new Date();
+  const date = parseDueDate(isoDate);
+  if (!date) return { label: 'Invalid date', isOverdue: false };
+  const isOverdue = daysBetweenLocalMidnight(new Date(), date) < 0;
   const formatted = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   return { label: isOverdue ? `Overdue — ${formatted}` : formatted, isOverdue };
 }
@@ -476,16 +482,22 @@ const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }
 
 const RecentActivitySection: React.FC<{
   items: ActivityItem[];
+  /** Task 105: some project's event list was cut short or could not be read. */
+  truncated: boolean;
   isLoading: boolean;
   onItemClick: (projectId: string) => void;
-}> = ({ items, isLoading, onItemClick }) => {
+}> = ({ items, truncated, isLoading, onItemClick }) => {
   const styles = useStyles();
   return (
     <SectionCard title="Recent Activity">
+      {!isLoading && <TruncatedListNotice truncated={truncated} shown={items.length} noun="events" />}
       {isLoading ? (
         <SectionSpinner label="Loading activity..." />
       ) : items.length === 0 ? (
-        <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
+        // An incomplete empty list is not "no activity": the notice above says it could not be loaded.
+        truncated ? null : (
+          <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
+        )
       ) : (
         <div className={styles.itemList}>
           {items.map(item => (
@@ -518,14 +530,22 @@ const RecentActivitySection: React.FC<{
 // Upcoming Events & Tasks section
 // ---------------------------------------------------------------------------
 
-const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> = ({ items, isLoading }) => {
+const UpcomingSection: React.FC<{ items: UpcomingItem[]; truncated: boolean; isLoading: boolean }> = ({
+  items,
+  truncated,
+  isLoading,
+}) => {
   const styles = useStyles();
   return (
     <SectionCard title="Upcoming Events & Tasks">
+      {!isLoading && <TruncatedListNotice truncated={truncated} shown={items.length} noun="events" />}
       {isLoading ? (
         <SectionSpinner label="Loading upcoming items..." />
       ) : items.length === 0 ? (
-        <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
+        // Task 105: an incomplete empty list is not "nothing upcoming".
+        truncated ? null : (
+          <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
+        )
       ) : (
         <div className={styles.itemList}>
           {items.map(item => {
@@ -619,17 +639,25 @@ const MyMattersSection: React.FC = () => (
 
 const MyDocumentsSection: React.FC<{
   docs: TaggedDocument[];
+  /** Task 105: some project's document list was cut short, so the count is a lower bound. */
+  truncated: boolean;
   isLoading: boolean;
   onItemClick: (projectId: string) => void;
-}> = ({ docs, isLoading, onItemClick }) => {
+}> = ({ docs, truncated, isLoading, onItemClick }) => {
   const styles = useStyles();
+  const total = truncated ? `${docs.length}+` : `${docs.length}`;
 
   return (
-    <SectionCard title={`My Documents${docs.length > 0 ? ` (${docs.length})` : ''}`}>
+    <SectionCard title={`My Documents${docs.length > 0 ? ` (${total})` : ''}`}>
       {isLoading ? (
         <SectionSpinner label="Loading documents..." />
       ) : docs.length === 0 ? (
-        <EmptyState message="No documents found across your projects." icon={<FolderRegular />} />
+        // Task 105: an incomplete empty list is not "no documents" — say it could not be loaded.
+        truncated ? (
+          <TruncatedListNotice truncated shown={0} noun="documents" />
+        ) : (
+          <EmptyState message="No documents found across your projects." icon={<FolderRegular />} />
+        )
       ) : (
         <div>
           {docs.slice(0, 10).map(doc => (
@@ -657,12 +685,12 @@ const MyDocumentsSection: React.FC<{
               </div>
             </div>
           ))}
-          {docs.length > 10 && (
+          {(docs.length > 10 || truncated) && (
             <Text
               size={200}
               style={{ color: tokens.colorNeutralForeground3, paddingTop: tokens.spacingVerticalS, display: 'block' }}
             >
-              Showing 10 of {docs.length} documents
+              Showing {Math.min(10, docs.length)} of {truncated ? `more than ${docs.length}` : docs.length} documents
             </Text>
           )}
         </div>
@@ -684,10 +712,13 @@ export const OutsideCounselDashboard: React.FC = () => {
   const [projectEvents, setProjectEvents] = useState<TaggedEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [upcomingLoading, setUpcomingLoading] = useState(false);
+  // Task 105: some project's event list was cut short or could not be read — the activity and upcoming views say so.
+  const [eventsTruncated, setEventsTruncated] = useState(false);
   const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [allDocs, setAllDocs] = useState<TaggedDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docsTruncated, setDocsTruncated] = useState(false);
 
   // Notifications — placeholder (future: query sprk_communication)
   const [notifications] = useState<NotificationItem[]>([]);
@@ -702,7 +733,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     setProjectsLoading(true);
     getProjects({ $select: 'sprk_projectid,sprk_name,sprk_referencenumber,modifiedon', $orderby: 'sprk_name asc' })
       .then(projects => {
-        if (!cancelled) setProjectDetails(projects);
+        if (!cancelled) setProjectDetails(projects.items);
       })
       .catch(() => {
         if (!cancelled) setProjectDetails([]);
@@ -737,6 +768,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     let cancelled = false;
     setActivityLoading(true);
     setUpcomingLoading(true);
+    setEventsTruncated(false);
 
     const fetchAll = async () => {
       try {
@@ -749,13 +781,21 @@ export const OutsideCounselDashboard: React.FC = () => {
               $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_regardingproject_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
-            }).then(evts => evts.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })))
+            }).then(evts => ({
+              truncated: evts.truncated,
+              items: evts.items.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })),
+            }))
           )
         );
         if (cancelled) return;
-        setProjectEvents(nested.flat());
+        setEventsTruncated(nested.some(n => n.truncated));
+        setProjectEvents(nested.flatMap(n => n.items));
       } catch {
-        setProjectEvents([]);
+        // A failed read is not "no events": shown as could-not-be-loaded, never as an empty list.
+        if (!cancelled) {
+          setProjectEvents([]);
+          setEventsTruncated(true);
+        }
       } finally {
         if (!cancelled) {
           setActivityLoading(false);
@@ -795,14 +835,16 @@ export const OutsideCounselDashboard: React.FC = () => {
   );
 
   const upcomingItems: UpcomingItem[] = React.useMemo(() => {
-    const now = Date.now();
+    // Task 098: sprk_duedate is a calendar date ("yyyy-MM-dd", Dataverse Date Only) — parsed as the LOCAL day
+    // (new Date("yyyy-MM-dd") is UTC midnight, the previous day west of UTC); the window is in calendar days.
+    const now = new Date();
     return projectEvents
       .flatMap(e => {
-        const due = e.sprk_duedate ? new Date(e.sprk_duedate).getTime() : NaN;
-        return isNaN(due) ? [] : [{ event: e, due }];
+        const day = parseDueDate(e.sprk_duedate);
+        return day ? [{ event: e, due: day.getTime(), day }] : [];
       })
       .sort((a, b) => a.due - b.due)
-      .filter(({ due }) => (due - now) / (1000 * 60 * 60 * 24) < 30)
+      .filter(({ day }) => daysBetweenLocalMidnight(now, day) < 30)
       .slice(0, 5)
       .map(({ event: e }) => ({
         id: e.sprk_eventid,
@@ -820,6 +862,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     }
     let cancelled = false;
     setDocsLoading(true);
+    setDocsTruncated(false);
 
     Promise.all(
       context.projects.map(p =>
@@ -827,13 +870,18 @@ export const OutsideCounselDashboard: React.FC = () => {
           $select: 'sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon',
           $orderby: 'createdon desc',
           $top: 20,
-        }).then(docs => docs.map(d => ({ ...d, _resolvedProjectId: p.projectId })))
+        }).then(docs => ({
+          truncated: docs.truncated,
+          items: docs.items.map(d => ({ ...d, _resolvedProjectId: p.projectId })),
+        }))
       )
     )
       .then(nested => {
         if (!cancelled) {
+          // Task 105: a project's list the BFF cut short makes the total a lower bound, said as such.
+          setDocsTruncated(nested.some(n => n.truncated));
           const flat = nested
-            .flat()
+            .flatMap(n => n.items)
             .sort(
               (a, b) =>
                 (b.createdon ? new Date(b.createdon).getTime() : 0) -
@@ -843,7 +891,11 @@ export const OutsideCounselDashboard: React.FC = () => {
         }
       })
       .catch(() => {
-        if (!cancelled) setAllDocs([]);
+        if (!cancelled) {
+          // A failed read is not "no documents": shown as could-not-be-loaded, never as an empty list.
+          setAllDocs([]);
+          setDocsTruncated(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setDocsLoading(false);
@@ -898,8 +950,13 @@ export const OutsideCounselDashboard: React.FC = () => {
 
       {/* Row 1: Recent Activity + Upcoming (2-column) */}
       <div className={styles.twoColGrid}>
-        <RecentActivitySection items={recentActivity} isLoading={activityLoading} onItemClick={handleProjectClick} />
-        <UpcomingSection items={upcomingItems} isLoading={upcomingLoading} />
+        <RecentActivitySection
+          items={recentActivity}
+          truncated={eventsTruncated}
+          isLoading={activityLoading}
+          onItemClick={handleProjectClick}
+        />
+        <UpcomingSection items={upcomingItems} truncated={eventsTruncated} isLoading={upcomingLoading} />
       </div>
 
       {/* Row 2: My Projects */}
@@ -913,7 +970,12 @@ export const OutsideCounselDashboard: React.FC = () => {
       <MyMattersSection />
 
       {/* Row 4: My Documents */}
-      <MyDocumentsSection docs={allDocs} isLoading={docsLoading} onItemClick={handleProjectClick} />
+      <MyDocumentsSection
+        docs={allDocs}
+        truncated={docsTruncated}
+        isLoading={docsLoading}
+        onItemClick={handleProjectClick}
+      />
     </PageContainer>
   );
 };

@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -34,6 +34,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
 - [AP-13: A tool with no parameter for a thing you must control, silently picking a default](#ap-13-a-tool-with-no-parameter-for-a-thing-you-must-control-silently-picking-a-default)
 - [AP-14: A facade method NAMED for an entity it does not write](#ap-14-a-facade-method-named-for-an-entity-it-does-not-write)
+- [AP-16: A swallowed catch — empty, comment-only, or log/telemetry-only](#ap-16-a-swallowed-catch--empty-comment-only-or-logtelemetry-only)
 - [G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)](#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji)
 
 ### Gotchas
@@ -53,6 +54,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
+- [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
+- [G-19: Sub-agent fan-out multiplies cost and exhausts memory](#g-19-sub-agent-fan-out-multiplies-cost-and-exhausts-memory)
 
 ---
 
@@ -1123,3 +1126,69 @@ every read that carries a value — and in-memory doubles that serialize the sha
 **Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
 
 ---
+
+### G-18: `git stash pop` in one worktree applies ANOTHER session's stash
+
+> **Added 2026-10-08** by the module-CLAUDE.md / procedure-calibration work. **Class**: shared mutable state between parallel agents.
+
+**What happens.** The stash stack lives in the shared `.git` directory, so every worktree and every session sees one stack. A session that pushes its own stash and then pops "the top" can get a stash another session pushed in between. On 2026-10-08 a verification agent's before/after script did exactly that: its `pop` applied the customer-provisioning session's stash (seven files) into the agent's worktree and removed it from the list. Nothing was lost only because that session had already committed the same work. The stash list showed hundreds of dropped stashes from four parallel projects that week.
+
+**Rule.**
+- Agents and workflow scripts never use `git stash`. To set changes aside, copy files or make a temporary WIP commit on your own branch.
+- A human session that must stash uses `git stash push -u -m "<unique-tag>"`, records the SHA, restores with `git stash apply <sha>`, and drops its own entry by tag.
+- **Enforced by:** `permissions.ask` on `git stash pop/apply/drop/clear` (`.claude/settings.json`, root §16) — the human confirms each one.
+
+---
+
+### G-19: Sub-agent fan-out multiplies cost and exhausts memory
+
+> **Added 2026-10-09** by the procedure / code-quality cleanup session. **Class**: shared resources between parallel agents (machine memory, spend).
+
+**What happens.** Every tool step of an agent re-sends its whole context. In early October 2026, five parallel projects ran fan-outs: 65–92% of 6,500–19,000 model calls a day came from sub-agents, averaging ~300k tokens of context per call. Most ran on Opus, because `settings.json` sets `"model": "opus"` and sub-agents inherit it. Estimated spend rose from $60–240 a day to $1,100–2,600. About two-thirds of the sub-agent cost was cache writes, because each new agent writes its context once. An agent resumed after its 5-minute cache expired writes its whole context again: in one session, 96 of 138 large writes came after a 5–60 minute pause. The same parallelism exhausted Windows memory. Bash fork failed with `0xC000012D` (commit limit) and Claude Code exited with `0xC0000409`.
+
+**Rule.** `.claude/constraints/agent-cost.md`:
+- every agent states the model and effort chosen for its work;
+- one top-tier independent review per change set;
+- small, scoped agents;
+- a fresh short-brief agent rather than resuming an idle one;
+- one or two heavy projects at a time per machine;
+- compact main sessions at 400k.
+
+**Enforced by:** `.claude/settings.json`:
+- a `PreToolUse` hook (`scripts/quality/require-agent-model.py`) that refuses an agent launch naming no model, so the session chooses one per the model table, superseding the brief `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default (owner 2026-10-09: no arbitrary default);
+- `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`;
+- `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`;
+- `workflowSizeGuideline: small`;
+- `autoCompactWindow: 400000`.
+
+Cross-session concurrency is not enforceable by settings; it stays a practice.
+
+---
+
+### AP-16: A swallowed catch — empty, comment-only, or log/telemetry-only
+
+> **Added 2026-10-10** by the client error-handling cleanup (Phase 3, P5). **Class**: silent failure.
+> Siblings: [AP-7](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only),
+> [G-15](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform) (a bare `catch {}` hid a TypeError).
+
+**The shape.** A `catch` that is empty, holds only a comment, or holds only a `console.*`, telemetry
+(`logTelemetryError`, `reportClientError`, `trackException`) or `logger.*` call. The failure is hidden
+from the user and from the caller. The UI shows a healthy-looking empty state, and nobody can tell a
+data fault from no data. Logging is not handling: telemetry-only counts as swallowing.
+
+**Enforced by lint (client packages).** The client-lint ratchet (`scripts/quality/client-lint/`,
+`no-restricted-syntax` selectors) blocks new instances. The 259 existing ones are baselined in
+`eslint-suppressions.json` and shrink through `prune`.
+
+**On a flagged catch:**
+- handle the error (fall back, retry); or
+- surface it (error state, toast, message bar) alongside any logging; or
+- rethrow, or return a failure the caller checks.
+
+When swallowing is deliberate (best-effort cache warm, storage access, `AbortError`), write
+`// eslint-disable-next-line no-restricted-syntax -- <why this is safe>`. A disable without a reason
+fails `spaarke-client/catch-disable-needs-reason`.
+
+**Evidence**: `scripts/quality/client-lint/eslint.client.config.mjs` (`CATCH` rules) ·
+`scripts/quality/client-lint/controls/catch-policy.control.ts` · `docs/procedures/testing-and-code-quality.md`
+(client-lint section).

@@ -31,26 +31,23 @@ import {
 } from "@fluentui/react-components";
 import { resolveRuntimeConfig, initAuth, getAuthProvider } from "@spaarke/auth";
 import { App } from "./App";
+import { resolveUploadLaunchParams } from "./launchParams";
 
 // ---------------------------------------------------------------------------
 // Parse URL parameters
 // ---------------------------------------------------------------------------
 
 const rawUrlParams = new URLSearchParams(window.location.search);
-const dataEnvelope = rawUrlParams.get("data");
-const appParams = dataEnvelope
-    ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-    : rawUrlParams;
-
-const parentEntityType = appParams.get("parentEntityType") ?? "";
-const parentEntityId = appParams.get("parentEntityId") ?? "";
-const parentEntityName = appParams.get("parentEntityName") ?? "";
+const { parentEntityType, parentEntityId, parentEntityName } = resolveUploadLaunchParams(
+    rawUrlParams.get("data"),
+    rawUrlParams,
+);
 // `containerId` is deliberately NOT read from the URL any more (task 076, 2026-09-03). It was the
 // head of the last client-supplied-container chain in this repo: three launch envelopes appended
 // it, this line consumed it, and it ended up naming the SPE destination for every upload the wizard
 // performed. The server now derives the container from the parent record. A caller that still
 // appends `&containerId=…` is simply ignored — the parameter is not read, so it cannot select
-// anything.
+// anything. (The envelope contract lives in `launchParams.ts`, shared with the in-app host.)
 
 // ---------------------------------------------------------------------------
 // Theme detection
@@ -76,13 +73,16 @@ async function bootstrap(): Promise<void> {
     window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
 
     // 3. Initialize auth with runtime-resolved values.
-    //    Eagerly warms the MSAL token cache so resolveTenantIdSync() can read
-    //    accounts[0].tenantId synchronously when "Find Similar" is clicked.
+    //    Eagerly warms the MSAL token cache so resolveTenantIdSync() can read the
+    //    authority's tenant / the token's tid synchronously when "Find Similar" is clicked.
+    //    tenantId is the environment's tenant (sprk_TenantId) so a B2B guest signs in
+    //    against it, not their home tenant (#1453); the library ignores an invalid value.
     try {
         await initAuth({
             clientId: runtimeConfig.msalClientId,
             bffApiScope: runtimeConfig.bffOAuthScope,
             bffBaseUrl: runtimeConfig.bffBaseUrl,
+            tenantId: runtimeConfig.tenantId,
         });
 
         // Patch window globals if tenantId was empty at resolveRuntimeConfig() time.

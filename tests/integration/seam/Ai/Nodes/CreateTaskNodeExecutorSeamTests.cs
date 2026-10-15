@@ -116,12 +116,13 @@ public class CreateTaskNodeExecutorSeamTests
         owner.Id.Should().NotBe(ownerId);
     }
 
-    // ── Degraded success when Dataverse rejects the create (criterion 7) ──────────────────────
+    // ── Error when Dataverse rejects the create (criterion 7; task 141 fix round 2: was degraded success) ──────
 
     [Fact]
-    public async Task ExecuteAsync_WhenCreateThrows_ReturnsDegradedSuccessWithEmptyTaskId()
+    public async Task ExecuteAsync_WhenCreateThrows_ReturnsErrorNotASuccessWithAnEmptyTaskId()
     {
-        // Arrange — CreateAsync throws; the current contract swallows it and returns Ok/taskId=Empty.
+        // Arrange — CreateAsync throws; TaskActionCore swallows it and answers Guid.Empty, which the executor now
+        // reports as an error ("Task was not created") rather than "Task created" with an empty id.
         var config = @"{""subject"":""Review contract"",""description"":""Body""}";
         var context = CreateContext(config);
         _entityServiceMock
@@ -131,12 +132,11 @@ public class CreateTaskNodeExecutorSeamTests
         // Act
         var result = await _executor.ExecuteAsync(context, CancellationToken.None);
 
-        // Assert — does NOT propagate; degraded success with Guid.Empty taskId (pinned as-is)
-        result.Success.Should().BeTrue();
-        var data = result.GetData<TaskCreatedData>();
-        data.Should().NotBeNull();
-        data!.TaskId.Should().Be(Guid.Empty);
-        data.Subject.Should().Be("Review contract");
+        // Assert — does NOT propagate; the node fails, carrying no task id
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.InternalError);
+        result.ErrorMessage.Should().Contain("Task was not created");
+        result.StructuredData.Should().BeNull();
     }
 
     // ── Validate() exact message (part of criterion 6 closed set) ─────────────────────────────
@@ -151,6 +151,32 @@ public class CreateTaskNodeExecutorSeamTests
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────
+
+    // Task 098: sprk_duedate is Date Only. A template date — "yyyy-MM-dd" or a timestamp with an offset — is the
+    // calendar date AS WRITTEN. DateTime.TryParse + ToUniversalTime() moved "2026-10-20T23:30:00-04:00" to 03:30Z on
+    // Oct 21, and the column stored Oct 21.
+    [Theory]
+    [InlineData("2026-10-20")]
+    [InlineData("2026-10-20T23:30:00-04:00")]
+    [InlineData("2026-10-20T00:00:00Z")]
+    public async Task ExecuteAsync_DueDate_IsTheCalendarDateAsWritten(string dueDate)
+    {
+        var config = $$"""
+        { "subject": "Calendar date", "dueDate": "{{dueDate}}" }
+        """;
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(CreatedTaskId);
+
+        var result = await _executor.ExecuteAsync(CreateContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var due = captured!.GetAttributeValue<DateTime>("sprk_duedate");
+        due.Should().Be(new DateTime(2026, 10, 20));
+        due.Kind.Should().Be(DateTimeKind.Unspecified);
+    }
 
     private static NodeExecutionContext CreateContext(string? configJson)
     {

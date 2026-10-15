@@ -221,7 +221,7 @@ public static class JobsEndpoints
     {
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "jobId route parameter is required",
@@ -232,7 +232,7 @@ public static class JobsEndpoints
         var job = registry.Resolve(jobId);
         if (job is null)
         {
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = $"No background job with jobId '{jobId}' is registered.",
@@ -302,7 +302,7 @@ public static class JobsEndpoints
     {
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "jobId route parameter is required",
@@ -329,7 +329,7 @@ public static class JobsEndpoints
         {
             // Host's own message is sufficient; pass it through to the admin client for
             // troubleshooting (e.g., "did you spell the jobId right?").
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = ex.Message,
@@ -339,7 +339,7 @@ public static class JobsEndpoints
         catch (ScheduledJobBusyException ex)
         {
             // ADR-036 A1 rule 1: a job never runs twice at once — not even at an admin's request.
-            return Results.Conflict(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Job Already Running",
                 Detail = ex.Message,
@@ -392,7 +392,7 @@ public static class JobsEndpoints
     {
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "jobId route parameter is required",
@@ -402,7 +402,7 @@ public static class JobsEndpoints
 
         if (registry.Resolve(jobId) is null)
         {
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = $"No background job with jobId '{jobId}' is registered.",
@@ -486,7 +486,7 @@ public static class JobsEndpoints
     {
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "jobId route parameter is required",
@@ -497,7 +497,7 @@ public static class JobsEndpoints
         var updated = await store.SetEnabledAsync(jobId, enabled, cancellationToken).ConfigureAwait(false);
         if (!updated)
         {
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = $"No background job definition with jobId '{jobId}' exists in the store.",

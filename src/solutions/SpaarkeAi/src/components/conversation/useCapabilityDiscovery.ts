@@ -14,6 +14,7 @@
  */
 
 import * as React from "react";
+import type { AuthenticatedFetchFn } from "@spaarke/auth";
 
 /** One launchable capability's launch metadata — mirrors the BFF `CapabilityDto` shape. */
 export interface CapabilityDiscoveryItem {
@@ -31,7 +32,7 @@ interface CapabilityDiscoveryResponseShape {
 
 export interface CapabilityDiscoveryDeps {
   bffBaseUrl: string;
-  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch: AuthenticatedFetchFn;
   /** Placement surface to request (default `"assistant"` — the soft-slash launcher's surface). */
   surface?: string;
   /**
@@ -77,10 +78,6 @@ export function useCapabilityDiscovery(deps: CapabilityDiscoveryDeps): Capabilit
         }
 
         const response = await authenticatedFetch(url.toString());
-        if (!response.ok) {
-          throw new Error(`capability-discovery fetch failed: ${response.status}`);
-        }
-
         const payload = (await response.json()) as CapabilityDiscoveryResponseShape;
         if (!cancelled) {
           // ADR-015: counts only — never log the capability list contents.

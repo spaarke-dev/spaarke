@@ -25,7 +25,7 @@ The `sdap-bff-api-remediation-fix` project measured **265 DI registrations** at 
 - **MUST** register concretes by default (not interfaces)
 - **MUST** use feature module extensions (`AddSpaarkeCore`, `AddDocumentsModule`, `AddWorkersModule`)
 - **MUST** use Options pattern with `ValidateOnStart()`
-- **MUST** keep DI registrations ≤15 non-framework lines
+- **MUST** keep `Program.cs` composing feature modules (one line each; registrations inside `Add{Feature}Module()`). ~15 non-framework lines is the readability target from the rationale above, not a hard count: past it, group related modules — never inline or bury registrations to meet the number
 - **MUST** use single typed `HttpClient` per upstream service
 
 ### ❌ MUST NOT

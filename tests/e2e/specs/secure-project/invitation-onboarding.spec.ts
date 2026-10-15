@@ -26,7 +26,7 @@
  *   - adx_invitation records are cleaned up after each test
  *
  * Environment Variables (.env):
- *   SDAP_BFF_API_URL      = https://spe-api-dev-67e2xz.azurewebsites.net
+ *   SDAP_BFF_API_URL      = https://spaarke-bff-dev.azurewebsites.net
  *   POWER_PAGES_URL       = https://{portal}.powerappsportals.com
  *   DATAVERSE_API_URL     = https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2
  *   TENANT_ID             = {tenant-id}
@@ -50,9 +50,11 @@ import { DataverseAPI } from '../../utils/dataverse-api';
 // Constants
 // ============================================================================
 
-const BFF_API_URL = process.env.SDAP_BFF_API_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+const BFF_API_URL = process.env.SDAP_BFF_API_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 const POWER_PAGES_URL = process.env.POWER_PAGES_URL || 'https://secure-project.powerappsportals.com';
 const DATAVERSE_API_URL = process.env.DATAVERSE_API_URL || 'https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2';
+/** The Dataverse resource (origin) tokens are requested for. The Web API path is not part of the resource. */
+const DATAVERSE_RESOURCE = DataverseAPI.resourceOrigin(DATAVERSE_API_URL);
 const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID || '';
 const SECURE_PARTICIPANT_WEB_ROLE_ID = process.env.SECURE_PARTICIPANT_WEB_ROLE_ID || '';
 
@@ -135,17 +137,14 @@ async function acquireBffToken(request: APIRequestContext): Promise<string> {
   const clientId = process.env.CLIENT_ID || '';
   const clientSecret = process.env.CLIENT_SECRET || '';
 
-  const response = await request.post(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      form: {
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: `api://${clientId}/.default`,
-      },
-    }
-  );
+  const response = await request.post(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    form: {
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: `api://${clientId}/.default`,
+    },
+  });
 
   const body = await response.json();
   return body.access_token as string;
@@ -234,7 +233,8 @@ class InviteUserDialogPage {
   /** Verify the invitation code is visible in the success view */
   async getInvitationCode(): Promise<string> {
     const codeRow = this.page.locator(DIALOG_SELECTORS.invitationCodeRow).locator('..');
-    return codeRow.locator('span[style*="monospace"]').textContent() ?? '';
+    // Await before `??`: applied to the Promise itself it never fires, so a missing code returned null.
+    return (await codeRow.locator('span[style*="monospace"]').textContent()) ?? '';
   }
 }
 
@@ -254,7 +254,7 @@ test.describe('Invitation flow — BFF API layer @e2e @sdap @invitation', () => 
       process.env.TENANT_ID || '',
       process.env.CLIENT_ID || '',
       process.env.CLIENT_SECRET || '',
-      DATAVERSE_API_URL
+      DATAVERSE_RESOURCE
     );
     dataverseApi = new DataverseAPI(DATAVERSE_API_URL, dvToken);
 
@@ -302,9 +302,7 @@ test.describe('Invitation flow — BFF API layer @e2e @sdap @invitation', () => 
       invitationId: expect.any(String),
       invitationCode: expect.any(String),
     });
-    expect(body.invitationId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    );
+    expect(body.invitationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(body.invitationCode).toBeTruthy();
     expect(body.invitationCode.length).toBeGreaterThan(0);
 
@@ -354,9 +352,13 @@ test.describe('Invitation flow — BFF API layer @e2e @sdap @invitation', () => 
     expect(invitation['adx_invitationcode']).toBeTruthy();
   });
 
-  test('Step 3b: adx_invitation should have the Secure Project Participant web role associated', async ({ request }) => {
-    test.skip(!TEST_PROJECT_ID || !SECURE_PARTICIPANT_WEB_ROLE_ID,
-      'TEST_PROJECT_ID or SECURE_PARTICIPANT_WEB_ROLE_ID not configured');
+  test('Step 3b: adx_invitation should have the Secure Project Participant web role associated', async ({
+    request,
+  }) => {
+    test.skip(
+      !TEST_PROJECT_ID || !SECURE_PARTICIPANT_WEB_ROLE_ID,
+      'TEST_PROJECT_ID or SECURE_PARTICIPANT_WEB_ROLE_ID not configured'
+    );
 
     const testEmail = buildTestEmail();
     const contactId = await createTestContact(dataverseApi, testEmail);
@@ -421,7 +423,7 @@ test.describe('Invitation flow — BFF API layer @e2e @sdap @invitation', () => 
     createdInvitations.push(invitationId);
 
     // Allow time for the async email send (background job or synchronous)
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await new Promise(resolve => setTimeout(resolve, 3_000));
 
     // Query sprk_communication records linked to this Contact
     const communications = await dataverseApi.fetchRecords(
@@ -536,7 +538,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
 
   test('Step 7: workspace home should display correct project after authenticated login', async ({ page, context }) => {
     // Mock the external/me endpoint to simulate an authenticated external user
-    await context.route('**/api/v1/external/me', async (route) => {
+    await context.route('**/api/v1/external/me', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -554,7 +556,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
     });
 
     // Mock Power Pages token endpoint
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'text/plain',
@@ -563,7 +565,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
     });
 
     // Mock the anti-forgery token endpoint
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'text/xml',
@@ -590,7 +592,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
 
   test('should complete full invitation flow via InviteUserDialog (mocked API)', async ({ page, context }) => {
     // Mock the BFF invite endpoint
-    await context.route(`**${INVITE_ENDPOINT}`, async (route) => {
+    await context.route(`**${INVITE_ENDPOINT}`, async route => {
       expect(route.request().method()).toBe('POST');
       const body = JSON.parse(route.request().postData() ?? '{}');
       expect(body.email).toBeTruthy();
@@ -604,10 +606,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
     });
 
     // Mock portal token endpoint
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'text/xml',
@@ -653,10 +655,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
   // -------------------------------------------------------------------------
 
   test('should show validation error for invalid email format', async ({ page, context }) => {
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -688,10 +690,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
   // -------------------------------------------------------------------------
 
   test('should show validation error when email is empty', async ({ page, context }) => {
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -719,7 +721,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
   // -------------------------------------------------------------------------
 
   test('should show error view when API returns 500', async ({ page, context }) => {
-    await context.route(`**${INVITE_ENDPOINT}`, async (route) => {
+    await context.route(`**${INVITE_ENDPOINT}`, async route => {
       await route.fulfill({
         status: 500,
         contentType: 'application/problem+json',
@@ -732,10 +734,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
       });
     });
 
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -766,7 +768,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
 
   test('should return to form view when Try Again is clicked', async ({ page, context }) => {
     let callCount = 0;
-    await context.route(`**${INVITE_ENDPOINT}`, async (route) => {
+    await context.route(`**${INVITE_ENDPOINT}`, async route => {
       callCount++;
       if (callCount === 1) {
         await route.fulfill({
@@ -787,10 +789,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
       }
     });
 
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -826,15 +828,15 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
 
   test('should close dialog without calling API when Cancel is clicked', async ({ page, context }) => {
     let apiCallMade = false;
-    await context.route(`**${INVITE_ENDPOINT}`, async (route) => {
+    await context.route(`**${INVITE_ENDPOINT}`, async route => {
       apiCallMade = true;
       await route.continue();
     });
 
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -864,7 +866,7 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
 
   test('should not render InviteUserDialog for ViewOnly users', async ({ page, context }) => {
     // Mock external/me to return ViewOnly access
-    await context.route('**/api/v1/external/me', async (route) => {
+    await context.route('**/api/v1/external/me', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -881,10 +883,10 @@ test.describe('Invitation flow — InviteUserDialog UI @e2e @sdap @invitation @u
       });
     });
 
-    await context.route('**/_services/auth/token', async (route) => {
+    await context.route('**/_services/auth/token', async route => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'mock.jwt.token' });
     });
-    await context.route('**/_layout/tokenhtml', async (route) => {
+    await context.route('**/_layout/tokenhtml', async route => {
       await route.fulfill({ status: 200, contentType: 'text/xml', body: '<input value="mock-csrf-token" />' });
     });
 
@@ -921,7 +923,7 @@ test.describe('Invitation flow — post-redemption Dataverse verification @sdap 
       process.env.TENANT_ID || '',
       process.env.CLIENT_ID || '',
       process.env.CLIENT_SECRET || '',
-      DATAVERSE_API_URL
+      DATAVERSE_RESOURCE
     );
     dataverseApi = new DataverseAPI(DATAVERSE_API_URL, dvToken);
   });
@@ -962,8 +964,10 @@ test.describe('Invitation flow — post-redemption Dataverse verification @sdap 
 
   test('Step 6: redeemed Contact should have Secure Project Participant web role assigned', async () => {
     const contactId = process.env.REDEEMED_CONTACT_ID;
-    test.skip(!contactId || !SECURE_PARTICIPANT_WEB_ROLE_ID,
-      'REDEEMED_CONTACT_ID or SECURE_PARTICIPANT_WEB_ROLE_ID not set');
+    test.skip(
+      !contactId || !SECURE_PARTICIPANT_WEB_ROLE_ID,
+      'REDEEMED_CONTACT_ID or SECURE_PARTICIPANT_WEB_ROLE_ID not set'
+    );
 
     // Query the Contact-to-WebRole N:N relationship
     // Power Pages uses mspp_portalwebroles as the join table
@@ -994,7 +998,9 @@ test.describe('Invitation flow — post-redemption Dataverse verification @sdap 
   // Step 7 (verification): Authenticated SPA shows correct project
   // --------------------------------------------------------------------------
 
-  test('Step 7 verification: external/me should return project with correct access level after redemption', async ({ request }) => {
+  test('Step 7 verification: external/me should return project with correct access level after redemption', async ({
+    request,
+  }) => {
     const contactId = process.env.REDEEMED_CONTACT_ID;
     test.skip(!contactId || !TEST_PROJECT_ID, 'REDEEMED_CONTACT_ID or TEST_PROJECT_ID not set');
 
@@ -1016,9 +1022,7 @@ test.describe('Invitation flow — post-redemption Dataverse verification @sdap 
     expect(body.projects).toBeDefined();
     expect(Array.isArray(body.projects)).toBe(true);
 
-    const project = body.projects.find(
-      (p: { projectId: string }) => p.projectId === TEST_PROJECT_ID
-    );
+    const project = body.projects.find((p: { projectId: string }) => p.projectId === TEST_PROJECT_ID);
     expect(project).toBeTruthy();
     expect(project.accessLevel).toBeTruthy();
   });
@@ -1029,7 +1033,7 @@ test.describe('Invitation flow — post-redemption Dataverse verification @sdap 
  * ===================
  *
  * 1. Configure .env file (copy from tests/e2e/config/.env.example):
- *    SDAP_BFF_API_URL=https://spe-api-dev-67e2xz.azurewebsites.net
+ *    SDAP_BFF_API_URL=https://spaarke-bff-dev.azurewebsites.net
  *    POWER_PAGES_URL=https://secure-project.powerappsportals.com
  *    DATAVERSE_API_URL=https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2
  *    TENANT_ID=<your-tenant-id>

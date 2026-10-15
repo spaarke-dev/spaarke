@@ -160,7 +160,7 @@ public sealed class H10SeamsSmokeTests
 
         // The REAL production catalog H10 consumes — not a fixture. Proves the
         // T3 seam's live REST shape (servicePrincipals filter + appRoleAssignments
-        // GET) against the actual 14-role GraphAppRoles.cs mirror.
+        // GET) against the actual GraphAppRoles.cs mirror (the stamp set, task 261).
         var registry = new L2GraphAppRolesRegistry();
         var expectedRoles = registry.GetAll();
         var logger = new CapturingLogger<GraphRestAppRoleParityVerifier>();
@@ -269,10 +269,8 @@ public sealed class H10SeamsSmokeTests
 //      task's live checks, plus non-project traffic) — an automated test that
 //      creates a systemuser row has no clean, safe, unattended undo (Dataverse
 //      App Users are disabled, not hard-deleted, via the public Web API).
-//   2. No live customer-shaped target Dataverse environment exists yet: H5
-//      (task 140)'s BapRestEnvironmentCreator has been unit-tested against
-//      fakes only (its own <notes-completion> — no live BAP credentials
-//      available in-sandbox) — there is no disposable env to write into.
+//   2. No live customer-shaped target Dataverse environment exists yet (since T228 the operator creates one per
+//      customer and H5 only adopts it) — there is no disposable env to write into.
 //   3. Task 111's Grant-ControlPlaneIdentity.ps1 (C5.8 — the L2 UAMI's own
 //      admin-env registration + Graph app-role self-grant) authored but its
 //      live-exec was explicitly DEFERRED per that task's own

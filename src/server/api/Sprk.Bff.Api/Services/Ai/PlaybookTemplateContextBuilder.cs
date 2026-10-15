@@ -198,7 +198,8 @@ public static class PlaybookTemplateContextBuilder
             runContext.PlaybookId,
             runContext.TenantId,
             runContext.StartedAt,
-            runContext.Document);
+            runContext.Document,
+            runContext.UserId);
     }
 
     /// <summary>
@@ -231,7 +232,8 @@ public static class PlaybookTemplateContextBuilder
             nodeContext.PlaybookId,
             nodeContext.TenantId,
             startedAt: null,
-            nodeContext.Document);
+            nodeContext.Document,
+            nodeContext.UserId);
     }
 
     /// <summary>
@@ -246,7 +248,8 @@ public static class PlaybookTemplateContextBuilder
         Guid playbookId,
         string tenantId,
         DateTimeOffset? startedAt,
-        DocumentContext? document = null)
+        DocumentContext? document = null,
+        Guid? userId = null)
     {
         var context = new Dictionary<string, object?>(StringComparer.Ordinal);
 
@@ -363,6 +366,9 @@ public static class PlaybookTemplateContextBuilder
                 id = runId.ToString(),
                 playbookId = playbookId.ToString(),
                 tenantId,
+                // ISS-018 (#1452): the run's user, so {{run.userId}} renders in Layer 1 (it rendered null, and
+                // CreateNotification's recipientId survived only through the executor's own fallback).
+                userId = userId?.ToString(),
                 startedAt = startedAt.Value.ToString("o"),
                 completedAtUtc = DateTimeOffset.UtcNow.ToString("o")
             };
@@ -374,6 +380,7 @@ public static class PlaybookTemplateContextBuilder
                 id = runId.ToString(),
                 playbookId = playbookId.ToString(),
                 tenantId,
+                userId = userId?.ToString(),
                 completedAtUtc = DateTimeOffset.UtcNow.ToString("o")
             };
         }

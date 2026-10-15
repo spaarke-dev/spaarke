@@ -43,6 +43,7 @@ import {
   webDarkTheme,
 } from '@fluentui/react-components';
 import { ArrangeStep } from '../steps/ArrangeStep';
+import { buildSectionsJson } from '../App';
 import type { SectionCatalogItem, SlotAssignments } from '../steps';
 import type { LayoutTemplateId } from '@spaarke/ui-components';
 
@@ -63,6 +64,17 @@ const FIXTURE_SECTIONS: SectionCatalogItem[] = [
 
 /** Sensible template default — single-column has one row for clarity. */
 const SINGLE_COLUMN_TEMPLATE_ID: LayoutTemplateId = 'single-column';
+
+/**
+ * Since the 2026-07-03 R2 UAT rework (708f18bb75, 803c77ace1) the row-height
+ * dropdown no longer lives in the row header: it is the first field of each
+ * placed section's Advanced popover (gear button `advanced-trigger-<slotKey>`),
+ * with testids `row-height-dropdown-popover-<rowId>` and
+ * `row-height-custom-input-popover-<rowId>`. Tests must open the popover first.
+ */
+function openAdvancedPopover(): void {
+  fireEvent.click(screen.getByTestId('advanced-trigger-row-1:0'));
+}
 
 /**
  * Render ArrangeStep inside a FluentProvider, returning `onRowHeightsChange`
@@ -115,25 +127,32 @@ function renderArrangeStep(overrides?: {
 describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
   it('renderInitial_RowHeightDropdownVisible_ShowsFivePresetsPlusCustom', () => {
     renderArrangeStep();
+    openAdvancedPopover();
 
     // Open the dropdown to reveal options.
-    const dropdown = screen.getByTestId(/^row-height-dropdown-/);
+    const dropdown = screen.getByTestId(/^row-height-dropdown-popover-/);
     fireEvent.click(dropdown);
 
     // Fluent v9 Dropdown renders options as role="option" once opened.
     // Expected: Auto (default), 40vh, 60vh, 80vh, 100vh, Custom… = 6 total.
-    expect(screen.getByText('Auto (default)')).toBeInTheDocument();
-    expect(screen.getByText('40vh (small)')).toBeInTheDocument();
-    expect(screen.getByText('60vh (medium)')).toBeInTheDocument();
-    expect(screen.getByText('80vh (large)')).toBeInTheDocument();
-    expect(screen.getByText('100vh (full-viewport)')).toBeInTheDocument();
-    expect(screen.getByText('Custom…')).toBeInTheDocument();
+    // (The closed dropdown also shows the selected "Auto (default)" as its
+    // button text, so assert on the listbox options by role, exactly 6.)
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels).toEqual([
+      'Auto (default)',
+      '40vh (small)',
+      '60vh (medium)',
+      '80vh (large)',
+      '100vh (full-viewport)',
+      'Custom…',
+    ]);
   });
 
   it('renderInitial_NoRowHeightSet_DropdownDefaultsToAuto', () => {
     renderArrangeStep({ rowHeights: new Map() });
+    openAdvancedPopover();
 
-    const dropdown = screen.getByTestId(/^row-height-dropdown-/);
+    const dropdown = screen.getByTestId(/^row-height-dropdown-popover-/);
     // Fluent v9 Dropdown displays its `value` prop as the button text.
     expect(dropdown).toHaveTextContent('Auto (default)');
   });
@@ -144,8 +163,9 @@ describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
 
   it('select80vhPreset_EmitsRowHeightsMapWithEightyVh', () => {
     const { onRowHeightsChange } = renderArrangeStep();
+    openAdvancedPopover();
 
-    const dropdown = screen.getByTestId(/^row-height-dropdown-/);
+    const dropdown = screen.getByTestId(/^row-height-dropdown-popover-/);
     fireEvent.click(dropdown);
 
     const option = screen.getByText('80vh (large)');
@@ -172,8 +192,9 @@ describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
     // Start with a stored custom value; selecting Auto (default) MUST remove it.
     const initial = new Map<string, string>([['row-1', '80vh']]);
     const { onRowHeightsChange } = renderArrangeStep({ rowHeights: initial });
+    openAdvancedPopover();
 
-    const dropdown = screen.getByTestId(/^row-height-dropdown-/);
+    const dropdown = screen.getByTestId(/^row-height-dropdown-popover-/);
     fireEvent.click(dropdown);
 
     const option = screen.getByText('Auto (default)');
@@ -192,15 +213,16 @@ describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
 
   it('selectCustomOption_RevealsCustomInputForArbitraryCssLength', () => {
     renderArrangeStep();
+    openAdvancedPopover();
 
-    const dropdown = screen.getByTestId(/^row-height-dropdown-/);
+    const dropdown = screen.getByTestId(/^row-height-dropdown-popover-/);
     fireEvent.click(dropdown);
 
     const customOption = screen.getByText('Custom…');
     fireEvent.click(customOption);
 
     // After selecting Custom…, the Input appears.
-    const customInput = screen.getByTestId(/^row-height-custom-input-/);
+    const customInput = screen.getByTestId(/^row-height-custom-input-popover-/);
     expect(customInput).toBeInTheDocument();
   });
 
@@ -208,8 +230,9 @@ describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
     // Start with an already-Custom state so the input is visible.
     const initial = new Map<string, string>([['row-1', '500px']]);
     const { onRowHeightsChange } = renderArrangeStep({ rowHeights: initial });
+    openAdvancedPopover();
 
-    const customInput = screen.getByTestId(/^row-height-custom-input-/);
+    const customInput = screen.getByTestId(/^row-height-custom-input-popover-/);
     fireEvent.change(customInput, { target: { value: '640px' } });
 
     expect(onRowHeightsChange).toHaveBeenCalled();
@@ -232,59 +255,48 @@ describe('ArrangeStep rowHeight dropdown — FR-02 UI (task 011)', () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderArrangeStep({ theme: webDarkTheme });
+      openAdvancedPopover();
       // Dropdown must still render + be interactable in dark mode.
-      expect(screen.getByTestId(/^row-height-dropdown-/)).toBeInTheDocument();
+      expect(screen.getByTestId(/^row-height-dropdown-popover-/)).toBeInTheDocument();
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     } finally {
       consoleErrorSpy.mockRestore();
     }
   });
 
-  // -------------------------------------------------------------------------
-  // (f) Help tooltip is rendered
-  // -------------------------------------------------------------------------
-
-  it('renderInitial_HelpTooltipTriggerVisible_HasAccessibleLabel', () => {
-    renderArrangeStep();
-    const helpTrigger = screen.getByTestId(/^row-height-help-/);
-    expect(helpTrigger).toBeInTheDocument();
-    expect(helpTrigger).toHaveAttribute('aria-label', 'Row height help');
-  });
+  // (f) The row-height help tooltip (`row-height-help-*`) was removed from the
+  // product by the 2026-07-03 R2 UAT rework; its test was deleted (ADR-038:
+  // asserts UI that no longer exists, no behaviour left to protect).
 });
 
 // ---------------------------------------------------------------------------
-// buildSectionsJson round-trip — verifies the wired output matches the schema
-//
-// These tests DUPLICATE the logic path exercised in ArrangeStep but at the
-// JSON boundary — proving that a row-heights Map with '80vh' produces JSON
-// with `"rowHeight": "80vh"`, and that an empty map produces JSON without the
-// field. `buildSectionsJson` currently lives inside App.tsx (module-scoped);
-// once App.tsx exports it (or the wizard is refactored to lift it into a
-// helpers/ module), these tests wire directly. For task 011 we scaffold the
-// test names so the JSON-boundary coverage exists once App.tsx exposes the
-// helper.
+// buildSectionsJson round-trip — the JSON boundary of FR-02. `buildSectionsJson`
+// is now exported from App.tsx, so the former `describe.skip` placeholders are
+// wired for real (they were skipped only "until App.tsx exports it").
 // ---------------------------------------------------------------------------
 
-describe.skip('buildSectionsJson — row height propagation (requires App.tsx export)', () => {
+describe('buildSectionsJson — row height propagation (FR-02)', () => {
+  const assignments: SlotAssignments = new Map([['row-1:0', 'documents']]);
+
   it('buildSectionsJson_MapContainsEightyVh_EmitsRowHeightInJson', () => {
-    // Placeholder — to be wired once buildSectionsJson is exported.
-    // Expected shape:
-    //   const json = buildSectionsJson('single-column', assignments, 'my', new Map([['row-1', '80vh']]));
-    //   expect(JSON.parse(json).rows[0].rowHeight).toBe('80vh');
+    const json = buildSectionsJson(
+      SINGLE_COLUMN_TEMPLATE_ID, assignments, 'my', new Map([['row-1', '80vh']]), new Map(),
+    );
+    expect(JSON.parse(json).rows[0].rowHeight).toBe('80vh');
   });
 
   it('buildSectionsJson_EmptyMap_OmitsRowHeightField', () => {
-    // Placeholder — to be wired once buildSectionsJson is exported.
-    // Expected shape:
-    //   const json = buildSectionsJson('single-column', assignments, 'my', new Map());
-    //   expect(JSON.parse(json).rows[0]).not.toHaveProperty('rowHeight');
+    const json = buildSectionsJson(
+      SINGLE_COLUMN_TEMPLATE_ID, assignments, 'my', new Map(), new Map(),
+    );
+    expect(JSON.parse(json).rows[0]).not.toHaveProperty('rowHeight');
   });
 
   it('buildSectionsJson_MapContains640Px_EmitsExactCustomValueInJson', () => {
-    // Placeholder — to be wired once buildSectionsJson is exported.
-    // Expected shape:
-    //   const json = buildSectionsJson('single-column', assignments, 'my', new Map([['row-1', '640px']]));
-    //   expect(JSON.parse(json).rows[0].rowHeight).toBe('640px');
+    const json = buildSectionsJson(
+      SINGLE_COLUMN_TEMPLATE_ID, assignments, 'my', new Map([['row-1', '640px']]), new Map(),
+    );
+    expect(JSON.parse(json).rows[0].rowHeight).toBe('640px');
   });
 });
 

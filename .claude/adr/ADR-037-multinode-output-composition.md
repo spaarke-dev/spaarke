@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (amended 2026-07-05)
 > **Domain**: BFF AI / composite output streaming + FE widget rendering
-> **Last Updated**: 2026-07-05
+> **Last Updated**: 2026-10-12
 >
 > **⚠️ Amendment 2026-07-05 (Path B per CLAUDE.md §6.5 — operator-approved, `spaarke-ai-code-audit-r1` ADR review A-2)**:
 > 1. **RESCINDED**: the Migration-Path rule *"any future workspace playbook
@@ -26,7 +26,8 @@
 > tasks 044/050): the `AnalysisChunk.FieldDelta` server model + `FromDelta` +
 > its test file are DELETED (grep-zero shown in
 > `projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md`).
-> The frozen engine's `Streaming.FieldDeltaEvent` type remains untouched. The
+> The frozen engine's `Streaming.FieldDeltaEvent` type and its
+> `IncrementalJsonParser` were deleted on 2026-10-12, since they had no caller left. The
 > "MUST preserve FieldDelta" / "MUST NOT delete until migrated" rules below are
 > therefore DISCHARGED — retained in this file for history only; the binding
 > content is the section-name-keyed streaming + widget contract.

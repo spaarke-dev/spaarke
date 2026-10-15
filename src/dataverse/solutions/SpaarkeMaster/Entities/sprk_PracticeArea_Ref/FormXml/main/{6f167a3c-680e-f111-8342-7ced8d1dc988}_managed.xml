@@ -1,0 +1,113 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{6f167a3c-680e-f111-8342-7ced8d1dc988}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{231009f9-ab0f-4fd8-b1fe-89421acd7df9}" IsUserDefined="1" labelid="{c4e058a6-3e35-4d70-b7e1-3205502ca28f}">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{70cbf308-8311-4c21-a3c4-b99d290c76a4}" labelid="{c7edb096-ffb3-433d-ba40-d13901c214b2}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{4f58c199-3431-475a-abc7-83ca5bcae653}" labelid="{5a60e3d4-e899-442d-a4f4-9e5096a434be}">
+                        <labels>
+                          <label description="Practice Area Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_practiceareaname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_practiceareaname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{847aedf4-3941-4846-babd-f89da9e44a60}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_practiceareacode" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_practiceareacode" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{7831c72b-f0f2-46cc-97ed-76627d7af045}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{507fdd9c-2973-42f5-a5f0-aa2fad84645e}" showlabel="false" labelid="{da1a4bc4-d47a-4334-9151-2ed92afe1ffc}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{5b84b8da-fc1e-4507-81fb-bdef249e8e5f}" showlabel="false" labelid="{6d06386b-4d6c-41da-8516-33fad3387544}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{ee327421-cc26-4ad5-a278-4ed375269f8f}" showlabel="false" labelid="{9869a5a0-0cbd-4b62-914e-65523d091278}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{9a0d2a33-6b19-4e8b-bd45-19285fc1f335}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{960c9684-fdb2-4ca7-b58e-4be493dff571}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{9b596bbc-fd2a-451e-b122-863b6dc19629}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{7da98ab7-5240-4451-b4a2-4cf8d3a30fc9}" showlabel="false" labelid="{40173d29-4683-46b8-b511-da6ed7af3b60}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{9030387a-81fd-4b08-9ef1-1e6df876b505}" showlabel="false" labelid="{f07eb7a9-2d89-4983-a28c-a0a11f91c86a}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{b40d4c99-4d6c-4474-8f63-90fdcbbe66df}" showlabel="false" labelid="{ecc91020-ed5d-460e-88cf-26c764e2479b}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Practice Area main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

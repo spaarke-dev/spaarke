@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_ApplicationInsightsKey">
+  <description default="Application Insights instrumentation key for logging and monitoring. Store in Azure Key Vault for consistency.">
+    <label description="Application Insights instrumentation key for logging and monitoring. Store in Azure Key Vault for consistency." languagecode="1033" />
+  </description>
+  <displayname default="Application Insights Key">
+    <label description="Application Insights Key" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000005</type>
+</environmentvariabledefinition>

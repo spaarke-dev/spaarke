@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Metadata;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -89,8 +89,8 @@ public class SecurableEntityRegistryTests
             Meta("sprk_invoice", secure: false),
             Meta("contact", secure: false));
 
-        var records = Substitute.For<IGenericEntityService>();
-        records.RetrieveAsync("sprk_project", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var records = new Mock<IGenericEntityService>();
+        records.Setup(r => r.RetrieveAsync("sprk_project", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_project", RecordId)
             {
                 ["sprk_issecure"] = true,
@@ -98,14 +98,14 @@ public class SecurableEntityRegistryTests
             }));
         // Task 155: an invoice is a CHILD record, so its row is now read for its root links. A row with none —
         // the resolve completes on the fallback; what is under test is still only the metadata cost.
-        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        records.Setup(r => r.RetrieveAsync("sprk_invoice", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)));
         // Task 155 f3: the same for a contact — its own sprk_invoice lookup (live sweep) means its row is read too.
-        records.RetrieveAsync("contact", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        records.Setup(r => r.RetrieveAsync("contact", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("contact", RecordId)));
 
         var resolver = new RecordContainerResolver(
-            harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+            harness.Registry, records.Object, NullLogger<RecordContainerResolver>.Instance);
 
         try
         {
@@ -136,13 +136,13 @@ public class SecurableEntityRegistryTests
             Meta("businessunit", secure: false));
 
         var projectId = Guid.Parse("45454545-4545-4545-4545-454545454545");
-        var records = Substitute.For<IGenericEntityService>();
-        records.RetrieveAsync("sprk_todo", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var records = new Mock<IGenericEntityService>();
+        records.Setup(r => r.RetrieveAsync("sprk_todo", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_todo", RecordId)
             {
                 ["sprk_regardingproject"] = new EntityReference("sprk_project", projectId)
             }));
-        records.RetrieveAsync("sprk_project", projectId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        records.Setup(r => r.RetrieveAsync("sprk_project", projectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_project", projectId)
             {
                 ["sprk_issecure"] = true,
@@ -150,7 +150,7 @@ public class SecurableEntityRegistryTests
             }));
 
         var resolver = new RecordContainerResolver(
-            harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+            harness.Registry, records.Object, NullLogger<RecordContainerResolver>.Instance);
 
         var decision = await resolver.ResolveForRecordAsync("sprk_todo", RecordId);
 
@@ -312,26 +312,28 @@ public class SecurableEntityRegistryTests
     public async Task AnInvoiceFlaggedTrue_UnderAnOrdinaryMatter_IsNotTreatedAsSecure()
     {
         var harness = LiveShapedHarness();
-        var records = Substitute.For<IGenericEntityService>();
-        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var records = new Mock<IGenericEntityService>();
+        records.Setup(r => r.RetrieveAsync("sprk_invoice", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
             {
                 ["sprk_issecure"] = true,   // what a user could set before the lock; no container of its own
                 ["sprk_matter"] = new EntityReference("sprk_matter", MatterId)
             }));
-        records.RetrieveAsync("sprk_matter", MatterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        records.Setup(r => r.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_matter", MatterId) { ["sprk_issecure"] = false }));
 
-        var resolver = new RecordContainerResolver(harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+        var resolver = new RecordContainerResolver(harness.Registry, records.Object, NullLogger<RecordContainerResolver>.Instance);
 
         var decision = await resolver.ResolveForRecordAsync("sprk_invoice", RecordId, nonSecureFallbackContainerId: SharedFallback);
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback,
             "before task 150 the invoice's own true flag made it a secure record with no container — every upload refused");
         decision.ContainerId.Should().Be(SharedFallback);
-        await records.Received(1).RetrieveAsync("sprk_invoice", RecordId,
-            Arg.Is<string[]>(columns => !columns.Contains(SecurableEntityRegistry.SecureFlagAttribute)),
-            Arg.Any<CancellationToken>());
+        records.Verify(
+            r => r.RetrieveAsync("sprk_invoice", RecordId,
+                It.Is<string[]>(columns => !columns.Contains(SecurableEntityRegistry.SecureFlagAttribute)),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
     }
 
     [Theory(DisplayName = "Task 150: an invoice under a SECURE matter IS secure — whatever its own flag says")]
@@ -340,21 +342,21 @@ public class SecurableEntityRegistryTests
     public async Task AnInvoiceUnderASecureMatter_IsSecure_WhateverItsOwnFlag(bool invoiceFlag)
     {
         var harness = LiveShapedHarness();
-        var records = Substitute.For<IGenericEntityService>();
-        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var records = new Mock<IGenericEntityService>();
+        records.Setup(r => r.RetrieveAsync("sprk_invoice", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
             {
                 ["sprk_issecure"] = invoiceFlag,
                 ["sprk_matter"] = new EntityReference("sprk_matter", MatterId)
             }));
-        records.RetrieveAsync("sprk_matter", MatterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        records.Setup(r => r.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_matter", MatterId)
             {
                 ["sprk_issecure"] = true,
                 ["sprk_containerid"] = SecureMatterContainer
             }));
 
-        var resolver = new RecordContainerResolver(harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+        var resolver = new RecordContainerResolver(harness.Registry, records.Object, NullLogger<RecordContainerResolver>.Instance);
 
         var decision = await resolver.ResolveForRecordAsync("sprk_invoice", RecordId, nonSecureFallbackContainerId: SharedFallback);
 

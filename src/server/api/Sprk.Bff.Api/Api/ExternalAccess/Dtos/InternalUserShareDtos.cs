@@ -41,12 +41,17 @@ public record ShareRecordWithUserRequest(
 /// the client's own input, so it is not echoed back; compare it with <paramref name="AccessLevel"/> to show the user
 /// what they actually granted.
 /// </param>
+/// <param name="NotificationFailed">
+/// <c>true</c> when the share gave the user access and they could not be sent the in-app notification (task 181, owner
+/// round 89). The share itself stands. Additive.
+/// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
     ExternalAccessLevel? AccessLevel,
     int AccessRightsMask,
     string Outcome,
-    bool Narrowed);
+    bool Narrowed,
+    bool NotificationFailed = false);
 
 /// <summary>Request body for <c>POST /api/v1/external-access/unshare-user</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
@@ -91,9 +96,21 @@ public record RecordUserSharesResponse(
 /// rights — for example a provisioning creator's Share right. Setting a level replaces those rights.
 /// </param>
 /// <param name="ModifiedOn">When the share last changed.</param>
+/// <param name="ExternalNoAccess">
+/// Task 114 (owner round 67 amendment 4(c)): <c>true</c> when the record is Restricted and this user is flagged external
+/// (<c>sprk_isexternal = true</c>) — Manage Access shows "External user — no access" until the share is removed (the
+/// record's next save or the 5-minute job). Additive: <c>false</c> on every other share.
+/// </param>
+/// <param name="InheritedFrom">
+/// Task 175 (owner round 84; task 067's amendment): the secure matter or project that passed this share on to the record
+/// (task 158's inherited-share provenance, still in force), or <c>null</c> for a direct share. Manage Access shows such a row
+/// read-only ("Inherited from the {matter}"). Additive; <c>Name</c> is not read (the record's own lookup names its parent).
+/// </param>
 public record RecordUserShare(
     Guid SystemUserId,
     string? FullName,
     int AccessRightsMask,
     ExternalAccessLevel? AccessLevel,
-    DateTimeOffset ModifiedOn);
+    DateTimeOffset ModifiedOn,
+    bool ExternalNoAccess = false,
+    RecordAccessParent? InheritedFrom = null);

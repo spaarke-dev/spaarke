@@ -326,8 +326,16 @@ public class WorkforceEmailNoHijackTests
         _store.Writes.Should().BeEmpty($"a {who} caller never binds or creates");
     }
 
+    /// <summary>
+    /// The non-members that carry a USER token. An app-only token is excluded: since the R3 task 012 review round the
+    /// resolver refuses every non-user token up front (it can never resolve through an oid binding either — see
+    /// <c>WorkforcePrincipalResolverTests.ResolveAsync_AppOnlyToken...</c>).
+    /// </summary>
+    public static IEnumerable<object[]> NonMembersWithAUserToken()
+        => NonMembers().Where(row => (string)row[2] != WorkforceMembershipTest.DenyNotUserToken);
+
     [Theory]
-    [MemberData(nameof(NonMembers))]
+    [MemberData(nameof(NonMembersWithAUserToken))]
     public async Task ANonMember_StillResolvesThroughAnExistingOidBinding(string who, ClaimsPrincipal token, string _)
     {
         _store.AddContact(ContactA, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce);
@@ -340,7 +348,8 @@ public class WorkforceEmailNoHijackTests
     [Fact]
     public async Task Model1_CustomerTenantT_IsServed_AndTheRegistrationsOwnTenantS_IsNot()
     {
-        // AzureAd:TenantId = S is irrelevant: the binder reads only WorkforceIdentity:CustomerTenantIds = [T].
+        // AzureAd:TenantId = S is irrelevant for a member: the binder reads only WorkforceIdentity:CustomerTenantIds = [T].
+        // (A registered guest (FR-15) additionally requires tid = AzureAd:TenantId; this resolver has no stamp tenant.)
         var fromS = await Resolve(WorkforceUser(Caller, SpaarkeTenant, email: Email));
         fromS.DenyCode.Should().Be(WorkforceMembershipTest.DenyForeignTenant);
         _store.Contacts.Should().BeEmpty();
@@ -589,7 +598,7 @@ public class WorkforceEmailNoHijackTests
             .ReturnsAsync(() =>
             {
                 var c = new EntityCollection();
-                if (systemUserId is { } id) c.Entities.Add(new Entity("systemuser") { Id = id });
+                if (systemUserId is { } id) c.Entities.Add(new Entity("systemuser") { Id = id, ["isdisabled"] = false });
                 return c;
             });
 

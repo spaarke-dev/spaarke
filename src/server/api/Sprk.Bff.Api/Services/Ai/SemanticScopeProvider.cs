@@ -20,11 +20,16 @@ public sealed class SemanticScopeProvider : ISemanticScopeProvider
     private const string ProvenanceClass = "semantic_retrieval";
 
     private readonly IRagService _ragService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly ILogger<SemanticScopeProvider> _logger;
 
-    public SemanticScopeProvider(IRagService ragService, ILogger<SemanticScopeProvider> logger)
+    public SemanticScopeProvider(
+        IRagService ragService,
+        IRetrievalAccessTrim accessTrim,
+        ILogger<SemanticScopeProvider> logger)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -53,13 +58,20 @@ public sealed class SemanticScopeProvider : ISemanticScopeProvider
             ParentEntityId = request.ParentEntityId,
         };
 
-        var response = await _ragService
-            .SearchAsync(request.Query, options, cancellationToken)
-            .ConfigureAwait(false);
+        // Task 176 (#1511): the privilege filter above does nothing until privilege_group_ids is stamped (finding
+        // A-21), so the references are trimmed to documents the caller can read. No caller principal → none.
+        var (response, _) = await _accessTrim.SearchReadableAsync(
+            _ragService,
+            request.Query,
+            options,
+            Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(request.CallerPrincipal),
+            cancellationToken).ConfigureAwait(false);
 
         var references = response.Results
             .Select(r => new RetrievalReference
             {
+                // Every surviving row has a readable DocumentId (the trim drops the rest), so the chunk-id fallback
+                // no longer fires; it stays as a guard on the record shape.
                 DocumentRef = r.DocumentId ?? r.Id,
                 IndexId = r.KnowledgeSourceName,
                 ProvenanceClass = ProvenanceClass,

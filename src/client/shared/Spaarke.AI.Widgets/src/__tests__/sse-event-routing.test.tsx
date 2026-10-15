@@ -42,11 +42,9 @@ import type { AiPaneEvent } from '@spaarke/ai-context';
 // ---------------------------------------------------------------------------
 
 jest.mock('@spaarke/auth', () => {
-  const stubFetch = jest.fn().mockResolvedValue({
-    ok: false,
-    status: 404,
-    json: async () => ({}),
-  });
+  // authenticatedFetch THROWS ApiError for a non-2xx (it never resolves { ok: false }).
+  const { ApiError } = jest.requireActual('../../../Spaarke.Auth/src/errors');
+  const stubFetch = jest.fn().mockRejectedValue(new ApiError('HTTP 404', 404, null));
   return {
     buildBffApiUrl: (base: string, path: string) => `${base}${path}`,
     authenticatedFetch: stubFetch,

@@ -1,5 +1,4 @@
 using Azure.Search.Documents.Indexes;
-using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -33,13 +32,12 @@ public class KnowledgeDeploymentServiceTests
         });
     }
 
-    private KnowledgeDeploymentService CreateService(SecretClient? secretClient = null)
+    private KnowledgeDeploymentService CreateService()
     {
         return new KnowledgeDeploymentService(
             _searchIndexClientMock.Object,
             _options,
-            _loggerMock.Object,
-            secretClient);
+            _loggerMock.Object);
     }
 
     #region GetDeploymentConfigAsync Tests
@@ -83,7 +81,6 @@ public class KnowledgeDeploymentServiceTests
             _searchIndexClientMock.Object,
             analysisOptions,
             _loggerMock.Object,
-            secretClient: null,
             aiSearchOptions: aiSearchOptions);
 
         // Act
@@ -116,29 +113,6 @@ public class KnowledgeDeploymentServiceTests
         // Assert
         result.Model.Should().Be(RagDeploymentModel.Dedicated);
         result.IndexName.Should().Be("tenant-002-knowledge");
-    }
-
-    [Fact]
-    public async Task GetDeploymentConfigAsync_CustomerOwnedModel_ReturnsInactiveByDefault()
-    {
-        // Arrange
-        var options = Options.Create(new AnalysisOptions
-        {
-            DefaultRagModel = RagDeploymentModel.CustomerOwned
-        });
-        var service = new KnowledgeDeploymentService(
-            _searchIndexClientMock.Object,
-            options,
-            _loggerMock.Object);
-
-        var tenantId = "tenant-003";
-
-        // Act
-        var result = await service.GetDeploymentConfigAsync(tenantId);
-
-        // Assert
-        result.Model.Should().Be(RagDeploymentModel.CustomerOwned);
-        result.IsActive.Should().BeFalse(); // Requires manual configuration
     }
 
     [Fact]
@@ -241,121 +215,6 @@ public class KnowledgeDeploymentServiceTests
 
     #endregion
 
-    #region ValidateCustomerOwnedDeploymentAsync Tests
-
-    [Fact]
-    public async Task ValidateCustomerOwnedDeploymentAsync_NonCustomerOwnedModel_ReturnsFailure()
-    {
-        // Arrange
-        var service = CreateService();
-        var config = new KnowledgeDeploymentConfig
-        {
-            TenantId = "tenant-validate",
-            Model = RagDeploymentModel.Shared
-        };
-
-        // Act
-        var result = await service.ValidateCustomerOwnedDeploymentAsync(config);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("CustomerOwned");
-    }
-
-    [Fact]
-    public async Task ValidateCustomerOwnedDeploymentAsync_MissingSearchEndpoint_ReturnsFailure()
-    {
-        // Arrange
-        var service = CreateService();
-        var config = new KnowledgeDeploymentConfig
-        {
-            TenantId = "tenant-validate",
-            Model = RagDeploymentModel.CustomerOwned,
-            ApiKeySecretName = "secret-name"
-            // SearchEndpoint is null
-        };
-
-        // Act
-        var result = await service.ValidateCustomerOwnedDeploymentAsync(config);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("SearchEndpoint");
-    }
-
-    [Fact]
-    public async Task ValidateCustomerOwnedDeploymentAsync_MissingApiKeySecretName_ReturnsFailure()
-    {
-        // Arrange
-        var service = CreateService();
-        var config = new KnowledgeDeploymentConfig
-        {
-            TenantId = "tenant-validate",
-            Model = RagDeploymentModel.CustomerOwned,
-            SearchEndpoint = "https://customer-search.search.windows.net"
-            // ApiKeySecretName is null
-        };
-
-        // Act
-        var result = await service.ValidateCustomerOwnedDeploymentAsync(config);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("ApiKeySecretName");
-    }
-
-    [Fact]
-    public async Task ValidateCustomerOwnedDeploymentAsync_NoSecretClient_ThrowsInvalidOperationException()
-    {
-        // Arrange - No SecretClient provided
-        var service = CreateService(secretClient: null);
-        var config = new KnowledgeDeploymentConfig
-        {
-            TenantId = "tenant-validate",
-            Model = RagDeploymentModel.CustomerOwned,
-            SearchEndpoint = "https://customer-search.search.windows.net",
-            ApiKeySecretName = "customer-api-key"
-        };
-
-        // Act
-        var result = await service.ValidateCustomerOwnedDeploymentAsync(config);
-
-        // Assert - Should fail because SecretClient is required
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("Key Vault");
-    }
-
-    #endregion
-
-    #region DeploymentValidationResult Tests
-
-    [Fact]
-    public void DeploymentValidationResult_Success_HasCorrectProperties()
-    {
-        // Arrange & Act
-        var result = DeploymentValidationResult.Success(100, "v1.0");
-
-        // Assert
-        result.IsValid.Should().BeTrue();
-        result.DocumentCount.Should().Be(100);
-        result.SchemaVersion.Should().Be("v1.0");
-        result.ErrorMessage.Should().BeNull();
-    }
-
-    [Fact]
-    public void DeploymentValidationResult_Failure_HasCorrectProperties()
-    {
-        // Arrange & Act
-        var result = DeploymentValidationResult.Failure("Connection failed");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Be("Connection failed");
-        result.DocumentCount.Should().BeNull();
-    }
-
-    #endregion
-
     #region Index Name Sanitization Tests
 
     [Fact]
@@ -426,7 +285,6 @@ public class KnowledgeDeploymentServiceTests
             _searchIndexClientMock.Object,
             _options,
             _loggerMock.Object,
-            secretClient: null,
             aiSearchOptions: aiSearchOptions);
     }
 

@@ -1,3 +1,4 @@
+/** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * Unit tests for formatDueDate (R2.2 Item 2).
  *
@@ -6,6 +7,8 @@
  * deterministic regardless of when they run.
  */
 
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { formatDueDate } from '../src/utils/formatDueDate';
 
 const NOW = new Date('2026-06-20T14:00:00Z');
@@ -60,19 +63,11 @@ describe('formatDueDate', () => {
 // `sprk_duedate`) is a calendar day. `new Date("2026-10-05")` is UTC midnight,
 // i.e. 8pm on Oct 4 in New York, so before the fix a task due TODAY read
 // "Overdue by 1d" and one due tomorrow read "Due today" in every US zone.
-// Run in a fixed negative-offset zone; restore TZ so other files in the same
-// jest worker are unaffected.
+// The whole file runs in America/New_York (a fixed negative-offset zone) through
+// the @jest-environment on line 1; the cases above do not depend on the zone.
 // ---------------------------------------------------------------------------
 
 describe('formatDueDate — DateOnly values in America/New_York', () => {
-  const originalTz = process.env.TZ;
-  beforeAll(() => {
-    process.env.TZ = 'America/New_York';
-  });
-  afterAll(() => {
-    process.env.TZ = originalTz;
-  });
-
   // 9:00am local on Mon 2026-10-05.
   const localNow = (): Date => new Date(2026, 9, 5, 9, 0, 0);
 

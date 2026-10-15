@@ -1,0 +1,60 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Role id="{b1fb7ee0-bfbe-f111-aaaf-0022482913fc}" name="Spaarke Ontology Service" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <IsCustomizable>1</IsCustomizable>
+  <IsAutoAssigned>0</IsAutoAssigned>
+  <AppliesTo>All users</AppliesTo>
+  <Description>Spaarke ontology service</Description>
+  <SummaryOfCoreTablePermissions>Create, read, write, append</SummaryOfCoreTablePermissions>
+  <RolePrivileges>
+    <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Global" />
+    <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvAppendsprk_Signal" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Budget" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Communication" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Event" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Policy" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_PolicyVersion" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Signal" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Todo" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Global" />
+    <RolePrivilege name="prvAppendToUser" level="Global" />
+    <RolePrivilege name="prvAssignsprk_BudgetRevision" level="Global" />
+    <RolePrivilege name="prvAssignsprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvAssignsprk_Signal" level="Global" />
+    <RolePrivilege name="prvCreateSharePointData" level="Global" />
+    <RolePrivilege name="prvCreatesprk_BudgetRevision" level="Global" />
+    <RolePrivilege name="prvCreatesprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvCreatesprk_Signal" level="Global" />
+    <RolePrivilege name="prvReadPluginAssembly" level="Global" />
+    <RolePrivilege name="prvReadPluginType" level="Global" />
+    <RolePrivilege name="prvReadSdkMessage" level="Global" />
+    <RolePrivilege name="prvReadSdkMessageProcessingStep" level="Global" />
+    <RolePrivilege name="prvReadSdkMessageProcessingStepImage" level="Global" />
+    <RolePrivilege name="prvReadSharePointData" level="Global" />
+    <RolePrivilege name="prvReadSharePointDocument" level="Global" />
+    <RolePrivilege name="prvReadsprk_BillingEvent" level="Global" />
+    <RolePrivilege name="prvReadsprk_Budget" level="Global" />
+    <RolePrivilege name="prvReadsprk_BudgetBucket" level="Global" />
+    <RolePrivilege name="prvReadsprk_BudgetRevision" level="Global" />
+    <RolePrivilege name="prvReadsprk_Communication" level="Global" />
+    <RolePrivilege name="prvReadsprk_CommunicationAttachment" level="Global" />
+    <RolePrivilege name="prvReadsprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvReadsprk_Event" level="Global" />
+    <RolePrivilege name="prvReadsprk_Invoice" level="Global" />
+    <RolePrivilege name="prvReadsprk_InvoiceLineItem" level="Global" />
+    <RolePrivilege name="prvReadsprk_KPIAssessment" level="Global" />
+    <RolePrivilege name="prvReadsprk_Matter" level="Global" />
+    <RolePrivilege name="prvReadsprk_Memo" level="Global" />
+    <RolePrivilege name="prvReadsprk_Policy" level="Global" />
+    <RolePrivilege name="prvReadsprk_PolicyVersion" level="Global" />
+    <RolePrivilege name="prvReadsprk_Project" level="Global" />
+    <RolePrivilege name="prvReadsprk_ServiceRequest" level="Global" />
+    <RolePrivilege name="prvReadsprk_Signal" level="Global" />
+    <RolePrivilege name="prvReadsprk_Todo" level="Global" />
+    <RolePrivilege name="prvReadsprk_TriageCategory" level="Global" />
+    <RolePrivilege name="prvReadsprk_WorkAssignment" level="Global" />
+    <RolePrivilege name="prvWriteSharePointData" level="Global" />
+    <RolePrivilege name="prvWritesprk_Signal" level="Global" />
+  </RolePrivileges>
+</Role>

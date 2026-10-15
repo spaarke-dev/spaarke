@@ -49,11 +49,27 @@
  *     pill reads "Secure" in red for every underlying value. The menu is the
  *     unchanged Standard / Limited / Restricted list — the secure display is a
  *     closed-label change only and never rewrites the stored value.
+ *
+ * Access-status indicator (unified-access-control-r2 task 153, owner round 83
+ * item 11 "BOTH": the form's red text banner plus this clickable indicator):
+ *   - opt-in via `accessStatus` (the two signals of task 064's per-record read);
+ *     omitted → nothing drawn, so existing consumers are unchanged;
+ *   - No Access in red ("Secure" too only when INDICATOR_SHOWS_SECURE is true;
+ *     owner round 85 set it false: the pill already says Secure); "Access status
+ *     unavailable" neutral when either signal is unknown; nothing when no shown
+ *     signal applies. No count, name or reason is ever shown, and nothing ever
+ *     says "not secure" / "not restricted";
+ *   - clickable only with `onOpenGrantModal` AND `canGrantAccess === true` (the
+ *     person icon's own fail-closed gate): No Access → Manage Access at its No
+ *     Access List (`onOpenGrantModal('noAccess')`), Secure only → the top. Else a
+ *     focusable, handler-less label whose tooltip says the caller cannot manage
+ *     access here. The unavailable state is never clickable.
  */
 
 import * as React from 'react';
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   Switch,
   Text,
@@ -69,6 +85,7 @@ import {
 } from '@fluentui/react-components';
 import { PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
+import { resolveAccessIndicator } from './accessStatus';
 
 /**
  * Position-based (NOT value-keyed) fallback pale backgrounds used when a
@@ -228,7 +245,56 @@ const useStyles = makeStyles({
     paddingLeft: 0,
     paddingRight: 0,
   },
+  // Access-status indicator (task 153). Token-only (ADR-021): the red is the palette the secure pill and the default
+  // Restricted segment already use; the unavailable state is neutral, never red and never absent.
+  accessIndicator: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: '22px',
+    minWidth: 'auto',
+    ...shorthands.borderRadius(tokens.borderRadiusCircular),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', 'transparent'),
+    ...shorthands.padding(0, tokens.spacingHorizontalS),
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase200,
+    whiteSpace: 'nowrap',
+  },
+  accessIndicatorRestricted: {
+    backgroundColor: tokens.colorPaletteRedBackground2,
+    color: tokens.colorNeutralForeground1,
+    // Verifier F4-2: Fluent's transparent Button sets its own :hover / :hover:active background and colour, which
+    // would turn a hovered or pressed "No Access" transparent with brand-coloured text. Stay red, a shade darker.
+    ':hover': {
+      backgroundColor: tokens.colorPaletteRedBackground3,
+      color: tokens.colorNeutralForeground1,
+    },
+    ':hover:active': {
+      backgroundColor: tokens.colorPaletteRedBackground3,
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+  accessIndicatorUnavailable: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightRegular,
+  },
 });
+
+/** The indicator's fixed strings (closed set, task 153). */
+const ACCESS_INDICATOR_TEXT = {
+  secure: 'Secure',
+  noAccess: 'No Access',
+  both: 'Secure · No Access',
+  unavailable: 'Access status unavailable',
+  secureExplain: 'Secure record: only people given access explicitly can see it.',
+  noAccessExplain: 'No Access restriction: named people or organizations are blocked from this record.',
+  unavailableExplain:
+    'Whether this record is secure or under a No Access restriction could not be checked. Do not assume it is unrestricted; reload the form to try again.',
+  openNoAccess: 'Open Manage Access at the No Access List.',
+  openTop: 'Open Manage Access.',
+  cannotManage: 'You cannot manage access on this record.',
+} as const;
 
 export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   monitor,
@@ -252,6 +318,8 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   accessPermissionDisabled = false,
   showAccessPermission = true,
   secureAccessPermission,
+  accessPermissionNote,
+  accessStatus,
 }) => {
   const styles = useStyles();
   // Task 138: the pill is disabled by the whole control's read-only state OR by its own column's
@@ -284,8 +352,9 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
               aria-label="Grant access"
               disabled={!grantEnabled}
               // No handler at all when disabled — a genuinely disabled Fluent
-              // Button (not merely dimmed) with no dead click.
-              onClick={grantEnabled ? onOpenGrantModal : undefined}
+              // Button (not merely dimmed) with no dead click. Wrapped so the
+              // click event is never passed on as a Manage Access section (task 153).
+              onClick={grantEnabled ? () => onOpenGrantModal() : undefined}
             />
           </Tooltip>
         )}
@@ -304,6 +373,73 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
       </>
     ) : null;
 
+  // Access-status indicator (task 153) — see the header comment. `accessStatus` omitted → nothing.
+  const indicatorView = accessStatus ? resolveAccessIndicator(accessStatus) : null;
+  let accessIndicator: React.ReactNode = null;
+  if (indicatorView && indicatorView.kind === 'unavailable') {
+    accessIndicator = (
+      <Tooltip content={ACCESS_INDICATOR_TEXT.unavailableExplain} relationship="description">
+        <span
+          className={mergeClasses(styles.accessIndicator, styles.accessIndicatorUnavailable)}
+          tabIndex={0}
+          data-testid="tracking-access-indicator"
+        >
+          {ACCESS_INDICATOR_TEXT.unavailable}
+        </span>
+      </Tooltip>
+    );
+  } else if (indicatorView && indicatorView.kind === 'restricted') {
+    const label = indicatorView.secure
+      ? indicatorView.noAccess
+        ? ACCESS_INDICATOR_TEXT.both
+        : ACCESS_INDICATOR_TEXT.secure
+      : ACCESS_INDICATOR_TEXT.noAccess;
+    const explain = [
+      indicatorView.secure ? ACCESS_INDICATOR_TEXT.secureExplain : null,
+      indicatorView.noAccess ? ACCESS_INDICATOR_TEXT.noAccessExplain : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const className = mergeClasses(styles.accessIndicator, styles.accessIndicatorRestricted);
+    if (onOpenGrantModal && grantEnabled) {
+      // When both apply, the click targets No Access (the list is what a manager needs to see).
+      const openAtNoAccess = indicatorView.noAccess;
+      accessIndicator = (
+        <Tooltip
+          content={`${explain} ${openAtNoAccess ? ACCESS_INDICATOR_TEXT.openNoAccess : ACCESS_INDICATOR_TEXT.openTop}`}
+          relationship="description"
+        >
+          <Button
+            className={className}
+            appearance="transparent"
+            size="small"
+            data-testid="tracking-access-indicator"
+            onClick={() => (openAtNoAccess ? onOpenGrantModal('noAccess') : onOpenGrantModal())}
+          >
+            {label}
+          </Button>
+        </Tooltip>
+      );
+    } else {
+      // Not clickable: no handler at all (the person icon's discipline), still focusable so the tooltip is reachable.
+      accessIndicator = (
+        <Tooltip content={`${explain} ${ACCESS_INDICATOR_TEXT.cannotManage}`} relationship="description">
+          <span className={className} tabIndex={0} data-testid="tracking-access-indicator">
+            {label}
+          </span>
+        </Tooltip>
+      );
+    }
+  }
+
+  const headerActions =
+    accessIndicator || toolbarIcons ? (
+      <div className={styles.headerActions}>
+        {accessIndicator}
+        {toolbarIcons}
+      </div>
+    ) : null;
+
   return (
     <div className={styles.container}>
       {/* Control header (task 073 UAT #3, always-on since v1.0.20) — a 32px row
@@ -312,10 +448,10 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
           title, so the toolbar is ALWAYS in a proper header row rather than
           floating (owner UAT: "toolbars not in the title row"). When no title is
           set, an empty spacer keeps the icons right-aligned. */}
-      {(title || toolbarIcons) && (
+      {(title || headerActions) && (
         <div className={styles.header}>
           {title ? <Text className={styles.headerTitle}>{title}</Text> : <span />}
-          {toolbarIcons && <div className={styles.headerActions}>{toolbarIcons}</div>}
+          {headerActions}
         </div>
       )}
       {/* Row 1 (only rendered when showTitle=true) — field labels, sourced
@@ -370,24 +506,34 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
                 ? getSelectedSegmentColors(idx, selOpt)
                 : undefined;
             const pillLabel = secureAccessPermission ? secureAccessPermission.label : (selOpt?.label ?? '');
+            const pillButton = (
+              <MenuButton
+                className={styles.accessPill}
+                appearance="transparent"
+                size="small"
+                aria-label={accessPermissionLabel}
+                disabled={pillDisabled}
+                // Suppress the chevron so the fixed-width pill centers its label
+                // (owner UAT v1.0.28). The colored pill is affordance enough.
+                menuIcon={null}
+                style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
+              >
+                {pillLabel}
+              </MenuButton>
+            );
             return (
               // A disabled pill never opens: `open={false}` pins the menu shut in addition to the
               // disabled trigger, so no onAccessPermissionChange can fire on a read-only form.
               <Menu positioning="below-start" {...(pillDisabled ? { open: false } : {})}>
                 <MenuTrigger disableButtonEnhancement>
-                  <MenuButton
-                    className={styles.accessPill}
-                    appearance="transparent"
-                    size="small"
-                    aria-label={accessPermissionLabel}
-                    disabled={pillDisabled}
-                    // Suppress the chevron so the fixed-width pill centers its label
-                    // (owner UAT v1.0.28). The colored pill is affordance enough.
-                    menuIcon={null}
-                    style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
-                  >
-                    {pillLabel}
-                  </MenuButton>
+                  {/* Task 175 (round 87): where the value comes from, as the pill's tooltip and description. */}
+                  {accessPermissionNote ? (
+                    <Tooltip content={accessPermissionNote} relationship="description">
+                      {pillButton}
+                    </Tooltip>
+                  ) : (
+                    pillButton
+                  )}
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>

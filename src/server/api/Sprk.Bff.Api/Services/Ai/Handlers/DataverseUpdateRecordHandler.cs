@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -226,9 +227,35 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // #1616: the ADR-024 pair is prepared BEFORE anything is checked — a project's half-pair completed from the row (so
+            // the checks and the application's write see exactly one pair), a work assignment's pair kept in step with the
+            // typed filing lookup this update moves (so this server never leaves a pair no typed lookup repeats).
+            var prepared = await OwnedChildWrite.KeepPairInStepAsync(
+                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                .ConfigureAwait(false);
+            if (prepared.Refusal is { } pairRefusal)
+            {
+                return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, pairRefusal, startedAt), stopwatch);
+            }
+            mapped = mapped with { Item = prepared.Item };
+
+            // AppendTo AS THE CALLER on every record a work assignment or project is moved under — its typed regarding
+            // lookups and the record its ADR-024 pair names — BEFORE the secure-root gate below reads anything about them:
+            // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
+            // caller who may not file under the record that it exists and is secure.
+            if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename)
+                && await OwnedChildWrite.CheckCallerMayFileRootUnderAsync(
+                        _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    .ConfigureAwait(false) is { } filingRefusal)
+            {
+                return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, filingRefusal, startedAt), stopwatch);
+            }
+
             // Task 158 (owner round 6): re-filing a work assignment or project — whether the record it will be filed under
-            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure").
-            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken)
+            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure"). #1630: a secure
+            // matter or project reached only through an invoice or event this update sets costs AppendTo as the caller too.
+            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken,
+                        OwnedChildWrite.CallerMayFileRootUnderSecure(_dataverse))
                     .ConfigureAwait(false) is { } rootRefusal)
             {
                 return LogOutcome(context, tablename, recordId,
@@ -257,6 +284,11 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 }
             }
 
+            // Ontology D-48 / #1659: the matter a communication is filed to BEFORE this write (for the Signal trigger below).
+            var matterBefore = IsCommunication(tablename) && MayRefile(tablename, mapped.Item!)
+                ? await ReadCommunicationMatterAsync(recordId).ConfigureAwait(false)
+                : default;
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
                 tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
@@ -266,7 +298,23 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
             }
 
-            if (!refile.Written)
+            // #1616: a project's ADR-024 pair is field-secured so that only this server writes it (its only filing column; the
+            // pair rule was asked AS THE CALLER above) — the caller's own PATCH carries every other column, the app the pair.
+            OwnedChildWrite.RefileOutcome? managedPair = null;
+            if (!refile.Written && OwnedChildWrite.BffManagedPairColumnsOf(tablename).Count > 0)
+            {
+                using var pairScope = _scopes?.CreateScope();
+                managedPair = await OwnedChildWrite.PatchWithBffManagedPairAsync(
+                        _dataverse, pairScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(),
+                        tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    .ConfigureAwait(false);
+                if (managedPair is { Written: false })
+                {
+                    return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, managedPair, startedAt), stopwatch);
+                }
+            }
+
+            if (!refile.Written && managedPair is null)
             {
                 // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
                 var response = await _dataverse.PatchAsync(
@@ -303,6 +351,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     tablename, recordId,
                     () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
                     CancellationToken.None).ConfigureAwait(false);
+            }
+
+            // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
+            // is a classified-then-filed email too, so it reaches the same association-confirmed Signal trigger as the
+            // filing route and the Office reconcile. Additive: runs only after the re-file was written, and never changes
+            // this tool's result.
+            if (refile.Written && IsCommunication(tablename))
+            {
+                await TriggerSignalForFiledCommunicationAsync(recordId, matterBefore).ConfigureAwait(false);
             }
 
             // Task 158 (owner round 6; §6.5 path B — see the class remarks): a work assignment or project the caller's own
@@ -397,23 +454,95 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             { NotARefile: true } => default,
             { Written: true } => new RefileStep(null, true),
-            { ClientFailure: { } failure } => new RefileStep(MapClientError(tool, failure, startedAt), false),
-            { Denied: { } denied } => new RefileStep(Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
-            { SecureFilingRefused: { } owner } => new RefileStep(Error(tool,
-                $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
-                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
-                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
-            // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure endpoint's
-            // message and reason code, not an owner refusal.
-            { Forbidden: { } forbidden } => new RefileStep(Error(tool,
-                $"The update was NOT written. {forbidden.Reason}",
-                forbidden.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
-            { OwnerRefusal: { } refused } => new RefileStep(Error(tool,
-                $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
-                refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
-            _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+            _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }
+
+    /// <summary>
+    /// Ontology D-48 / #1659 (owner decision D-125): after this tool re-filed a communication, queues the matter's Signal
+    /// re-evaluation when the communication is classified and on a matter — the one check the filing route and the Office
+    /// reconcile call (<see cref="Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger"/>). Both services come from a
+    /// fresh scope (same as the re-file's other scoped services); absent either, nothing happens. Never throws and never
+    /// changes the tool's result: the re-file is already written and the nightly pass remains the backstop.
+    /// </summary>
+    private async Task TriggerSignalForFiledCommunicationAsync(
+        Guid communicationId, Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger.MatterBefore matterBefore)
+    {
+        try
+        {
+            using var scope = _scopes?.CreateScope();
+            var provider = scope?.ServiceProvider;
+            var entities = provider?.GetService<Spaarke.Dataverse.IGenericEntityService>();
+            if (entities is null)
+                return;
+
+            await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+                .EnqueueIfClassifiedOnMatterAsync(
+                    entities, provider!.GetService<Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger>(),
+                    communicationId, _logger, matterBefore)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(Sprk.Bff.Api.Services.Signals.SignalTriggerEvents.FilingReadFailed, ex,
+                "[dataverse.update_record] could not queue the Signal trigger for re-filed communication {CommunicationId}; " +
+                "the nightly pass will pick it up ({ExceptionType}).",
+                communicationId, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>The matter a communication is filed to before this tool's write (bounded app-only read; unknown when it
+    /// cannot be read or no trigger is registered). Never throws.</summary>
+    private async Task<Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger.MatterBefore> ReadCommunicationMatterAsync(
+        Guid communicationId)
+    {
+        try
+        {
+            using var scope = _scopes?.CreateScope();
+            var entities = scope?.ServiceProvider.GetService<Spaarke.Dataverse.IGenericEntityService>();
+            return entities is null
+                ? default
+                : await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+                    .ReadMatterAsync(
+                        entities, scope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger>(),
+                        communicationId, _logger)
+                    .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(Sprk.Bff.Api.Services.Signals.SignalTriggerEvents.FilingReadFailed, ex,
+                "[dataverse.update_record] could not read the matter of communication {CommunicationId} before the update; " +
+                "the Signal trigger will queue its current matter only ({ExceptionType}).",
+                communicationId, ex.GetType().Name);
+            return default;
+        }
+    }
+
+    private static bool IsCommunication(string tablename) =>
+        string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The tool result for a re-file the core refused (nothing was written).</summary>
+    private ToolResult RefileRefusal(
+        AnalysisTool tool, string tablename, OwnedChildWrite.RefileOutcome outcome, DateTimeOffset startedAt) =>
+        outcome switch
+        {
+            { ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
+            { Invalid: { } invalid } => Error(tool, $"The update was NOT written: {invalid}", ToolErrorCodes.ValidationFailed, startedAt),
+            { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            { SecureFilingRefused: { } owner } => Error(tool,
+                $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
+                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
+                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure endpoint's
+            // message and reason code, not an owner refusal.
+            { Forbidden: { } forbidden } => Error(tool,
+                $"The update was NOT written. {forbidden.Reason}",
+                forbidden.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            { OwnerRefusal: { } refused } => Error(tool,
+                $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
+                refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+        };
 
     // ── helpers ───────────────────────────────────────────────────────────────
 

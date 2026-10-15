@@ -634,9 +634,17 @@ public class ScopeResolverService : IScopeResolverService
     #region Lookup Queries
 
     /// <inheritdoc />
+    public Task<string[]> QueryLookupValuesAsync(
+        string entitySetName,
+        string fieldName,
+        CancellationToken cancellationToken) =>
+        QueryLookupValuesAsync(entitySetName, fieldName, null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<string[]> QueryLookupValuesAsync(
         string entitySetName,
         string fieldName,
+        string? additionalFilter,
         CancellationToken cancellationToken)
     {
         await EnsureAuthenticatedAsync(cancellationToken);
@@ -644,7 +652,7 @@ public class ScopeResolverService : IScopeResolverService
         var safeEntitySet = entitySetName.Replace("'", "").Replace("/", "");
         var safeField = fieldName.Replace("'", "").Replace("/", "");
 
-        var url = $"{safeEntitySet}?$select={safeField}&$orderby={safeField} asc&$top=200&$filter=statecode eq 0";
+        var url = BuildLookupValuesUrl(safeEntitySet, safeField, additionalFilter);
 
         _logger.LogDebug(
             "[LOOKUP CHOICES] Querying {EntitySet}.{Field}",
@@ -690,6 +698,75 @@ public class ScopeResolverService : IScopeResolverService
                 safeEntitySet, safeField);
             return [];
         }
+    }
+
+    /// <summary>
+    /// The single place the lookup row filter is written: active rows, plus an optional per-taxonomy predicate.
+    /// </summary>
+    private static string LookupFilter(string? additionalFilter) =>
+        string.IsNullOrWhiteSpace(additionalFilter)
+            ? "statecode eq 0"
+            : $"statecode eq 0 and ({additionalFilter})";
+
+    /// <summary>
+    /// The relative Web API URL for the names read (the enum source). Public so the live-schema test runs the
+    /// very string production sends.
+    /// </summary>
+    public static string BuildLookupValuesUrl(string entitySet, string field, string? additionalFilter = null) =>
+        $"{entitySet}?$select={field}&$orderby={field} asc&$top=200&$filter={LookupFilter(additionalFilter)}";
+
+    /// <summary>
+    /// The relative Web API URL for the guidance read. Same filter + cap as <see cref="BuildLookupValuesUrl"/>
+    /// so the guidance covers exactly the rows behind the enum.
+    /// </summary>
+    public static string BuildLookupGuidanceUrl(
+        string entitySet, string nameField, string guidanceField, string? additionalFilter = null) =>
+        $"{entitySet}?$select={nameField},{guidanceField}&$orderby={nameField} asc&$top=200&$filter={LookupFilter(additionalFilter)}";
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> QueryLookupGuidanceAsync(
+        string entitySetName,
+        string nameField,
+        string guidanceField,
+        string? additionalFilter,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var safeEntitySet = entitySetName.Replace("'", "").Replace("/", "");
+        var safeName = nameField.Replace("'", "").Replace("/", "");
+        var safeGuidance = guidanceField.Replace("'", "").Replace("/", "");
+
+        var url = BuildLookupGuidanceUrl(safeEntitySet, safeName, safeGuidance, additionalFilter);
+
+        // No catch: a failed read must reach the caller (LookupChoicesResolver), which emits it to telemetry.
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessWithDiagnosticsAsync(response, $"QueryLookupGuidance({safeEntitySet}.{safeGuidance})", cancellationToken);
+
+        using var doc = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!doc.RootElement.TryGetProperty("value", out var valueArray) ||
+            valueArray.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var item in valueArray.EnumerateArray())
+        {
+            if (item.TryGetProperty(safeName, out var n) && n.ValueKind == JsonValueKind.String &&
+                item.TryGetProperty(safeGuidance, out var g) && g.ValueKind == JsonValueKind.String)
+            {
+                var name = n.GetString();
+                var guidance = g.GetString();
+                if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(guidance))
+                    result[name] = guidance;
+            }
+        }
+
+        return result;
     }
 
     /// <inheritdoc />

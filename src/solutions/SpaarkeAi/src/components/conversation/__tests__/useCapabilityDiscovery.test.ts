@@ -13,6 +13,7 @@ import {
   useCapabilityDiscovery,
   type CapabilityDiscoveryItem,
 } from "../useCapabilityDiscovery";
+import { httpError } from "../../../__tests__/helpers/httpError";
 
 describe("useCapabilityDiscovery", () => {
   const item1: CapabilityDiscoveryItem = {
@@ -103,11 +104,7 @@ describe("useCapabilityDiscovery", () => {
   });
 
   it("fails closed to an empty list (never an invented fallback) when the fetch fails", async () => {
-    const authenticatedFetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    });
+    const authenticatedFetch = jest.fn().mockRejectedValue(httpError(500));
 
     const { result } = renderHook(() =>
       useCapabilityDiscovery({

@@ -59,6 +59,9 @@ param location string = 'westus2'
 @description('Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it.')
 param openAiLocation string = 'westus3'
 
+@description('Azure region for the Azure AI Content Safety account (task 246). It must offer BOTH Prompt Shields and Groundedness Detection; per the Microsoft region table (2026-09-18) the US regions with both are westus, eastus, eastus2 and canadaeast. westus2 (the stamp default location) has no Groundedness Detection, so this does NOT follow `location`: default westus, the nearest such region to westus2 (keeps the Prompt Shield call inside its deadline). Split-region like openAiLocation.')
+param contentSafetyLocation string = 'westus'
+
 // --- Storage Account options ---
 
 @description('SKU for the customer Storage Account')
@@ -196,6 +199,9 @@ var logAnalyticsName = 'sprk-${customerId}-${environmentName}-logs'
 // Document Intelligence: sprk-{customer}-{env}-docintel (per design.md §7.1 naming convention).
 var docIntelligenceName = 'sprk-${customerId}-${environmentName}-docintel'
 
+// Azure AI Content Safety: sprk-{customer}-{env}-contentsafety (task 246; also the custom subdomain).
+var contentSafetyName = 'sprk-${customerId}-${environmentName}-contentsafety'
+
 // Azure Managed Redis: sprk-{customer}-{env}-redis (task 128b naming; Managed Redis since task 242).
 var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 
@@ -307,6 +313,10 @@ module storage 'modules/storage-account.bicep' = {
     // account-key fallback. Same T5-stable UAMI pattern as openAi/aiSearch/
     // docIntelligence below.
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    // Keyless (owner D13, task 244): no shared-key access. Any caller uses the blob endpoint with an
+    // identity — the stamp UAMI holds Storage Blob Data Contributor (above); Event Grid dead-letters
+    // with its system topic's identity (acs-communication.bicep).
+    disableSharedKeyAccess: true
     tags: tags
   }
 }
@@ -331,8 +341,8 @@ module serviceBus 'modules/service-bus.bicep' = {
 // COSMOS DB (Per-customer AI platform state — Wave C2 prep, task 014)
 // Per spec §5.3 + FR-04 + R11 + § MUST rules: Cosmos MUST be per-customer (BFF prereq —
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
-// (Wave C2's multi-stack plan is moot: this is the template H2a deploys — Model 2 today, Model 1
-// with tasks 225b + 228 (D-12); task 225a retired stacks/model1-shared.bicep.)
+// (Wave C2's multi-stack plan is moot: this is the template H2a deploys for both models (D-12;
+// Model 1 since task 228); task 225a retired stacks/model1-shared.bicep.)
 // Redis is per-customer too (see the REDIS CACHE section below + the header note). It is
 // grouped with the other supporting-infra resources after AI Search per §7.6.
 // Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.
@@ -363,10 +373,10 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
 // Order step 10 — UAMI (task 127's `uami` module) granted Cognitive Services
 // User RBAC (built-in role a97b65f3-24c7-4388-baec-2e87135dc908) via the
 // module's existing `userAssignedIdentityPrincipalId` param. NO `deployments`
-// override is passed — the module's own default array (gpt-4o:150,
-// gpt-4o-mini:200, spaarke-gpt4o-mini:30, text-embedding-3-large:350) is the
-// exact spec.md FR-01 / NFR-12 TPM budget and design.md §7.4's 4-row table,
-// byte-for-byte verified consistent. `openAiEndpoint` output name is
+// override is passed — the module's own default array is the stamp set
+// (task 247: DataZoneStandard gpt-4o 150, gpt-4o-mini → gpt-4.1-mini 200,
+// text-embedding-3-large 350), mirrored by L2's PinnedModelCatalog and checked
+// against this template by ArmTemplateInspectorTests. `openAiEndpoint` output name is
 // LOAD-BEARING — ArmDeploymentRunner.MapOutputs (task 123) reads it exactly.
 // ============================================================================
 
@@ -429,6 +439,27 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
   params: {
     docIntelligenceName: docIntelligenceName
     location: location
+    sku: 'S0'
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// AZURE AI CONTENT SAFETY (task 246, plan G26)
+// The stamp's own safety perimeter for the BFF's Prompt Shield + groundedness checks. Before this,
+// a stamp had no Content Safety resource and the BFF fell back to a hard-coded dev endpoint.
+// Keyless like its siblings (owner D13): custom subdomain + local auth disabled; the UAMI holds
+// Cognitive Services User via the module. `contentSafetyEndpoint` output name is LOAD-BEARING --
+// ArmDeploymentRunner.MapOutputs reads it into InterStepState for H4b.
+// ============================================================================
+
+module contentSafety 'modules/content-safety.bicep' = {
+  scope: rg
+  name: 'contentSafety-${baseName}'
+  params: {
+    contentSafetyName: contentSafetyName
+    location: contentSafetyLocation
     sku: 'S0'
     userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
@@ -583,9 +614,9 @@ module bffApi 'modules/app-service.bicep' = {
     //     Data/Service Contributor on Service Bus + AI Search (bffRuntimeRbac below).
     //     H4b adds the MI selectors (ServiceBus__FullyQualifiedNamespace,
     //     AiSearch__ManagedIdentity__Enabled). Storage's connection string was unused
-    //     by any BFF code and is not emitted. KNOWN GAP (plan G16): modules/ai-search.bicep
-    //     still creates the service keys-only, so its MI calls 403 until T244 enables
-    //     Entra auth on it.
+    //     by any BFF code and is not emitted. Since T244 (G16 closed) every one of these
+    //     services has local/key auth DISABLED (Storage: shared key off), so the UAMI is
+    //     the only way in — a key setting could not work even if one were emitted.
     //   - Document Intelligence is reached with the stamp UAMI too (T243, owner D13): the
     //     BFF uses managed identity when no DocumentIntelligence__DocIntelKey is set, and no
     //     stamp is given one. The module sets a custom subdomain (Entra needs it) and grants
@@ -629,6 +660,11 @@ module bffApi 'modules/app-service.bicep' = {
       // Document Intelligence (per-customer, task 128b)
       DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
 
+      // Content Safety (per-customer, task 246). The BFF refuses to start outside Development/Testing
+      // without this setting; it authenticates with the UAMI (H4b also sets
+      // AiSafety__ContentSafety__ManagedIdentity__Enabled=true and re-applies this endpoint from H2a's output).
+      AiSafety__ContentSafety__Endpoint: contentSafety.outputs.contentSafetyEndpoint
+
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
       ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
@@ -654,7 +690,9 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
 // L2 CONTROL-PLANE UAMI -- Website Contributor on the per-customer BFF App
 // Service (customer-provisioning-orchestration-r1 task 203b, punch list row A21
 // / task 201 "Deferred #1"). Enables H4b Kudu docker-log fetch + H9 zip-deploy
-// from the L2 Worker. Split into modules/customer-l2-bff-rbac.bicep because
+// from the L2 Worker. Plus Search Service Contributor + Search Index Data
+// Contributor on the stamp AI Search service for H2b (task 244, G16 -- the
+// service has local auth disabled). Split into modules/customer-l2-bff-rbac.bicep because
 // this stack (targetScope='subscription') cannot inline RG-scoped role
 // assignments (BCP139) -- same pattern as modules/bff-runtime-rbac.bicep.
 // ============================================================================
@@ -667,6 +705,7 @@ module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {
     // Implicit dependency on bffApi via bffApi.outputs.appServiceName -- no
     // explicit dependsOn needed (BCP linter rule no-unnecessary-dependson).
     bffAppServiceName: bffApi.outputs.appServiceName
+    searchServiceName: aiSearch.outputs.searchServiceName
   }
 }
 
@@ -731,18 +770,13 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //   Redis-ConnectionString (T242: Azure Managed Redis with access keys disabled — the BFF
 //     connects with the UAMI using the plain Redis__Endpoint app setting).
 //
-// Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
+// Deliberately OMITTED (2) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
-//   SPE-ContainerTypeId
-//     -> topology-scoped (one container type per Spaarke tier), not a customer
-//        resource. manifest value_source = from-topology-constants: H4 writes it
-//        from the run's containerTypeId parameter (the /provision-environment skill
-//        reads it from spaarke-constants.yaml).
-//   SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
-//     -> per-customer SPE containers created at RUNTIME (H8); no ARM-deploy-time
-//        value exists. KNOWN GAP (plan G18): the manifest still labels both
-//        from-bicep-output and nothing writes them, so H4 quarantines on a fresh
-//        customer until the H8 write path is wired.
+//   (No SPE secrets remain. T227c / G18: SPE-DefaultContainerId and
+//    SPE-CommunicationArchiveContainerId left the catalog — the customer's container is
+//    created at runtime by H8 and reaches the BFF as plain app settings H4b writes from
+//    H8's output. T227e: SPE-ContainerTypeId left too — nothing read it; the BFF reads
+//    the container type as the plain H4b setting SharePointEmbedded__ContainerTypeId.)
 //   BFF-API-ClientId, BFF-API-Audience
 //     -> H3 creates the per-customer BFF app-registration at RUNTIME and writes
 //        ClientId/Audience to this vault itself (manifest value_source
@@ -789,14 +823,12 @@ output keyVaultId string = keyVault.outputs.keyVaultId
 // --- Storage Account ---
 output storageAccountName string = storage.outputs.storageAccountName
 output storagePrimaryEndpoint string = storage.outputs.primaryEndpoint
-#disable-next-line outputs-should-not-contain-secrets
-output storageConnectionString string = storage.outputs.connectionString
+// No storage connection-string output (task 244): shared-key access is disabled.
 
 // --- Service Bus ---
 output serviceBusName string = serviceBus.outputs.serviceBusName
 output serviceBusEndpoint string = serviceBus.outputs.serviceBusEndpoint
-#disable-next-line outputs-should-not-contain-secrets
-output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnectionString
+// No Service Bus connection-string output (task 244): local (SAS) auth is disabled.
 
 // --- Cosmos DB (task 014 Wave C2 prep — per-customer AI platform state) ---
 output cosmosAccountName string = cosmosDb.outputs.accountName
@@ -806,15 +838,14 @@ output cosmosDatabaseName string = cosmosDb.outputs.databaseName
 
 // --- Azure OpenAI (task 128 / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.OpenAiEndpoint. Raw `openAiKey` is intentionally NOT
-// echoed here — flows through task 129's kv-secrets wiring instead. ---
+// BicepDeployOutputs.OpenAiEndpoint. There is no key: local auth is disabled
+// (task 244) and the stamp BFF uses its UAMI. ---
 output openAiEndpoint string = openAi.outputs.openAiEndpoint
 
 // --- AI Search (task 128 / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.AiSearchEndpoint. Raw `searchServiceAdminKey` is
-// intentionally NOT echoed here — flows through task 129's kv-secrets wiring
-// instead. ---
+// BicepDeployOutputs.AiSearchEndpoint. There is no key: local auth is disabled
+// (task 244); the BFF UAMI and the L2 UAMI hold Search roles. ---
 output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 
 // --- Document Intelligence (task 128b / Phase C). Output name is LOAD-BEARING:
@@ -823,6 +854,12 @@ output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 // reaches Document Intelligence with its UAMI (T243). ---
 output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
 output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
+
+// --- Azure AI Content Safety (task 246). Output name is LOAD-BEARING: ArmDeploymentRunner.MapOutputs
+// reads it into BicepDeployOutputs.ContentSafetyEndpoint -> InterStepState -> H4b's
+// AiSafety__ContentSafety__Endpoint. No key output: local auth is disabled. ---
+output contentSafetyEndpoint string = contentSafety.outputs.contentSafetyEndpoint
+output contentSafetyName string = contentSafety.outputs.contentSafetyName
 
 // --- Monitoring: App Insights + Log Analytics (task 128b / Phase C). Raw
 // `connectionString`/`instrumentationKey` are intentionally NOT echoed here —

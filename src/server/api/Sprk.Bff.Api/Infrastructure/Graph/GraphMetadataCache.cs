@@ -158,6 +158,34 @@ public class GraphMetadataCache
     }
 
     // =========================================================================
+    // Container Ownership Marker Cache (task 227d — SpeContainerOwnershipGuard)
+    // Caches the container's `spaarkeCustomerId` marker VALUE (data), never the ownership
+    // decision (ADR-009). The guard chooses the TTL. Key follows this class's existing
+    // `sdap:graph:` convention (each stamp has its own Redis instance; plan G34).
+    // =========================================================================
+
+    /// <summary>The cached marker of a container, or null on a cache miss. <c>Marker</c> is null when the container has none.</summary>
+    public Task<ContainerMarkerEntry?> GetContainerMarkerAsync(string containerId, bool deleted)
+        => GetFromCacheAsync<ContainerMarkerEntry>(MarkerKey(containerId, deleted), "container-marker");
+
+    /// <summary>Caches a container's marker value (null = no marker visible).</summary>
+    public Task SetContainerMarkerAsync(string containerId, bool deleted, string? marker, TimeSpan ttl)
+        => SetInCacheAsync(MarkerKey(containerId, deleted), new ContainerMarkerEntry(marker), ttl, "container-marker");
+
+    /// <summary>Drops both cached marker entries (live and deleted) of a container.</summary>
+    public async Task RemoveContainerMarkerAsync(string containerId)
+    {
+        await RemoveFromCacheAsync(MarkerKey(containerId, deleted: false), "container-marker");
+        await RemoveFromCacheAsync(MarkerKey(containerId, deleted: true), "container-marker");
+    }
+
+    private static string MarkerKey(string containerId, bool deleted)
+        => $"sdap:graph:marker:{(deleted ? "deleted" : "live")}:{containerId}";
+
+    /// <summary>A cached container marker value.</summary>
+    public sealed record ContainerMarkerEntry(string? Marker);
+
+    // =========================================================================
     // Internal Helpers
     // =========================================================================
 

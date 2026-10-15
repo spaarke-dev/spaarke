@@ -5,17 +5,18 @@ using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Api.Platform;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
-using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
 using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 using Sprk.Bff.Api.Infrastructure.HealthChecks; // CatalogHealthChecks.Tag (UAC-r2 task 167, round 34 item 7)
 
@@ -227,6 +228,12 @@ public static class EndpointMappingExtensions
         app.MapOfficeCommunicationsEndpoints();
         app.MapFieldMappingEndpoints();
         app.MapEventEndpoints();
+        // Ontology platform R1 task 036: a Signal's decision plan resolved against the closed action catalog.
+        app.MapDecisionPlanEndpoints();
+        // Ontology platform R1 task 043: the decision commit route (one review, record last, idempotent per review id).
+        app.MapDecisionCommitEndpoints();
+        // Ontology platform R1 task 038: the worklist's Signal read route (core-record check and Do-lane scope as the caller).
+        app.MapSignalReadEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
         // owner round 10 item 1). Api/WorkAssignmentEndpoints.cs is DELETED. Its one route, POST
         // /api/v1/work-assignments, created a sprk_workassignment APP-ONLY with ownerid = a caller-chosen user (records
@@ -239,6 +246,8 @@ public static class EndpointMappingExtensions
         // re-filed in the browser (G5). UNCONDITIONAL (bff-extensions.md §F.1): IDataverseUserClient, IRecordOwnershipResolver,
         // IFieldMappingDataverseService and CoreAncestorRestamper are all registered unconditionally.
         app.MapChildRecordEndpoints();
+        // Ontology task 071 (D-111): a person records how a budget inquiry turned out (write as the caller, record-level filter).
+        app.MapInquiryEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
@@ -319,6 +328,8 @@ public static class EndpointMappingExtensions
 
         app.MapVisualizationEndpoints();
         app.MapResilienceEndpoints();
+        // Keyless proof for provisioning's acceptance gate (task 230b) — app role held only by the L2 Worker identity.
+        app.MapKeylessProofEndpoints();
 
         // POST /api/ai/document-intelligence/match-records and /associate-record (RecordMatchEndpoints) were
         // REMOVED by unified-access-control-r2 task 164 (owner round 10 item 1): no caller in the repo and not
@@ -445,22 +456,25 @@ public static class EndpointMappingExtensions
         // Reporting module endpoints (/api/reporting/*) — Power BI Embedded (App Owns Data)
         app.MapReportingEndpoints();
 
-        // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
-        app.MapRegistrationEndpoints();
+        // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection.
+        // Task 261: mapped only where the demo registration feature is registered (Spaarke's platform/demo BFF) —
+        // never on a customer stamp, which must not hold the directory write roles approval needs.
+        if (RegistrationModule.IsDemoProvisioningEnabled(app.Configuration))
+        {
+            app.MapRegistrationEndpoints();
+        }
 
         // Onboarding — H0.5 consent-callback (customer-provisioning-orchestration-r1, task 042).
         // POST /api/onboarding/consent-callback — Anonymous + HMAC-SHA256 signature verified.
         // Captures the customer admin tid from the Microsoft admin-consent redirect and enqueues
         // the L2 provisioning pipeline via Service Bus. See Endpoints/Onboarding/OnboardingModule.cs
         // and design.md D18 + §4.3a.2 for the Anonymous+HMAC exception rationale.
-        app.MapConsentCallbackEndpoint();
-
-        // Diagnostics — I4 tenant-container-resolver (customer-provisioning-orchestration-r1,
-        // G-8 Batch 6 fix #18). GET /api/diagnostics/tenant-container-resolver — JWT-authorized,
-        // READ-ONLY; the L2 H13 I4 invariant probe's BFF-side dependency (without it, live H13
-        // parks I4 at InfraFault via its 404 branch and Ready is unreachable). Contract locked
-        // by SpeContainerResolverInvariantProbe (L2). See Endpoints/Diagnostics/.
-        app.MapTenantContainerResolverEndpoint();
+        // Task 258: mapped only when Onboarding:Enabled (the same gate as AddOnboardingModule) — off on
+        // every customer stamp, which cannot serve the Model 2 consent callback (OnboardingOptions.Enabled).
+        if (OnboardingModule.IsEnabled(app.Configuration))
+        {
+            app.MapConsentCallbackEndpoint();
+        }
 
         // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
         // GET /api/admin/jobs               — list registered jobs + status summary

@@ -794,7 +794,7 @@ carries an escalation trigger for it.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** |
+| **Status** | ✅ **Fixed by task 114** (branch `task/uac-r2-114`, 2026-10-06) under owner round 67, which refined the 2026-09-18 decision: a licensed user flagged external is shared with on any record except a **Restricted** one, which refuses `sprk_isexternal = true` (`user_not_internal`); a blank flag is NOT external. See `notes/task-114-isexternal-eligibility.md`. The text below is the pre-fix finding. |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 (the finding itself dates from task 063, session 13) |
 | **Source** | Task 063; raised as an open owner question in every handoff since |

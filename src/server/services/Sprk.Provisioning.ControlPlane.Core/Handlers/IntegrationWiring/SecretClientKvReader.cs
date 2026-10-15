@@ -15,10 +15,9 @@
 //
 // ACCESS-DENIED vs NOT-FOUND vs GENERIC (task 143/144 verification-focused
 // discipline — silent-fail-adjacent traps matter here): a 404
-// RequestFailedException maps to the domain NotFound outcome (H14b/H14c
-// treat this as "H4 has not yet provisioned this secret" — a distinct,
-// Resumable-classified condition per those sub-handlers' own switch
-// statements). A 403 RequestFailedException is classified as its OWN
+// RequestFailedException maps to the domain NotFound outcome (the
+// sidecar client treats this as "the shared secret is not provisioned" -- a distinct,
+// Resumable-classified condition). A 403 RequestFailedException is classified as its OWN
 // Failure branch with an explicit "verify the L2 UAMI RBAC grant" diagnostic
 // — collapsing 403 into the generic catch-all would produce a diagnostic
 // that reads like a transient fault when it is actually a permanent

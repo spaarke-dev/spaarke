@@ -93,8 +93,6 @@ export interface SavedSearchSelectorProps {
   currentSearchName: string | null;
   /** Called when user selects a saved search. */
   onSelectSavedSearch: (search: SavedSearch) => void;
-  /** Called when user clicks "Save Current Search". */
-  onSaveCurrentSearch: () => void;
   /** Whether saved searches are loading. */
   isLoading: boolean;
 }

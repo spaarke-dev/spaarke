@@ -37,7 +37,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 2. **MUST** cite the relevant ADRs (and any constraints) that bind the design. ADR-001 (Minimal API), ADR-007 (SpeFileStore), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-013 (AI architecture) are the most common. If unsure which apply, load [`.claude/adr/INDEX.md`](../adr/INDEX.md).
 
-3. **MUST** verify the addition does not regress the publish baseline (currently ~60 MB compressed, ~240 entries per [`azure-deployment.md`](azure-deployment.md)). New direct package references are the most common bloat source. Run `dotnet publish --runtime linux-x64` locally and inspect output size before merging if adding packages.
+3. **MUST** report the publish-size delta against a fresh master build on every BFF-touching task — rule: [`.claude/rules/bff-hygiene.md`](../rules/bff-hygiene.md) item 4; procedure and current baseline: [`azure-deployment.md`](azure-deployment.md) "BFF Publish-Size Per-Task Verification Rule". Do not compare against a remembered baseline. New direct package references are the most common bloat source.
 
 4. **MUST NOT** add a new direct CRUD→AI dependency. If CRUD code (Finance, Workspace, Jobs handlers outside `Services/Ai/`, etc.) needs AI capability, it MUST consume through `Services/Ai/PublicContracts/` facade types — not by injecting `IOpenAiClient`, `IPlaybookService`, or other AI-internal interfaces directly. The 2026-05-20 extraction assessment found 20 existing direct deps; the BFF remediation project is migrating them. New code MUST NOT add to that backlog.
 
@@ -47,7 +47,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 ### B. New Package References (Binding)
 
-- **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph.
+- **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph. When no fixed version exists upstream, follow the escalation in [`.claude/rules/bff-hygiene.md`](../rules/bff-hygiene.md) item 5 (owner sign-off in the PR).
 - **MUST** verify package version compatibility with the pinned chains documented inline in [`Sprk.Bff.Api.csproj`](../../src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj) — particularly Microsoft.Graph + Kiota (all Kiota packages MUST stay version-matched), Microsoft.Extensions.AI chain, Azure.AI.OpenAI chain.
 - **MUST NOT** add pre-release packages (`-beta`, `-rc`, `-preview`) without an inline csproj comment justifying the chain-compat reason. Pre-release packages are a known risk surface; three already exist (`Azure.AI.Projects beta.8`, `Microsoft.Agents.AI rc1`, `Azure.AI.OpenAI 2.8.0-beta.1`).
 
@@ -134,7 +134,7 @@ The static scan above catches the obvious case. The audit W4-2 finding recommend
 public async Task EveryPublicEndpoint_ResolvesItsHandlerCtorParams(bool analysisEnabled, bool docIntelEnabled) { /* ... */ }
 ```
 
-When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implementation queued** as Migration PR #8 per [`migration-plan.md` §2.8](../../projects/bff-ai-architecture-audit-r1/notes/migration-plan.md); Insights team owns. Until that fixture ships, the static-scan rule + explicit reviewer discipline remain the only enforcement.
+When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implemented 2026-10-09 (task 204e)** as `tests/Spaarke.ArchTests/Adr032/GateCombinationConstructibilityTests.cs`: it boots the real BFF per gate combination with `ValidateOnBuild`, ratcheted against a ledger of filed defects. The static half is `AsymmetricRegistrationTests` (scans `Program.cs` → every `Add*` registration → `if`/`else` paths). Both run in the blocking `arch-tests` job.
 
 #### F.2 Fixture-Config-FIRST Inspection Protocol (Binding per r2 task 081 / D-13)
 
@@ -235,6 +235,19 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 **Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
 
+#### F.5 Tier-1-IOptions Deploy Checklist (Binding per customer-provisioning-orchestration-r1 task 204e / punch row B15)
+
+**Codified 2026-10-09** from the F20/F20a SIGABRT chain (2026-08-24) and the task 081.5 rollback: an options type registered with `AddOptions<T>()…ValidateOnStart()` refuses to boot a stamp whose settings do not satisfy it, and nothing used to connect "this type demands key K" to "something deploys K". `IOptionsDriftTests.IOptionsInventoryMustMatchManifest` now enforces it in the blocking `arch-tests` job; this checklist is what the reviewer applies when a PR adds or changes such a chain.
+
+1. **Manifest entry.** Every key `T` demands at startup (each `[Required]` member, and each key a custom `IValidateOptions<T>` or `.Validate(…)` lambda demands outside Development/Testing) has an entry in `scripts/canonical-secret-catalog/manifest.yaml`: a secret's `app_settings` or a `per_env_settings` key (with a `per_env_source` from the closed `PerEnvSourceCatalog` set), or a setting in `customer.bicep`. `appsettings.template.json` does not count: it is not published to a stamp.
+2. **Secret binding provisioned.** If a demanded key is a secret, the manifest `secrets:` entry exists, `customer.bicep`'s `kvSecretValues` (or the entry's `value_source`) writes it, and the app setting is a Key Vault reference to the canonical secret name. A reference with no value surfaces the literal `@Microsoft.KeyVault(...)` string as the setting.
+3. **Fail-fast path tested.** A test proves the missing-config failure is the intended one: `T`'s validator rejects an empty value with a message naming the key (a pure `Validate(…)` unit test), and for an environment-conditional rule a case per environment class. Do not rely on the booted-host route guard to notice.
+4. **Local run before approving.** The reviewer runs `dotnet test tests/Spaarke.ArchTests --filter "FullyQualifiedName~IOptionsDriftTests"`. A failure is one of: `NO CHANNEL` (do step 1; never weaken the validator), `NO CENSUS ENTRY` (add the type to `IOptionsDriftTests.Census` with the keys its validator demands, each `Supplied`, `Exempt` with the gate that is off for every stamp, named in the row's `Gate` — the test fails if a stamp channel writes that gate, or `KnownDrift` with a filed row), `NOW SUPPLIED` (change the ledger entry to `Supplied`).
+
+A `KnownDrift` entry is a confirmed deployment gap with a filed punch-list row, never a way to make CI pass. Case study: SESSION 5 Model 1 Prod stand-up (the sequential-gate chain behind `e3a15db91`) and the task 204e findings (rows 204e-F5..F8: `Onboarding:HmacSigningKey`, `PublicConfig:*`, `Graph:Scopes`, `ServiceBus:QueueName` had no stamp channel). Closed by task 258: PublicConfig/Graph:Scopes/ServiceBus:QueueName are written by H4b; the Onboarding consent callback is off unless `Onboarding:Enabled`.
+
+**Cross-reference**: `tests/Spaarke.ArchTests/IOptionsDriftTests.cs`; `.claude/constraints/provisioning.md` "Progressive fail-fast recovery"; `.claude/patterns/provisioning/manifest-driven-secret-catalog.md`.
+
 ### G. Action / Node / Playbook Config Boundary — Dispatch + Prompt + Categorization (Binding per R4 canonical-truth loop 2026-06-26; rewritten per R7 spec FR-29 on 2026-06-29)
 
 **Codified 2026-06-26** from the spaarke-daily-update-service-r4 canonical-truth loop after surfacing a design smell where playbook config gets stuffed into the wrong column (node-level wire-up onto Action row, playbook-level scope decisions in node configjson, or node-graph data in `sprk_analysisplaybook.sprk_configjson` — which the runtime ignores).
@@ -321,7 +334,7 @@ Any project that touches BFF (`src/server/api/Sprk.Bff.Api/**`, `src/server/shar
 
 - **MUST NOT** add new code to the BFF without considering "should this go elsewhere?" — even one sentence in the PR description satisfies the rule; absence does not
 - **MUST NOT** add new direct CRUD→AI dependencies (use `Services/Ai/PublicContracts/` facades)
-- **MUST NOT** add packages that introduce known HIGH-severity CVEs
+- **MUST NOT** add packages that introduce known HIGH-severity CVEs (no upstream fix → escalation in `.claude/rules/bff-hygiene.md` item 5)
 - **MUST NOT** add `<PublishTrimmed>true</PublishTrimmed>` or `<PublishAot>true</PublishAot>` — the BFF's reflection-heavy stack (Graph SDK, Identity.Web, EF, DI, JSON serializers) breaks silently under trimming
 - **MUST NOT** publish from `/tmp` or any directory outside `deploy/api-publish/` (per [`azure-deployment.md`](azure-deployment.md) — produces incomplete ~22 MB packages, missing DLLs, silent 404s)
 - **MUST NOT** bypass the `bff-deploy` skill for deploys (it enforces hash-verify, health-check window, slot-swap rollback)
@@ -347,7 +360,7 @@ Use this table when designing new functionality. **All four "BFF" answers → BF
 If you are scoping a new project that will add code to the BFF, the project's `design.md` MUST include:
 
 1. **Placement justification section**: which new code lives in BFF, which lives in Functions, which (if any) lives in a future separate deployable. Cite the decision criteria above with a one-sentence answer per row for each major component.
-2. **Size impact estimate**: rough estimate of compressed publish-size delta. If >2 MB, requires explicit owner ack before merging.
+2. **Size impact estimate**: rough estimate of the whole project's compressed publish-size delta. If >2 MB, the owner acknowledges it at design review. (Project-level; separate from the per-task measurement and its ≥ +5 MB justification trigger in `.claude/rules/bff-hygiene.md` item 4.)
 3. **Boundary preservation statement**: confirmation that new code follows facade patterns where applicable (no new direct CRUD→AI deps); follows feature-module DI; follows endpoint-filter auth.
 4. **Reference to this file**: cite `.claude/constraints/bff-extensions.md` in the project's design.md as a binding constraint.
 

@@ -170,10 +170,24 @@ public record EmailMetadata
     public string? ConversationId { get; init; }
 
     /// <summary>
-    /// RFC 2822 Internet message ID.
+    /// RFC 5322 Internet message ID (<c>Office.context.mailbox.item.internetMessageId</c>).
     /// </summary>
+    /// <remarks>
+    /// A task-pane add-in older than spaarkeai-word-add-in-r1 task 121 sent the Exchange item id HERE. The server still
+    /// accepts that: in a request without <see cref="ExchangeItemId"/>, a value that is not shaped like a Message-ID is
+    /// treated as the item id, never as a Message-ID — see
+    /// <c>OfficeEmailEnricher.ResolveExchangeItemId</c>.
+    /// </remarks>
     [MaxLength(998)]
     public string? InternetMessageId { get; init; }
+
+    /// <summary>
+    /// Task 121: the Exchange item id of the message in the caller's mailbox (<c>Office.context.mailbox.item.itemId</c>).
+    /// Optional. The key the Graph fallback fetches the email by when the client sent no body; never stored as the
+    /// email's Message-ID while <see cref="InternetMessageId"/> carries one.
+    /// </summary>
+    [MaxLength(998)]
+    public string? ExchangeItemId { get; init; }
 
     /// <summary>
     /// Email body content (HTML or text).

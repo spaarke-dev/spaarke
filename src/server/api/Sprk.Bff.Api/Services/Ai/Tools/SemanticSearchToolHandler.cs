@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
@@ -28,6 +29,12 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// - filters: Optional filters (documentTypes, fileTypes, tags, dateRange)
 /// - limit: Maximum results to return (default: 10)
 /// </para>
+/// <para>
+/// <b>Access trim (unified-access-control-r2 task 176, #1511).</b> <see cref="ISemanticSearchService"/> does no per-user
+/// check (the HTTP route does that itself), so every page is trimmed through <see cref="IRetrievalAccessTrim"/> to the
+/// documents <see cref="ToolExecutionContext.CallerObjectId"/> can read, from a 2× candidate pool. With no verified caller
+/// the search is not run and the result carries a withheld warning.
+/// </para>
 /// </remarks>
 public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
 {
@@ -36,17 +43,20 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
     private const int MaxLimit = 50;
 
     private readonly ISemanticSearchService _searchService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly IOpenAiClient _openAiClient;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<SemanticSearchToolHandler> _logger;
 
     public SemanticSearchToolHandler(
         ISemanticSearchService searchService,
+        IRetrievalAccessTrim accessTrim,
         IOpenAiClient openAiClient,
         PromptSchemaRenderer promptSchemaRenderer,
         ILogger<SemanticSearchToolHandler> logger)
     {
         _searchService = searchService;
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _openAiClient = openAiClient;
         _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
@@ -156,14 +166,8 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
             var config = ParseConfiguration(tool.Configuration!);
             var limit = Math.Clamp(config.Limit ?? DefaultLimit, 1, MaxLimit);
 
-            // Build search request
-            var searchRequest = BuildSearchRequest(config, limit);
-
-            // Execute search
-            var response = await _searchService.SearchAsync(
-                searchRequest,
-                context.TenantId,
-                cancellationToken);
+            // Execute search, trimmed to the caller's readable documents (task 176)
+            var (response, trim) = await SearchReadableAsync(config, limit, context, cancellationToken);
 
             stopwatch.Stop();
 
@@ -210,6 +214,10 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
             var warnings = response.Metadata.Warnings?
                 .Select(w => $"{w.Code}: {w.Message}")
                 .ToList() ?? new List<string>();
+            if (trim.Withheld)
+            {
+                warnings.Add($"{WithheldWarningCode}: {trim.WithheldMessage}");
+            }
 
             return ToolResult.Ok(
                 HandlerId,
@@ -284,15 +292,10 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
             // Step 1: Execute Azure AI Search (preserve existing custom logic)
             var config = ParseConfiguration(tool.Configuration!);
             var limit = Math.Clamp(config.Limit ?? DefaultLimit, 1, MaxLimit);
-            var searchRequest = BuildSearchRequest(config, limit);
-
             SemanticSearchResponse response;
             try
             {
-                response = await _searchService.SearchAsync(
-                    searchRequest,
-                    context.TenantId,
-                    cancellationToken);
+                (response, _) = await SearchReadableAsync(config, limit, context, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -498,6 +501,50 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
         {
             PropertyNameCaseInsensitive = true
         }) ?? new SemanticSearchConfig();
+    }
+
+    private const string WithheldWarningCode = "RESULTS_WITHHELD";
+
+    /// <summary>
+    /// Runs the configured search from a 2× candidate pool and keeps at most <paramref name="limit"/> rows whose document
+    /// the run principal can read (task 176). Counts in the metadata describe the rows returned, never the index count.
+    /// With no verified caller the search is not run.
+    /// </summary>
+    private async Task<(SemanticSearchResponse Response, RetrievalTrimResult<SearchResult> Trim)> SearchReadableAsync(
+        SemanticSearchConfig config,
+        int limit,
+        ToolExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!_accessTrim.CanEvaluate(context.CallerObjectId))
+        {
+            _logger.LogWarning(
+                "Semantic search tool withheld for analysis {AnalysisId}: no verified run principal (task 176, fail closed)",
+                context.AnalysisId);
+            var withheld = await _accessTrim.TrimAsync(
+                Array.Empty<SearchResult>(), r => r.DocumentId, context.CallerObjectId, cancellationToken);
+            return (new SemanticSearchResponse { Results = Array.Empty<SearchResult>(), Metadata = new SearchMetadata() }, withheld);
+        }
+
+        var response = await _searchService.SearchAsync(
+            BuildSearchRequest(config, RetrievalAccessTrim.CandidatePoolSize(limit)),
+            context.TenantId,
+            cancellationToken);
+
+        var trim = await _accessTrim.TrimAsync(response.Results, r => r.DocumentId, context.CallerObjectId, cancellationToken);
+        if (trim.Withheld)
+        {
+            _logger.LogWarning(
+                "Semantic search tool withheld all rows for analysis {AnalysisId}: {Outcome} (task 176, fail closed)",
+                context.AnalysisId, trim.Outcome);
+        }
+        var page = trim.Rows.Take(limit).ToList();
+
+        return (response with
+        {
+            Results = page,
+            Metadata = response.Metadata with { TotalResults = page.Count, ReturnedResults = page.Count }
+        }, trim);
     }
 
     /// <summary>

@@ -30,7 +30,9 @@ module.exports = {
     setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
     transform: {
         "^.+\\.tsx?$": ["ts-jest", {
-            tsconfig: "tsconfig.json",
+            // tsconfig.jest.json adds a rootDirs overlay with a type stub for the gitignored
+            // pcf-scripts output `generated/ManifestTypes`; no diagnostics are suppressed (#1392).
+            tsconfig: "tsconfig.jest.json",
         }],
     },
     moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],

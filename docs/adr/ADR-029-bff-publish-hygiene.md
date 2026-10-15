@@ -81,7 +81,7 @@ Constraints on the pattern:
 
 ### 4. Publish-Size Baseline Ratchet (FR-A4 / FR-A5 / FR-C5)
 
-**Current baseline (measured 2026-07-08 by `spaarke-ai-architecture-redesign-r1` task 055, project close)** — downstream projects diff against THIS row. Measurement method: fresh `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` **including the 4 PDBs** (the same content `Deploy-BffApi.ps1` ships); sizes in MiB (`bytes / 1MB` in PowerShell):
+**Current baseline (measured 2026-07-08 by `spaarke-ai-architecture-redesign-r1` task 055, project close)** — historical: downstream projects do NOT diff against this row; they measure against a fresh master build (root CLAUDE.md §10, `.claude/rules/bff-hygiene.md` item 4). Measurement method: fresh `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` **including the 4 PDBs** (the same content `Deploy-BffApi.ps1` ships); sizes in MiB (`bytes / 1MB` in PowerShell):
 
 | Metric | Measured (2026-07-08) | Governing threshold |
 |---|---:|---:|
@@ -136,7 +136,7 @@ Baseline history: 72.9 MB (2026-05-19 trigger) → **45.65 MB** (Phase 5 close, 
 | `.claude/constraints/azure-deployment.md` Publish & Packaging | Documented MUST rules for PR review |
 | `.claude/constraints/bff-extensions.md` | Binding pre-merge checklist for ALL BFF additions (per root CLAUDE.md §10) — references this ADR's size ceiling |
 | `.claude/skills/bff-deploy/SKILL.md` Publish Hygiene section | Operational guidance for any BFF deploy |
-| Planned CI workflow guard (FR-C1, FR-C2, FR-C3, FR-C5) | Per-PR enforcement of rules 1, 2, 3, 4 in `.github/workflows/sdap-ci.yml` (project task 071) |
+| Planned CI workflow guard (FR-C1, FR-C2, FR-C3, FR-C5) | Per-PR enforcement of rules 1, 2, 3, 4 in `.github/workflows/sdap-ci.yml` (project task 071). Historical: `sdap-ci.yml` was retired 2026-10-14 (archived at `docs/archive/workflows/`); per-push dependency auditing now runs in `ci-standalone-checks.yml` (`dependency-audit`) and the Release build + BFF publish in its `release-build` job |
 | Quarterly publish-hygiene review | Walk the verification table in the concise ADR; record results in `projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md` |
 
 ### Verification commands

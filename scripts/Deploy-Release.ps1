@@ -10,7 +10,9 @@
       Phase 1: Build all client components (calls Build-AllClientComponents.ps1)
       Per-environment loop (sequential):
         Phase 2: BFF API deployment (calls Deploy-BffApi.ps1)
-        Phase 3: Dataverse solution import (calls Deploy-DataverseSolutions.ps1)
+        Phase 3: SpaarkeMaster import — the CI-published package, typed per environment
+                 (config/environments.json solutionPackageType; calls
+                 solution-authoring/Import-SpaarkeMasterPackage.ps1; T218f)
         Phase 4: Web resource deployment — customerId-driven (Gap 2 / FR-28)
                  Target env resolved from sprk_dataverseenvironment registry keyed
                  on -CustomerId (NOT from -EnvironmentUrl loop iterand). Calls
@@ -35,7 +37,7 @@
     One or more Dataverse environment URLs or environment names from config/environments.json.
     Drives Phases 1/2/3/5 (build, BFF API, solutions, validation). Phase 4 target is
     resolved separately via -CustomerId + registry lookup (Gap 2 / FR-28).
-    Examples: "https://{tenant}.crm.dynamics.com", "dev", "demo"
+    Examples: "https://{tenant}.crm.dynamics.com", "dev"
 
 .PARAMETER CustomerId
     Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$ (T237). MANDATORY.
@@ -66,9 +68,8 @@
     Default: $true
 
 .PARAMETER ClientSecret
-    Service principal client secret for Dataverse solution import.
-    If not provided, falls back to SPAARKE_SP_CLIENT_SECRET environment variable,
-    then prompts interactively.
+    IGNORED since T218f (2026-10-08). Phase 3 imports with the operator's own az/pac sign-in (NFR-11) — no service
+    principal secret. Kept so existing invocations do not break; passing it prints a warning.
 
 .EXAMPLE
     .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev -CustomerId acme
@@ -76,18 +77,18 @@
     # Resources) targets whatever env the acme customer registry row points at.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, demo -CustomerId acme -Version v2.1.0
-    # Phases 1/2/3/5 loop dev then demo; Phase 4 targets acme's registry-resolved env
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, https://myenv.crm.dynamics.com -CustomerId acme -Version v2.1.0
+    # Phases 1/2/3/5 loop dev then the second environment; Phase 4 targets acme's registry-resolved env
     # (idempotent — same customer env each iteration). Tags as v2.1.0.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme `
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl https://myenv.crm.dynamics.com -CustomerId acme `
         -SkipBuild -SkipPhase BffApi,Solutions,Validation
     # H9 handler invocation pattern: only Phase 4 runs; target env comes from
     # the acme registry lookup; other phases skipped.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme -WhatIf
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl https://myenv.crm.dynamics.com -CustomerId acme -WhatIf
     # Preview the full release pipeline without executing anything.
 
 .NOTES
@@ -208,6 +209,7 @@ function Resolve-Environment {
                 KeyVaultName  = $cfg.keyVaultName
                 TenantId      = $cfg.tenantId
                 SpClientId    = $cfg.servicePrincipal.clientId
+                SolutionPackageType = $cfg.solutionPackageType
             }
         }
     }
@@ -228,6 +230,7 @@ function Resolve-Environment {
                 KeyVaultName  = $cfg.keyVaultName
                 TenantId      = $cfg.tenantId
                 SpClientId    = $cfg.servicePrincipal.clientId
+                SolutionPackageType = $cfg.solutionPackageType
             }
         }
     }
@@ -443,24 +446,11 @@ if (-not $Version) {
 }
 
 # ─────────────────────────────────────────────────────────────────────
-# Resolve client secret for Dataverse solutions
+# Phase 3 identity (T218f): the operator's own sign-in — no service principal secret
 # ─────────────────────────────────────────────────────────────────────
 
-if (-not (Test-PhaseSkipped 'Solutions')) {
-    if (-not $ClientSecret) {
-        $ClientSecret = $env:SPAARKE_SP_CLIENT_SECRET
-    }
-    if (-not $ClientSecret -and -not $WhatIfPreference) {
-        Write-Host ""
-        $secureSecret = Read-Host "  Enter service principal client secret for Dataverse" -AsSecureString
-        $ClientSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
-        )
-        if (-not $ClientSecret) {
-            Write-Fail "Client secret is required for Dataverse solution deployment."
-            exit 1
-        }
-    }
+if ($ClientSecret) {
+    Write-Warn "-ClientSecret is ignored since T218f: Phase 3 imports SpaarkeMaster with your own az/pac sign-in."
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -624,32 +614,26 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
     } elseif (Test-PhaseSkipped 'Solutions') {
         Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED"
     } else {
-        Write-Phase "Phase 3" "Dataverse Solutions → $($env.DataverseUrl)"
-        $phaseStart = Get-Date
-
-        $solScript = Join-Path $ScriptDir "Deploy-DataverseSolutions.ps1"
-        if (-not (Test-Path $solScript)) {
-            Write-Fail "Solutions deploy script not found: $solScript"
+        # T218f: the CI-published SpaarkeMaster, typed per environment (config/environments.json
+        # solutionPackageType: managed | unmanaged | none). 'none' = never imported here (the authoring env).
+        $packageType = $env.SolutionPackageType
+        if ($packageType -eq 'none') {
+            Write-Phase "Phase 3" "SpaarkeMaster — SKIPPED ($($env.Name) is the authoring environment: solutionPackageType none)"
+        } elseif ($packageType -notin @('managed', 'unmanaged')) {
+            Write-Phase "Phase 3" "SpaarkeMaster → $($env.DataverseUrl)"
+            Write-Fail "config/environments.json gives $($env.Name) no solutionPackageType (managed | unmanaged | none) — Phase 3 refuses to guess."
             $envFailed = $true
         } else {
-            $solParams = @{
-                EnvironmentUrl = $env.DataverseUrl
-                TenantId       = $env.TenantId
-                ClientId       = $env.SpClientId
-                ClientSecret   = $ClientSecret
-            }
-
-            if ($PSCmdlet.ShouldProcess("$($env.DataverseUrl)", "Import Dataverse solutions")) {
-                try {
-                    & $solScript @solParams
-                    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-                        throw "Deploy-DataverseSolutions.ps1 exited with code $LASTEXITCODE"
-                    }
-                    Write-Ok "Solutions deployed in $(Get-ElapsedString $phaseStart)"
-                } catch {
-                    Write-Fail "Solution deployment failed: $_"
-                    $envFailed = $true
-                }
+            Write-Phase "Phase 3" "SpaarkeMaster ($packageType) → $($env.DataverseUrl)"
+            $phaseStart = Get-Date
+            $importScript = Join-Path $ScriptDir 'solution-authoring/Import-SpaarkeMasterPackage.ps1'
+            try {
+                # The import script plans first (H6's rules) and honours -WhatIf itself, printing the plan.
+                & $importScript -EnvironmentUrl $env.DataverseUrl -PackageType $packageType -WhatIf:$WhatIfPreference
+                Write-Ok "SpaarkeMaster phase done in $(Get-ElapsedString $phaseStart)"
+            } catch {
+                Write-Fail "SpaarkeMaster import failed: $_"
+                $envFailed = $true
             }
         }
     }

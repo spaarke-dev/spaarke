@@ -3,8 +3,8 @@
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
 > **Last Updated**: 2026-06-01 (r2 task 080 — added BFF test suite repair lessons + TestClock pattern)
-> **Last Reviewed**: 2026-09-30
-> **Reviewed By**: `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons); `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — Nightly Quality / Weekly Quality / Claude Code Action sections corrected after `nightly-quality.yml`, `weekly-quality.yml`, and `claude-code-review.yml` were deleted)
+> **Last Reviewed**: 2026-10-14
+> **Reviewed By**: `ci-cd-unit-test-remediation-r1` task 077 (2026-10-14 — PR gates rewritten for the CI Router after `sdap-ci.yml` was retired); `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons); `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — Nightly Quality / Weekly Quality / Claude Code Action sections corrected after `nightly-quality.yml`, `weekly-quality.yml`, and `claude-code-review.yml` were deleted)
 > **Status**: Current
 
 ---
@@ -19,7 +19,7 @@ This guide explains the complete code quality system in the Spaarke development 
 |-------|------|-------|-----------|
 | **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
 | **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
-| **PR gates** | Every pull request (sdap-ci.yml) | Build, test, security scan, client quality, code quality, ADR tests | Yes |
+| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
 | **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
 | **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
 | **Quarterly** | Manual trigger | Full audit runbook | Advisory |
@@ -43,7 +43,7 @@ This guide explains the complete code quality system in the Spaarke development 
 3. [Code Review (Step 9.5)](#code-review-step-95)
 4. [ADR Compliance Check (Step 9.5)](#adr-compliance-check-step-95)
 5. [Linting (Step 9.5)](#linting-step-95)
-6. [PR Quality Gates (sdap-ci.yml)](#pr-quality-gates-sdap-ciyml)
+6. [PR Quality Gates (CI Router)](#pr-quality-gates-ci-router)
 7. [Nightly Quality Pipeline](#nightly-quality-pipeline)
 8. [Weekly Quality Summary](#weekly-quality-summary)
 9. [Quarterly Audit](#quarterly-audit)
@@ -435,7 +435,7 @@ The adr-check skill validates code against Architecture Decision Records:
 
 **What it does**: Enforces consistent code formatting for TypeScript, JSON, and YAML files across the repository.
 
-**When it runs**: Pre-commit (via Husky/lint-staged), PR (client-quality job in sdap-ci.yml), Step 9.5 quality gates.
+**When it runs**: Pre-commit (via Husky/lint-staged), PR (Tier 2 `lint` job in `ci-tier2-advisory.yml`, advisory), Step 9.5 quality gates.
 
 **Configuration**: `.prettierrc.json` at repository root:
 ```json
@@ -637,37 +637,115 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
 ---
 
-## PR Quality Gates (sdap-ci.yml)
+## Client type-aware lint ratchet (`client-lint`)
 
-The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All jobs must pass before a PR can merge.
+One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
+
+- **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DocumentOperations, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
+
+### Run it
+
+```bash
+# once: toolchain, then the covered packages' dependencies (slow; ~7 min with 4-way parallel npm on a dev box)
+npm install --legacy-peer-deps --no-audit --no-fund --prefix scripts/quality/client-lint
+node scripts/quality/client-lint/client-lint.mjs install
+
+node scripts/quality/client-lint/client-lint.mjs check                          # all packages; exit 0 = no new violations
+node scripts/quality/client-lint/client-lint.mjs check --package spaarkeai      # one package (ids: see eslint.client.config.mjs)
+node scripts/quality/client-lint/client-lint.mjs controls                       # must-fire / must-not-fire fixtures
+```
+
+`check` takes about 1 minute for all ten packages on a warm dev box (UI.Components is the longest at 10-65 s depending on machine load). CI runs `controls` then `check` in the standalone workflow `.github/workflows/client-lint.yml` (check `Client lint (type-aware ratchet)`). It runs on every PR and reports success without linting when no covered path changed, so it can be a required check without leaving unrelated PRs waiting; master pushes run it only when a covered path changed. It is kept out of the router/tier files so the CI shadow window's comparison is untouched, and is not yet a required check: the owner approved (2026-10-10) adding it to the master ruleset once the shadow window has closed.
+
+### How suppressions work
+
+Today's violations are recorded per file and rule in `scripts/quality/client-lint/eslint-suppressions.json` (ESLint bulk suppressions, ESLint 9.24+). A violation not covered by it fails the run. A suppression whose violation is gone **also fails** ("unused suppressions") so the file can only shrink.
+
+- **You fixed existing debt:** `node scripts/quality/client-lint/client-lint.mjs prune`, then commit the smaller `eslint-suppressions.json` with the fix.
+- **You added a violation:** fix it. If the condition is genuinely defensive (for example a dual-shape fetch), narrow the type or use `// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- <reason>`. Do not hand-edit the JSON to add entries.
+- **After moving or renaming a file with recorded findings:** run `client-lint.mjs baseline --package <id>` (re-records only that package, merging into the JSON and pruning the old path), then explain the diff in the PR.
+- **Lockfiles:** on a dev box, `install` can rewrite a stale tracked `package-lock.json`; commit the regenerated lock (CI fails on a stale one: `npm install --package-lock-only --legacy-peer-deps` in that dir).
+- **Re-baselining everything** (`client-lint.mjs baseline`) is rare and reviewed in the PR; the diff must be explained.
+- **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not).
+
+#### Catch policy
+
+Besides `no-unnecessary-condition`, the same ratchet enforces that a `catch` handles the error, surfaces it to the user, or rethrows. Rules (all `error`, same baseline mechanism):
+
+- `no-restricted-syntax` (selectors in `eslint.client.config.mjs`): an **empty or comment-only** catch; a catch whose **only statement is a `console.*` call**; a catch whose only statement is a **telemetry call** (`logTelemetryError`, `reportClientError`, `trackException`); a catch whose only statement is a **logger call** (`logger.*` / `this.logger.*` with `logError`, `logWarn`, `error`, `warn`). Telemetry-only and logger-only count as swallowing: the failure is recorded but the user and the caller never learn of it.
+- `spaarke-client/catch-disable-needs-reason`: an `eslint-disable*` directive naming `no-restricted-syntax` must carry a reason.
+
+**A flagged catch:** (1) handle it (fall back, retry, return an error result); (2) surface it (error state, toast, message bar) in addition to logging; or (3) rethrow / return a failure the caller checks. Logging plus real handling (e.g. `console.error(...)` then `return null`) is fine: only a catch that does nothing else is flagged.
+
+**A deliberate swallow** (best-effort cache warm, optional telemetry, cleanup) needs a reasoned disable directly above the line ESLint reports: the `} catch {` line for an empty or comment-only catch, otherwise the catch's lone statement. Above `try {` it does nothing (unused-directive reporting is off, so nothing tells you):
+
+```ts
+try {
+  await warmCache();
+  // eslint-disable-next-line no-restricted-syntax -- best-effort cache warm; failure is harmless
+} catch {
+  /* intentionally ignored */
+}
+
+try {
+  persistDraft();
+} catch (e) {
+  // eslint-disable-next-line no-restricted-syntax -- quota errors are expected; the draft also lives in state
+  console.warn("draft not persisted", e);
+}
+```
+
+A disable without ` -- <reason>` fails `catch-disable-needs-reason`, and so does a bare `// eslint-disable-next-line` with no rule list (it would silence every rule). Existing violations are baselined in `eslint-suppressions.json`; fixing one means `prune`. `controls` asserts exact must-fire counts per rule (`EXPECTED_FIRE` in `client-lint.mjs`), so adding or removing a catch-policy fixture means updating that table. If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
+
+### Pre-commit
+
+`.lintstagedrc.mjs` does **not** run this on commit: a typed program for even one file builds the whole package program (10-65 s for UI.Components alone), far over the pre-commit budget. Use `npm run lint:client` (or `check --package <id>`) before pushing changes to a covered package.
+
+## PR Quality Gates (CI Router)
+
+Every pull request to `master` runs the **CI Router** (`ci-router.yml`, check `Router`). It classifies the diff and dispatches a **blocking Tier 1** and an **advisory Tier 2**; a docs-only diff skips both. The `master` ruleset requires `Router` and `Client lint (type-aware ratchet)` (`client-lint.yml`). Verify with `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
+
+The legacy `sdap-ci.yml` pipeline was **retired on 2026-10-14** (archived at `docs/archive/workflows/`); the job-by-job mapping is in `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`.
 
 ### CI Jobs
 
-| Job | Runner | What It Checks | Blocking? |
-|-----|--------|---------------|-----------|
-| **Security Scan** | ubuntu-latest | Trivy filesystem vulnerability scan | Yes |
-| **Build & Test** | windows-latest | `dotnet build`, `dotnet test` with coverage | Yes |
-| **Client Quality** | ubuntu-latest | Prettier format check, ESLint strict check | Yes |
-| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), dependency audit (legacy plugin size step is dead — Spaarke ships no plugins, ADR-002; removal deferred to post-cutover) | Yes |
-| **Integration Readiness** | windows-latest | Build for deployment, package artifacts, environment readiness | Yes |
-| **ADR Violations Report** | ubuntu-latest | Parses NetArchTest results and comments on PR | Advisory |
-| **CI Summary** | ubuntu-latest | Aggregates all job results into step summary | Advisory |
+| Job | Workflow | What It Checks | Blocking? |
+|-----|----------|---------------|-----------|
+| **Compile (Debug)** | Tier 1 | Whole-solution `dotnet build` | Yes |
+| **Arch Tests** | Tier 1 | Full NetArchTest suite (`tests/Spaarke.ArchTests`) | Yes |
+| **Eval Gate**, **Tenant Isolation**, **Naming Conformance**, **Compose Fidelity Gate**, smoke + guard jobs | Tier 1 | Golden-utterance evals, I1–I5 invariants, naming, Compose round-trip, changed-surface/auth smoke, Xrm capability guard | Yes |
+| **Client lint (type-aware ratchet)** | `client-lint.yml` | Typed ESLint ratchet over the client packages | Yes (required) |
+| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes`; Prettier + PCF ESLint | Advisory |
+| **Full Unit Tests (Debug)** | Tier 2 | Whole unit suite in 4 shards, two-pass retry classifier | Advisory |
+| **ADR Compliance**, **Plugin Size**, **Markdown Link Validator**, **Last Reviewed Stamp** | Tier 2 | As named; one "Tier 2 Advisory Report" PR comment | Advisory |
+| **Dependencies audit** | `ci-standalone-checks.yml` | `dotnet list package --vulnerable --include-transitive` outside the accepted-risk list | Advisory (alert on master) |
+| **Release build + BFF publish** | `ci-standalone-checks.yml` | Release build of the solution (FR-B07); BFF publish + `deployment-packages` artifact | Advisory (alert on master) |
+| **Compose Client Gate** | `ci-standalone-checks.yml` | `@spaarke/compose-components` jest save-contract suite | Advisory (alert on master) |
+| **Client typecheck** | `ci-standalone-checks.yml` | Shared-lib `tsc` builds + `Spaarke.AI.Widgets` `tsc --noEmit` | Advisory (alert on master) |
+| **PCF ESLint** | `ci-standalone-checks.yml` | `eslint .` in `src/client/pcf` on every non-docs PR (Tier 2 `lint` runs only on SpaarkeAi/BFF changes) | Advisory (alert on master) |
+
+Advisory does not mean ignorable. On master every red check raises a **quality alert** assigned to the owner, and a red `Router` on master raises `router-master` (`master-ci-alert.yml`). See [CI/CD Workflow Guide — How CI problems are surfaced](ci-cd-workflow.md#how-ci-problems-are-surfaced).
 
 ### Key Commands Run in CI
 
 ```bash
-# Client Quality job
-npx prettier --check .                    # Format verification
-cd src/client/pcf && npx eslint .         # ESLint strict check
+# Tier 2 lint
+npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+cd src/client/pcf && node_modules/.bin/eslint .
 
-# Code Quality job
-dotnet format --verify-no-changes         # C# format verification
-dotnet test tests/Spaarke.ArchTests/      # ADR architecture tests (NetArchTest)
+# Tier 2 format / Tier 1 arch tests
+dotnet format whitespace --verify-no-changes
+dotnet test tests/Spaarke.ArchTests/
+
+# Standalone dependency audit
+dotnet list Spaarke.sln package --vulnerable --include-transitive
 ```
 
 ### Performance Target
 
-The full PR pipeline MUST complete in **< 5 minutes**. The `client-quality` job runs in parallel with `build-test` and `security-scan` to stay within budget.
+Spec budgets: Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (see [CI/CD Workflow Guide](ci-cd-workflow.md)). The standalone checks run in parallel and do not hold the required check.
 
 ---
 
@@ -996,7 +1074,7 @@ This section defines **which tests to run when you modify code in a specific mod
 
 | Test Project | Path | Framework | Covers |
 |-------------|------|-----------|--------|
-| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
+| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
 | **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
 | **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
 | **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |

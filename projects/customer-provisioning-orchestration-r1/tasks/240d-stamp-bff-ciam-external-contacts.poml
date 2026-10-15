@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240d" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Stamp BFFs serve CIAM external contacts: per-stamp Ciam settings, CIAM audience shape, keyless CIAM Graph provisioner, and how a contact reaches the right customer</title>
+    <phase>Model 1 dedicated-stamp remediation — T240 (G14), found 2026-10-07 from the external-access-r3 reply</phase>
+    <gate>owner 2026-10-07: yes, customer BFFs serve external contacts; needs the design note with external-access-r3 + UAC-r2</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth and tenant isolation across every customer stamp (a second identity plane), new provisioning settings and a credential change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-critical cross-tenant identity design touching three projects.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owner decision and cross-project design (external-access-r3, unified-access-control-r2); edits .claude/constraints/provisioning.md.</parallel-reason>
+    <tags>auth, security, tenant-isolation, provisioning, provisioning-handler, model1-dedicated, testing</tags>
+    <deps>240a</deps>
+  </metadata>
+
+  <prompt>Make every provisioned customer BFF serve the External Access SPA's CIAM external contacts with the same isolation as its workforce users.</prompt>
+
+  <goal>An external contact invited by customer X signs in to the shared CIAM tenant and reaches only customer X's BFF and data; the stamp holds no secret or certificate for it; re-runs are idempotent.</goal>
+
+  <context>
+    <background>
+      `notes/t240-plan.md` F13/F14 and `notes/coordination/2026-10-07-from-external-access-r3.md` §0 and Q3. External
+      contacts are local accounts in the shared CIAM tenant `spaarkeextid`. A stamp BFF reads `Ciam:Instance/TenantId/Audience`
+      for its "Ciam" JwtBearer scheme, and nothing in provisioning sets them. The CIAM Graph provisioner signs in with a Key
+      Vault certificate, which a keyless stamp (D13) does not have. A contact's shared records live in the customer's own
+      Dataverse, so a shared backend cannot serve them without reaching every customer's Dataverse (against D-13).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="isolation">A CIAM token accepted by customer X's BFF grants nothing at customer Y's BFF unless Y bound that contact itself (I1–I5).</constraint>
+    <constraint source="credentials">No secret or certificate on a stamp (D13; provisioning.md KV lifecycle): the CIAM Graph provisioner uses a federated credential from the stamp's managed identity.</constraint>
+    <constraint source="owner">Only owner-approved live actions in the CIAM tenant or on Entra, per action.</constraint>
+    <constraint source="coordination">SPA changes are spaarke-SPA-external-access-platform-r3's; access-model changes are unified-access-control-r2's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">(Q3 answered yes, owner 2026-10-07.) Design note with external-access-r3 and UAC-r2: CIAM audience (one shared CIAM API app vs one per customer), contact-to-customer routing (directory vs invitation), keyless provisioner.</step>
+    <step order="2">Provisioning: `Ciam:*` settings per stamp (catalog + H4b), the CIAM app registration step if per customer, the provisioner's federated credential; tests.</step>
+    <step order="3">H13 probe: the stamp accepts a CIAM token for its audience and refuses one for another stamp's.</step>
+    <step order="4">Docs (deployment guide, inventory, provisioning.md); Step 9.5 with two verifier passes; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A provisioned stamp's settings include the `Ciam:*` values, and the BFF starts and validates a CIAM token for its audience.</criterion>
+    <criterion testable="true">A CIAM contact bound only at customer X gets no records from customer Y's BFF (negative test).</criterion>
+    <criterion testable="true">No stamp Key Vault holds a CIAM certificate or secret.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Q3 answered "external contacts stay on a shared backend" — stop: that conflicts with D-13 data placement; take it back to the owner.</trigger>
+  </escalation>
+
+  <notes/>
+</task>

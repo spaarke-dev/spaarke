@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>InsightSummaryCard dead render path, own PR (C-22)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified cleanup with named files and a verification path.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree or the other wave-I tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt088, branch fix/insight-summary-card-placeholder (already created off origin/master). Land C-22.</prompt>
+  <role>SPAARKE full-stack developer. Cleanup is convergence and deletion with evidence, never a behaviour change in disguise.</role>
+  <goal>The matter form no longer carries mount glue for a bundle that does not exist, so production does not show a permanent placeholder that reads as live.</goal>
+
+  <context>
+    <background>InsightSummaryCard's mount bundle does not exist in the repo, so production renders a placeholder forever. Task 080 removed the dead render path from insightCardMount.ts and a second placeholder in matter_insight_card_host.html (the one visible in production, inside a cross-document iframe the parent script cannot reach), on the ontology branch in commit 1c56cd29b.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/forms/sprk_matter/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111. Owner decision 2026-10-03: cleanup unrelated to ontology is fixed now (never deferred to an issue) but kept off the ontology branch so that PR stays reviewable.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: run the affected package tests BEFORE applying any change (that run is the master baseline) and AFTER. Report both. A failure is pre-existing only if it appears in the baseline run; never assert pre-existing without that evidence.</constraint>
+    <constraint source="project">Scope: install dependencies with npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md section 12). Discard every package-lock.json diff that npm install produces; lockfile churn is never part of this PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify. If a pre-commit hook fails, fix the cause (usually a missing node_modules).</constraint>
+    <constraint source="project">Scope: you CANNOT write .claude/ paths. If one is needed, stop and report the exact text for the main session.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup with evidence</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/cleanup-placement-plan.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
+    <step order="2">Apply the C-22 changes already written and verified on the ontology branch: git diff 1c56cd29b~1 1c56cd29b -- &lt;paths below&gt; | git apply. The commit is in the shared object store, so it is reachable from this worktree. Path: src/dataverse/forms/sprk_matter/</step>
+    <step order="3">Run tsc -p in src/dataverse/forms/sprk_matter and confirm the committed insightCardMount.js matches the compiled output.</step>
+    <step order="4">State in the PR body that these are Dataverse web resources: production changes only after a web-resource deploy, which this PR does not perform.</step>
+    <step order="5">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
+    <step order="6">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="7">Report back: the PR URL, each acceptance criterion with evidence, files changed, the baseline and after test output, and any escalation.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install and run package tests</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/dataverse/forms/sprk_matter/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">tsc -p in src/dataverse/forms/sprk_matter reports zero errors and insightCardMount.js matches its compiled output.</criterion>
+    <criterion testable="true">Neither insightCardMount nor matter_insight_card_host.html still renders the InsightSummaryCard placeholder.</criterion>
+    <criterion testable="true">A pull request against master is open, ready for review, with the item ids in its body.</criterion>
+    <criterion testable="true">Negative: the PR contains no package-lock.json changes and no file outside this task's scope.</criterion>
+    <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">PR #1116 (c2c10cc01). Found that the insightCardMount.js extracted from 1c56cd29b did NOT equal the tsc output of its .ts: task 080 hand-edited the .js, and the pre-commit hook ran prettier on the .ts only (lint-staged does not cover .js). Regenerated the .js with tsc -p; a second compile diffs to zero. Line-ending-only rewrites of two sibling .js files were discarded.</completion>
+  <notes>Does not build the missing @spaarke/ai-widgets browser bundle; no bundler config exists for it, so that would be new infrastructure, not cleanup.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

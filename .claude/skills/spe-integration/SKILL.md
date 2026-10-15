@@ -59,7 +59,7 @@ Read in this order:
 | User-initiated read/write of a file | OBO (On-Behalf-Of) — user token | `Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
 | Background indexing, system-level container ops | App-only via **Managed Identity** (`DefaultAzureCredential`, UAMI-pinned) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. Local dev uses the `DefaultAzureCredential` az-CLI leg, **not** a secret. Per **A4**, delegated/OBO container + file ops authenticate the confidential client with an **MI-FIC assertion or KV certificate** — never `.WithClientSecret` (transitional sites only, exception E-3). | Same factory; MI/app-only path |
 | Container type registration in a new tenant | App-only via PowerShell during onboarding | `RegisterContainer.ps1` |
-| Mailbox-scoped Graph (`Mail.*`) | App-only + Exchange `ApplicationAccessPolicy` scoping MI to allowed mailboxes (Phase C hardening) | See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §7 |
+| Mailbox-scoped Graph (`Mail.*`) | App-only via the managed identity, scoped to allowed mailboxes by Exchange RBAC for Applications (control-plane-provisioned environments; legacy `ApplicationAccessPolicy` on older ones) | See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.9 |
 
 **Default**: OBO for user-facing endpoints; app-only via MI only when the operation has no acting user. New-environment setup requires Graph permission grants on the MI principal (see [`auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §5).
 

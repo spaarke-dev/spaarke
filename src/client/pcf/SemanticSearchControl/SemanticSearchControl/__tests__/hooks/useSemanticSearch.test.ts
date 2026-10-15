@@ -15,8 +15,8 @@ const mockApiService = {
 } as unknown as SemanticSearchApiService;
 
 // Helper to create mock response
-const createMockResponse = (results: number, total: number): SearchResponse => ({
-  results: Array.from({ length: results }, (_, i) => ({
+const createMockResponse = (results: number, total: number, startIndex = 0): SearchResponse => ({
+  results: Array.from({ length: results }, (_, k) => k + startIndex).map(i => ({
     documentId: `doc-${i}`,
     name: `Document ${i}`,
     fileType: 'pdf',
@@ -72,7 +72,7 @@ describe('useSemanticSearch', () => {
   it('should execute search successfully', async () => {
     mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     act(() => {
       result.current.search('test query', emptyFilters);
@@ -81,7 +81,7 @@ describe('useSemanticSearch', () => {
     expect(result.current.isLoading).toBe(true);
     expect(result.current.state).toBe('loading');
 
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.results).toHaveLength(10);
     expect(result.current.totalCount).toBe(50);
@@ -91,39 +91,46 @@ describe('useSemanticSearch', () => {
     expect(result.current.query).toBe('test query');
   });
 
-  it('should not search empty query', async () => {
-    const { result } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+  it('should still search for an empty query (returns all documents in scope)', async () => {
+    // Contract change: the hook's search() documents "Empty query is supported - returns
+    // all documents in scope ordered by date", so an empty query MUST reach the API.
+    mockSearch.mockResolvedValueOnce(createMockResponse(3, 3));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     await act(async () => {
       await result.current.search('', emptyFilters);
     });
+    await waitFor(() => expect(result.current.state).toBe('success'));
 
-    expect(mockSearch).not.toHaveBeenCalled();
-    expect(result.current.state).toBe('idle');
+    expect(mockSearch).toHaveBeenCalledTimes(1);
+    expect(mockSearch.mock.calls[0][0]).toEqual(expect.objectContaining({ query: '' }));
+    expect(result.current.results).toHaveLength(3);
   });
 
-  it('should not search whitespace-only query', async () => {
-    const { result } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+  it('should forward a whitespace-only query verbatim (trimming is the service/BFF concern)', async () => {
+    mockSearch.mockResolvedValueOnce(createMockResponse(0, 0));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     await act(async () => {
       await result.current.search('   ', emptyFilters);
     });
+    await waitFor(() => expect(result.current.state).toBe('success'));
 
-    expect(mockSearch).not.toHaveBeenCalled();
-    expect(result.current.state).toBe('idle');
+    expect(mockSearch).toHaveBeenCalledTimes(1);
+    expect(mockSearch.mock.calls[0][0]).toEqual(expect.objectContaining({ query: '   ' }));
   });
 
   it('should handle search error', async () => {
     const mockError = { message: 'Network error', retryable: true };
     mockSearch.mockRejectedValueOnce(mockError);
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     act(() => {
       result.current.search('test query', emptyFilters);
     });
 
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.state).toBe('error');
     expect(result.current.error).toEqual(mockError);
@@ -134,18 +141,18 @@ describe('useSemanticSearch', () => {
     // First search returns 10 of 50
     mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     // Initial search
     act(() => {
       result.current.search('test query', emptyFilters);
     });
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.results).toHaveLength(10);
 
-    // Load more returns another 10
-    mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
+    // Load more returns the NEXT 10 (distinct documentIds - the hook dedupes by documentId)
+    mockSearch.mockResolvedValueOnce(createMockResponse(10, 50, 10));
 
     act(() => {
       result.current.loadMore();
@@ -154,43 +161,64 @@ describe('useSemanticSearch', () => {
     expect(result.current.isLoadingMore).toBe(true);
     expect(result.current.state).toBe('loadingMore');
 
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.results).toHaveLength(20);
     expect(result.current.state).toBe('success');
   });
 
-  it('should not load more when already loading', async () => {
+  it('should drop already-seen documentIds when a later page overlaps (dedupe)', async () => {
     mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
-
-    // Start initial search
     act(() => {
       result.current.search('test query', emptyFilters);
     });
+    await waitFor(() => expect(result.current.state).toBe('success'));
+
+    // Page 2 repeats doc-8/doc-9 and adds doc-10/doc-11.
+    mockSearch.mockResolvedValueOnce(createMockResponse(4, 50, 8));
+    act(() => {
+      result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.state).toBe('success'));
+
+    expect(result.current.results.map(r => r.documentId)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `doc-${i}`)
+    );
+  });
+
+  it('should not load more when already loading', async () => {
+    mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
+
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+
+    // Start initial search (state -> 'loading')
+    act(() => {
+      result.current.search('test query', emptyFilters);
+    });
+    expect(result.current.state).toBe('loading');
 
     // Try to load more while loading
     await act(async () => {
       await result.current.loadMore();
     });
+    await waitFor(() => expect(result.current.state).toBe('success'));
 
-    // Should only have called search once
+    // Should only have called search once (the initial one)
     expect(mockSearch).toHaveBeenCalledTimes(1);
-
-    await waitForNextUpdate();
   });
 
   it('should not load more when no more results', async () => {
     // Search returns all 10 results
     mockSearch.mockResolvedValueOnce(createMockResponse(10, 10));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     act(() => {
       result.current.search('test query', emptyFilters);
     });
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.hasMore).toBe(false);
 
@@ -206,13 +234,13 @@ describe('useSemanticSearch', () => {
   it('should reset state', async () => {
     mockSearch.mockResolvedValueOnce(createMockResponse(10, 50));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     // Execute search
     act(() => {
       result.current.search('test query', emptyFilters);
     });
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(result.current.results).toHaveLength(10);
 
@@ -230,25 +258,26 @@ describe('useSemanticSearch', () => {
   it('should pass scope and scopeId to API', async () => {
     mockSearch.mockResolvedValueOnce(createMockResponse(5, 5));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'matter', 'matter-123'));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'matter', 'matter-123'));
 
     act(() => {
       result.current.search('test', emptyFilters);
     });
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(mockSearch).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: 'matter',
         scopeId: 'matter-123',
-      })
+      }),
+      undefined // searchIndexName not supplied -> forwarded as undefined
     );
   });
 
   it('should pass filters to API', async () => {
     mockSearch.mockResolvedValueOnce(createMockResponse(5, 5));
 
-    const { result, waitForNextUpdate } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
+    const { result, waitFor } = renderHook(() => useSemanticSearch(mockApiService, 'all', null));
 
     const filters: SearchFilters = {
       documentTypes: ['contract'],
@@ -262,12 +291,13 @@ describe('useSemanticSearch', () => {
     act(() => {
       result.current.search('test', filters);
     });
-    await waitForNextUpdate();
+    await waitFor(() => expect(['success', 'error']).toContain(result.current.state));
 
     expect(mockSearch).toHaveBeenCalledWith(
       expect.objectContaining({
         filters,
-      })
+      }),
+      undefined // searchIndexName not supplied -> forwarded as undefined
     );
   });
 });

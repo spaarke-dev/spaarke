@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218d" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>CI packs SpaarkeMaster (managed + unmanaged) from git and publishes both zips + the manifest to provisioning-artifacts — replaces the hand-uploaded SpaarkeMaster.zip and the hand-written dataverse-solutions-latest.json</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T218 ("replace the manual H6 workaround"); notes/t218-plan.md design 3</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>CI workflow that writes the artifact every customer import reads.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Release pipeline; OIDC + storage write.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>.github/workflows only (check /conflict-check for CI ownership).</parallel-reason>
+    <tags>provisioning, ci-workflows, dataverse, solution</tags>
+    <deps>218b, 218c, 218e</deps>
+  </metadata>
+
+  <prompt>Make the artifact H6 imports come from git through CI, never from a laptop.</prompt>
+
+  <goal>
+    `publish-dataverse-solutions-manifest.yml` installs the pac CLI, packs `src/dataverse/solutions/SpaarkeMaster` as
+    managed and unmanaged, fails if either zip contains environment-variable values, uploads both as versioned blobs, and
+    writes the manifest in 218b's schema (`solutions.SpaarkeMaster = {version, managedBlobName, unmanagedBlobName}`) as a
+    versioned file and as `dataverse-solutions-latest.json`. Manual dispatch; storage access through the existing OIDC
+    identity, no key.
+  </goal>
+
+  <context>
+    <background>t218-plan.md F3, F4: the workflow lists 8 solutions, has no pack step and cannot run; the store holds hand-made files.</background>
+    <relevant-files>
+      <file>.github/workflows/publish-dataverse-solutions-manifest.yml</file>
+      <file>infrastructure/bicep/modules/controlplane-worker-app-service.bicep (ProvisioningArtifactsContainerUri); scripts/provisioning-prereqs/spaarke-constants.yaml (sprkcpartifacts{env})</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="live">The first real publish overwrites dataverse-solutions-latest.json in sprkcpartifactsdev — ask the owner before dispatching it. Keep the hand-made blobs (rename/version, never delete without OK).</constraint>
+    <constraint source="no secrets">OIDC federated login only; no storage key or SAS in the workflow.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Rewrite the workflow (pack both, value check, versioned upload, manifest); actionlint/yaml check.</step>
+    <step order="2">Dry-run mode (pack + manifest as an artifact, no upload) — run it on the branch (read-only for storage).</step>
+    <step order="3">Owner OK → real publish; H6 manifest read verified (read-only GET of latest.json); runbook + guide; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dry run on a clean checkout produces SpaarkeMaster managed + unmanaged zips and a manifest matching 218b's parser (parsed by a ControlPlane test fixture or the importer's parse method).</criterion>
+    <criterion testable="true">A zip with environment-variable values fails the job.</criterion>
+    <criterion testable="true">No secret, key or SAS appears in the workflow.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-08">COMPLETED (SESSION 44) — the workflow is done and dry-run green; the FIRST REAL PUBLISH is NOT done: publish=true runs from master only (the OIDC subject trusts refs/heads/master), so it waits for the branch merge (PR #1365) and the owner's OK. Commits c5d58d40e (workflow + New-SpaarkeMasterManifest/Get-PackedSolutionInfo + parity tests + runbook), 6b3108e49 (review fixes).
+    - Workflow: pac 1.46.1 (pinned = the version that unpacked the source) packs managed + unmanaged from src/dataverse/solutions/SpaarkeMaster; checks name/version/managed flag, env-var values, F12 leaks, and the manifest keys against the C# parser's sample; run artifact always; publish=true on master: versioned zips (blob metadata sourcesha — same-commit re-run replaces, other commit refuses), versioned manifest (run attempt in the name), latest.previous rollback pointer, latest + read-back. Pull requests touching the package source dry-run it.
+    - Dry runs on GitHub: 37801647679 and 37803620013 green (18 MB per zip; manifest keys = sample). Store today (read-only 2026-10-08): only the hand-made 2026-08-21 latest.json + dataverse-solutions/2026.08.21-h3-manual-1/SpaarkeMaster.zip.
+    QUALITY GATES: one full review pass — F1 fixed (a partial publish could never be re-run without a version bump); F2 fixed (manifest contract check now inside the workflow; runbook rollback note for the first publish); K fixed (exists checks stop on az errors; publish refused off master). F2 OUT OF SCOPE, filed + reported: the CI identity trusts the repo:…:pull_request OIDC subject (unused) — any same-repo PR can sign in as it; #1446 (ISS-007), removal is an owner action. Pester 30/30; parser tests pass; actionlint clean.
+    KNOWN LIMITS: the publish branch itself is exercised only by the first real run (it cannot run off master); managedSha256/unmanagedSha256 are audit fields H6 does not check.</note>
+  </notes>
+</task>

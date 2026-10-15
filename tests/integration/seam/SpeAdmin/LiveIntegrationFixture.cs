@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// </para>
 /// <para>
 /// <b>Which app-only identity, and why it is not production's (changed 2026-10-04).</b> Production
-/// (<c>SpeAdminGraphService.GetClientForConfigAsync</c>) now runs as the BFF's own identity — on Azure, its
+/// (<c>SpeAdminGraphService.GetClientForContainerAsync</c>) now runs as the BFF's own identity — on Azure, its
 /// user-assigned managed identity — which does not exist on an operator's workstation. This fixture
 /// therefore authenticates as the dev container type's OWNING app (<see cref="OwningAppClientId"/>), with
 /// its secret read from Key Vault under the operator's own <c>az login</c>. That is a TEST credential, built
@@ -48,9 +48,10 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// documented no-op — see <c>ContainerLifecycleLiveTests.ContainerTypeOwnerGrant_RoleFlow_*</c>.
 /// </para>
 /// <para>
-/// <b>Skip-via-return, not <c>[Trait("Category","Live")]</c> CI filtering.</b> The default
-/// <c>sdap-ci.yml</c> test job runs <c>dotnet test</c> with no <c>--filter</c> at all (every test
-/// project's full suite executes), so a category trait alone would not stop this suite from trying
+/// <b>Skip-via-return, not <c>[Trait("Category","Live")]</c> CI filtering.</b> The
+/// Tier 2 <c>Full Unit Tests (Debug)</c> shards (<c>.github/workflows/ci-tier2-advisory.yml</c>) run
+/// <c>dotnet test</c> with only namespace <c>--filter</c>s and no <c>Category</c> filter at all (every test
+/// in each shard's namespaces executes), so a category trait alone would not stop this suite from trying
 /// to reach a live tenant in CI. The repo's own established answer to that —
 /// <c>tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/Phase2EndToEndTests.cs</c>'s
 /// <c>LiveMode_*</c> tests — is an env-var presence check at the top of each test that returns

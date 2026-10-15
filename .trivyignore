@@ -20,8 +20,10 @@
 #         The file is in the knowledge-base repo (MCP sample app reference), not in
 #         deployed product code.
 # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key
-# Workflow also skips `knowledge/` from Trivy scan (sdap-ci.yml); this entry is a
-# defense-in-depth backstop in case the skip-dirs config changes.
+# The retired sdap-ci.yml (2026-10-14) also skipped `knowledge/` in its Trivy scan; the nightly
+# `trivy-fs` job (nightly-health.yml) scans `.` with no skip-dirs, so this entry is what keeps
+# the sample key out of that scan's report (and any local `trivy fs .` run). The nightly HIGH/CRITICAL
+# count reads only vulnerability findings, so it never counted secret findings.
 azure-storage-account-key
 
 # ---------------------------------------------------------------------------

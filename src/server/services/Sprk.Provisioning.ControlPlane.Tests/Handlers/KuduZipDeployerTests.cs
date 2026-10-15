@@ -6,7 +6,7 @@
 // bearer-token auth header, content-type, body) via a hand-rolled fake
 // HttpMessageHandler — NOT Mock&lt;HttpMessageHandler&gt;, which
 // docs/standards/TEST-ARCHITECTURE.md / ADR-038 bans. Parity with
-// BapRestEnvironmentRateProbeTests.cs's FakeBapHttpMessageHandler pattern
+// BapRestEnvironmentRateProbeTests.cs's (removed by T228) FakeBapHttpMessageHandler pattern
 // (the established plain-HttpClient fake-transport idiom in this test
 // project, distinct from the ARM-SDK-specific FakeArmHttpMessageHandler
 // since Kudu is not an ARM endpoint). ADR-038 path #1.
@@ -178,7 +178,7 @@ public sealed class KuduZipDeployerTests : IDisposable
     /// Hand-rolled fake <see cref="HttpMessageHandler"/> for KuduZipDeployer's
     /// plain (non-ARM) HttpClient — NOT Mock&lt;HttpMessageHandler&gt;
     /// (banned per ADR-038 / testing.md). Parity with
-    /// BapRestEnvironmentRateProbeTests.FakeBapHttpMessageHandler; extended
+    /// BapRestEnvironmentRateProbeTests.FakeBapHttpMessageHandler (removed by T228); extended
     /// with a CancellationToken pass-through so the timeout test can prove
     /// real cooperative cancellation.
     /// </summary>

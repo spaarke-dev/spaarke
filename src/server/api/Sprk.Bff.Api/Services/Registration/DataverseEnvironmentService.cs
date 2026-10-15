@@ -93,7 +93,11 @@ public class DataverseEnvironmentService : IDisposable
     /// Returns null if not found.
     /// NFR-01: Fresh read from Dataverse (no caching).
     /// </summary>
-    public async Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
+    /// <remarks>
+    /// Virtual for the same reason as <see cref="GetActiveEnvironmentsAsync"/>: a test stands in for the registry at
+    /// this boundary without an HTTP double (<c>DemoExpirationService</c> reads each request's own target environment).
+    /// </remarks>
+    public virtual async Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
     {
         var select = string.Join(",", DataverseEnvironmentRecord.AllColumns);
         var url = $"{EntitySetName}({environmentId})?$select={select}";

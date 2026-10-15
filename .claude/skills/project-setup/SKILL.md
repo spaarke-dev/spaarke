@@ -22,7 +22,6 @@ last-reviewed: 2026-05-16
 **IMPORTANT**: Before running this skill, ensure Claude Code is configured with extended context settings:
 
 ```bash
-MAX_THINKING_TOKENS=50000
 CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 ```
 
@@ -35,10 +34,9 @@ CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 **Verify settings before proceeding**:
 ```bash
 # Windows PowerShell
-echo $env:MAX_THINKING_TOKENS
 echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 
-# Should output: 50000 and 64000
+# Should output: 64000
 ```
 
 For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md). Note: `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** — adaptive thinking applies. Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing; invoke this skill on Opus with effort `high` or `max`.

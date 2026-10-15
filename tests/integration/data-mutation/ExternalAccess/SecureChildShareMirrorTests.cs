@@ -40,14 +40,17 @@ public class SecureChildShareMirrorTests
     private const int ViewOnly = 1;
     private const int Collaborate = 262167;      // R 1 + W 2 + A 4 + AT 16 + Share 262144 (task 139)
     private const int FullAccess = 327703;       // Collaborate + Delete 65536
-    private const int CollaborateOnChild = 23;   // Collaborate without Share
-    private const int FullAccessOnChild = 65559; // Full Access without Share
+    // Owner round 91 (2026-10-10, task 179): a child carries its root share's Share, so the child levels equal the root's.
+    private const int CollaborateOnChild = Collaborate;
+    private const int FullAccessOnChild = FullAccess;
+    private const int LegacyCollaborate = 23;    // a root share written before task 139: no Share
     private const int ShareBit = 262144;
     private const int AssignBit = 524288;
 
     private const string ViewCsv = "ReadAccess";
-    private const string CollaborateChildCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
-    private const string FullChildCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess";
+    private const string CollaborateChildCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+    private const string FullChildCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess,DeleteAccess";
+    private const string LegacyCollaborateCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
 
     // ── Records ────────────────────────────────────────────────────────────────────────────────────────────────────
     private static readonly Guid ProjectR = Guid.Parse("a1000000-0000-4000-8000-000000000001");
@@ -117,7 +120,7 @@ public class SecureChildShareMirrorTests
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task Reconcile_AChildCreatedAfterTheShare_IsReadableByTheSharee_AtTheRootsRightsWithoutShare()
+    public async Task Reconcile_AChildCreatedAfterTheShare_IsReadableByTheSharee_AtTheRootsRightsWithShare()
     {
         _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
 
@@ -128,12 +131,11 @@ public class SecureChildShareMirrorTests
             _shares.MaskOf(table, id, User(UserA)).Should().Be(CollaborateOnChild, $"{table} {id} is a child of R");
 
         _shares.WriteLog.Should().OnlyContain(w => w.Action == "GrantAccess" && w.Rights == CollaborateChildCsv,
-            "every child mirror is a GrantAccess of Collaborate WITHOUT ShareAccess (trigger 6)");
-        _shares.WriteLog.Should().NotContain(w => w.Rights != null && w.Rights.Contains("ShareAccess"));
+            "every child mirror is a GrantAccess of Collaborate, ShareAccess included, as the root share holds it (round 91)");
     }
 
     [Fact]
-    public async Task Reconcile_FullAccessOnTheRoot_MirrorsDeleteButNotShare()
+    public async Task Reconcile_FullAccessOnTheRoot_MirrorsDeleteAndShare()
     {
         _shares.Seed("sprk_project", ProjectR, User(UserA), FullAccess);
 
@@ -205,19 +207,60 @@ public class SecureChildShareMirrorTests
     }
 
     [Fact]
-    public async Task Reconcile_NarrowsAChildShareWiderThanTheRoot_AndStripsShareAccessFromAChild()
+    public async Task Reconcile_NarrowsAChildShareWiderThanTheRoot_AndStripsAShareTheRootShareDoesNotHold()
     {
         _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
-        _shares.Seed("sprk_project", ProjectR, User(UserB), Collaborate);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), LegacyCollaborate);
         _shares.Seed("sprk_document", DocR, User(UserA), FullAccessOnChild); // wider than A's View on R
-        _shares.Seed("sprk_document", DocR, User(UserB), Collaborate);       // carries Share on the child
+        _shares.Seed("sprk_document", DocR, User(UserB), Collaborate);       // carries Share; B's root share does not
 
         await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
 
         _shares.MaskOf("sprk_document", DocR, User(UserA)).Should().Be(ViewOnly);
-        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(CollaborateOnChild);
+        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(LegacyCollaborate,
+            "round 91 mirrors Share only where the root share holds it: never wider than the root");
         _shares.WriteLog.Where(w => w.RecordId == DocR).Select(w => w.Action).Should().OnlyContain(a => a == "ModifyAccess",
             "an existing share is changed with ModifyAccess (it replaces), never widened or narrowed by GrantAccess");
+    }
+
+    /// <summary>
+    /// Owner round 91: a root share WITHOUT Share (a legacy Collaborate, written before task 139) mirrors none — the child
+    /// gets Read, Write, Append and AppendTo only.
+    /// </summary>
+    [Fact]
+    public async Task Reconcile_ARootShareWithoutShare_MirrorsNoShareOntoTheChildren()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), LegacyCollaborate);
+
+        await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(LegacyCollaborate, $"{table} {id} gets no Share the root lacks");
+        _shares.WriteLog.Should().OnlyContain(w => w.Rights == LegacyCollaborateCsv);
+    }
+
+    /// <summary>
+    /// Owner round 91, the upgrade: a child share mirrored BEFORE round 91 (Collaborate without Share) under a root share
+    /// that carries Share is raised to the root's rights on the next pass, with ModifyAccess, and a second pass writes
+    /// nothing (idempotent).
+    /// </summary>
+    [Fact]
+    public async Task Reconcile_AnExistingChildShareMirroredBeforeRound91_IsRaisedToCarryShare_Once()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.Seed(table, id, User(UserA), LegacyCollaborate);
+
+        await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(CollaborateOnChild, $"{table} {id} now carries the root's Share");
+        _shares.WriteLog.Should().OnlyContain(w => w.Action == "ModifyAccess" && w.Rights == CollaborateChildCsv);
+        var writes = _shares.WriteLog.Count;
+
+        await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.WriteLog.Should().HaveCount(writes, "the mirror is already right: the second pass changes nothing");
     }
 
     [Fact]
@@ -312,15 +355,16 @@ public class SecureChildShareMirrorTests
     }
 
     [Fact]
-    public async Task Never_ShareOrAssign_IsAddedToAChild_EvenWhenTheRootShareCarriesThem()
+    public async Task Never_AssignIsAddedToAChild_ButTheRootSharesShareIs_Round91()
     {
-        // A share made in the Dataverse UI can carry Assign; the child receives only what a mirror may carry.
+        // A share made in the Dataverse UI can carry Assign; the child receives only what a mirror may carry. Since owner
+        // round 91 that includes the root share's Share (task 179), never its Assign.
         _shares.Seed("sprk_project", ProjectR, User(UserA), 1 | 2 | ShareBit | AssignBit);
 
         await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
 
-        _shares.MaskOf("sprk_document", DocR, User(UserA)).Should().Be(3);
-        _shares.WriteLog.Should().OnlyContain(w => w.Rights == "ReadAccess,WriteAccess");
+        _shares.MaskOf("sprk_document", DocR, User(UserA)).Should().Be(1 | 2 | ShareBit);
+        _shares.WriteLog.Should().OnlyContain(w => w.Rights == "ReadAccess,WriteAccess,ShareAccess");
     }
 
     [Fact]
@@ -569,20 +613,21 @@ public class SecureChildShareMirrorTests
         | AccessRights.Share;
 
     private Task<IResult> Share(SecureChildShareWorld world, Guid user, ExternalAccessLevel level,
-        AccessRights callerRights = CallerHoldsEverything) =>
+        AccessRights callerRights = CallerHoldsEverything, GrantAccessNotifier? notifier = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
-            _shares, _users.Client, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
+            _shares, _users.Client, _flags, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
             world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
+            notifier ?? Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertNotifier(), // task 181
             Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> Unshare(SecureChildShareWorld world, Guid user) =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("project", ProjectR, user),
             _shares, _users.Client, _flags, _cache.Object, Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            world.Synchronizer(_shares), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), Context(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            world.Synchronizer(_shares), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     [Fact]
     public async Task ShareUser_OnASecureRoot_SharesEveryChild_AtTheSharedLevel()
@@ -642,6 +687,27 @@ public class SecureChildShareMirrorTests
         _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().BeNull();
     }
 
+    /// <summary>
+    /// Task 181: the related-records-pending 500 still says whether the user could not be notified — the modal reads it
+    /// from this answer, which carries no 200 body.
+    /// </summary>
+    [Fact]
+    public async Task ShareUser_WhenAChildCannotBeWritten_AndTheNotificationFails_The500SaysNotificationFailed()
+    {
+        _shares.FailWritesOnRecord = ("sprk_events", EventR);
+        var notifier = new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Harness
+        {
+            NotificationWriteFailure = new HttpRequestException("Simulated appnotification create failure."),
+        }.Notifier;
+
+        var result = await Share(World(), UserB, ExternalAccessLevel.ViewOnly, notifier: notifier);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["notificationFailed"].Should().Be(true);
+        _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(ViewOnly, "the root share stands");
+    }
+
     [Fact]
     public async Task ShareUser_WhenAChildCannotBeWritten_Is500ChildrenIncomplete_TheRootShareStands_AndReconcileCompletesIt()
     {
@@ -657,6 +723,7 @@ public class SecureChildShareMirrorTests
         problem.ProblemDetails.Extensions["childrenNotUpdated"].Should().Be(1);
         problem.ProblemDetails.Extensions["childrenUpdated"].Should().Be(ChildrenOfR.Length - 1);
         problem.ProblemDetails.Detail.Should().Contain($"1 of its {ChildrenOfR.Length} related records");
+        problem.ProblemDetails.Extensions["notificationFailed"].Should().Be(false, "task 181: the user was told");
         _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(ViewOnly, "the root share stands");
 
         _shares.FailWritesOnRecord = null;
@@ -1476,12 +1543,21 @@ public class SecureChildShareMirrorTests
                     .ToList(),
             });
 
+        // #1629: the message grant asks the anchor's grantees (the audience the join fixed), not the thread's set.
+        derivation
+            .Setup(d => d.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(participants.ToList());
+
         return new DirectThreadAccessService(
             entities.Object, _shares, new Lazy<IThreadMembershipDerivationService>(() => derivation.Object),
             SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance);
     }
 
     private static readonly Guid ThreadId = Guid.Parse("7e7e0000-0000-4000-8000-000000000001");
+
+    /// <summary>The audience a join onto the project thread fixes (#1629): the project's members.</summary>
+    private static Sprk.Bff.Api.Services.Communication.ThreadAssignment OnProjectThread(Guid project) =>
+        Sprk.Bff.Api.Services.Communication.ThreadAssignment.Anchored(ThreadId, "sprk_project", project);
 
     /// <summary>
     /// F3: a message on a SECURE record's thread. Its participants come from the record's membership lookups (here A, a
@@ -1494,7 +1570,7 @@ public class SecureChildShareMirrorTests
         var world = World();
         _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
 
-        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(CommR, OnProjectThread(ProjectR));
 
         _shares.WriteLog.Should().BeEmpty("a secure message's shares are the secure-child synchronizer's alone");
 
@@ -1513,7 +1589,7 @@ public class SecureChildShareMirrorTests
         var world = World().OrdinaryChild("sprk_communication", ordinaryComm,
             ("sprk_regardingproject", "sprk_project", OrdinaryProject));
 
-        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(ordinaryComm, ThreadId);
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(ordinaryComm, OnProjectThread(OrdinaryProject));
 
         _shares.MaskOf("sprk_communication", ordinaryComm, User(UserA)).Should().Be(ViewOnly);
         _shares.MaskOf("sprk_communication", ordinaryComm, User(UserC)).Should().Be(ViewOnly);
@@ -1524,11 +1600,71 @@ public class SecureChildShareMirrorTests
     public async Task MessageAccess_WhenTheSecureRecordTeamIsAmbiguous_OrTheMessageIsMissing_GrantsNothing()
     {
         var ambiguous = World().Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
-        await MessageAccess(ambiguous, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+        await MessageAccess(ambiguous, UserA, UserC).GrantMessageAccessAsync(CommR, OnProjectThread(ProjectR));
 
-        await MessageAccess(World(), UserA, UserC).GrantMessageAccessAsync(Guid.NewGuid(), ThreadId);
+        await MessageAccess(World(), UserA, UserC).GrantMessageAccessAsync(Guid.NewGuid(), OnProjectThread(ProjectR));
 
         _shares.WriteLog.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: an email filed to a project from an unanchored Direct thread is reconciled — the
+    /// thread is anchored to the project — and the message grant goes through THIS service, so a secure message is still
+    /// never granted (positive control below: an ordinary one is).
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Communication.ThreadResolver FilingReconciler(
+        Guid communication, string regardingField, Guid project, DirectThreadAccessService access)
+    {
+        var thread = Guid.Parse("7e7e0000-0000-4000-8000-000000000129");
+        var entities = new Mock<IGenericEntityService>();
+        var email = new Microsoft.Xrm.Sdk.Entity("sprk_communication", communication)
+        {
+            ["sprk_communicationtype"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000), // Email
+            ["sprk_communicationthread"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communicationthread", thread),
+            [regardingField] = new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project),
+        };
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(email);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", thread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_communicationthread", thread)
+            {
+                ["sprk_threadtype"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000001), // Direct, unanchored (ingested unfiled)
+                ["sprk_privacystate"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000), // Open
+            });
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(new List<Microsoft.Xrm.Sdk.Entity> { email }));
+        return new Sprk.Bff.Api.Services.Communication.ThreadResolver(
+            Array.Empty<Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy>(), entities.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            NullLogger<Sprk.Bff.Api.Services.Communication.ThreadResolver>.Instance, access);
+    }
+
+    [Fact]
+    public async Task FilingReconcile_ASecureEmailFiledFromADirectThread_GrantsNoParticipant()
+    {
+        var world = World();
+
+        await FilingReconciler(CommR, "sprk_regardingproject", ProjectR, MessageAccess(world, UserA, UserC))
+            .ReconcileThreadForFilingAsync(CommR, CancellationToken.None);
+
+        _shares.WriteLog.Should().BeEmpty("a secure message's shares are the secure-child synchronizer's alone");
+    }
+
+    [Fact]
+    public async Task FilingReconcile_AnOrdinaryEmailFiledFromADirectThread_IsGrantedToTheProjectsMembers()
+    {
+        var ordinaryComm = Guid.Parse("c0c00000-0000-4000-8000-0000000001a9");
+        var world = World().OrdinaryChild("sprk_communication", ordinaryComm,
+            ("sprk_regardingproject", "sprk_project", OrdinaryProject));
+
+        await FilingReconciler(ordinaryComm, "sprk_regardingproject", OrdinaryProject, MessageAccess(world, UserA, UserC))
+            .ReconcileThreadForFilingAsync(ordinaryComm, CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserC)).Should().Be(ViewOnly);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

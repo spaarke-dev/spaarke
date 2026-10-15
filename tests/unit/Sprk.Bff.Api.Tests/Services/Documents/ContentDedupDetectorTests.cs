@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Documents;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Documents;
 
@@ -26,9 +27,9 @@ public class ContentDedupDetectorTests
     {
         var gcf = Mock.Of<IGraphClientFactory>();
         var speMock = new Mock<SpeFileStore>(MockBehavior.Loose,
-            new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>()),
-            new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>()),
-            new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+            new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
+            new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
+            new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
             null!);
 

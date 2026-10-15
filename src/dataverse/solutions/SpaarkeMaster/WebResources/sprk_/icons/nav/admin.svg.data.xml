@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{99330e8d-c00b-f111-8341-7c1e525abd8b}</WebResourceId>
+  <Name>sprk_/icons/nav/admin.svg</Name>
+  <DisplayName>Admin Icon</DisplayName>
+  <Description>Fluent UI icon: Wrench20Regular - Administration area navigation</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsnavadminsvg99330E8D-C00B-F111-8341-7C1E525ABD8B</FileName>
+</WebResource>

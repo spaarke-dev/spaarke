@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Re-seed POL-COMMIT-BUDGET: rename, short name, decision plan, classification-phrased v2</title>
+    <phase>0 Foundations</phase>
+    <gate>007, 008 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data seeding against existing tables; the template is checked by the shipped validator.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two rows and one stamp, every value stated below.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>007, 008</deps>
+    <tags>dataverse,policy,seed</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Publish version 2 of the Path B policy with a name and template that describe what the predicate actually tests, a short name, a work type and a decision plan, and close version 1's in-force window, while no Signal exists yet.</prompt>
+  <role>SPAARKE platform developer. Section 0.3: the words may assert only what the rule reads.</role>
+  <goal>POL-COMMIT-BUDGET's current version is v2, its sentence phrases the classification as a classification, its plan lists the three Decide actions, and v1 carries an sprk_inforceto.</goal>
+
+  <context>
+    <background>The live row (task 004, GUID 4d204810-61bf-f111-aaaf-0022482913fc; version 42b3e716-61bf-f111-aaaf-0022482913fc) is named "Budget Variance Policy" and its template says "A commitment with financial consequence was raised...", which states a classifier's output as fact and names a variance the predicate never computes (v4-prototype-vs-solution #7; reconciliation H-2; v4 HANDOFF section 1.4 L116, binding: claims resting on a classifier are phrased as classifications). D-23 keeps task 022's template rule: the sentence stays literal, witness values go to evidence lines. 0 Signals exist, so the change is free now and a migration later.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: v2 copies v1's sprk_ruletype and sprk_rulebody unchanged, except that the body may declare the FR-17a quiet-window knob ONLY if task 024 has landed and the validator accepts it; otherwise omit it (the 14-day default applies).</constraint>
+    <constraint source="project">Scope: v2's sprk_messagetemplate is literal text (Path B's body pins no token) and phrases the communication half as a classification, e.g. "A communication on this matter was classified as a fee or scope change in the last 30 days, and no budget revision was recorded in that time." It must pass PolicyVersionValidator.ValidateForSave.</constraint>
+    <constraint source="project">Scope: sprk_policy: sprk_name "Classified fee or scope change, with no budget revision since" (the v4 baseline wording, v4-prototype-vs-solution #7), sprk_shortname "Fee or scope change, no budget revision", sprk_worktype "Approve or rebudget", sprk_currentversion = v2. Leave sprk_enabled = No and sprk_priority unchanged.</constraint>
+    <constraint source="project">Scope: v2's sprk_decisionplan lists, in this order, the action codes send-budget-inquiry, revise-budget, approve-variance (D-18, D-19; reconciliation X-6), with no Next-steps set. Task 036's catalog must contain these exact codes; record them in the notes for 036.</constraint>
+    <constraint source="owner">Scope (D-14): stamp v1's sprk_inforceto with v2's sprk_inforcefrom. v1's body, type and template are not edited.</constraint>
+    <constraint source="project">Scope: no Signal may exist for POL-COMMIT-BUDGET when this runs. If one does, STOP (see escalation).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Policy seeding and section 0.3</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/022-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Confirm 0 sprk_signal rows reference POL-COMMIT-BUDGET.</step>
+    <step order="2">Run the v2 body and template through PolicyVersionValidator.ValidateForSave (a unit-level call is enough) and record the result.</step>
+    <step order="3">Create the v2 sprk_policyversion row; update sprk_policy; stamp v1's sprk_inforceto.</step>
+    <step order="4">Re-read both rows and record every value in notes/004-seed-policy-rows.md under a dated v2 section, including the three action codes for task 036.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any Signal already exists for POL-COMMIT-BUDGET, STOP: re-seeding then needs the supersede path (task 033), not a seed edit.</trigger>
+    <trigger>If ValidateForSave refuses the v2 template, STOP and bring the refusal to the owner rather than rewording until it passes.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Create and update the two rows; read back</tool>
+    <tool name="dotnet">Run ValidateForSave against the v2 body and template</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: POL-COMMIT-BUDGET v2 version row; updated policy row; v1 sprk_inforceto</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given POL-COMMIT-BUDGET, when read, then sprk_currentversion is v2, sprk_name and sprk_shortname are as stated, sprk_worktype is Approve or rebudget and sprk_enabled is still No.</criterion>
+    <criterion testable="true">Given v2, when read, then its body equals v1's (plus at most the quiet-window knob), its template passes ValidateForSave, and its decision plan is send-budget-inquiry, revise-budget, approve-variance in that order.</criterion>
+    <criterion testable="true">Given v1, when read, then sprk_inforceto equals v2's sprk_inforcefrom and its body, type and template are unchanged.</criterion>
+    <criterion testable="true">Negative: v2's template contains no witness value (no sender, date or category name picked from a matching row) and does not state the classification as a fact.</criterion>
+  </acceptance-criteria>
+
+  <completion>2026-10-07: v2 (e51906ea-62c2-f111-a05a-7c1e520a989f) published; policy renamed, short name, work type and current version set; v1 inforceto stamped; ValidateForSave passed; 0 Signals at write time; quiet-window knob omitted (024 unmerged). Record: notes/004-seed-policy-rows.md.</completion>
+
+  <notes>spec.md FR-16 (amended), FR-48, FR-49, NFR-02; D-14, D-18, D-19, D-23. This is the reconciliation's proposed "008 re-seed", renumbered because 008 is now the role edits.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

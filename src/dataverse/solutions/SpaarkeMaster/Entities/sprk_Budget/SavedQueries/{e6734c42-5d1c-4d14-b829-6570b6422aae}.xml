@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{e6734c42-5d1c-4d14-b829-6570b6422aae}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_budgetid">
+          <cell name="sprk_budgetnumber" width="130" />
+          <cell name="sprk_name" width="300" />
+          <cell name="statuscode" width="119" />
+          <cell name="sprk_budgetperiod" width="121" />
+          <cell name="sprk_totalbudget_base" width="153" />
+          <cell name="sprk_budgetstartdate" width="141" />
+          <cell name="sprk_budgetenddate" width="137" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_budget">
+          <attribute name="sprk_budgetid" />
+          <attribute name="sprk_name" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_budgetnumber" />
+          <attribute name="sprk_budgetperiod" />
+          <attribute name="sprk_totalbudget_base" />
+          <attribute name="statuscode" />
+          <attribute name="sprk_budgetenddate" />
+          <attribute name="sprk_budgetstartdate" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Budgets" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

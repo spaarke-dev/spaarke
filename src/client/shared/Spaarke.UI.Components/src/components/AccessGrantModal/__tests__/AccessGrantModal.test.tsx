@@ -14,7 +14,7 @@
  *  - a "Current Access" list with per-row level badge + Revoke.
  *
  * These tests cover: open/closed, external→/invite-and-grant, internal→/grant +
- * notify-pending, missing-level guard, revoke, canGrantAccess gate, dark mode,
+ * internal-grant success (task 181), missing-level guard, revoke, canGrantAccess gate, dark mode,
  * polymorphic root, the native pickers (contact + organization), and onOpenContact.
  */
 
@@ -22,6 +22,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
@@ -62,7 +63,8 @@ function jsonResponse(body: unknown, ok = true): Response {
   return {
     ok,
     status: ok ? 200 : 500,
-    json: async () => body,
+    // A BFF ProblemDetails always carries `status`.
+    json: async () => (ok ? body : { status: 500, ...(body as Record<string, unknown>) }),
   } as unknown as Response;
 }
 
@@ -71,7 +73,7 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   const fetchExistingGrants = jest.fn(async () => [EXISTING_GRANT]);
   const searchContacts = jest.fn(async (): Promise<IContactSearchResult[]> => []);
   const isInternalContact = jest.fn(async (contactId: string) => contactId === CANDIDATE_INTERNAL.contactId);
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/invite-and-grant')) {
       return jsonResponse({
         contactId: CANDIDATE_EXTERNAL.contactId,
@@ -189,7 +191,7 @@ describe('AccessGrantModal (v1.0.26)', () => {
       });
     });
 
-    it('granting an internal candidate calls /grant (not /invite-and-grant) and surfaces a notify-pending notice', async () => {
+    it('granting an internal candidate calls /grant (not /invite-and-grant) and shows a plain success, not the old dev notice (task 181)', async () => {
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
@@ -208,7 +210,10 @@ describe('AccessGrantModal (v1.0.26)', () => {
         '/api/v1/external-access/invite-and-grant',
         expect.anything()
       );
-      expect(await screen.findByText(/Internal notify \(deep-link\) is not yet available/)).toBeInTheDocument();
+      // Task 181 (owner round 89 item 3): the server notifies the internal user; the modal reports plain success.
+      expect(await screen.findByText('Granted access to 1 item(s).')).toBeInTheDocument();
+      expect(screen.queryByText(/escalated; see project notes/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/could not be notified/)).not.toBeInTheDocument();
     });
 
     it('warns and does not write when a selected row has no access level chosen', async () => {

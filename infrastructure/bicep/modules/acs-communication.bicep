@@ -17,6 +17,11 @@
 // webhook (task 030 ingress) and configures a dead-letter Storage destination FROM DAY ONE.
 // Event Grid delivery is at-least-once / unordered / may duplicate — handler idempotency is
 // task 031's concern, not this module's.
+//
+// Keyless dead-lettering (customer-provisioning-orchestration-r1 task 244, owner D13): the stamp
+// Storage account has shared-key access disabled, so the subscription dead-letters WITH THE SYSTEM
+// TOPIC'S MANAGED IDENTITY (`deadLetterWithResourceIdentity`). That identity holds Storage Blob Data
+// Contributor on the dead-letter container only.
 
 // ============================================================================
 // PARAMETERS
@@ -79,9 +84,46 @@ resource systemTopic 'Microsoft.EventGrid/systemTopics@2023-12-15-preview' = {
   name: systemTopicName
   location: resourceLocation
   tags: tags
+  // The identity the subscription dead-letters as (task 244 — shared key is off on the stamp Storage).
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     source: acs.id
     topicType: 'Microsoft.Communication.CommunicationServices'
+  }
+}
+
+// ============================================================================
+// RBAC: Storage Blob Data Contributor for the system topic on the dead-letter container
+// (task 244). Scoped to the one container, not the account. The container is created by
+// modules/storage-account.bicep (customer.bicep adds it when deployAcsMessaging is true).
+// ============================================================================
+
+var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+
+resource deadLetterStorage 'Microsoft.Storage/storageAccounts@2023-01-01' existing = {
+  name: last(split(deadLetterStorageAccountResourceId, '/'))
+}
+
+resource deadLetterBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' existing = {
+  parent: deadLetterStorage
+  name: 'default'
+}
+
+resource deadLetterContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' existing = {
+  parent: deadLetterBlobService
+  name: deadLetterContainerName
+}
+
+resource systemTopicDeadLetterWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(deadLetterContainer.id, systemTopic.id, storageBlobDataContributorRoleId)
+  scope: deadLetterContainer
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalId: systemTopic.identity.principalId
+    principalType: 'ServicePrincipal'
+    description: 'Event Grid system topic writes dead-lettered ACS chat events (keyless, task 244)'
   }
 }
 
@@ -90,14 +132,18 @@ resource systemTopic 'Microsoft.EventGrid/systemTopics@2023-12-15-preview' = {
 // ============================================================================
 //   destination:            WebHook -> BFF inbound (task 030). ACS sends a one-time
 //                           SubscriptionValidationEvent the webhook must echo (task 030 handshake).
-//   deadLetterDestination:  StorageBlob on the customer Storage account, FROM DAY ONE (§8.3),
-//                           so undeliverable events are captured for operator inspection.
+//   deadLetterWithResourceIdentity: StorageBlob on the customer Storage account, FROM DAY ONE
+//                           (§8.3), so undeliverable events are captured for operator inspection —
+//                           written as the system topic's identity (task 244).
 //   retryPolicy:            30 attempts / 24h TTL (Event Grid defaults; at-least-once semantics
 //                           — handler dedupe on ACS message id is task 031, NFR-03).
 //
 resource chatEventSubscription 'Microsoft.EventGrid/systemTopics/eventSubscriptions@2023-12-15-preview' = {
   parent: systemTopic
   name: eventSubscriptionName
+  dependsOn: [
+    systemTopicDeadLetterWriter // the identity can write before the first event could be dead-lettered
+  ]
   properties: {
     destination: {
       endpointType: 'WebHook'
@@ -110,11 +156,16 @@ resource chatEventSubscription 'Microsoft.EventGrid/systemTopics/eventSubscripti
     filter: {
       includedEventTypes: includedEventTypes
     }
-    deadLetterDestination: {
-      endpointType: 'StorageBlob'
-      properties: {
-        resourceId: deadLetterStorageAccountResourceId
-        blobContainerName: deadLetterContainerName
+    deadLetterWithResourceIdentity: {
+      identity: {
+        type: 'SystemAssigned'
+      }
+      deadLetterDestination: {
+        endpointType: 'StorageBlob'
+        properties: {
+          resourceId: deadLetterStorageAccountResourceId
+          blobContainerName: deadLetterContainerName
+        }
       }
     }
     retryPolicy: {

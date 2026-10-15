@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -30,6 +31,7 @@ public class RagIndexingJobHandler : IJobHandler
     private readonly IIdempotencyService _idempotencyService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ISearchIndexNameResolver _searchIndexNameResolver;
+    private readonly DocumentIndexParentResolver _parentResolver;
     private readonly RagTelemetry _telemetry;
     private readonly ILogger<RagIndexingJobHandler> _logger;
 
@@ -43,6 +45,7 @@ public class RagIndexingJobHandler : IJobHandler
         IIdempotencyService idempotencyService,
         IDocumentDataverseService documentService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        DocumentIndexParentResolver parentResolver,
         RagTelemetry telemetry,
         ILogger<RagIndexingJobHandler> logger)
     {
@@ -50,6 +53,7 @@ public class RagIndexingJobHandler : IJobHandler
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
+        _parentResolver = parentResolver ?? throw new ArgumentNullException(nameof(parentResolver));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -113,6 +117,23 @@ public class RagIndexingJobHandler : IJobHandler
 
             try
             {
+                // #1510 (unified-access-control-r2 task 177): a producer that knows the document but sent no parent — the
+                // relocation after a secure transition, an Office new-item save, the post-analysis re-index — would write
+                // chunks with no parent, and the document would drop out of record search and parent-scoped RAG. Recover
+                // the parent from the document row (the derivation Send-to-Index uses). Never fails the job: an unreadable
+                // row indexes without a parent, as before.
+                var parentEntity = payload.ParentEntity;
+                if (parentEntity is null && !string.IsNullOrEmpty(payload.DocumentId))
+                {
+                    parentEntity = await _parentResolver.ResolveAsync(payload.DocumentId, ct);
+                    if (parentEntity is not null)
+                    {
+                        _logger.LogInformation(
+                            "RAG indexing job {JobId}: no parent in the payload; document {DocumentId} is filed under {ParentType} {ParentId}.",
+                            job.JobId, payload.DocumentId, parentEntity.EntityType, parentEntity.EntityId);
+                    }
+                }
+
                 // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve the
                 // per-record sprk_searchindexname for the indexing batch. Precedence:
                 //   (a) payload.SearchIndexName (set by enqueueing site — preferred);
@@ -124,8 +145,8 @@ public class RagIndexingJobHandler : IJobHandler
                 {
                     resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
                         payload.DocumentId,
-                        payload.ParentEntity?.EntityType,
-                        payload.ParentEntity?.EntityId,
+                        parentEntity?.EntityType,
+                        parentEntity?.EntityId,
                         ct);
                 }
 
@@ -140,7 +161,7 @@ public class RagIndexingJobHandler : IJobHandler
                     KnowledgeSourceId = payload.KnowledgeSourceId,
                     KnowledgeSourceName = payload.KnowledgeSourceName,
                     Metadata = payload.Metadata,
-                    ParentEntity = payload.ParentEntity,
+                    ParentEntity = parentEntity,
                     SearchIndexName = resolvedSearchIndexName,
                     // Task 029: only a version-save job sets this. The allow-list fallback below re-issues the
                     // request with SearchIndexName=null and keeps the flag, so the leftover chunks are removed

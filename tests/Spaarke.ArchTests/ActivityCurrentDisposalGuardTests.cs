@@ -70,15 +70,16 @@ public class ActivityCurrentDisposalGuardTests
             + "an Activity this code did not create.\n\n"
             + "Offending sites:\n  " + string.Join("\n  ", violations));
 
-        // Non-vacuity: the fixed shape (`var activity = Activity.Current;`, no `using`) is still at >= 15
+        // Non-vacuity: the fixed shape (`var activity = Activity.Current;`, no `using`) is still at >= 14
         // sites (20 after the 2026-10-03 fix; 15 since uac-r2 task 171 gave each SPE byte operation ONE shared core and
-        // deleted four uncalled OBO byte methods). A scanner that found 0 total usages of the pattern would make the assertion
-        // above vacuously true rather than a real check that it is reading the tree.
+        // deleted four uncalled OBO byte methods; 14 since customer-provisioning-orchestration-r1 task 227d removed the
+        // app-only, type-wide ContainerOperations.ListContainersAsync). A scanner that found 0 total usages of the pattern
+        // would make the assertion above vacuously true rather than a real check that it is reading the tree.
         var sanctionedShapeCount = CountSanctionedShape();
         Assert.True(
-            sanctionedShapeCount >= 15,
+            sanctionedShapeCount >= 14,
             $"Only found {sanctionedShapeCount} site(s) reading Activity.Current into a local without "
-            + "`using`. There were 15 after uac-r2 task 171 (9 in DriveItemOperations.cs, 4 in "
+            + "`using`. There were 14 after uac-r2 task 171 and provisioning task 227d (9 in DriveItemOperations.cs, 3 in "
             + "ContainerOperations.cs, 1 in UploadSessionManager.cs, 1 elsewhere). A count well below that means this "
             + "scanner's own pattern has drifted from the tree — check before trusting a pass.");
     }

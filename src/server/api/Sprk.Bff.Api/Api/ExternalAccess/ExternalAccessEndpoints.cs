@@ -36,6 +36,12 @@ public static class ExternalAccessEndpoints
     {
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
+
+        // GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access — the per-record No Access
+        // read (task 064, owner round 59 item 3). NOT on the management group: its DelegationRuleFilter demands Write for
+        // every route, and the form banner (task 153) must answer callers who hold only Read. Each route carries the
+        // route-record Read gate itself; the entries are added for a caller who also holds Write (owner O2).
+        app.MapRecordNoAccessEndpoint();
     }
 
     // =========================================================================
@@ -71,16 +77,18 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
-        // Returns the module-code list the external-spa widget registry gates tab visibility on: workforce
-        // from sprk_approlemodulemap (App-Role → module); CIAM blanket outside-counsel set. Distinct from
+        // Returns the module-code list the external-spa widget registry gates tab visibility on: default
+        // modules by server-resolved principal kind (A8: workforce → legal-front-door + policy-library; CIAM →
+        // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras. Distinct from
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
-                "Returns the caller's entitled module codes (Tier-1). Workforce callers resolve from the " +
-                "App-Role→module map (sprk_approlemodulemap); CIAM outside-counsel callers are blanket- " +
-                "entitled to the outside-counsel module set. Consumed by the external-spa widget registry " +
+                "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +
+                "principal kind (workforce: legal-front-door + policy-library; CIAM: assigned-work, plus " +
+                "legal-front-door when the partner service-request switch is on), plus App-Role→module map " +
+                "(sprk_approlemodulemap) extras. Consumed by the external-spa widget registry " +
                 "to gate tab visibility. Record visibility within a module is governed by Tier-2 grants.")
             .Produces<MeEntitlementsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -99,6 +107,24 @@ public static class ExternalAccessEndpoints
         // filter above are untouched.
         externalGroup.MapExternalModuleDataEndpoints();
 
+        // GET /api/v1/external/{root}/{id}/messages — the message thread regarding a record (r3 task 033, FR-04). Inherits
+        // this group's policy + CallerPrincipalAuthorizationFilter; the record is checked against the caller's accessible
+        // set (service requests: the caller's own) before an app-only read, and internal-only messages reach only
+        // internal systemusers.
+        externalGroup.MapExternalMessageEndpoints();
+
+        // POST /api/v1/external/servicerequests — the Legal Front Door intake submit (r3 task 035, FR-05/FR-06). Inherits this
+        // group's policy + CallerPrincipalAuthorizationFilter; gated server-side on the legal-front-door module entitlement
+        // (the one ModuleEntitlementResolver check /me/entitlements reports), and creates the request app-only with the
+        // caller's contact as sprk_requestedby.
+        externalGroup.MapExternalIntakeEndpoints();
+
+        // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
+        // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the
+        // caller's accessible set, messages come only from records in it under the external read rules (no privileged, no
+        // internal-only to a contact, not the caller's own), and the last-seen marker is Redis keyed by the principal id.
+        externalGroup.MapExternalNotificationFeedEndpoints();
+
         // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
         // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
         // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);
@@ -116,8 +142,9 @@ public static class ExternalAccessEndpoints
         // Until this filter landed, every write on this group — mint a grant, revoke one, onboard a
         // CIAM identity, cascade-close a project, provision a business unit — was reachable by ANY
         // authenticated caller and then executed app-only. AddDelegationRuleFilter enforces owner
-        // decision B-14: you may change who can access a record only if YOU hold Write on it,
-        // evaluated as the caller (OBO), before the handler runs.
+        // decision B-14 + round 89 (task 179): you may change who can access a record only if YOU hold
+        // Write on it and the Share privilege on its table, evaluated as the caller (OBO), before the
+        // handler runs.
         //
         // Group-level, not per-route, deliberately: DelegationRuleFilter denies any request whose
         // target record it cannot identify, so a route added to this group later is gated from its
@@ -150,7 +177,7 @@ public static class ExternalAccessEndpoints
 
         // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
         // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
-        // they inherit the same Write-on-the-record delegation gate as every route above.
+        // they inherit the same delegation gate (Write and Share on the record) as every route above.
         adminGroup.MapInternalShareEndpoints();
 
         // POST /api/v1/external-access/no-access/enforce — enforce one No Access entry now (task 143, owner Q4 + R3:
@@ -159,7 +186,7 @@ public static class ExternalAccessEndpoints
 
         // POST /assigned-access/sync · GET /assigned-access · POST /assigned-access/dismiss — the Assigned-To auto-grants
         // (task 142, owner Q5 + R3: the form save, the wizards and "Update Access" call the BFF; owner A3: suggestions on
-        // secure records). On this group so the delegation filter gates each on Write on the RECORD.
+        // secure records). On this group so the delegation filter gates each on the RECORD (sync: Write; list and dismiss: Write and Share).
         adminGroup.MapAssignedAccessEndpoints();
 
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)

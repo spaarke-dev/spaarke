@@ -54,7 +54,8 @@ public enum VersionCompatVerdict
 /// A (BFF version, Solution-set version) pair. Target formats per matrix doc §3.1 (e.g.
 /// <c>1.0.0-net10</c>) and §3.2 (e.g. <c>S2026.08</c>) — but neither has a producer yet, so the
 /// registry currently carries what H13 writes (task 245b, matrix doc §2 note): the deployed CI build id
-/// (e.g. <c>2026.09.30-123</c>) and the <c>ImportedSolutionSet</c> fingerprint. Matrix rows must use the
+/// (e.g. <c>2026.09.30-123</c>) and, since T218b, the installed package as <c>SpaarkeMaster {version} ({managed|unmanaged})</c>
+/// (<c>ImportedSolutionSet</c>; before T218b a 32-hex fingerprint of a multi-solution set). Matrix rows must use the
 /// same values; an unknown pair is Red. Comparison is case-insensitive at the matrix impl.
 /// </summary>
 /// <param name="BffVersion">BFF binary version (registry column <c>sprk_bffversion</c> / release manifest).</param>

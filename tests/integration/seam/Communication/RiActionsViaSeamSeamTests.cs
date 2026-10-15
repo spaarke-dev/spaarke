@@ -3,12 +3,16 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -74,6 +78,14 @@ public sealed class RiActionsViaSeamSeamTests
         public required Guid ThreadId { get; init; }
         public required Guid MatterId { get; init; }
         public required Guid OwnerId { get; init; }
+
+        /// <summary>Task 042: every Decision Record the gate's writer created, in order (empty unless the harness was built with one).</summary>
+        public required List<DataverseEntity> DecisionRecords { get; init; }
+
+        /// <summary>Task 042: the writer's Dataverse boundary, so a test can make the record's create fail.</summary>
+        public required Mock<IOrganizationServiceAsync2> WriterOrg { get; init; }
+
+        public required Guid RuleId { get; init; }
     }
 
     /// <summary>
@@ -83,7 +95,9 @@ public sealed class RiActionsViaSeamSeamTests
     /// (<c>task</c> / <c>sprk_notificationoutbox</c> / <c>appnotification</c>) record their creation into the shared
     /// ordering log so the seam→outbox→ping→mirror ordering is assertable.
     /// </summary>
-    private static Harness BuildHarness(decimal ruleThreshold)
+    private static Harness BuildHarness(
+        decimal ruleThreshold, TimeProvider? clock = null, int recipientTimeZoneCode = 92, string recipientZoneName = "UTC",
+        bool withDecisionRecords = false)
     {
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
@@ -110,6 +124,19 @@ public sealed class RiActionsViaSeamSeamTests
             .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(communication);
 
+        // Task 098: the RI task's due dates count from the RECIPIENT's today, in their Dataverse time zone.
+        entity
+            .Setup(s => s.RetrieveAsync("usersettings", ownerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("usersettings", ownerId) { ["timezonecode"] = recipientTimeZoneCode });
+        entity
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "timezonedefinition"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity>
+            {
+                new("timezonedefinition") { ["standardname"] = recipientZoneName },
+            }));
+
         // Rule store: one enabled rule matching the matter at the given threshold.
         var rule = new DataverseEntity("sprk_communicationrule", ruleId)
         {
@@ -119,6 +146,10 @@ public sealed class RiActionsViaSeamSeamTests
             ["sprk_matter"] = new EntityReference("sprk_matter", matterId),
             ["sprk_confidencethreshold"] = ruleThreshold,
         };
+        // Task 042: the consumer reads the matched rule's priority for the Decision Record's fact snapshot.
+        entity
+            .Setup(s => s.RetrieveAsync("sprk_communicationrule", ruleId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rule);
         entity
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationrule"),
@@ -160,10 +191,32 @@ public sealed class RiActionsViaSeamSeamTests
         var notifications = new NotificationService(entity.Object, NullLogger<NotificationService>.Instance); // REAL mirror
 
         var riAction = new CommunicationRiActionService(
-            seam, outbox, delivery, notifications, entity.Object, NullLogger<CommunicationRiActionService>.Instance);
+            seam, outbox, delivery, notifications, entity.Object, NullLogger<CommunicationRiActionService>.Instance, clock);
+
+        // Task 042: the REAL Decision Record writer over a doubled Dataverse boundary (the SDK's own IOrganizationServiceAsync2 behind the
+        // writer client; the stamp columns exist on sprk_decisionrecord live, task 140), uac-r2's resolver double, and the spaarkedev1 catalog.
+        var decisionRecords = new List<DataverseEntity>();
+        var writerOrg = new Mock<IOrganizationServiceAsync2>();
+        writerOrg.Setup(o => o.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity e, CancellationToken _) => { decisionRecords.Add(e); events.Add("decision-record-create"); return Guid.NewGuid(); });
+        DecisionRecordWriter? writer = null;
+        if (withDecisionRecords)
+        {
+            writer = new DecisionRecordWriter(
+                new OntologyWriterDataverseClient(() => writerOrg.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                new CoreAncestorResolver(
+                    entity.Object,
+                    (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                        CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+                    NullLogger<CoreAncestorResolver>.Instance),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
+                TimeProvider.System,
+                NullLogger<DecisionRecordWriter>.Instance);
+        }
 
         var consumer = new RuleGatedAssessedConsumer(
-            entity.Object, gate, riAction, NullLogger<RuleGatedAssessedConsumer>.Instance);
+            entity.Object, gate, riAction, NullLogger<RuleGatedAssessedConsumer>.Instance, signalTrigger: null, decisionRecords: writer);
 
         return new Harness
         {
@@ -175,6 +228,9 @@ public sealed class RiActionsViaSeamSeamTests
             ThreadId = threadId,
             MatterId = matterId,
             OwnerId = ownerId,
+            DecisionRecords = decisionRecords,
+            WriterOrg = writerOrg,
+            RuleId = ruleId,
         };
     }
 
@@ -233,6 +289,28 @@ public sealed class RiActionsViaSeamSeamTests
         h.Events.Should().Equal("seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
     }
 
+    // ── Task 098: the RI task's due dates are the RECIPIENT's calendar dates, not UTC dates. ──
+    // Reproduces the two live "ONTOLOGY DEV SEED 005" tasks hand-corrected in the Date Only conversion: raised at
+    // 2026-10-04T01:04:37Z — 21:04 on Oct 3 for an Eastern recipient — with the default +1 / +3 days. The former
+    // createdAtUtc.AddDays(n) wrote Oct 5 / Oct 7 (the UTC date); the recipient's dates are Oct 4 / Oct 6.
+    [Fact]
+    public async Task PublishAsync_TaskDueDates_CountFromTheRecipientsLocalToday()
+    {
+        var h = BuildHarness(
+            ruleThreshold: 0.7m,
+            clock: new FakeTimeProvider(DateTimeOffset.Parse("2026-10-04T01:04:37Z", System.Globalization.CultureInfo.InvariantCulture)),
+            recipientTimeZoneCode: 35,
+            recipientZoneName: "Eastern Standard Time");
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+
+        var task = h.Creates.Single(e => e.LogicalName == "sprk_event");
+        task.GetAttributeValue<DateTime>("sprk_duedate").Should().Be(new DateTime(2026, 10, 4));
+        task.GetAttributeValue<DateTime>("sprk_finalduedate").Should().Be(new DateTime(2026, 10, 6));
+        task.GetAttributeValue<DateTime>("sprk_duedate").Kind.Should().Be(DateTimeKind.Unspecified,
+            "a Date Only column stores the date as written; a Local kind would be converted to UTC first");
+    }
+
     // ── Deny: below-threshold confidence → NO seam call, NO outbox, NO ping, NO appnotification. ──
     [Fact]
     public async Task PublishAsync_WhenGateDenies_ProducesNoSeamCallNoOutboxNoPingNoAppnotification()
@@ -244,5 +322,102 @@ public sealed class RiActionsViaSeamSeamTests
         h.Creates.Should().BeEmpty("a denied assessment creates no task, no outbox row, and no appnotification");
         h.Delivery.Pings.Should().BeEmpty("a denied assessment fires no Layer-C ping");
         h.Events.Should().BeEmpty("the RI action path is never entered on deny (structural short-circuit)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Ontology task 042 (FR-23): the Decision Record on BOTH gate paths, through the REAL chain.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly System.Xml.Linq.XNamespace NoNs = System.Xml.Linq.XNamespace.None;
+
+    /// <summary>The per-matter query the spec names (success criterion 3): every outcome for one matter, newest first.</summary>
+    private static string PerMatterFetchXml(Guid matterId) => $@"
+<fetch>
+  <entity name='sprk_decisionrecord'>
+    <attribute name='sprk_decisionoutcome' />
+    <attribute name='sprk_reason' />
+    <filter><condition attribute='sprk_regardingmatter' operator='eq' value='{matterId}' /></filter>
+    <order attribute='sprk_decidedon' descending='true' />
+  </entity>
+</fetch>";
+
+    /// <summary>Runs the FetchXML's single <c>eq</c> condition over the created rows: what the column filter would return.</summary>
+    private static List<DataverseEntity> Run(string fetchXml, IEnumerable<DataverseEntity> rows)
+    {
+        var doc = System.Xml.Linq.XDocument.Parse(fetchXml);
+        var entityName = doc.Root!.Element(NoNs + "entity")!.Attribute("name")!.Value;
+        var condition = doc.Descendants(NoNs + "condition").Single();
+        var attribute = condition.Attribute("attribute")!.Value;
+        condition.Attribute("operator")!.Value.Should().Be("eq");
+        var value = Guid.Parse(condition.Attribute("value")!.Value);
+        return rows.Where(r => r.LogicalName == entityName
+                               && r.GetAttributeValue<EntityReference>(attribute)?.Id == value).ToList();
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenGateAuthorizes_WritesAnAuthorizedDecisionRecord_BeforeTheRiAction_AndTheRiActionStillRuns()
+    {
+        var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+
+        var record = h.DecisionRecords.Should().ContainSingle("criterion 1: an authorize writes a Decision Record").Subject;
+        record.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000000, "Authorized");
+        record.GetAttributeValue<OptionSetValue>("sprk_recordclass").Value.Should().Be(100000000, "Judgement");
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be(RuleGatedAssessedConsumer.ProposedActionCode);
+        record.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(h.CommunicationId);
+        record.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(h.MatterId);
+        record.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(h.MatterId);
+        record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        record.Contains("sprk_gatesessionid").Should().BeFalse("criterion 4 as amended: null for enrichment-gate records");
+        record.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain(h.RuleId.ToString("D")).And.Contain(h.CommunicationId.ToString("D"));
+
+        // One call site before the branch: the record is written first, and the RI action still runs after it, unchanged.
+        h.Events.Should().Equal("decision-record-create", "seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenGateDenies_WritesADeniedDecisionRecord_AndStillProducesNoSideEffect()
+    {
+        var h = BuildHarness(ruleThreshold: 0.9m, withDecisionRecords: true);
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.5));
+
+        var record = h.DecisionRecords.Should().ContainSingle("criterion 2: a deny writes a Decision Record").Subject;
+        record.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000001, "Denied");
+        record.Contains("sprk_actioncode").Should().BeFalse();
+        record.Contains("sprk_action").Should().BeFalse();
+        record.GetAttributeValue<string>("sprk_reason").Should().Be("rule-matched-confidence-below-threshold");
+        h.Creates.Should().BeEmpty("the record is written by the ontology writer identity; a deny still creates no task, outbox row or appnotification");
+        h.Delivery.Pings.Should().BeEmpty();
+        h.Events.Should().Equal("decision-record-create");
+    }
+
+    [Fact]
+    public async Task PublishAsync_ForOneMatter_BothOutcomesAreQueryablePerMatter_Criterion3()
+    {
+        var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9)); // authorize
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.4)); // deny: below the rule's 0.7
+
+        var found = Run(PerMatterFetchXml(h.MatterId), h.DecisionRecords);
+        found.Select(r => r.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value)
+            .Should().BeEquivalentTo(new[] { 100000000, 100000001 }, "the per-matter query returns the authorize AND the deny");
+        Run(PerMatterFetchXml(Guid.NewGuid()), h.DecisionRecords).Should().BeEmpty("and only that matter's");
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenTheDecisionRecordCannotBeWritten_TheRiActionStillRuns_AndTheFailureIsNotSilent()
+    {
+        var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
+        h.WriterOrg.Setup(o => o.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse"));
+
+        var act = () => h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+
+        await act.Should().NotThrowAsync("the gate's outcome and the enrichment that triggered it are unaffected by a lost record");
+        h.DecisionRecords.Should().BeEmpty();
+        // The authorize path ran exactly as it does without a writer.
+        h.Events.Should().Equal("seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
     }
 }

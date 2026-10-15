@@ -17,7 +17,7 @@ Filtered by `scope` and `tenancyModel = {tenancyModel}` for this run.
 Example rows:
 
 | PRQ-S-03 | Resource-provider registration | once_per_subscription | ✅ OK | 12 of 12 namespaces `Registered` (`az provider show` all pass) | — |
-| PRQ-T-04 | SPE container-type published | once_per_tenant | ✅ OK | `Get-SPEContainerType` returns `spaarke-canonical-v1` | — |
+| PRQ-T-01 | SPE container-type registered | once_per_env | ✅ OK | `Get-SPEContainerType` returns `spaarke-canonical-v1` | — |
 | PRQ-C-01 | OpenAI TPM headroom (frontier tiers) | once_per_customer | ❌ FAIL | `gpt-5.4 GlobalStandard: limit 0, current 0` | Support ticket via `az support tickets create` (PRQ-S-02 present ✓); ETA 2-5 business days |
 
 ## Summary

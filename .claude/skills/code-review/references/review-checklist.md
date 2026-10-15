@@ -132,7 +132,7 @@ grep -rn "app.Use.*Auth" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 ```
 # Count interface registrations
 grep -c "services.Add.*<I[A-Z]" src/api/ --include="*.cs"
-# Should be ≤15 non-framework interfaces
+# A signal, not a gate: ~15 non-framework lines in Program.cs is ADR-010's readability target; check that registrations live in Add{Feature}Module() and that interfaces are real seams
 ```
 
 ## TypeScript/PCF Specific

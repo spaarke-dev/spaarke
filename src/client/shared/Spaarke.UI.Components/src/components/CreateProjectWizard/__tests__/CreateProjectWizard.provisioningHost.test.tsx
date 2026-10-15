@@ -20,6 +20,7 @@ import type { IWizardSuccessConfig } from '../../Wizard/wizardShellTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { CreateProjectWizard } from '../CreateProjectWizard';
 import { classifyProvisioningFailure } from '../provisioningService';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // The generic wizard shell is replaced by a stub that captures the config the wrapper builds — `onFinish` included.
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
@@ -45,12 +46,9 @@ jest.mock('../projectService', () => ({
 const BFF = 'https://bff.example.test';
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 
+// The production shape: `@spaarke/auth`'s authenticatedFetch THROWS ApiError(500) with the parsed ProblemDetails.
 const problem = (reasonCode: string) =>
-  ({
-    ok: false,
-    status: 500,
-    json: async () => ({ reasonCode, detail: 'operator text' }),
-  }) as unknown as Response;
+  apiErrorFor(500, { title: 'Provisioning failed', status: 500, reasonCode, detail: 'operator text' });
 
 const ok = {
   ok: true,
@@ -113,7 +111,7 @@ describe('CreateProjectWizard — routes a provisioning failure to the right des
   it('renders "Try securing again" with its advice for a retryable failure, and the action secures the SAME project', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValueOnce(problem('sdap.provision.creator_share_failed'))
+      .mockRejectedValueOnce(problem('sdap.provision.creator_share_failed'))
       .mockResolvedValue(ok);
 
     const success = await finishWithProvisioningFailure(authFetch);
@@ -147,7 +145,7 @@ describe('CreateProjectWizard — routes a provisioning failure to the right des
   });
 
   it('shows a non-retryable failure as its warning, with no action and no retry advice', async () => {
-    const authFetch = jest.fn().mockResolvedValue(problem('sdap.provision.creator_share_failed_resumable'));
+    const authFetch = jest.fn().mockRejectedValue(problem('sdap.provision.creator_share_failed_resumable'));
 
     const success = await finishWithProvisioningFailure(authFetch);
 

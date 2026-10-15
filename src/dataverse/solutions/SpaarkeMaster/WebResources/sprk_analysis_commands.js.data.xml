@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{5dd263a4-2fd8-f011-8406-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_analysis_commands.js</Name>
+  <DisplayName>Analysis Commands</DisplayName>
+  <Description>JavaScript commands for Analysis ribbon buttons</Description>
+  <LanguageCode>0</LanguageCode>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_analysis_commandsjs5DD263A4-2FD8-F011-8406-7CED8D1DC988</FileName>
+</WebResource>

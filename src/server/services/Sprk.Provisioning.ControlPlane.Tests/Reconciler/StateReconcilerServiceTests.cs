@@ -29,8 +29,7 @@
 //   convention (see H14SecretRedactionTests etc.). A local
 //   <see cref="TestTimeProvider"/> avoids the
 //   Microsoft.Extensions.TimeProvider.Testing package (not referenced in the
-//   test csproj; local 3-line double is the tests/CLAUDE.md-approved pattern
-//   per <c>InMemoryTenantTokenLedgerTests.MutableTimeProvider</c>).
+//   test csproj; local 3-line double is the tests/CLAUDE.md-approved pattern).
 //
 // The MessageId-dedup enqueuer replicates the Service Bus wire-level dedup
 // semantics: two calls with an identical envelope resolve to the same
@@ -487,9 +486,7 @@ public sealed class StateReconcilerServiceTests
     // ---------------- TimeProvider double ----------------
 
     /// <summary>
-    /// Minimal TimeProvider double for tests. Mirrors the shape of the
-    /// <c>MutableTimeProvider</c> in <c>InMemoryTenantTokenLedgerTests</c>
-    /// so we avoid adding <c>Microsoft.Extensions.TimeProvider.Testing</c>
+    /// Minimal TimeProvider double for tests, so we avoid adding <c>Microsoft.Extensions.TimeProvider.Testing</c>
     /// as a new package dep (per tests/CLAUDE.md guidance).
     /// </summary>
     private sealed class TestTimeProvider : TimeProvider

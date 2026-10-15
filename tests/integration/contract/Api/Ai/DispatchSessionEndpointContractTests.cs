@@ -500,7 +500,7 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     }
 
     [Fact]
-    public async Task Post_InvalidGuidSessionId_Returns400_SessionIdInvalid()
+    public async Task Post_InvalidGuidSessionId_Returns404_NotFoundOrNotOwned()
     {
         _fx.Reset();
         var client = _fx.CreateAuthenticatedClient();

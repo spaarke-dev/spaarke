@@ -178,6 +178,80 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // PATCH /api/v1/events/{id}/due-assignee - the event's due date and/or assignee (ontology platform R1 task 044; #29).
+        // The ONE narrow event write, in #1312's one-route-per-table family: after task 159 deleted the general PUT nothing
+        // wrote sprk_duedate or sprk_assignedto. Shape first (no I/O); then the as-caller Write on the event; then the write
+        // itself runs AS THE CALLER (EventDueAssigneeWrite). Never sprk_finalduedate (D-27).
+        group.MapPatch("/{id:guid}/due-assignee", UpdateDueAssigneeAsync)
+            .AddEndpointFilter(ValidateDueAssigneeRequestAsync)
+            .AddRecordRouteAccessAuthorizationFilter("write", EventEntitySet, "id")
+            .WithName("UpdateEventDueAssignee")
+            .WithSummary("Reschedule and/or reassign an event")
+            .WithDescription("Writes the event's due date (sprk_duedate) and/or its assignee contact (sprk_assignedto, statuscode " +
+                "Reassigned, reassigned-by) as the caller. Only open work can be changed. An event the caller cannot read gets " +
+                "the same 404 as one that does not exist; Read without Write is a 403.")
+            .Produces<UpdateEventDueAssigneeResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    // =============================================================================================================
+    // PATCH /{id}/due-assignee — the event's due date and assignee (task 044)
+    // =============================================================================================================
+
+    /// <summary>The request's SHAPE (no I/O), BEFORE the authorization filter, so a 400 never becomes a 403.</summary>
+    internal static async ValueTask<object?> ValidateDueAssigneeRequestAsync(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var request = context.Arguments.OfType<UpdateEventDueAssigneeRequest>().FirstOrDefault();
+        return EventDueAssigneeWrite.ShapeProblem(request) is { } problem
+            ? Results.ValidationProblem(new Dictionary<string, string[]> { ["body"] = [problem] })
+            : await next(context);
+    }
+
+    /// <summary>PATCH /{id}/due-assignee. The filter has established Write; the write is the caller's own.</summary>
+    internal static async Task<IResult> UpdateDueAssigneeAsync(
+        Guid id,
+        [FromBody] UpdateEventDueAssigneeRequest request,
+        [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+        ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContact = await ResolveActingUserContactAsync(callerResolver, identity, httpContext, logger, ct);
+        var result = await EventDueAssigneeWrite.ApplyAsync(
+            user, id, request, callerContact,
+            (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow(), ct);
+
+        switch (result.Outcome)
+        {
+            case EventDueAssigneeOutcome.Written:
+                logger.LogInformation(
+                    "Event due date/assignee written as the caller. EventId={EventId}, Rescheduled={Rescheduled}, Reassigned={Reassigned}",
+                    id, request.DueDate is not null, request.AssigneeContactId is not null);
+                return TypedResults.Ok(new UpdateEventDueAssigneeResponse(
+                    id, request.DueDate, request.AssigneeContactId, request.AssigneeContactId is not null));
+            case EventDueAssigneeOutcome.NotFound:
+                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            case EventDueAssigneeOutcome.InvalidState:
+                return Results.Problem(detail: result.Detail, statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Status Transition", type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            case EventDueAssigneeOutcome.Denied:
+                return ProblemDetailsHelper.Forbidden(
+                    RecordRouteAccessAuthorizationFilter.InsufficientRightsReasonCode,
+                    RecordRouteAccessAuthorizationFilter.InsufficientRightsDetail, httpContext.TraceIdentifier);
+            default:
+                logger.LogError("Event due date/assignee write failed. EventId={EventId}, Status={Status}", id, result.DataverseStatus);
+                return Results.Problem(detail: "An error occurred while updating the event",
+                    statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
     }
 
     // =============================================================================================================
@@ -250,7 +324,7 @@ public static class EventEndpoints
     }
 
     private static IResult? ValidateCommonFields(
-        int? priority, int? regardingRecordType, Guid? regardingRecordId, DateTime? scheduledStart, DateTime? scheduledEnd)
+        int? priority, int? regardingRecordType, Guid? regardingRecordId, DateOnly? scheduledStart, DateOnly? scheduledEnd)
     {
         // Validate priority if provided — against the LIVE sprk_priority option set (task 097: the former 0..3 range is
         // not an option of the column, so every create carrying a priority was a Dataverse 400).
@@ -572,7 +646,7 @@ public static class EventEndpoints
     /// <summary>
     /// Gets a single event by its ID. The filter has established Read on sprk_events({id}).
     /// </summary>
-    private static async Task<IResult> GetEventByIdAsync(
+    internal static async Task<IResult> GetEventByIdAsync( // internal: EventDateOnlyTests executes the real handler (task 098)
         Guid id,
         HttpContext httpContext,
         IEventDataverseService dataverseService,
@@ -752,7 +826,10 @@ public static class EventEndpoints
                 : null,
             BaseDate = entity.BaseDate,
             DueDate = entity.DueDate,
+            FinalDueDate = entity.FinalDueDate,
             CompletedDate = entity.CompletedDate,
+            ApprovedDate = entity.ApprovedDate,
+            MeetingDate = entity.MeetingDate,
             StateCode = entity.StateCode,
             StatusCode = entity.StatusCode,
             Status = EventStatusCode.GetDisplayName(entity.StatusCode),
@@ -770,7 +847,7 @@ public static class EventEndpoints
     /// UAC-r2 task 152: the acting user's LINKED contact (task 141 — <c>PersonIdentity.ContactId</c>), or null when the
     /// caller does not resolve to a systemuser, has no link, or the read fails. Never an email/UPN match.
     /// </summary>
-    private static async Task<Guid?> ResolveActingUserContactAsync(
+    internal static async Task<Guid?> ResolveActingUserContactAsync(
         ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         HttpContext httpContext,
@@ -820,7 +897,8 @@ public static class EventEndpoints
         string? Name,
         string Url,
         string? Number,
-        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps);
+        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps,
+        int? AccessPermission = null);
 
     /// <summary>Pause before the one catalog retry: long enough for a throttle window to pass, short for a request.</summary>
     internal static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(500);
@@ -980,6 +1058,7 @@ public static class EventEndpoints
         }
 
         var stamps = new List<(string LookupAttribute, string EntitySetName, Guid RecordId)>();
+        int? accessPermission;
         try
         {
             var outcome = await coreAncestors.DeriveForHostAsync("sprk_event", logicalName, regardingId, ct);
@@ -996,6 +1075,9 @@ public static class EventEndpoints
                 var stampSet = await entities.GetEntitySetNameAsync(stamp.EntityType, ct);
                 stamps.Add((stamp.LookupAttribute, stampSet, stamp.RecordId));
             }
+
+            // Task 173 (owner round 81): the Access Permission the event takes from what it is filed under, in the same body.
+            accessPermission = outcome.InheritedAccessPermission;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1013,7 +1095,8 @@ public static class EventEndpoints
             name,
             TodoRegardingBuilder.BuildRecordUrl(logicalName, regardingId.ToString("D")),
             number,
-            stamps);
+            stamps,
+            accessPermission);
     }
 
     /// <summary>The refusal when a create cannot be stamped: a 500 that names no record and writes nothing.</summary>
@@ -1069,6 +1152,7 @@ public static class EventEndpoints
             dataverseRequest.RegardingRecordUrl = regarding.Url;
             dataverseRequest.RegardingRecordNumber = regarding.Number;
             dataverseRequest.RegardingCoreStamps = regarding.CoreStamps;
+            dataverseRequest.AccessPermission = regarding.AccessPermission; // task 173 (owner round 81)
         }
 
         // Create the event record
@@ -1157,6 +1241,8 @@ public static class EventEndpoints
         HttpContext httpContext,
         IEventDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        ICallerSystemUserResolver callerResolver,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1192,8 +1278,14 @@ public static class EventEndpoints
             var previousStatus = existing.Status;
             var actionTimestamp = DateTime.UtcNow;
 
+            // Task 098: sprk_completeddate is a calendar date — today in the completing user's own time zone, not the
+            // UTC date (a 23:49 Eastern completion was dated the next day). See EventCompletionDate.
+            var completedDate = await EventCompletionDate.ForCallerAsync(
+                httpContext.User, callerResolver, genericEntityService,
+                httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System, logger, ct);
+
             // Update status to Completed and set completed date
-            await UpdateEventStatusAsync(dataverseService, id, EventStatusCode.Completed, ct);
+            await UpdateEventStatusAsync(dataverseService, id, EventStatusCode.Completed, completedDate, ct);
 
             var newStatusDisplay = EventStatusCode.GetDisplayName(EventStatusCode.Completed);
 
@@ -1250,21 +1342,16 @@ public static class EventEndpoints
     /// Updates an event's status in Dataverse.
     /// </summary>
     /// <remarks>
-    /// Updates the statuscode field and, for completion, sets the completeddate.
+    /// Updates the statuscode field and, for completion, the completeddate the caller resolved
+    /// (<see cref="EventCompletionDate"/>, task 098).
     /// </remarks>
-    private static async Task UpdateEventStatusAsync(
+    private static Task UpdateEventStatusAsync(
         IEventDataverseService dataverseService,
         Guid id,
         int newStatusCode,
-        CancellationToken ct)
-    {
-        // Set completed date for completion status
-        DateTime? completedDate = newStatusCode == EventStatusCode.Completed
-            ? DateTime.UtcNow
-            : null;
-
-        await dataverseService.UpdateEventStatusAsync(id, newStatusCode, completedDate, ct);
-    }
+        DateOnly? completedDate,
+        CancellationToken ct) =>
+        dataverseService.UpdateEventStatusAsync(id, newStatusCode, completedDate, ct);
 
     /// <summary>
     /// Creates an Event Log entry for a state transition.

@@ -10,8 +10,8 @@
 // REAL CHECK: queries the BFF app-registration's service principal in the
 // TARGET TENANT for its oauth2PermissionGrants, and confirms the aggregate
 // granted scope string contains every value in
-// EntraAppRegPermissionCatalog.ScopeValues (5 as of task 130 — see that
-// file's header for why this is NOT the 14-role app-only catalog H10 owns).
+// EntraAppRegPermissionCatalog.ScopeValues (6 as of ISS-018 F6 — see that
+// file's header for why this is NOT the app-only catalog H10 owns).
 //
 // SP-NOT-FOUND SEMANTICS: for a MULTI-TENANT app (a Model 2 customer-tenant
 // app-reg with signInAudience=AzureADMultipleOrgs — see
@@ -67,7 +67,7 @@ public sealed class GraphAdminConsentVerifier : IAdminConsentVerifier
         {
             throw new ArgumentOutOfRangeException(
                 nameof(expectedDelegatedScopeCount), expectedDelegatedScopeCount,
-                "expectedDelegatedScopeCount must be >= 1 (5 per EntraAppRegPermissionCatalog.All as of task 130).");
+                "expectedDelegatedScopeCount must be >= 1 (per EntraAppRegPermissionCatalog.All).");
         }
 
         // §4D I5 — explicit per-tenant credential (parity with

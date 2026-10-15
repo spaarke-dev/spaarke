@@ -33,6 +33,17 @@
         — for example a creator share that also carries Delete, or an Assign bit — treated as a hand-made share.
     Rows with mask 0 (Dataverse's inherited-access rows) are ignored.
 
+    WHAT IT SKIPS (unified-access-control-r2 task 179, round 90 verifier finding F1):
+      * every legacy user share for which a LIVE `sprk_assignedaccess` ledger row in state Shared records that the BFF
+        WROTE it — an inherited share passed on from a secure parent (`sprk_sourcefield` starting `inherited:`) or an
+        Assigned-To share. That row's `sprk_grantedlevel` holds the mask the BFF wrote (23 / 65559). Upgrading the
+        share without it would make the share read as "changed by someone since", so the parent's unshare, an
+        unsecure or an ended assignment would KEEP it (KeptModified) instead of removing it — a person kept with
+        Collaborate + Share after their access should have gone. Those shares are reported as skipped and left to
+        their owner: after the round-91 deploy the secure-child / secure-root reconcile rewrites an inherited share at
+        the root's current mask AND records it in the ledger. RUN THAT RECONCILE FIRST, then this script.
+      * A ledger read that fails stops the run before any write (exit 1): never "no ledger row".
+
     IDEMPOTENT: a second run finds nothing at 23 / 65559 and writes nothing.
 
     AUTHENTICATION: the operator's OWN identity via the Azure CLI (`az login`), exactly as
@@ -60,6 +71,7 @@
     Project : unified-access-control-r2
     Task    : 139 — grant model: share rights and the grantor cap (GitHub #1062)
     Created : 2026-10-02
+    Changed : 2026-10-10 — task 179: skips BFF-written shares recorded in the sprk_assignedaccess ledger (see above)
     Exit codes: 0 = done (or nothing to do); 1 = a read failed; 2 = at least one upgraded share did not read back
                 at its new mask; 3 = listed rows need an owner decision (team shares at a legacy mask, or non-level
                 masks). Exit 3 is informational on a dry run and does not mean anything was written.
@@ -167,8 +179,38 @@ function Get-ShareMask {
     return $mask
 }
 
+# The (table, record, system user) triples whose share the BFF WROTE and still tracks: live sprk_assignedaccess rows in
+# state Shared (100000001), whether inherited from a secure parent or Assigned-To. Value = "inherited" | "assigned-to".
+# A read that fails throws — never "no ledger row" (the caller stops before any write).
+function Get-LedgerOwnedShares {
+    param([string]$Token, [string]$ApiBase)
+
+    $lookups = @{
+        "sprk_project"        = "_sprk_project_value"
+        "sprk_matter"         = "_sprk_matter_value"
+        "sprk_workassignment" = "_sprk_workassignment_value"
+    }
+    $uri = "$ApiBase/sprk_assignedaccesses?`$filter=statecode eq 0 and sprk_state eq 100000001 and _sprk_subjectsystemuser_value ne null" +
+           "&`$select=sprk_sourcefield,_sprk_subjectsystemuser_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value"
+    $owned = @{}
+    while ($uri) {
+        $page = Invoke-Dataverse -Token $Token -Uri $uri
+        foreach ($row in $page.value) {
+            $user = [string]$row._sprk_subjectsystemuser_value
+            if (-not $user) { continue }
+            $kind = if (([string]$row.sprk_sourcefield).StartsWith("inherited:", [System.StringComparison]::OrdinalIgnoreCase)) { "inherited" } else { "assigned-to" }
+            foreach ($table in $lookups.Keys) {
+                $record = [string]$row.($lookups[$table])
+                if ($record) { $owned[("{0}|{1}|{2}" -f $table, $record, $user).ToLowerInvariant()] = $kind }
+            }
+        }
+        $uri = $page.'@odata.nextLink'
+    }
+    return $owned
+}
+
 function Get-Classified {
-    param([object[]]$Rows, [string]$LogicalName)
+    param([object[]]$Rows, [string]$LogicalName, [hashtable]$LedgerOwned = @{})
 
     foreach ($row in $Rows) {
         $mask = [int]$row.accessrightsmask
@@ -177,8 +219,12 @@ function Get-Classified {
         # spellings are accepted; anything else is never treated as a user.
         $rawType = [string]$row.principaltypecode
         $kind = switch ($rawType) { "8" { "systemuser" } "9" { "team" } default { $rawType.ToLowerInvariant() } }
+        $ledgerKey = ("{0}|{1}|{2}" -f $LogicalName, [string]$row.objectid, [string]$row.principalid).ToLowerInvariant()
         $class =
             if ($CurrentLevelMasks -contains $mask) { "current" }
+            elseif ($Upgrades.ContainsKey($mask) -and $kind -eq "systemuser" -and $LedgerOwned.ContainsKey($ledgerKey)) {
+                "skipped-$($LedgerOwned[$ledgerKey])"
+            }
             elseif ($Upgrades.ContainsKey($mask) -and $kind -eq "systemuser") { "upgrade" }
             elseif ($Upgrades.ContainsKey($mask)) { "legacy-other-principal" }
             else { "non-level" }
@@ -196,7 +242,7 @@ function Get-Classified {
 
 function Get-Counts {
     param([object[]]$Classified)
-    $counts = [ordered]@{ current = 0; upgrade = 0; "legacy-other-principal" = 0; "non-level" = 0 }
+    $counts = [ordered]@{ current = 0; upgrade = 0; "skipped-inherited" = 0; "skipped-assigned-to" = 0; "legacy-other-principal" = 0; "non-level" = 0 }
     foreach ($r in $Classified) { $counts[$r.Class]++ }
     return $counts
 }
@@ -213,9 +259,10 @@ $apiBase = "$($EnvironmentUrl.TrimEnd('/'))/api/data/v9.2"
 
 $before = @()
 try {
+    $ledgerOwned = Get-LedgerOwnedShares -Token $token -ApiBase $apiBase
     foreach ($t in $Tables) {
         $rows = Get-ShareRows -Token $token -ApiBase $apiBase -LogicalName $t.LogicalName
-        $before += @(Get-Classified -Rows $rows -LogicalName $t.LogicalName)
+        $before += @(Get-Classified -Rows $rows -LogicalName $t.LogicalName -LedgerOwned $ledgerOwned)
     }
 }
 catch {
@@ -230,6 +277,13 @@ $beforeCounts.GetEnumerator() | ForEach-Object { Write-Host ("  {0,-24} {1}" -f 
 
 $toUpgrade = @($before | Where-Object Class -eq "upgrade")
 $needsOwner = @($before | Where-Object { $_.Class -in @("legacy-other-principal", "non-level") })
+$skipped = @($before | Where-Object { $_.Class -like "skipped-*" })
+
+if ($skipped.Count -gt 0) {
+    Write-Host ""
+    Write-Host "SKIPPED — the BFF wrote these and tracks them in its ledger (inherited: the reconcile upgrades it; assigned-to: the Assigned-To rule owns it):" -ForegroundColor Yellow
+    $skipped | Sort-Object Table, RecordId | Format-Table Table, RecordId, PrincipalId, Mask, Class -AutoSize | Out-String | Write-Host
+}
 
 if ($needsOwner.Count -gt 0) {
     Write-Host ""
@@ -282,9 +336,10 @@ if ($Apply -and $toUpgrade.Count -gt 0) {
 # After-counts: re-read everything (on a dry run this equals "before").
 $after = @()
 try {
+    $ledgerOwnedAfter = Get-LedgerOwnedShares -Token $token -ApiBase $apiBase
     foreach ($t in $Tables) {
         $rows = Get-ShareRows -Token $token -ApiBase $apiBase -LogicalName $t.LogicalName
-        $after += @(Get-Classified -Rows $rows -LogicalName $t.LogicalName)
+        $after += @(Get-Classified -Rows $rows -LogicalName $t.LogicalName -LedgerOwned $ledgerOwnedAfter)
     }
 }
 catch {
@@ -306,6 +361,7 @@ $report = [ordered]@{
     afterCounts    = $afterCounts
     upgraded       = $results
     toUpgrade      = $toUpgrade
+    skippedLedgerOwned = $skipped
     needsOwnerDecision = $needsOwner
 }
 $report | ConvertTo-Json -Depth 6 | Set-Content -Path $ReportPath -Encoding utf8

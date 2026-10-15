@@ -142,7 +142,7 @@ function Get-IndexMarkers {
     #   - The status cell is the first later cell holding a status token or glyph; a row with none
     #     is not a status row (dependency / reference tables) and is skipped.
     $idFirstPattern = '^\|\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
-    $statusTokenPattern = '\[(?:open|wip|done|escalated|blocked)\]'
+    $statusTokenPattern = '\[(?:open|wip|done|escalated|blocked|cancelled|deferred)\]'
     $statusCellPattern = "$statusTokenPattern|✅|🔲|🔄|⚠️|🟡"
 
     # A cell holding the ASCII token wins over one holding only a glyph — a title or dependency cell
@@ -208,6 +208,12 @@ function Test-PomlDone {
     return $Status.StartsWith('complete') -or $Status -eq 'blocked-shipped'
 }
 
+# Cut or parked by an owner decision — neither open work nor completed work (see $closedTokens).
+function Test-PomlClosed {
+    param([string] $Status)
+    return $Status -eq 'cancelled' -or $Status -eq 'deferred'
+}
+
 # Some projects prefix their POML ids (`ENV-001`, `MCI-001`) while the index names the bare id (`001`),
 # or the reverse. Without this, every task reports twice as unpaired (once per side) although both sides
 # describe the same task — measured 2026-10-01 on production-environment-setup-r2 (38 POMLs, 38 rows,
@@ -246,6 +252,14 @@ function ConvertTo-PairingKeys {
 $doneTokens  = @('[done]', '[escalated]', '[blocked]')
 $openTokens  = @('[open]', '[wip]')
 $doneMarkers = @('✅', '⚠️', '🟡')
+# CLOSED-NOT-DONE (added 2026-10-07, unified-access-control-r2): a task cut or parked by an owner
+# decision. The POML says `cancelled` / `deferred`; the index says `🚫 [cancelled]` / `⏸️ [deferred]`.
+# Before this, those first-cell markers matched no status pattern, so the row's status was read from
+# a LATER cell (often the description), and an icon inside the description text decided the result:
+# 9 false "POML is behind" reports on a correctly kept index. Closed is its own class on both sides.
+# Matched by the ASCII TOKEN only: the 🚫/⏸️ glyphs also appear inside other projects' description
+# text, and treating them as status glyphs created false drift there (measured on -All).
+$closedTokens  = @('[cancelled]', '[deferred]')
 
 function Invoke-ProjectCheck {
     param([string] $Name, [switch] $ReportOnly)
@@ -296,8 +310,23 @@ function Invoke-ProjectCheck {
     $details = @()
     foreach ($id in ($poml.Keys | Sort-Object)) {
         if (-not $idx.ContainsKey($id)) { continue }   # already reported as unpaired, above
-        $pomlDone = Test-PomlDone -Status $poml[$id]
         $marker = $idx[$id]
+        # Closed (cancelled / deferred) is compared as its own class: both sides must agree on it.
+        $pomlClosed = Test-PomlClosed -Status $poml[$id]
+        $idxClosed = $false
+        foreach ($t in $closedTokens) { if ($marker.Contains($t)) { $idxClosed = $true } }
+        if ($pomlClosed -or $idxClosed) {
+            if ($pomlClosed -ne $idxClosed) {
+                $details += [pscustomobject]@{
+                    Id     = $id
+                    Poml   = $poml[$id]
+                    Marker = $marker
+                    Which  = if ($pomlClosed) { 'INDEX is behind' } else { 'POML is behind' }
+                }
+            }
+            continue
+        }
+        $pomlDone = Test-PomlDone -Status $poml[$id]
         # Token wins when present — it is unambiguous. Emoji only as fallback for legacy indexes.
         $idxDone = $null
         foreach ($t in $doneTokens) { if ($marker.Contains($t)) { $idxDone = $true } }

@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{8329ddcf-9e5e-f111-ab0c-7c1e521b425f}</WebResourceId>
+  <Name>sprk_kpiassessmentspage.html</Name>
+  <DisplayName>KPI Assessments Page (Matter Health drillthrough)</DisplayName>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_kpiassessmentspagehtml8329DDCF-9E5E-F111-AB0C-7C1E521B425F</FileName>
+</WebResource>

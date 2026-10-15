@@ -24,9 +24,14 @@ Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_p
 | Column | Purpose |
 |---|---|
 | `sprk_bffversion` | The **CI build id** of the BFF artifact H9 deployed (`<YYYY>.<MM>.<DD>-<run>`, e.g. `2026.09.30-123` — the `buildId` in the BFF artifact manifest). Written by H13 from H9's output. H9 also reads it to pin a re-run to the same build. |
-| `sprk_solutionversion` | A **32-hex fingerprint** of the imported solution set — the sorted (solution unique name, version) pairs H6 imported (`ImportedSolutionSet`). Identical sets give identical values in every environment. Written by H13. |
+| `sprk_solutionversion` | The installed Dataverse package: **`SpaarkeMaster {version} ({managed\|unmanaged})`**, e.g. `SpaarkeMaster 1.2.0.0 (managed)` (`ImportedSolutionSet`, v3). Written by H13 from H6's record. Rows written before T218b hold a 32-hex fingerprint of the old multi-solution set. |
 | `sprk_clientcachebusttoken` | The **run id** of the last provisioning or upgrade run (every run deploys). Intended for SPA clients to detect a deploy on next refresh; no client reads it yet. |
 
+> **v3 (2026-10-07, T218b).** The Dataverse content is now ONE solution, SpaarkeMaster (ADR-027 §3 amended, owner D8), so
+> its own version is the release tag: `sprk_solutionversion` = `SpaarkeMaster {version} ({type})`, which also records the
+> package type on the registry row. This supersedes v2's fingerprint (which existed only because a multi-solution set had
+> no tag). Matrix cells use the new value; an upgrade from a row still holding a fingerprint needs its cell appended once.
+>
 > **v2 (2026-10-02, owner decision D17).** The columns record **what was deployed**, as above. v1 described a
 > semver and an `S<YYYY>.<MM>` set tag; neither ever had a producer (the columns were blank until task 245b) and
 > nothing read them, so the definition was fixed before the first real write (ADR-020 complied with, no exception —
@@ -79,11 +84,8 @@ Derived from the deployed `Sprk.Bff.Api` binary. Format:
 
 ### 3.2 Solution-set version (`sprk_solutionversion`)
 
-An **aggregate tag** representing the coordinated shipped combination of the 8 managed solutions per [design.md §11.1a](../../projects/customer-provisioning-orchestration-r1/design.md):
-
-- SpaarkeCore (Tier 1)
-- SpaarkeWebResources (Tier 2)
-- CalendarSidePane, DocumentUploadWizard, EventRibbons, EventDetailSidePane, EventsPage, LegalWorkspace (all Tier 3)
+An **aggregate tag** for the shipped Dataverse content. *(2026-10-07: the content is now ONE solution, `SpaarkeMaster`
+— ADR-027 §3 amended; the 8-solution set below the v1 cell is history. The tag then tracks the SpaarkeMaster version.)*
 
 Format: `S<YYYY>.<MM>[.<seq>]` — e.g. `S2026.08` is the August-2026 shipped set. Sequenced (`.1`, `.2`) if multiple sets ship in the same month. Individual solutions carry their own `<Version>` inside each `Other/Solution.xml` (Dataverse-visible); the aggregate is what H6 pins to the customer.
 
@@ -119,7 +121,7 @@ When a cell is 🟡 Yellow or 🔴 Red, the operator MUST invoke the applicable 
 
 | U-CB class | Trigger (what upgrade change causes this) | Verdict typically | Remediation (operator flow) | Customer-comms template |
 |---|---|---|---|---|
-| **U-CB-1** — Column removal or type change | Solution upgrade drops or breaking-type-changes a `sprk_*` column | 🟡 Yellow (with `--allow-destructive`) OR 🔴 Red (without) | (1) Take pre-migration data export; (2) obtain customer signoff; (3) `Deploy-DataverseSolutions.ps1 --allow-destructive`; (4) publish reversal note if incident | [`customer-comms/U-CB-1-column-removal.md`](./customer-comms/U-CB-1-column-removal.md) *(exists)* |
+| **U-CB-1** — Column removal or type change | Solution upgrade drops or breaking-type-changes a `sprk_*` column | 🟡 Yellow (with `--allow-destructive`) OR 🔴 Red (without) | (1) Take pre-migration data export; (2) obtain customer signoff on the release note's removed-component list; (3) run the upgrade (H6, or `Import-SpaarkeMasterPackage.ps1` for Spaarke's own environments) — a managed upgrade deletes components dropped from the package; (4) publish reversal note if incident *(corrected 2026-10-08: the former `--allow-destructive` flag never existed)* | [`customer-comms/U-CB-1-column-removal.md`](./customer-comms/U-CB-1-column-removal.md) *(exists)* |
 | **U-CB-2** — AI Search index vector-dimension change | H2b upgrade migrates embedding model (e.g. 3072 → 768) | 🟡 Yellow | (1) Estimate re-index window from doc volume; (2) schedule maintenance window; (3) run H2b upgrade with `--reindex`; (4) monitor re-index completion | `customer-comms/U-CB-2-vector-dim-change.md` *(pending task 007)* |
 | **U-CB-3** — BFF app-reg permission additions requiring re-consent | BFF release adds a Graph / Dataverse / SPE permission scope needing admin consent | 🟡 Yellow | (1) Compute new admin-consent URL; (2) send to customer admin; (3) H0.5 re-consent flow captures `tid`; (4) proceed with H9 | `customer-comms/U-CB-3-reconsent.md` *(pending task 007)* |
 | **U-CB-4** — SPE container-type schema change | Major Microsoft Graph SDK / SPE container-type migration | 🟡 Yellow | (1) Announce up-to-24h SPE replication window per T6; (2) confidential-client re-create ceremony if needed; (3) verify container-type post-replication | `customer-comms/U-CB-4-spe-schema.md` *(pending task 007)* |
@@ -157,4 +159,5 @@ Per [design.md §14A.3](../../projects/customer-provisioning-orchestration-r1/de
 | Version | Date | Change | Author |
 |---|---|---|---|
 | v2 | 2026-10-02 | Registry columns redefined to what provisioning writes: `sprk_bffversion` = BFF CI build id, `sprk_solutionversion` = solution-set fingerprint, `sprk_clientcachebusttoken` = run id (owner decision D17; ADR-020 path C). §3 schemes re-scoped to the future release layer. The v1 cell keeps release names no environment carries — historical, not deleted. | main session (customer-provisioning-orchestration-r1, owner item O3) |
+| v3 | 2026-10-07 | `sprk_solutionversion` = `SpaarkeMaster {version} ({managed\|unmanaged})` — the Dataverse content is one solution (ADR-027 §3 amended, owner D8), so its version is the tag; supersedes v2's fingerprint and records the package type on the registry row. | main session (customer-provisioning-orchestration-r1, T218b) |
 | v1 | 2026-08-17 | Initial publication per FR-34 + design.md §14A.3. Baseline row (BFF 1.0.0-net10) × baseline column (S2026.08) = ✅ Green. Framework + remediation guidance in place; matrix expands per §6 at each release-tag milestone. | task-execute (task 006, project customer-provisioning-orchestration-r1) |

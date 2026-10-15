@@ -1,0 +1,1237 @@
+using System.Collections.Frozen;
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Xml.Linq;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Actions;
+
+namespace Sprk.Bff.Api.Services.Signals;
+
+// =====================================================================================================================
+// Ontology platform R1 task 038 (D-15, FR-24, FR-54; D-34..D-36, D-42, D-44; D-129/D-137): the ONE way the worklist
+// reads Signals. It runs the worklist configuration's FetchXML AS THE CALLER, drops every row whose core record the
+// caller cannot read, keeps a Do-lane row only when its subject is the caller's own work, and orders each lane by D-42.
+//
+// COMPONENT JUSTIFICATION (CLAUDE.md section 11).
+//   Existing: SignalCoreRecordAccess (task 036) decides ONE Signal (a Signal-keyed route); RecordRouteAccessAuthorizationFilter
+//     (uac-r2) authorizes one record id per route. Neither filters a LIST by each row's core record. EventOwnershipScope
+//     (task 097) is "my events" as an OData clause; OwnedChildWrite.ForPersonColumns names the person column per table.
+//   Extension: SignalCoreRecordAccess answers per id with two reads each (Signal + core); calling it per row is one query per
+//     row, which the POML's escalation trigger forbids. This service applies the SAME rules (caller-identity reads, the
+//     catalog-named core table, uac-r2's core taxonomy, no-core = Do lane + caller reads the subject) as ONE batched read per
+//     core type per 100 ids, and reuses the two existing person mechanisms for "mine".
+//   Cost of doing nothing: no route reads sprk_signal, and reading as the caller alone shows every Console User in the BU
+//     tree the Signals (sentence and evidence) on matters they cannot open and every colleague's overdue work (#17).
+// =====================================================================================================================
+
+/// <summary>Which worklist set the route returns (task 050's row: the two lanes, or one of the three secondary sets).</summary>
+public enum WorklistSet
+{
+    /// <summary>The Decide and Do lanes: open and acknowledged, not suppressed. Ordered by D-42.</summary>
+    Lanes,
+
+    /// <summary>Resolved today in each item's own time zone (D-25 as amended by D-129).</summary>
+    ClosedToday,
+
+    /// <summary>Open or acknowledged Signals whose suppression date is in the future.</summary>
+    Suppressed,
+
+    /// <summary>Resolved within the configured window but not today in the item's own time zone.</summary>
+    ClosedEarlier,
+}
+
+/// <summary>What <see cref="SignalReadService.ReadAsync"/> decided.</summary>
+public enum SignalReadOutcome
+{
+    /// <summary>The caller's visible Signals (possibly none).</summary>
+    Ok,
+
+    /// <summary>The caller could not be resolved to a Dataverse user: #1312's single 403 (D-29).</summary>
+    CallerUnresolved,
+
+    /// <summary>A fault (configuration, Dataverse, volume cap): 503. Never a partial list and never the empty list.</summary>
+    Unavailable,
+}
+
+/// <summary>The route's answer.</summary>
+/// <param name="Outcome">The decision.</param>
+/// <param name="Response">The body when <see cref="Outcome"/> is <see cref="SignalReadOutcome.Ok"/>.</param>
+/// <param name="Reason">A short machine reason for an <see cref="SignalReadOutcome.Unavailable"/> answer (logged, not row data).</param>
+public sealed record SignalReadResult(SignalReadOutcome Outcome, WorklistResponse? Response, string? Reason = null)
+{
+    public static readonly SignalReadResult CallerUnresolved = new(SignalReadOutcome.CallerUnresolved, null);
+
+    public static SignalReadResult Unavailable(string reason) => new(SignalReadOutcome.Unavailable, null, reason);
+}
+
+/// <summary>The worklist body: always both lanes, each a list of core-record groups (task 051's <c>WorklistCore</c> cards).</summary>
+public sealed record WorklistResponse(string Set, IReadOnlyList<WorklistLaneGroups> Lanes);
+
+/// <summary>One lane's groups, in display order.</summary>
+public sealed record WorklistLaneGroups(string Lane, IReadOnlyList<WorklistGroup> Groups);
+
+/// <summary>A core record's items (D-34/D-36), or the caller's "Not filed" items (D-35) when <see cref="Core"/> is null.</summary>
+public sealed record WorklistGroup(WorklistCoreRecord? Core, bool NotFiled, IReadOnlyList<WorklistItemRow> Items);
+
+/// <summary>The catalog-driven identity of a core record (task 051's <c>WorklistCore</c>). No field is type-specific (D-36).</summary>
+public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string? TypeLabel, string? Name, string? Number);
+
+/// <summary>One Work Item: display columns only (D-23, task 051 #1513, task 052 #1536 F4).</summary>
+/// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
+/// witness rule (D-123): a line whose witness is not in the Signal's own known secure family has no <c>text</c> or <c>source</c> and
+/// carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather than absent. Null when nothing is stored or the
+/// stored value is not a JSON array.</param>
+public sealed record WorklistItemRow(
+    Guid SignalId,
+    string Lane,
+    string? Status,
+    string? Title,
+    string? SubjectName,
+    string? RuleShortName,
+    string? WorkType,
+    string PastDueWording,
+    DateTimeOffset? RaisedOn,
+    string? DueDate,
+    string? EvidenceRefs,
+    Guid? PolicyVersionId,
+    DateTimeOffset? ResolvedOn = null,
+    int? ResolutionType = null,
+    DateTimeOffset? SuppressedUntil = null);
+
+/// <summary>
+/// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
+/// <see cref="IDataverseUserClient"/>; only configuration and metadata (the worklist row, the record-type catalog, entity-set
+/// names, time zones) are read with the BFF's own <see cref="IGenericEntityService"/>, and nothing read that way is returned
+/// unless the caller's own read admitted the row it belongs to.
+/// </summary>
+/// <remarks>
+/// <para><b>Membership and base order</b> are the worklist <c>sprk_gridconfiguration</c> row's (task 050, id
+/// <see cref="WorklistConfigurationId"/>), executed verbatim except for paging attributes. The route never re-implements the
+/// predicate and never adds a user filter to it.</para>
+/// <para><b>Visibility, per row, by the row's OWN lane</b> (a configuration that puts a Do row in the Decide query cannot widen
+/// anything): (1) Dataverse trims the Signal read itself (the Signal's business unit and secure-child shares). (2) A row with a
+/// complete core pair is kept only when the caller's own batched read of the catalog-named core table returns its
+/// <c>sprk_corerecordid</c>; the table must be in uac-r2's <see cref="CoreAncestorResolver.CoreRecordEntities"/> (K2, as in
+/// <see cref="SignalCoreRecordAccess"/>). (3) A half pair is dropped. (4) A row with no core record is Do-lane only (D-35).
+/// (5) A Do-lane row is kept only when the caller's own read of its subject, filtered to "mine", returns it
+/// (<see cref="DoLaneMineRules"/>); that read also proves the caller can read the subject (D-35 as amended by D-129). A dropped
+/// row leaves no trace: no count, no placeholder, no group.</para>
+/// <para><b>Fail closed, honestly.</b> A row the caller cannot read is dropped; a FAULT (a 5xx, throttling, an unparseable
+/// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
+/// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
+/// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
+/// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
+/// catalog query; and, only for returned rows whose evidence carries detail, the app-only secure-family placement of those
+/// Signals and their witnesses (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// Nothing is cached across callers.</para>
+/// </remarks>
+public sealed class SignalReadService
+{
+    /// <summary>The worklist <c>sprk_gridconfiguration</c> row (task 050; live on spaarkedev1 per D-138).</summary>
+    internal static readonly Guid WorklistConfigurationId = Guid.Parse("00000000-0000-4000-8000-000000005010");
+
+    /// <summary>Pages of Signals read per set before the route refuses (fails loudly) rather than ranking a partial list.</summary>
+    internal const int MaxPages = 5;
+
+    /// <summary>Ids per batched caller read (keeps the GET URL well under Dataverse's limit).</summary>
+    internal const int IdChunk = 100;
+
+    internal const string SignalEntitySet = "sprk_signals";
+    internal const string HighPriorityColumn = "sprk_highpriority";
+    private const string RecordTypeRefEntity = "sprk_recordtype_ref";
+    private const string ConfigurationEntity = "sprk_gridconfiguration";
+
+    /// <summary>A Do-lane subject table's "mine" rule. Each part is OR-ed, each compared with the caller.</summary>
+    /// <param name="Table">The subject table.</param>
+    /// <param name="OwnerIsCaller">The row's <c>ownerid</c> is the caller (a user-owned personal record).</param>
+    /// <param name="PersonColumn">The contact lookup naming who the record is FOR (<see cref="OwnedChildWrite.ForPersonColumns"/>),
+    /// compared with the caller's linked contact.</param>
+    /// <param name="CreatorIsCaller"><c>sprk_createdbyperson</c> is the caller.</param>
+    internal sealed record DoLaneMineRule(string Table, bool OwnerIsCaller, string PersonColumn, bool CreatorIsCaller);
+
+    /// <summary>
+    /// "The caller's own work" per Do-lane subject (D-15 as amended by D-44; D-129, D-137). A subject table not listed has no
+    /// "mine" and its Do rows are never returned.
+    /// <list type="bullet">
+    /// <item><c>sprk_event</c>: task 097 owner decision B, the same three parts as <see cref="EventOwnershipScope"/> (owner,
+    /// assigned to the caller's contact via <c>sprk_assignedto</c> per D-137 Q22, or created by the caller).</item>
+    /// <item><c>sprk_todo</c>: the POML's owner rule (a personal To Do stays user-owned, D-130) OR its Assigned To
+    /// (<c>sprk_assignedto</c>; D-129: a team-owned To Do names its person there).</item>
+    /// <item><c>sprk_workassignment</c>: D-44, both the assigner (<c>sprk_createdbyperson</c>) and the assignee, the Assigned To
+    /// Internal contact (<c>sprk_assignedtointernal</c>, D-129; the column <see cref="OwnedChildWrite.ForPersonColumns"/> names).</item>
+    /// </list>
+    /// </summary>
+    internal static readonly FrozenDictionary<string, DoLaneMineRule> DoLaneMineRules = new[]
+    {
+        new DoLaneMineRule("sprk_event", OwnerIsCaller: true, OwnedChildWrite.ForPersonColumns["sprk_event"].Column, CreatorIsCaller: true),
+        new DoLaneMineRule("sprk_todo", OwnerIsCaller: true, OwnedChildWrite.ForPersonColumns["sprk_todo"].Column, CreatorIsCaller: false),
+        new DoLaneMineRule("sprk_workassignment", OwnerIsCaller: false, OwnedChildWrite.ForPersonColumns["sprk_workassignment"].Column, CreatorIsCaller: true),
+    }.ToFrozenDictionary(r => r.Table, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Subject tables that carry <c>sprk_highpriority</c>, D-42's second key (spec Q1: the flag on the SUBJECT; the same seven
+    /// tables the Daily Briefing reads it from). Pinned to the solution source by the route's tests. A subject table not listed
+    /// ranks as not flagged.
+    /// </summary>
+    internal static readonly FrozenSet<string> HighPriorityTables = new[]
+    {
+        "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_event", "sprk_todo", "sprk_document", "sprk_invoice",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary><c>sprk_policy.sprk_worktype</c> option → the camelCase key <c>WorklistItem.workType</c> expects (task 052 F4).</summary>
+    internal static readonly FrozenDictionary<int, string> WorkTypeKeys = new Dictionary<int, string>
+    {
+        [100000000] = "askOutsideCounsel",
+        [100000001] = "approveOrRebudget",
+        [100000002] = "chaseReply",
+        [100000003] = "finishOrReschedule",
+        [100000004] = "comingDue",
+        [100000005] = "chaseResponse",
+    }.ToFrozenDictionary();
+
+    /// <summary>The work type whose past-due wording is "late" (a work assignment's response, v4 W-3); every other is "overdue".</summary>
+    internal const string LateWorkType = "chaseResponse";
+
+    /// <summary><c>sprk_policy.sprk_severity</c> (D-30): Critical first.</summary>
+    internal const int SeverityCritical = 100000002;
+    internal const int SeverityWarning = 100000001;
+    internal const int SeverityInfo = 100000000;
+
+    private static readonly FrozenDictionary<int, string> StatusLabels = new Dictionary<int, string>
+    {
+        [100000000] = "Open",
+        [100000001] = "Acknowledged",
+        [100000002] = "Resolved",
+    }.ToFrozenDictionary();
+
+    private readonly IDataverseUserClient _user;
+    private readonly IGenericEntityService _entities;
+    private readonly IIdentityNormalizationService _identity;
+    private readonly TimeProvider _clock;
+    private readonly ILogger<SignalReadService> _logger;
+    private readonly SignalSuppressionService _families;
+
+    public SignalReadService(
+        IDataverseUserClient user,
+        IGenericEntityService entities,
+        IIdentityNormalizationService identity,
+        SignalSuppressionService families,
+        TimeProvider clock,
+        ILogger<SignalReadService> logger)
+    {
+        _user = user ?? throw new ArgumentNullException(nameof(user));
+        _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _families = families ?? throw new ArgumentNullException(nameof(families));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
+    public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
+    {
+        // (1) Who the caller is, as Dataverse sees them (the identity every later caller read runs as).
+        var who = await _user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
+        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        {
+            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                _logger.LogWarning("Signal read: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
+                return SignalReadResult.CallerUnresolved;
+            }
+
+            _logger.LogWarning("Signal read: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
+            return SignalReadResult.Unavailable("caller_identity_fault");
+        }
+
+        // (2) The caller's linked contact (the person columns are contact lookups). Under D-129 records are team-owned, so most of
+        // the caller's own work matches only on an assignee column: a contact that cannot be READ (a fault, as opposed to a user
+        // with no linked contact) is 503, never a Do lane silently missing that work.
+        Guid? contactId;
+        try
+        {
+            var person = await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
+            if (person.ContactUnreadable)
+            {
+                _logger.LogWarning("Signal read: the caller's linked contact could not be read; unavailable.");
+                return SignalReadResult.Unavailable("caller_contact_fault");
+            }
+
+            contactId = person.ContactId is { } c && c != Guid.Empty ? c : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
+                ex.GetType().Name);
+            return SignalReadResult.Unavailable("caller_contact_fault");
+        }
+
+        try
+        {
+            // (3) The configuration (task 050's row): which FetchXML runs for this set.
+            var fetches = await ReadFetchesAsync(set, ct).ConfigureAwait(false);
+            if (fetches is null)
+            {
+                return SignalReadResult.Unavailable("configuration_invalid");
+            }
+
+            // (4) The Signals, AS THE CALLER. Dataverse trims by the Signal's own business unit and shares first.
+            var rows = new List<SignalRow>();
+            var seen = new HashSet<Guid>();
+            foreach (var fetch in fetches)
+            {
+                var page = await FetchAllAsCallerAsync(fetch, ct).ConfigureAwait(false);
+                if (page.Outcome is { } failure)
+                {
+                    return failure;
+                }
+
+                foreach (var raw in page.Rows)
+                {
+                    if (SignalRow.TryParse(raw, out var row) && seen.Add(row.SignalId))
+                    {
+                        rows.Add(row);
+                    }
+                }
+            }
+
+            if (rows.Count == 0)
+            {
+                return Ok(set, []);
+            }
+
+            // (5) The record-type catalog rows the page names (core and subject types), one app-only query.
+            var catalog = await ReadCatalogAsync(rows, ct).ConfigureAwait(false);
+
+            // (6) Core-record access: one caller read per core type per chunk. Unreadable, malformed or non-core: dropped.
+            var cores = await ReadReadableCoresAsync(rows, catalog, ct).ConfigureAwait(false);
+            if (cores.Outcome is { } coreFailure)
+            {
+                return coreFailure;
+            }
+
+            var candidates = new List<SignalRow>();
+            foreach (var row in rows)
+            {
+                if (row.Lane is not { } lane)
+                {
+                    continue;
+                }
+
+                if (row.HasNoCore)
+                {
+                    // D-35: no core record → Do lane only (and then only if the subject is the caller's, step 7).
+                    if (lane == DecisionLane.Do)
+                    {
+                        candidates.Add(row);
+                    }
+
+                    continue;
+                }
+
+                if (row.CoreTypeId is { } typeId && row.CoreId is { } coreId && cores.Readable.ContainsKey((typeId, coreId)))
+                {
+                    candidates.Add(row);
+                }
+            }
+
+            // (7) Do lane: the caller's own work only (also proves the caller reads the subject). Also the subject flag and,
+            // for the closed sets, the assignee whose day decides "today".
+            var subjects = await ReadSubjectsAsync(candidates, catalog, callerId, contactId, ct).ConfigureAwait(false);
+            if (subjects.Outcome is { } subjectFailure)
+            {
+                return subjectFailure;
+            }
+
+            var visible = new List<VisibleRow>();
+            foreach (var row in candidates)
+            {
+                var key = (row.SubjectId ?? Guid.Empty);
+                if (row.Lane == DecisionLane.Do)
+                {
+                    if (key == Guid.Empty || !subjects.MineDo.TryGetValue(key, out var mine))
+                    {
+                        continue;
+                    }
+
+                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact));
+                }
+                else
+                {
+                    var decide = key != Guid.Empty && subjects.Decide.TryGetValue(key, out var found) ? found : null;
+                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact));
+                }
+            }
+
+            // (8) Closed sets: each item in exactly one of today / earlier, by its own today (D-25 as amended by D-129).
+            if (set is WorklistSet.ClosedToday or WorklistSet.ClosedEarlier)
+            {
+                visible = await PartitionClosedAsync(visible, set == WorklistSet.ClosedToday, ct).ConfigureAwait(false);
+            }
+
+            // (9) The witness rule at read time (D-123; task 145 review F1, option B): a stored line keeps its subject and sender only
+            // while its witness is in the Signal's own known secure family.
+            visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
+
+            return Ok(set, Shape(set, visible, cores.Readable, catalog));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Type only, never the message (it can echo row content).
+            _logger.LogError("Signal read: faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return SignalReadResult.Unavailable("fault");
+        }
+    }
+
+    private static SignalReadResult Ok(WorklistSet set, IReadOnlyList<WorklistLaneGroups> lanes) =>
+        new(SignalReadOutcome.Ok, new WorklistResponse(SetName(set), lanes.Count == 0 ? EmptyLanes() : lanes));
+
+    internal static string SetName(WorklistSet set) => set switch
+    {
+        WorklistSet.Lanes => "lanes",
+        WorklistSet.ClosedToday => "closedToday",
+        WorklistSet.Suppressed => "suppressed",
+        WorklistSet.ClosedEarlier => "closedEarlier",
+        _ => throw new ArgumentOutOfRangeException(nameof(set)),
+    };
+
+    private static IReadOnlyList<WorklistLaneGroups> EmptyLanes() =>
+        [new WorklistLaneGroups(LaneName(DecisionLane.Decide), []), new WorklistLaneGroups(LaneName(DecisionLane.Do), [])];
+
+    private static string LaneName(DecisionLane lane) => lane == DecisionLane.Decide ? "Decide" : "Do";
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (3) configuration
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The FetchXML(s) the set runs, or null when the row is missing, inactive or not a Signal worklist.</summary>
+    private async Task<IReadOnlyList<string>?> ReadFetchesAsync(WorklistSet set, CancellationToken ct)
+    {
+        var query = new QueryExpression(ConfigurationEntity) { ColumnSet = new ColumnSet("sprk_configjson", "statecode"), TopCount = 1 };
+        query.Criteria.AddCondition($"{ConfigurationEntity}id", ConditionOperator.Equal, WorklistConfigurationId);
+        var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var row = found.Entities.FirstOrDefault();
+        if (row is null || row.GetAttributeValue<OptionSetValue>("statecode") is { Value: not 0 })
+        {
+            _logger.LogError("Signal read: the worklist configuration row {RowId} is missing or inactive.", WorklistConfigurationId);
+            return null;
+        }
+
+        var fetches = ParseFetches(row.GetAttributeValue<string>("sprk_configjson"), set);
+        if (fetches is null)
+        {
+            _logger.LogError("Signal read: the worklist configuration row {RowId} is not a valid sprk_signal worklist for set {Set}.",
+                WorklistConfigurationId, set);
+        }
+
+        return fetches;
+    }
+
+    /// <summary>Parses task 050's definition. Every FetchXML must be a <c>sprk_signal</c> query; anything else is null.</summary>
+    internal static IReadOnlyList<string>? ParseFetches(string? configJson, WorklistSet set)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            var root = doc.RootElement;
+            if (ReadString(root, "kind") != "worklist" || ReadString(root, "entity") != "sprk_signal")
+            {
+                return null;
+            }
+
+            (string Section, string Key)[] paths = set switch
+            {
+                WorklistSet.Lanes => [("lanes", "decide"), ("lanes", "do")],
+                WorklistSet.ClosedToday => [("secondary", "closedToday")],
+                WorklistSet.Suppressed => [("secondary", "suppressed")],
+                WorklistSet.ClosedEarlier => [("secondary", "closedEarlier")],
+                _ => [],
+            };
+
+            var fetches = new List<string>();
+            foreach (var (section, key) in paths)
+            {
+                if (!root.TryGetProperty(section, out var s) || !s.TryGetProperty(key, out var entry)
+                    || ReadString(entry, "fetchXml") is not { Length: > 0 } fetch)
+                {
+                    return null;
+                }
+
+                var entity = XDocument.Parse(fetch).Root?.Element("entity");
+                if (entity?.Attribute("name")?.Value != "sprk_signal")
+                {
+                    return null;
+                }
+
+                fetches.Add(fetch);
+            }
+
+            return fetches.Count == 0 ? null : fetches;
+        }
+        catch (Exception ex) when (ex is JsonException or System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (4) the Signals, as the caller, paged
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record FetchPages(List<JsonElement> Rows, SignalReadResult? Outcome);
+
+    private async Task<FetchPages> FetchAllAsCallerAsync(string fetchXml, CancellationToken ct)
+    {
+        var fetch = XDocument.Parse(fetchXml);
+        var root = fetch.Root!;
+        var rows = new List<JsonElement>();
+        for (var page = 1; ; page++)
+        {
+            if (page > MaxPages)
+            {
+                _logger.LogError("Signal read: more than {MaxPages} pages of Signals for one caller; refusing rather than ranking a partial list.", MaxPages);
+                return new FetchPages(rows, SignalReadResult.Unavailable("too_many_signals"));
+            }
+
+            var response = await _user.GetAsync(
+                $"{SignalEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
+            if (!response.IsSuccess)
+            {
+                if (IsCallerUnresolved(response.ErrorCode))
+                {
+                    return new FetchPages(rows, SignalReadResult.CallerUnresolved);
+                }
+
+                if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && page > 1)
+                {
+                    // Page 1 was readable, so this is not "no Read on sprk_signal": never rank the pages already read as the list.
+                    _logger.LogWarning("Signal read: page {Page} of the Signal query was refused after page 1 was read; unavailable.", page);
+                    return new FetchPages(rows, SignalReadResult.Unavailable("signal_query_failed"));
+                }
+
+                if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+                {
+                    // No Read on sprk_signal at all: the caller reads nothing, which is an empty list, not an error (FR-54).
+                    _logger.LogInformation("Signal read: the caller has no read on sprk_signal; nothing to return.");
+                    return new FetchPages([], null);
+                }
+
+                _logger.LogWarning("Signal read: the Signal query failed ({ErrorCode}); unavailable.", response.ErrorCode);
+                return new FetchPages(rows, SignalReadResult.Unavailable("signal_query_failed"));
+            }
+
+            if (response.Body is not { } body || !body.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                return new FetchPages(rows, SignalReadResult.Unavailable("signal_query_unparseable"));
+            }
+
+            rows.AddRange(value.EnumerateArray().Select(e => e.Clone()));
+
+            if (!HasMoreRecords(body))
+            {
+                return new FetchPages(rows, null);
+            }
+
+            var cookie = PagingCookieOf(body);
+            if (cookie is null)
+            {
+                return new FetchPages(rows, SignalReadResult.Unavailable("paging_cookie_missing"));
+            }
+
+            root.SetAttributeValue("page", (page + 1).ToString(CultureInfo.InvariantCulture));
+            root.SetAttributeValue("paging-cookie", cookie);
+        }
+    }
+
+    /// <summary>
+    /// Whether another page exists. The caller-identity client sends no <c>Prefer: odata.include-annotations</c>, and then
+    /// Dataverse omits <c>@Microsoft.Dynamics.CRM.morerecords</c> and returns <c>@Microsoft.Dynamics.CRM.fetchxmlpagingcookie</c>
+    /// only when more rows exist (verified live on spaarkedev1, 2026-10-14). An explicit <c>morerecords</c> wins when present.
+    /// </summary>
+    internal static bool HasMoreRecords(JsonElement body)
+    {
+        if (body.TryGetProperty("@Microsoft.Dynamics.CRM.morerecords", out var more))
+        {
+            return more.ValueKind == JsonValueKind.True;
+        }
+
+        return body.TryGetProperty("@Microsoft.Dynamics.CRM.fetchxmlpagingcookie", out var cookie) && cookie.ValueKind == JsonValueKind.String;
+    }
+
+    /// <summary>
+    /// The paging cookie for the next page: the Web API returns <c>&lt;cookie pagingcookie="…" /&gt;</c> whose attribute is
+    /// URL-encoded twice; FetchXML's <c>paging-cookie</c> takes the decoded XML.
+    /// </summary>
+    internal static string? PagingCookieOf(JsonElement body)
+    {
+        if (!body.TryGetProperty("@Microsoft.Dynamics.CRM.fetchxmlpagingcookie", out var c) || c.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        try
+        {
+            var encoded = XElement.Parse(c.GetString()!).Attribute("pagingcookie")?.Value;
+            return string.IsNullOrEmpty(encoded) ? null : Uri.UnescapeDataString(Uri.UnescapeDataString(encoded));
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (5) catalog
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>One <c>sprk_recordtype_ref</c> row: the table it names and the field names its catalog entry declares.</summary>
+    internal sealed record CatalogRow(string LogicalName, string? Label, string? DisplayField, string? NumberField);
+
+    private async Task<Dictionary<Guid, CatalogRow>> ReadCatalogAsync(IReadOnlyList<SignalRow> rows, CancellationToken ct)
+    {
+        var ids = rows.SelectMany(r => new[] { r.CoreTypeId, r.SubjectTypeId })
+            .Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        var catalog = new Dictionary<Guid, CatalogRow>();
+        if (ids.Length == 0)
+        {
+            return catalog;
+        }
+
+        var query = new QueryExpression(RecordTypeRefEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_recordlogicalname", "sprk_recorddisplayname", "sprk_recorddisplaynamefield", "sprk_regardingrecordnumberfield"),
+        };
+        query.Criteria.AddCondition("sprk_recordtype_refid", ConditionOperator.In, ids.Cast<object>().ToArray());
+        var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        foreach (var entity in found.Entities)
+        {
+            var logical = entity.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(logical) || !IsLogicalName(logical))
+            {
+                continue;
+            }
+
+            catalog[entity.Id] = new CatalogRow(
+                logical,
+                entity.GetAttributeValue<string>("sprk_recorddisplayname"),
+                Field(entity, "sprk_recorddisplaynamefield"),
+                Field(entity, "sprk_regardingrecordnumberfield"));
+        }
+
+        return catalog;
+
+        static string? Field(Entity row, string column) =>
+            row.GetAttributeValue<string>(column)?.Trim() is { Length: > 0 } f && IsLogicalName(f) ? f : null;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (6) core-record access, batched, as the caller
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record CoreAccess(Dictionary<(Guid TypeId, Guid CoreId), (string? Name, string? Number)> Readable, SignalReadResult? Outcome);
+
+    private async Task<CoreAccess> ReadReadableCoresAsync(
+        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, CancellationToken ct)
+    {
+        var readable = new Dictionary<(Guid, Guid), (string?, string?)>();
+        foreach (var byType in rows.Where(r => r.CoreTypeId is not null && r.CoreId is not null).GroupBy(r => r.CoreTypeId!.Value))
+        {
+            if (!catalog.TryGetValue(byType.Key, out var type)
+                || !CoreAncestorResolver.CoreRecordEntities.Contains(type.LogicalName, StringComparer.OrdinalIgnoreCase))
+            {
+                // K2 (as SignalCoreRecordAccess): a type that does not resolve, or is not one of uac-r2's core types, is a forged or
+                // stale pointer. The rows are dropped; the route is never a probe of an arbitrary table.
+                _logger.LogWarning("Signal read: {Count} Signals name a core record type that is not an access-control core type; dropped.",
+                    byType.Count());
+                continue;
+            }
+
+            var entitySet = await _entities.GetEntitySetNameAsync(type.LogicalName, ct).ConfigureAwait(false);
+            var pk = $"{type.LogicalName}id";
+            var select = new List<string> { pk };
+            if (type.DisplayField is { } d && d != pk) select.Add(d);
+            if (type.NumberField is { } n && n != pk && !select.Contains(n)) select.Add(n);
+
+            foreach (var chunk in byType.Select(r => r.CoreId!.Value).Distinct().Chunk(IdChunk))
+            {
+                var response = await _user.GetAsync(
+                    $"{entitySet}?$select={string.Join(',', select)}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                var result = ReadAccessRows(response, "core record");
+                if (result.Outcome is { } failure)
+                {
+                    return new CoreAccess(readable, failure);
+                }
+
+                foreach (var core in result.Rows)
+                {
+                    if (TryReadGuid(core, pk, out var id) && chunk.Contains(id))
+                    {
+                        readable[(byType.Key, id)] = (
+                            type.DisplayField is { } df ? ReadDisplay(core, df) : null,
+                            type.NumberField is { } nf ? ReadDisplay(core, nf) : null);
+                    }
+                }
+            }
+        }
+
+        return new CoreAccess(readable, null);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (7) subjects: Do-lane "mine", the D-42 flag, the closed sets' assignee
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact);
+
+    private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
+
+    private async Task<SubjectReads> ReadSubjectsAsync(
+        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, Guid callerId, Guid? contactId, CancellationToken ct)
+    {
+        var mine = new Dictionary<Guid, MineSubject>();
+        var decide = new Dictionary<Guid, MineSubject>();
+
+        // Do lane: per rule table, the subject ids typed to it, plus every untyped id (a GUID matches in its own table only).
+        var doRows = rows.Where(r => r.Lane == DecisionLane.Do && r.SubjectId is not null).ToList();
+        foreach (var rule in DoLaneMineRules.Values)
+        {
+            var ids = doRows
+                .Where(r => SubjectTable(r, catalog) is not { } t || string.Equals(t, rule.Table, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.SubjectId!.Value).Distinct().ToArray();
+            if (ids.Length == 0)
+            {
+                continue;
+            }
+
+            var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
+            var pk = $"{rule.Table}id";
+            var mineFilter = MineFilter(rule, callerId, contactId);
+            var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
+            foreach (var chunk in ids.Chunk(IdChunk))
+            {
+                var response = await _user.GetAsync(
+                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)} and ({mineFilter})", ct).ConfigureAwait(false);
+                var result = ReadAccessRows(response, "Do-lane subject");
+                if (result.Outcome is { } failure)
+                {
+                    return new SubjectReads(mine, decide, failure);
+                }
+
+                foreach (var subject in result.Rows)
+                {
+                    if (TryReadGuid(subject, pk, out var id) && chunk.Contains(id))
+                    {
+                        mine[id] = new MineSubject(
+                            subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
+                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null);
+                    }
+                }
+            }
+        }
+
+        // Decide lane: the flag and, for the closed sets' per-item day (D-25 as amended by D-129), the subject's individual (its
+        // Assigned To contact, OwnedChildWrite.ForPersonColumns). A subject the caller cannot read is simply not flagged and has no
+        // assignee (its day is UTC); the row stays (D-15 checks the core).
+        foreach (var byTable in rows.Where(r => r.Lane == DecisionLane.Decide && r.SubjectId is not null)
+                     .GroupBy(r => SubjectTable(r, catalog))
+                     .Where(g => g.Key is { } t && HighPriorityTables.Contains(t)))
+        {
+            var table = byTable.Key!;
+            var entitySet = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
+            var pk = $"{table}id";
+            var person = OwnedChildWrite.ForPersonColumns.TryGetValue(table, out var column)
+                && string.Equals(column.RelatedTable, "contact", StringComparison.Ordinal) ? column.Column : null;
+            var select = $"{pk},{HighPriorityColumn}" + (person is null ? string.Empty : $",_{person}_value");
+            foreach (var chunk in byTable.Select(r => r.SubjectId!.Value).Distinct().Chunk(IdChunk))
+            {
+                var response = await _user.GetAsync(
+                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                var result = ReadAccessRows(response, "Decide-lane subject");
+                if (result.Outcome is { } failure)
+                {
+                    return new SubjectReads(mine, decide, failure);
+                }
+
+                foreach (var subject in result.Rows)
+                {
+                    if (TryReadGuid(subject, pk, out var id) && chunk.Contains(id))
+                    {
+                        decide[id] = new MineSubject(
+                            subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
+                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null);
+                    }
+                }
+            }
+        }
+
+        return new SubjectReads(mine, decide, null);
+    }
+
+    /// <summary>The subject's table from its <c>sprk_regardingrecordtype</c> catalog row; null when untyped or not cataloged.</summary>
+    private static string? SubjectTable(SignalRow row, IReadOnlyDictionary<Guid, CatalogRow> catalog) =>
+        row.SubjectTypeId is { } t && catalog.TryGetValue(t, out var type) ? type.LogicalName : null;
+
+    /// <summary>The OData "mine" clause: the rule's parts OR-ed, each compared with the caller (never widened, only narrowed).</summary>
+    internal static string MineFilter(DoLaneMineRule rule, Guid callerId, Guid? contactId)
+    {
+        var parts = new List<string>();
+        if (rule.OwnerIsCaller)
+        {
+            parts.Add(string.Format(CultureInfo.InvariantCulture, "_ownerid_value eq {0:D}", callerId));
+        }
+
+        if (contactId is { } contact && contact != Guid.Empty)
+        {
+            parts.Add(string.Format(CultureInfo.InvariantCulture, "_{0}_value eq {1:D}", rule.PersonColumn, contact));
+        }
+
+        if (rule.CreatorIsCaller)
+        {
+            parts.Add(string.Format(CultureInfo.InvariantCulture, "_{0}_value eq {1:D}", RecordCreatorPersonColumn.LogicalName, callerId));
+        }
+
+        // Every rule has an owner or creator part, so the clause is never empty (an empty clause would mean "everything").
+        return parts.Count > 0
+            ? string.Join(" or ", parts)
+            : throw new InvalidOperationException($"The Do-lane rule for {rule.Table} has no part that names the caller.");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (8) closed sets: today per item
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private async Task<List<VisibleRow>> PartitionClosedAsync(List<VisibleRow> rows, bool wantToday, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        var days = new DataverseRecipientDays(_entities, now);
+        var zones = new Dictionary<Guid, TimeZoneInfo?>();
+        var kept = new List<VisibleRow>();
+        foreach (var row in rows)
+        {
+            if (row.Row.ResolvedOn is not { } resolvedOn)
+            {
+                continue;
+            }
+
+            // D-25 as amended by D-129: the assignee's linked user's zone, else UTC; never the owner (records are owned by teams).
+            var recipient = await days.ForAsync(row.AssigneeContact, owner: null, ct).ConfigureAwait(false);
+            if (recipient.Error is { } dayError)
+            {
+                _logger.LogWarning("Signal read: the assignee's day could not be read ({Reason}, {ExceptionType}); the UTC date is used for this item.",
+                    recipient.FallbackReason, dayError.GetType().Name);
+            }
+            TimeZoneInfo? zone = null;
+            if (recipient.Source == RecipientDaySource.Assignee && recipient.SystemUserId is { } user)
+            {
+                if (!zones.TryGetValue(user, out zone))
+                {
+                    zone = (await DataverseUserTimeZone.UserDayForUserAsync(_entities, user, now, ct).ConfigureAwait(false)).Zone;
+                    zones[user] = zone;
+                }
+            }
+
+            var today = zone is null ? DataverseUserTimeZone.LocalDate(now, null) : recipient.Today;
+            var resolvedToday = DataverseUserTimeZone.LocalDate(resolvedOn, zone) == today;
+            if (resolvedToday == wantToday)
+            {
+                kept.Add(row);
+            }
+        }
+
+        return kept;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (9) the witness rule at read time (D-123)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Each returned row's stored witness lines, judged now (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>): a
+    /// line that carries a <c>text</c> or <c>source</c> keeps them only when its witness is in the Signal's own known secure family;
+    /// otherwise both are removed and the line carries <c>"withheld": true</c> (kind, ref, tier, as-of and clause stay). A fault in
+    /// that judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
+    /// is returned as null: what it holds cannot be judged line by line.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
+    {
+        var parsed = new Dictionary<Guid, JsonArray?>();
+        var asked = new List<(Guid SignalId, IReadOnlyList<string> References)>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Row.EvidenceRefs) || parsed.ContainsKey(row.Row.SignalId))
+            {
+                continue;
+            }
+
+            var lines = ParseEvidence(row.Row.EvidenceRefs);
+            parsed[row.Row.SignalId] = lines;
+            var references = lines?.OfType<JsonObject>().Where(HasDetail).Select(RefOf).OfType<string>().ToList();
+            if (references is { Count: > 0 })
+            {
+                asked.Add((row.Row.SignalId, references));
+            }
+        }
+
+        if (parsed.Count == 0)
+        {
+            return rows;
+        }
+
+        var shown = asked.Count == 0 ? new Dictionary<Guid, IReadOnlySet<string>>() : await _families.WitnessDetailShownOnReadAsync(asked, ct).ConfigureAwait(false);
+        var withheld = 0;
+        var result = new List<VisibleRow>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!parsed.TryGetValue(row.Row.SignalId, out var lines))
+            {
+                result.Add(row);
+                continue;
+            }
+
+            if (lines is null)
+            {
+                result.Add(row with { Row = row.Row with { EvidenceRefs = null } });
+                continue;
+            }
+
+            var keep = shown is not null && shown.TryGetValue(row.Row.SignalId, out var set) ? set : null;
+            var copy = (JsonArray)lines.DeepClone();
+            foreach (var line in copy.OfType<JsonObject>().Where(HasDetail))
+            {
+                if (keep is not null && RefOf(line) is { } reference && keep.Contains(reference))
+                {
+                    continue;
+                }
+
+                line.Remove("text");
+                line.Remove("source");
+                line["withheld"] = true;
+                withheld++;
+            }
+
+            result.Add(row with { Row = row.Row with { EvidenceRefs = copy.ToJsonString() } });
+        }
+
+        if (withheld > 0)
+        {
+            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (another or an undetermined secure family; D-123).", withheld);
+        }
+
+        return result;
+
+        static bool HasDetail(JsonObject line) => line["text"] is not null || line["source"] is not null;
+
+        static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
+    /// <remarks>Property names are matched case-insensitively (a <c>Text</c> or <c>SOURCE</c> is detail too). A line whose names
+    /// collide under that rule (<c>text</c> and <c>Text</c>) cannot be judged, so the Signal's whole evidence is withheld (null).</remarks>
+    private static JsonArray? ParseEvidence(string json)
+    {
+        try
+        {
+            if (JsonNode.Parse(json, new JsonNodeOptions { PropertyNameCaseInsensitive = true }) is not JsonArray lines
+                || !lines.All(l => l is JsonObject))
+            {
+                return null;
+            }
+
+            // JsonObject builds its property table lazily; build it now so a duplicate name fails here, for this Signal only.
+            foreach (var line in lines.OfType<JsonObject>())
+            {
+                _ = line.Count;
+            }
+
+            return lines;
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // shaping and D-42 order
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact);
+
+    private static IReadOnlyList<WorklistLaneGroups> Shape(
+        WorklistSet set,
+        IReadOnlyList<VisibleRow> rows,
+        IReadOnlyDictionary<(Guid TypeId, Guid CoreId), (string? Name, string? Number)> cores,
+        IReadOnlyDictionary<Guid, CatalogRow> catalog)
+    {
+        var lanes = new List<WorklistLaneGroups>();
+        foreach (var lane in new[] { DecisionLane.Decide, DecisionLane.Do })
+        {
+            var groups = rows.Where(r => r.Row.Lane == lane)
+                .GroupBy(r => r.Row.HasNoCore ? (Guid.Empty, Guid.Empty) : (r.Row.CoreTypeId!.Value, r.Row.CoreId!.Value))
+                .Select(g =>
+                {
+                    WorklistCoreRecord? core = null;
+                    if (g.Key != (Guid.Empty, Guid.Empty))
+                    {
+                        var type = catalog[g.Key.Item1];
+                        var (name, number) = cores[g.Key];
+                        core = new WorklistCoreRecord(type.LogicalName, g.Key.Item2, type.Label, name, number);
+                    }
+
+                    return (Core: core, Rows: g.ToList());
+                })
+                .ToList();
+
+            if (set == WorklistSet.Lanes)
+            {
+                // D-42: severity, then the subject's sprk_highpriority, then oldest, then record number; a core record's items stay
+                // together at its best-ranked item. Deterministic: ties end on the record and Signal ids. No model input.
+                foreach (var group in groups)
+                {
+                    group.Rows.Sort(CompareItems);
+                }
+
+                groups.Sort((a, b) =>
+                {
+                    var byBest = CompareRankKeys(a.Rows[0], b.Rows[0]);
+                    if (byBest != 0) return byBest;
+                    var byNumber = CompareNullableOrdinal(a.Core?.Number, b.Core?.Number);
+                    if (byNumber != 0) return byNumber;
+                    var byType = string.CompareOrdinal(a.Core?.RecordType ?? "~", b.Core?.RecordType ?? "~");
+                    if (byType != 0) return byType;
+                    var byCore = (a.Core?.RecordId ?? Guid.Empty).CompareTo(b.Core?.RecordId ?? Guid.Empty);
+                    return byCore != 0 ? byCore : a.Rows[0].Row.SignalId.CompareTo(b.Rows[0].Row.SignalId);
+                });
+            }
+
+            // Secondary sets keep the configuration's order (membership and order come from the row, FR-24), grouped by first
+            // appearance; the closed and suppressed queries already order by the core pair first.
+            lanes.Add(new WorklistLaneGroups(LaneName(lane), groups
+                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r.Row)).ToList()))
+                .ToList()));
+        }
+
+        return lanes;
+    }
+
+    private static int CompareItems(VisibleRow a, VisibleRow b)
+    {
+        var byRank = CompareRankKeys(a, b);
+        return byRank != 0 ? byRank : a.Row.SignalId.CompareTo(b.Row.SignalId);
+    }
+
+    /// <summary>D-42's item keys: severity (Critical first, unknown last), flagged first, oldest first (undated last).</summary>
+    private static int CompareRankKeys(VisibleRow a, VisibleRow b)
+    {
+        var bySeverity = SeverityRank(a.Row.Severity).CompareTo(SeverityRank(b.Row.Severity));
+        if (bySeverity != 0) return bySeverity;
+        var byFlag = (a.HighPriority ? 0 : 1).CompareTo(b.HighPriority ? 0 : 1);
+        if (byFlag != 0) return byFlag;
+        return (a.Row.FirstDetected ?? DateTimeOffset.MaxValue).CompareTo(b.Row.FirstDetected ?? DateTimeOffset.MaxValue);
+    }
+
+    internal static int SeverityRank(int? severity) => severity switch
+    {
+        SeverityCritical => 0,
+        SeverityWarning => 1,
+        SeverityInfo => 2,
+        _ => 3,
+    };
+
+    private static int CompareNullableOrdinal(string? a, string? b) =>
+        a is null ? (b is null ? 0 : 1) : b is null ? -1 : string.CompareOrdinal(a, b);
+
+    private static WorklistItemRow ToItem(SignalRow row)
+    {
+        var workType = row.WorkType is { } w && WorkTypeKeys.TryGetValue(w, out var key) ? key : null;
+        return new WorklistItemRow(
+            row.SignalId,
+            LaneName(row.Lane!.Value),
+            row.Status is { } s && StatusLabels.TryGetValue(s, out var label) ? label : null,
+            row.Title,
+            row.SubjectName,
+            row.RuleShortName,
+            workType,
+            workType == LateWorkType ? "late" : "overdue",
+            row.FirstDetected,
+            row.DueDate,
+            row.EvidenceRefs,
+            row.PolicyVersionId,
+            row.ResolvedOn,
+            row.ResolutionType,
+            row.SuppressedUntil);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // helpers
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record AccessRows(IReadOnlyList<JsonElement> Rows, SignalReadResult? Outcome);
+
+    /// <summary>
+    /// A batched caller read: success = the rows the caller may read; 403 (no Read on the table at all) = none; an unresolved
+    /// caller = the single 403; anything else is a fault (503), never "none".
+    /// </summary>
+    private AccessRows ReadAccessRows(DataverseUserResponse response, string what)
+    {
+        if (response.IsSuccess)
+        {
+            return response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array
+                ? new AccessRows(value.EnumerateArray().Select(e => e.Clone()).ToList(), null)
+                : new AccessRows([], SignalReadResult.Unavailable($"{what} read unparseable"));
+        }
+
+        if (IsCallerUnresolved(response.ErrorCode))
+        {
+            return new AccessRows([], SignalReadResult.CallerUnresolved);
+        }
+
+        if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+        {
+            _logger.LogDebug("Signal read: the caller has no read on the {What} table; those rows are dropped.", what);
+            return new AccessRows([], null);
+        }
+
+        _logger.LogWarning("Signal read: the {What} read failed ({ErrorCode}); unavailable.", what, response.ErrorCode);
+        return new AccessRows([], SignalReadResult.Unavailable($"{what} read failed"));
+    }
+
+    private static bool IsCallerUnresolved(string? code) =>
+        code is DataverseUserClientErrorCodes.UserContextRequired
+            or DataverseUserClientErrorCodes.OboExchangeFailed
+            or DataverseUserClientErrorCodes.OboNotConfigured;
+
+    /// <summary><c>Microsoft.Dynamics.CRM.In(PropertyName='pk',PropertyValues=['…',…])</c> — one batched read for many ids.</summary>
+    internal static string InFilter(string primaryKey, IEnumerable<Guid> ids)
+    {
+        var values = string.Join(',', ids.Select(id => $"'{id:D}'"));
+        return $"Microsoft.Dynamics.CRM.In(PropertyName='{primaryKey}',PropertyValues=[{values}])";
+    }
+
+    private static string? ReadDisplay(JsonElement row, string column)
+    {
+        if (row.TryGetProperty(column, out var v))
+        {
+            return v.ValueKind switch
+            {
+                JsonValueKind.String => v.GetString(),
+                JsonValueKind.Number => v.GetRawText(),
+                _ => null,
+            };
+        }
+
+        // A lookup display field comes back as its formatted value only when annotations are asked for; not here.
+        return null;
+    }
+
+    private static bool IsLogicalName(string value) =>
+        value.Length > 0 && char.IsAsciiLetterLower(value[0]) && value.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_');
+
+    private static string? ReadString(JsonElement row, string name) =>
+        row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static bool TryReadGuid(JsonElement? row, string name, out Guid id)
+    {
+        id = Guid.Empty;
+        return row is { ValueKind: JsonValueKind.Object } r
+            && r.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String
+            && Guid.TryParse(value.GetString(), out id)
+            && id != Guid.Empty;
+    }
+
+    /// <summary>One Signal row as the worklist FetchXML returns it through the Web API.</summary>
+    internal sealed record SignalRow(
+        Guid SignalId,
+        DecisionLane? Lane,
+        int? Status,
+        string? Title,
+        DateTimeOffset? FirstDetected,
+        string? DueDate,
+        Guid? SubjectTypeId,
+        Guid? SubjectId,
+        string? SubjectName,
+        Guid? CoreTypeId,
+        Guid? CoreId,
+        bool HasNoCore,
+        Guid? PolicyVersionId,
+        string? EvidenceRefs,
+        string? RuleShortName,
+        int? WorkType,
+        int? Severity,
+        DateTimeOffset? ResolvedOn,
+        int? ResolutionType,
+        DateTimeOffset? SuppressedUntil)
+    {
+        internal static bool TryParse(JsonElement raw, out SignalRow row)
+        {
+            row = null!;
+            if (!TryReadGuid(raw, "sprk_signalid", out var id))
+            {
+                return false;
+            }
+
+            var hasType = TryReadGuid(raw, "_sprk_corerecordtype_value", out var coreType);
+            var coreText = ReadString(raw, "sprk_corerecordid");
+            var hasCoreId = Guid.TryParse(coreText, out var coreId) && coreId != Guid.Empty;
+            var noCore = !hasType && string.IsNullOrWhiteSpace(coreText);
+
+            row = new SignalRow(
+                id,
+                Int(raw, "sprk_lane") is { } lane && Enum.IsDefined(typeof(DecisionLane), lane) ? (DecisionLane)lane : null,
+                Int(raw, "sprk_signalstatus"),
+                ReadString(raw, "sprk_name"),
+                Instant(raw, "sprk_firstdetected"),
+                ReadString(raw, "sprk_duedate"),
+                TryReadGuid(raw, "_sprk_regardingrecordtype_value", out var subjectType) ? subjectType : null,
+                Guid.TryParse(ReadString(raw, "sprk_regardingrecordid"), out var subjectId) && subjectId != Guid.Empty ? subjectId : null,
+                ReadString(raw, "sprk_regardingrecordname"),
+                // A half pair (type without id, or id without type) is malformed: neither "no core" nor a core to check, so the
+                // row is dropped by both paths (never treated as owner-only, as in SignalCoreRecordAccess).
+                hasType && hasCoreId ? coreType : null,
+                hasType && hasCoreId ? coreId : null,
+                noCore,
+                TryReadGuid(raw, "_sprk_policyversion_value", out var version) ? version : null,
+                ReadString(raw, "sprk_evidencerefs"),
+                AsString(Aliased(raw, "sprk_shortname")),
+                Int(Aliased(raw, "sprk_worktype")),
+                Int(Aliased(raw, "sprk_severity")),
+                Instant(raw, "sprk_resolvedon"),
+                Int(raw, "sprk_resolutiontype"),
+                Instant(raw, "sprk_suppresseduntil"));
+            return true;
+        }
+
+        /// <summary>The <c>policy</c> link-entity column: the Web API names it <c>policy.{column}</c> (verified live on spaarkedev1,
+        /// 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted too.</summary>
+        private static JsonElement? Aliased(JsonElement raw, string column) =>
+            raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
+
+        private static string? AsString(JsonElement? value) => value is { ValueKind: JsonValueKind.String } v ? v.GetString() : null;
+
+        private static int? Int(JsonElement raw, string name) => raw.TryGetProperty(name, out var v) ? Int(v) : null;
+
+        private static int? Int(JsonElement? value) =>
+            value is { ValueKind: JsonValueKind.Number } v && v.TryGetInt32(out var i) ? i : null;
+
+        private static DateTimeOffset? Instant(JsonElement raw, string name) =>
+            ReadString(raw, name) is { } text
+            && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at)
+                ? at
+                : null;
+    }
+}

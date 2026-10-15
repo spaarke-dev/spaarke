@@ -155,8 +155,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   onClose,
   config,
   embedded,
-  maxWidth,
-  height,
+  uiScale,
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
@@ -223,7 +222,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   React.useEffect(() => {
     if (open && config.resolveSpeContainerId) {
-      config.resolveSpeContainerId().then(id => setSpeContainerId(id));
+      config
+        .resolveSpeContainerId()
+        .then(id => setSpeContainerId(id))
+        // Task 112: a failed resolution was an unhandled rejection. The id stays '' — the same state
+        // as a business unit with no container configured.
+        .catch(err => console.warn('[CreateRecordWizard] SPE container resolution failed:', err));
     }
   }, [open, config]);
 
@@ -846,8 +850,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       onFinish={handleFinish}
       finishingLabel={config.finishingLabel ?? 'Creating\u2026'}
       finishLabel="Finish"
-      {...(maxWidth ? { maxWidth } : {})}
-      {...(height ? { height } : {})}
+      {...(uiScale !== undefined ? { uiScale } : {})}
     />
   );
 };

@@ -9,7 +9,9 @@
  * `sprk_event` filtered by the legacy event-as-todo boolean toggle. To-dos
  * are now first-class `sprk_todo` records returned by the BFF route
  * `GET /api/v1/external/projects/{id}/todos` with ADR-024 polymorphic-resolver
- * fields populated server-side.
+ * fields populated server-side. Task 057: the same list reads a matter's or a work assignment's to-dos
+ * (`GET /api/v1/external/{matters|workassignments}/{id}/todos`) when `root` says so - read-only there (create and
+ * status toggle are project-only in this component).
  *
  * Design reference: @spaarke/ui-components/TodoDetail
  *   (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx)
@@ -18,6 +20,10 @@
  *   - ViewOnly    (100000000): Read-only. Can view to-dos, cannot create or modify.
  *   - Collaborate (100000001): Can create to-dos and toggle status.
  *   - FullAccess  (100000002): Same as Collaborate plus invite rights (not relevant here).
+ *
+ * Delete-own (task 054, FR-26): independent of the access level, a to-do the caller CREATED (creator stamp = the
+ * signed-in principal, passed as `caller`) shows Delete, which asks first. 204 removes it; a refusal shows an error and
+ * the to-do stays. With no `caller` there is no Delete.
  *
  * Status values (FR-24):
  *   1         = Open
@@ -48,6 +54,7 @@ import {
   DialogActions,
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
   Tooltip,
   Divider,
 } from '@fluentui/react-components';
@@ -57,11 +64,26 @@ import {
   CheckmarkCircleFilled,
   TaskListSquareLtrRegular,
   CalendarLtrRegular,
+  DeleteRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
+import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
-import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
+import {
+  getRootTodos,
+  createTodo,
+  updateTodo,
+  deleteOwnTodo,
+  EVENTS_TODOS_ROOT_NOUN,
+  type EventsTodosRoot,
+  type ODataTodo,
+} from '../api/web-api-client';
+import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
+import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
+import { TruncatedListNotice } from './TruncatedListNotice';
+import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel } from '../types';
+import { problemMessage } from '../auth/bff-client';
 import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
@@ -263,29 +285,22 @@ const PRIORITY_OPTIONS: PriorityOption[] = [
 // Helper utilities
 // ---------------------------------------------------------------------------
 
-/** Format an ISO date string as a short human-readable date. */
+/**
+ * A to-do due date is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 106). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function formatDueDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return '';
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return '';
+  const d = parseDueDate(isoDate);
+  if (!d) return '';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Check if a to-do due date is overdue. */
+/** A to-do is overdue once its due DAY has passed (a to-do due today is not overdue — task 106, D-43). */
 function isOverdue(isoDate: string | null | undefined, isCompleted: boolean): boolean {
-  if (!isoDate || isCompleted) return false;
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return false;
-  return d < new Date();
-}
-
-/** Convert YYYY-MM-DD input value to ISO string for Dataverse. */
-function dateInputToIso(value: string): string | undefined {
-  if (!value) return undefined;
-  // Input type=date provides YYYY-MM-DD; convert to noon UTC to avoid timezone shifts
-  const [year, month, day] = value.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return d.toISOString();
+  if (isCompleted) return false;
+  const d = parseDueDate(isoDate);
+  if (!d) return false;
+  return daysBetweenLocalMidnight(new Date(), d) < 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,9 +326,12 @@ interface TaskItemProps {
   accessLevel: AccessLevel;
   isToggling: boolean;
   onToggleStatus: (task: ODataTodo) => void;
+  /** Show Delete (the caller created this to-do). */
+  canDelete?: boolean;
+  onDelete?: (task: ODataTodo) => void;
 }
 
-const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus }) => {
+const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus, canDelete, onDelete }) => {
   const styles = useStyles();
 
   const isCompleted = isTerminalStatus(task.statuscode);
@@ -395,6 +413,19 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onTo
           )}
         </div>
       </div>
+
+      {/* Delete: only a to-do the caller created (the server re-checks every delete). */}
+      {canDelete && onDelete && (
+        <Tooltip content="Delete" relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<DeleteRegular />}
+            onClick={() => onDelete(task)}
+            aria-label={`Delete task ${task.sprk_name}`}
+          />
+        </Tooltip>
+      )}
     </div>
   );
 };
@@ -558,10 +589,14 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
 // ---------------------------------------------------------------------------
 
 export interface SmartTodoProps {
-  /** Dataverse GUID of the sprk_project record whose to-dos to display. */
+  /** Dataverse GUID of the record whose to-dos to display (a sprk_project unless `root` says otherwise). */
   projectId: string;
+  /** Which kind of record `projectId` is (task 057). Defaults to a project. */
+  root?: EventsTodosRoot;
   /** The current user's access level — controls create/edit permissions. */
   accessLevel: AccessLevel;
+  /** The signed-in principal. With it, to-dos the caller created show Delete (task 054); without it, none do. */
+  caller?: CallerIdentity | null;
 }
 
 /**
@@ -572,13 +607,26 @@ export interface SmartTodoProps {
  * users can only read; Collaborate and Full Access users can create to-dos
  * and toggle their completion status.
  */
-export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) => {
+export const SmartTodo: React.FC<SmartTodoProps> = ({
+  projectId,
+  root = 'projects',
+  accessLevel: levelProp,
+  caller,
+}) => {
+  // Create and the status toggle are project routes' actions: a matter or work assignment list is read-only here whatever
+  // level the host passes (task 057). Delete-own is independent of the level.
+  const accessLevel = root === 'projects' ? levelProp : AccessLevel.ViewOnly;
   const styles = useStyles();
 
   // To-do list state
   const [tasks, setTasks] = React.useState<ODataTodo[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState(false);
+  // A 401/403 on the list is the shared sign-in / denied state (task 057); a failed read offers "Try again".
+  const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  const noun = EVENTS_TODOS_ROOT_NOUN[root];
 
   // Status toggle state — tracks which to-do ID is currently being toggled
   const [togglingTaskId, setTogglingTaskId] = React.useState<string | null>(null);
@@ -591,6 +639,13 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
 
   const allowEdit = canEdit(accessLevel);
 
+  // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.
+  const del = useDeleteOwn<ODataTodo>({
+    noun: 'task',
+    remove: task => deleteOwnTodo(task.sprk_todoid),
+    onRemoved: task => setTasks(prev => prev.filter(t => t.sprk_todoid !== task.sprk_todoid)),
+  });
+
   // ---------------------------------------------------------------------------
   // Load to-dos
   // ---------------------------------------------------------------------------
@@ -598,23 +653,33 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const loadTasks = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    setAccessFailure(null);
+    // Task 105: a flag from an earlier read must not sit beside this read's error.
+    setTruncated(false);
 
     try {
-      // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records
-      // regarding the given project (server-side resolver). No client-side
+      // BFF route /api/v1/external/{root}/{id}/todos returns sprk_todo records
+      // regarding the given record (server-side resolver). No client-side
       // todoflag filter is needed — the new route returns only to-dos.
-      const todos = await getProjectTodos(projectId, {
+      // The BFF returns every to-do up to its row cap and says `truncated` when it stops short (task 105).
+      const todos = await getRootTodos(root, projectId, {
         $orderby: 'createdon desc',
-        $top: 200,
       });
-      setTasks(todos);
+      setTasks(todos.items);
+      setTruncated(todos.truncated);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load tasks';
-      setLoadError(message);
+      const failure = accessFailureOf(err);
+      if (failure) {
+        setAccessFailure(failure);
+      } else {
+        // The server's ProblemDetails `detail` when it wrote one; never the raw response body (an HTML 503 page or a JSON
+        // problem document is not a message).
+        setLoadError(problemMessage(err, 'Tasks could not be loaded just now.'));
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, root]);
 
   React.useEffect(() => {
     void loadTasks();
@@ -681,7 +746,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
         const newTodo = await createTodo(projectId, {
           sprk_name: formData.title,
           ...(formData.description ? { sprk_notes: formData.description } : {}),
-          ...(formData.dueDate ? { sprk_duedate: dateInputToIso(formData.dueDate) ?? null } : {}),
+          // The date input's own "yyyy-MM-dd" is the calendar day the user picked — the only shape a Date Only column
+          // accepts (task 106; this used to send toISOString() of noon UTC, which Dataverse now refuses with 400).
+          ...(formData.dueDate ? { sprk_duedate: formData.dueDate } : {}),
           sprk_priorityscore: formData.priority,
         });
 
@@ -728,9 +795,20 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
       <SectionCard title={cardTitle} actions={cardActions}>
         <div className={styles.container}>
           {/* Errors */}
+          {accessFailure && (
+            <BffAccessState
+              failure={accessFailure}
+              deniedMessage={`You do not have permission to view tasks on this ${noun}.`}
+            />
+          )}
           {loadError && (
             <MessageBar intent="error" className={styles.errorBanner}>
               <MessageBarBody>{loadError}</MessageBarBody>
+              <MessageBarActions>
+                <Button appearance="secondary" size="small" onClick={() => void loadTasks()}>
+                  Try again
+                </Button>
+              </MessageBarActions>
             </MessageBar>
           )}
           {toggleError && (
@@ -738,6 +816,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
               <MessageBarBody>{toggleError}</MessageBarBody>
             </MessageBar>
           )}
+          <DeleteFailureNotice del={del} />
+          {!isLoading && <TruncatedListNotice truncated={truncated} shown={tasks.length} noun="tasks" />}
 
           {/* Loading state */}
           {isLoading && (
@@ -747,7 +827,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
 
           {/* Empty state */}
-          {!isLoading && !loadError && tasks.length === 0 && (
+          {/* Task 105: an incomplete empty list is not "no tasks" — the notice says it could not be read. */}
+          {!isLoading && !loadError && !accessFailure && !truncated && tasks.length === 0 && (
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>
@@ -777,6 +858,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
                         accessLevel={accessLevel}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
+                        canDelete={isCreatedByCaller(task, caller)}
+                        onDelete={t => del.ask(t, t.sprk_name)}
                       />
                     ))}
 
@@ -796,6 +879,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
                         accessLevel={accessLevel}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
+                        canDelete={isCreatedByCaller(task, caller)}
+                        onDelete={t => del.ask(t, t.sprk_name)}
                       />
                     ))}
                   </div>
@@ -805,6 +890,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
         </div>
       </SectionCard>
+
+      <DeleteOwnConfirm del={del} />
 
       {/* Create task dialog — only rendered when allowEdit */}
       {allowEdit && (

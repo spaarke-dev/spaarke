@@ -213,7 +213,7 @@ Compress-Archive -Path "infrastructure\dataverse\ribbon\temp\{SolutionName}_extr
 ### Step 5: Import Solution
 
 ```powershell
-pac solution import --path "infrastructure\dataverse\ribbon\temp\{SolutionName}_modified.zip" --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "infrastructure\dataverse\ribbon\temp\{SolutionName}_modified.zip" -SolutionUniqueName {SolutionName}   # publishes the ribbon's entity only; the effective ribbon can lag the publish by up to about 75 s
 ```
 
 ### Step 6: Clean Up
@@ -374,7 +374,7 @@ Library="$webresource:prefix_ScriptName.js"
 | Icons show as placeholder (jigsaw) | Use SVG web resources with `.svg` extension in `ModernImage` |
 | **Icon not showing at all** | Remove `width`/`height` from SVG; use only `viewBox` |
 | **Icon wrong color in dark mode** | Use `fill="currentColor"` instead of hardcoded colors |
-| Ribbon not appearing after import | Run `pac solution publish` or publish from Power Apps maker portal |
+| Ribbon not appearing after import | Re-run `scripts/Import-SolutionScoped.ps1` (publishes the ribbon's entity only), then wait up to about 75 s; never a tenant-wide publish |
 | XML parsing error | Validate `customizations.xml` structure; check for unclosed tags |
 | Changes not visible in app | Clear browser cache; try Ctrl+F5 hard refresh |
 | **Subgrid button not appearing** | Use `Mscrm.SubGrid.{entity}` location, not `Mscrm.HomepageGrid` |

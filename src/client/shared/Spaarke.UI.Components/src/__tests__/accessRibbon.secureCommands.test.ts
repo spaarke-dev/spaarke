@@ -1,5 +1,6 @@
 /**
- * `sprk_access_ribbon.js` 1.5.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
+ * `sprk_access_ribbon.js` 1.8.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group (task 175's
+ * floor rule: accessRibbon.followsParent.test.ts).
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -137,7 +138,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.5.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.8.0'); // the real script ran
   return {
     ribbon,
     retrieveRecord,
@@ -165,11 +166,14 @@ const RECORD_TYPES: Record<string, string> = {
   sprk_workassignment: 'workassignment',
 };
 
-/** 142's cached can-manage-access verdict for this record (Write on it, the server's own answer). */
+/**
+ * 142's cached can-manage-access verdict for this record (Write on it, the server's own answer) — since 1.8.0 (task 175)
+ * cached with the record's floor facts: here a record with no floor, cached just now.
+ */
 function canManage(entityName: string, can: boolean): void {
   window.sessionStorage.setItem(
     `sprk_access_canmanage_${RECORD_TYPES[entityName]}_${RECORD_ID}`,
-    can ? 'true' : 'false'
+    JSON.stringify({ can, unverifiable: !can, floorSecure: !can, at: Date.now() })
   );
 }
 
@@ -1027,6 +1031,9 @@ describe('Make Secure — the people it was NOT shared with are named (round 33 
       'sdap.provision.principal_no_access': SKIPPED.noAccess('{name}', '{record}'),
       'sdap.provision.principal_no_access_unverifiable': SKIPPED.unverifiable('{name}', '{record}'),
       'sdap.provision.principal_share_failed': SKIPPED.shareFailed('{name}', '{record}'),
+      // Task 114 (owner round 67, owner wording, 2026-10-06): a new key; the three texts above are unchanged.
+      'sdap.provision.principal_external_on_restricted':
+        "{name} is flagged as an external user and can't be given access to a Restricted record.",
     });
     expect(ribbon.SKIPPED_PRINCIPAL_GENERIC).toBe(SKIPPED.generic('{name}', '{record}'));
   });

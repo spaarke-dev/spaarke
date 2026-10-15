@@ -83,7 +83,7 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
 
 9. **User receives welcome email** with: username, temporary password, access URL, "use InPrivate/Incognito" tip, quick start guide link, expiration date, support contact.
 
-10. **User logs in** to `https://spaarke-demo.crm.dynamics.com/`, changes password on first login, explores Spaarke with sample data.
+10. **User logs in** to the Dataverse URL of the Target Environment the admin selected, changes password on first login, explores Spaarke with sample data.
 
 11. **Day 11** (3 days before expiry): Pre-expiration warning email sent with extension contact info and production access CTA.
 
@@ -104,13 +104,13 @@ Before the registration system can operate, the following must be in place:
 
 | Prerequisite | Description |
 |-------------|-------------|
-| **Demo Dataverse environment** | `spaarke-demo.crm.dynamics.com` provisioned with Spaarke solution deployed |
+| **Demo Dataverse environment** | A target Dataverse environment registered as a `sprk_dataverseenvironment` row, with the Spaarke solution deployed. The old `spaarke-demo.crm.dynamics.com` was retired and deleted on 2026-10-14 (its registry row "Demo 1" is inactive and kept); the demo is now the ACME stamp built by the provisioning control plane (T186) |
 | **Business Unit + Owner Team** | "Spaarke Demo" BU and "Spaarke Demo Team" with `Spaarke Demo User` security role |
 | **SPE container** | Pre-existing container with sample documents loaded |
 | **Entra ID security group** | "Spaarke Demo Users" group for Conditional Access MFA exclusion (created by `Setup-EntraInfrastructure.ps1`) |
 | **Conditional Access policy** | Excludes "Spaarke Demo Users" group from MFA requirements |
 | **Graph API Application permissions** | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Directory.ReadWrite.All` on BFF app registration, with admin consent granted |
-| **Exchange Application Access Policy** | Grants the BFF app registration permission to send email from `demo@demo.spaarke.com` shared mailbox |
+| **Exchange Application Access Policy** | Grants the BFF app registration permission to send email from the `Communication:DefaultMailbox` shared mailbox |
 | **BFF API deployed** | With `DemoProvisioning` configuration section populated |
 | **`demo.spaarke.com` domain** | Configured in Entra ID as a verified domain |
 
@@ -128,7 +128,7 @@ Before the registration system can operate, the following must be in place:
 |--------|------|----------|-------------|
 | `sprk_name` | Text (200) | Yes | Display name (e.g., "Dev", "Demo 1") |
 | `sprk_environmenttype` | Choice | Yes | Development, Demo, Sandbox, Trial, Partner, Training, Production |
-| `sprk_dataverseurl` | URL | Yes | e.g., `https://spaarke-demo.crm.dynamics.com` |
+| `sprk_dataverseurl` | URL | Yes | e.g., `https://myenv.crm.dynamics.com` |
 | `sprk_appid` | Text (100) | No | MDA app GUID for deep links |
 | `sprk_description` | Multiline (2000) | No | Admin notes |
 | `sprk_isactive` | Boolean | Yes | Default: Yes |
@@ -388,7 +388,7 @@ Submitted (0) ─── Approve ──► Approved (1) ──► Provisioned (3)
 
 ### How to Approve a Request
 
-1. Open the **Spaarke Demo MDA** (`https://spaarke-demo.crm.dynamics.com/`)
+1. Open the **Spaarke Demo MDA** of the target demo environment (the old `spaarke-demo.crm.dynamics.com` was retired 2026-10-14; the demo is now the ACME stamp built by provisioning, T186)
 2. Navigate to **Registration Requests** in the sitemap
 3. Open the **"Pending Demo Requests"** view
 4. Select a request and click the **"Approve Demo Access"** ribbon button (or open the record and use the form command bar button)
@@ -472,7 +472,7 @@ To add a second (or subsequent) demo environment, no code changes are required:
 
 ## Email Templates
 
-The system sends 4 email types via the existing Spaarke Communication Service (`POST /api/communications/send`, SharedMailbox mode from `demo@demo.spaarke.com`).
+The system sends 4 email types via the existing Spaarke Communication Service (`POST /api/communications/send`, SharedMailbox mode from the configured `Communication:DefaultMailbox`).
 
 | Template | File | Trigger | Subject |
 |----------|------|---------|---------|
@@ -497,7 +497,7 @@ To modify a template:
 
 ### Email Sender Configuration
 
-- **From address**: `demo@demo.spaarke.com` (hardcoded in `RegistrationEmailService`)
+- **From address**: the `Communication:DefaultMailbox` setting (Spaarke template value `mailbox-central@spaarke.com`; it must also be listed in `Communication:ApprovedSenders`). Required outside Development/Testing; it was the hardcoded `demo@demo.spaarke.com` before 2026-10-11.
 - **Send mode**: `SharedMailbox` via CommunicationService
 - **Requirement**: The BFF API app registration must have an Exchange Application Access Policy granting send-as permission for the shared mailbox
 
@@ -553,9 +553,12 @@ Run `Setup-EntraInfrastructure.ps1` to add permissions and grant consent, or che
 
 ### "INVALID_SENDER" or email send failures
 
-**Cause**: The Exchange Application Access Policy does not grant the BFF app registration send-as permission for the `demo@demo.spaarke.com` shared mailbox.
+**Cause**: The Exchange Application Access Policy does not grant the BFF app registration send-as permission for the `Communication:DefaultMailbox` shared mailbox.
 
 **Fix**: Create or update the Exchange Application Access Policy:
+
+> **Legacy mechanism — check before use.** Environments provisioned by the control plane get mailbox access through Exchange *RBAC for Applications*, granted by handler H14a to the stamp's managed identity only ([`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §4.2.1, §7.9). Microsoft calls Application Access Policies legacy. Under RBAC for Applications the mailbox roles must not also be granted as Entra app roles (§7.7): Exchange adds the two together, so an Entra grant reaches every mailbox. The steps below apply only to an environment set up before 2026-10-04 that still uses a policy.
+
 ```powershell
 New-ApplicationAccessPolicy -AppId "{bff-app-id}" -PolicyScopeGroupId "{mail-enabled-security-group}" -AccessRight RestrictAccess
 ```
@@ -643,12 +646,9 @@ POST /storage/fileStorage/containers/{containerId}/permissions
 | Demo BU ID (in dev) | `9271b764-952f-f111-88b5-7c1e520aa4df` |
 | Demo Team ID (in dev) | `9471b764-952f-f111-88b5-7c1e520aa4df` |
 
-### Demo Environment
+### Demo Environment (retired 2026-10-14)
 
-| Resource | Value |
-|----------|-------|
-| Dataverse URL | `https://spaarke-demo.crm.dynamics.com` |
-| Demo BFF App Registration ID | `da03fe1a-4b1d-4297-a4ce-4b83cae498a9` |
+The old demo environment was retired and deleted on 2026-10-14: the Dataverse environment `spaarke-demo.crm.dynamics.com`, its BFF App Service, and the "Spaarke BFF API - Demo" and "Spaarke UI - Demo" app registrations no longer exist. The demo is now the dedicated customer stamp ACME Corporation (`customerId` `acme`), built by the provisioning control plane (T186); its values come from provisioning, not from this guide. The "Spaarke Demo Users" group and the `demo.spaarke.com` domain below are still used by the dev BFF's registration flow.
 
 ### Shared Resources
 

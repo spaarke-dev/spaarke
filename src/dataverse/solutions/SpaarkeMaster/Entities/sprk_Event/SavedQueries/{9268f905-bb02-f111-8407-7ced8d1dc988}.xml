@@ -1,0 +1,54 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{9268f905-bb02-f111-8407-7ced8d1dc988}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_eventname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_eventid">
+          <cell name="sprk_eventname" width="300" />
+          <cell name="sprk_eventtype_ref" width="104" />
+          <cell name="sprk_eventstatus" width="111" />
+          <cell name="sprk_duedate" width="100" />
+          <cell name="sprk_finalduedate" width="126" />
+          <cell name="sprk_completeddate" width="132" />
+          <cell name="createdon" width="125" />
+          <cell name="ownerid" width="100" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical" distinct="true">
+        <entity name="sprk_event">
+          <attribute name="sprk_eventid" />
+          <attribute name="sprk_eventname" />
+          <attribute name="createdon" />
+          <attribute name="sprk_duedate" />
+          <attribute name="ownerid" />
+          <order attribute="sprk_duedate" descending="true" />
+          <filter type="and">
+            <condition attribute="sprk_eventtype_ref" operator="in">
+              <value uiname="Reminder" uitype="sprk_eventtype_ref">{da6bc005-99ff-f011-8406-7c1e525abd8b}</value>
+              <value uiname="Deadline" uitype="sprk_eventtype_ref">{e0043c4b-99ff-f011-8406-7c1e525abd8b}</value>
+              <value uiname="Task" uitype="sprk_eventtype_ref">{124f5fc9-98ff-f011-8406-7c1e525abd8b}</value>
+            </condition>
+            <condition attribute="sprk_eventstatus" operator="eq" value="1" />
+          </filter>
+          <attribute name="sprk_completeddate" />
+          <attribute name="sprk_eventtype_ref" />
+          <attribute name="sprk_eventstatus" />
+          <attribute name="sprk_finalduedate" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Tasks Open subgrid" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

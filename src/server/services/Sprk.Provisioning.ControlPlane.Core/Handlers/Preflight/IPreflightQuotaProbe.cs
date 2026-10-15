@@ -6,10 +6,9 @@
 // IEnumerable<IPreflightQuotaProbe> and orchestrates them in parallel.
 //
 // DESIGN CHOICE (SDK/REST, not shell-out — task 120, Wave G-2):
-//   The four concrete production implementations —
+//   The concrete production implementations —
 //   <see cref="ArmCognitiveServicesTpmProbe"/>,
-//   <see cref="BapRestEnvironmentRateProbe"/>,
-//   <see cref="ArmComputeVCpuProbe"/>, and
+//   <see cref="ArmComputeVCpuProbe"/>, <see cref="ArmOpenAiPinFreshnessProbe"/> and
 //   <see cref="SpeOwnerCredentialProbe"/> (task 248; replaced KeyVaultCertBootstrapProbe) — are pure .NET SDK/REST calls
 //   under the L2 UAMI (Option D hybrid per DS-1b §1 H0 row); the SPE probe signs in
 //   as the container type's owning app through the UAMI's federated credential. They REPLACE the original shell-out

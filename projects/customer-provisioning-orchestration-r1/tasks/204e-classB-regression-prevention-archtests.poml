@@ -4,7 +4,8 @@
     <title>Class-B B01 + B02 + B15 regression-prevention ArchTests + Tier-1-IOptions deploy checklist</title>
     <phase>Pre-Live-Fire — Class-B regression prevention (post-186 safe)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <note>2026-10-09 (worktree agent): B01 + B02 built, B15 text authored. Paths in this POML are stale: ArchTests live in tests/Spaarke.ArchTests (no tests/unit/..., no tests/nightly/...). B01 = tests/Spaarke.ArchTests/Adr032/{AsymmetricRegistrationTests,GateCombinationConstructibilityTests,DiRegistrationScan}.cs; B02 = tests/Spaarke.ArchTests/IOptionsDriftTests.cs, per-PR not nightly (ci-tier1-blocking.yml already runs the full ArchTests suite; no workflow edited; scripts/ci/check-ioptions-drift.ps1 not built, redundant). B15 is section F.5 (F.4 is taken) and is main-session-only: the exact text is in the 204e report; until applied, B15 is NOT done. The tests surfaced 8 defect rows (204e-F1..F4 DI asymmetries, F5..F8 keys with no stamp deployment channel), filed in notes/task-202-punch-list.md ("204e EXECUTION RESULTS"); they are ledgered as ratchets, none fixed here (multi-module ADR-032 decisions).</note>
     <rigor>FULL</rigor>
     <rigor-reason>Every sub-row modifies `tests/**` (B01 + B02 = new ArchTests; B15 = CI script). Per root CLAUDE.md §8 TEST-MODIFYING override row (2026-06-26): tasks tagged `testing` / `integration-test` / `archtest` trigger FULL rigor UNCONDITIONALLY. B15 also touches `.claude/constraints/bff-extensions.md` (main-session-only per Sub-Agent Write Boundary).</rigor-reason>
     <model-tier>sonnet</model-tier>

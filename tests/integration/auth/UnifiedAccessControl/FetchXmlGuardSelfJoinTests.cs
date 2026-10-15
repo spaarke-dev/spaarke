@@ -1,7 +1,7 @@
 // unified-access-control-r2 task 011 — spec FR-10, finding A-17 (High).
 //
-// KEEP-path classification (ADR-038 §2 path #1 security-auth / tests/CLAUDE.md line 120 "every new auth
-// path → ≥1 integration test"): this asserts an AUTHORIZATION decision on the external module read seam,
+// KEEP-path classification (ADR-038 §2 path #1 security-auth / tests/CLAUDE.md "Mandatory Authoring Rules":
+// "every new auth path → ≥1 integration test"): this asserts an AUTHORIZATION decision on the external module read seam,
 // so it lives under tests/integration/auth/** and NOT under tests/unit/**. (Task 011's POML named
 // tests/unit/Sprk.Bff.Api.Tests/AccessControl/ — not a KEEP path; re-scoped per CLAUDE.md §6.5 path C.
 // The file is compiled into the SAME assembly either way by the csproj auth glob, so InternalsVisibleTo

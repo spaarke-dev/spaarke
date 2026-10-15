@@ -39,7 +39,10 @@ public class RecordOwnerAssignmentCensusTests
     /// sprk_project, sprk_matter and sprk_workassignment, plus the content rows that hang off a communication, an
     /// analysis, a document, an event, an invoice and a budget). All UserOwned.
     /// </summary>
-    private static readonly string[] ChildTables =
+    /// <remarks>Task 182 (ontology child-record contract C7, audit F4): the ontology's three secure children —
+    /// <c>sprk_signal</c>, <c>sprk_decisionrecord</c>, <c>sprk_budgetrevision</c> — joined the list. Internal so
+    /// <see cref="SecureFamilyConsistencyTests"/> can tie it to the lineage and the codified role set.</remarks>
+    internal static readonly string[] ChildTables =
     {
         "sprk_agreement", "sprk_analysis", "sprk_billingevent", "sprk_budget", "sprk_communication",
         "sprk_communicationthread", "sprk_document", "sprk_event", "sprk_invoice", "sprk_kpiassessment", "sprk_memo",
@@ -47,6 +50,7 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_servicerequest", "sprk_analysisoutput", "sprk_communicationattachment", "sprk_communicationparticipant",
         "sprk_emailreviewlog", "sprk_communicationchannelref", "sprk_fileversion", "sprk_emailartifact",
         "sprk_attachmentartifact", "sprk_eventlog", "sprk_invoicelineitem", "sprk_budgetbucket", "sprk_processingjob",
+        "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
     };
 
     private enum Disposition
@@ -144,9 +148,10 @@ public class RecordOwnerAssignmentCensusTests
             "The mapper builds the mirrored analysis row; DataverseObservationMirror resolves its owner from the row's "
             + "parent lookups (ForChild) and skips the mirror on a refusal.",
             OwnerFile: "DataverseObservationMirror.cs"),
-        new CensusEntry("CommunicationService.cs", "sprk_communication", 3, Disposition.Routed,
-            "Outbound email, message and shared sends: ForChild over every parent lookup on the row (secure-if-any); an "
-            + "unfiled send keeps its creator (E1); a refusal throws before the create."),
+        new CensusEntry("CommunicationService.cs", "sprk_communication", 4, Disposition.Routed,
+            "Outbound email, message and shared sends, and the external thread post (spaarke-SPA-external-access-platform-r3 "
+            + "task 034, PostToRecordThreadAsync): ForChild over every parent lookup on the row (secure-if-any); an unfiled "
+            + "send keeps its creator (E1); a refusal throws before the create."),
         new CensusEntry("CommunicationService.cs", "sprk_document", 3, Disposition.Routed,
             "Archived .eml and attachment documents — content of the communication (ContentOf), resolved before the SPE "
             + "upload so a refusal leaves neither bytes nor a row."),
@@ -187,6 +192,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TaskActionCore.cs", "sprk_event", 1, Disposition.Routed,
             "AI create-task: ForChild over the stamped parents; the caller-supplied owner no longer owns a filed task "
             + "(B2: the assignee belongs in Assigned To, task 152)."),
+        new CensusEntry("InquiryReplyTodoCreator.cs", "sprk_todo", 1, Disposition.Routed,
+            "Ontology task 071 (D-111): the \"Record the outcome of the budget inquiry\" To Do raised when a reply arrives: ForChild "
+            + "over the matter it is filed against (secure-if-any); the person it is for is Assigned To (task 152's rule); a "
+            + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
         new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
@@ -225,6 +234,33 @@ public class RecordOwnerAssignmentCensusTests
             WaiverKind.Permanent),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
+
+        // ── Task 182 (ontology child-record contract C7, audit F4): the ontology writers, as they stand at the head of
+        // docs/ontology-platform-design. Each entry says what the code does TODAY. A Pending waiver is not a way
+        // to turn the build green: it names the ontology task that routes the writer (contract §4), and that task
+        // moves its entry to Routed when it lands (142 moved the Decision Record's, 143 the Signal's). ─────────────────────────────────────
+        new CensusEntry("DecisionActionExecutors.cs", "sprk_budgetrevision", 1, Disposition.Routed,
+            "Ontology task 044 (D-33/D-38): ReviseBudgetExecutor resolves the revision's owner through "
+            + "IRecordOwnershipResolver in its preflight (secure-if-any over the matter and the budget), refuses before any "
+            + "write when no owner is resolved, and writes the answer onto the row with ApplyTo before the create."),
+        new CensusEntry("DecisionRecordWriter.cs", "sprk_decisionrecord", 1, Disposition.Routed,
+            "Ontology task 142 (contract C1/C2/C3/C9, audit F1/F2/F3): WriteAsync files the record under its subject through "
+            + "the shared regarding builder, stamps it from the subject (CoreAncestorResolver), and writes "
+            + "RecordOwnershipResolver's answer over EVERY parent (the core record, the record's subject, every derived core "
+            + "and every resolved Signal's subject) onto the row with ApplyTo, with the deciding user as RequestedBy; a "
+            + "refusal or a fault writes nothing. A personal no-core To Do's record goes to its Assigned To's business-unit "
+            + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
+            + "families (#1778) before any write. Ontology task 042: WriteGateDecisionAsync (the communications gate's decision, "
+            + "authorize and deny) reaches the SAME single create (CreateAsync, pinned by DecisionRecordContextImmutabilityTests) "
+            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester."),
+        new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Routed,
+            "Ontology task 143 (contract C3, audit F2/F3, D-130): BuildEntity writes RecordOwnershipResolver's answer over the "
+            + "Signal's parents (its core record, its subject and every core-ancestor stamp) onto the row with ApplyTo, with "
+            + "the requesting person as RequestedBy (null for every job-raised Signal). A no-core Signal takes the same "
+            + "resolver over its subject, and a personal no-core To Do's Signal goes to its Assigned To's business-unit team "
+            + "(D-134, PersonalToDoAssignee) with secure-parent precedence. A refusal, or an answer that names no team, writes "
+            + "nothing; no owningbusinessunit is written. The job's no-core follow re-owns through SecureChildReconciler."
+            + "ReownOrdinaryRowAsync (UAC task 183)."),
     };
 
     /// <summary>
@@ -240,6 +276,10 @@ public class RecordOwnerAssignmentCensusTests
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
             "The external routes resolve the root's owner before the create; ExternalDataService refuses an empty team."),
+        new UnscannedWriter("ExternalIntakeEndpoints.cs", "Web API POST of a sprk_servicerequest (the Legal Front Door intake)",
+            "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
+            + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
+            + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
         new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
             "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
@@ -278,7 +318,9 @@ public class RecordOwnerAssignmentCensusTests
         new UnscannedWriter("DataverseUpdateRecordHandler.cs", "run-as-user PATCH of any table (lookups allowed)",
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
             + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
-            + "OwnedChildWrite.RefileAsync."),
+            + "OwnedChildWrite.RefileAsync. #1616: a project's BFF-managed (field-secured) pair is written update-only by the "
+            + "application after the caller's AppendTo/Write/Append checks (OwnedChildWrite.PatchWithBffManagedPairAsync); "
+            + "the owner is never written there."),
 
         // ── task 147 r1 (owner round 28 item 1): the browser's child writers, through the BFF ─────────────────────────
         new UnscannedWriter("ChildRecordEndpoints.cs", "app-only create (G5) + run-as-user re-file PATCH of a child table",
@@ -307,6 +349,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildEventCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
+        new OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
     };
 
@@ -353,6 +396,21 @@ public class RecordOwnerAssignmentCensusTests
         /// the member's owner value is its start-owner parameter, and the file's only caller of it passes the snapshot.
         /// </summary>
         Restore,
+
+        /// <summary>
+        /// UAC task 183 (owner round 96, D-135): re-owns an ORDINARY Decision Record or Signal to the ordinary team its caller
+        /// names (ontology task 148's follow-the-assignee job) — never into or out of the Secure Record business unit, which
+        /// stays the secure pass's. Asserted (<see cref="EveryOrdinaryReownWriteSitsBehindItsGuards"/>): before its owner write
+        /// the member checks the table against its two-table set, resolves the Secure Record business unit, and returns
+        /// <c>RefusedSecure</c>.
+        /// </summary>
+        OrdinaryReown,
+
+        /// <summary>
+        /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
+        /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
+        /// </summary>
+        Pending,
     }
 
     private sealed record OwnerWriteEntry(string FileName, string Member, int Writes, OwnerWriteKind Kind, string Reason);
@@ -384,6 +442,8 @@ public class RecordOwnerAssignmentCensusTests
             "The team the external route resolved from the project — RequireOwner refuses an empty one."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildTodoCreatePayload", 1, OwnerWriteKind.Seam,
             "The team the external route resolved from the root — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildServiceRequestCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the intake route resolved from the requester's contact (its business unit's default team) — RequireOwner refuses an empty one."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),
@@ -405,7 +465,7 @@ public class RecordOwnerAssignmentCensusTests
             "Office invoice quick-create — the resolver's team (task 080)."),
         new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
             "Office to-do — secure-if-any over regarding, stamps and carriers."),
-        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureAsync", 1, OwnerWriteKind.Routed,
+        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
             "Upload capture — the team the evaluated filing resolved."),
         new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
             "Inbound email — the team the evaluated filing resolved."),
@@ -417,8 +477,15 @@ public class RecordOwnerAssignmentCensusTests
             "A thread created on request — the record's team for an ownership parent (409 on refusal), else the caller."),
         new OwnerWriteEntry("ThreadResolver.cs", "FindOrCreateDefaultThreadAsync", 1, OwnerWriteKind.Routed,
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
+        new OwnerWriteEntry("ThreadResolver.cs", "AnchorThreadForFilingAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 129
+            "A thread that follows its email's filing — re-anchored to the record and owned by its team (S6); a refusal leaves it untouched."),
+        new OwnerWriteEntry("ThreadResolver.cs", "ReconcileAnchoredThreadOwnerAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 129 sweep
+            "An existing anchored thread gets its anchor record's team (S6, the same ResolveRecordThreadOwnershipAsync); a refusal, a " +
+            "secure current owner or target, or a party anchor leaves it untouched; only the owner is written."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
+        new OwnerWriteEntry("InquiryReplyTodoCreator.cs", "CreateIfNeededAsync", 1, OwnerWriteKind.Routed,
+            "The budget-inquiry outcome To Do (ontology 071) - ForChild over its matter, the resolver's team; nothing is created on a refusal."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
@@ -429,6 +496,12 @@ public class RecordOwnerAssignmentCensusTests
             "out of isolation whose mirrored shares could not all be removed (back on the Secure team, so no later pass reads " +
             "it as never isolated), or a row the pass pulled into isolation whose support then left (back on its ordinary " +
             "owner); read back."),
+        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowAsync", 1, OwnerWriteKind.OrdinaryReown,
+            "UAC task 183 (owner round 96, D-135 item 2): an ORDINARY sprk_decisionrecord or sprk_signal re-owned to the ordinary " +
+            "team ontology task 148's job names (the To Do's assignee's team) — refused when the row's owner, its business unit " +
+            "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
+            "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
+            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
@@ -471,6 +544,12 @@ public class RecordOwnerAssignmentCensusTests
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
+        // spaarke-ontology-platform-r1 task 043 (owner D-129): DecisionRecordWriter.WriteAsync no longer writes an owner of its own; both
+        // the core and the no-core Decision Record take the resolver's answer through ApplyTo (the censused resolver write), so the
+        // former PerUser entry for the no-core item's owner is gone.
+        // spaarke-ontology-platform-r1 task 143 (D-130): SignalWriter writes no owner of its own either. BuildEntity applies the
+        // resolver's answer (ApplyTo) on every path, and ReassignNoCoreOwnerAsync re-owns through SecureChildReconciler.
+        // ReownOrdinaryRowAsync (listed above), so the former PerUser entries for the no-core item's owner are gone.
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
@@ -491,29 +570,229 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly Regex OwnerKeyConst = new(
         @"const\s+string\s+(?<name>\w+)\s*=\s*" + OwnerKeyLiteral + @"\s*;", RegexOptions.Compiled);
 
+    /// <summary>A column whose writes are censused: its key as a literal (every spelling) and a const that holds it.</summary>
+    private sealed record WrittenKey(string Literal, Regex Const);
+
+    private static readonly WrittenKey OwnerKey = new(OwnerKeyLiteral, OwnerKeyConst);
+
     [Fact(DisplayName = "Task 146 r2: every owner write in the server is censused, by member, with its kind")]
     public void EveryOwnerWriteIsCensused()
     {
-        var actual = ScanOwnerWrites(ServerFiles());
-        var expected = OwnerWrites.ToDictionary(e => (e.FileName, e.Member), e => e.Writes);
-        var problems = new List<string>();
-
-        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
-        {
-            if (!expected.TryGetValue((file, member), out var count))
-                problems.Add($"UNLISTED owner write in {file}.{member}: lines {string.Join(", ", lines)}");
-            else if (count != lines.Count)
-                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count} (lines {string.Join(", ", lines)})");
-        }
-
-        foreach (var key in expected.Keys.Where(k => !actual.ContainsKey(k)))
-            problems.Add($"CENSUSED BUT ABSENT: {key.FileName}.{key.Member}. Remove the entry if the owner write was deleted.");
+        var problems = WriteCensusProblems(ScanOwnerWrites(ServerFiles()), OwnerWrites, "owner write");
 
         Assert.True(
             problems.Count == 0,
             "The owner-write census does not match the source (unified-access-control-r2 task 146 r2). A child's owner is "
             + "IRecordOwnershipResolver's answer — no writer computes a team itself. Route the new write through the resolver "
             + "(or classify it with its reason), then list it:\n" + string.Join("\n", problems));
+    }
+
+    // UAC task 183: an OrdinaryReown owner write is not a resolver answer — its team is the caller's — so it is allowed only
+    // behind its own guards, in this order, before the write: the two-table check, the Secure Record business unit resolved,
+    // and a RefusedSecure return. Removing any of them from the member fails here (and the behaviour tests fail too).
+    private static readonly string[] OrdinaryReownGuards =
+        { "OrdinaryReownTables.Contains(", "ResolveSecureBusinessUnitAsync(", "OrdinaryRowReownOutcome.RefusedSecure" };
+
+    [Fact(DisplayName = "Task 183: an OrdinaryReown owner write sits behind the table check and the Secure Record business-unit guard")]
+    public void EveryOrdinaryReownWriteSitsBehindItsGuards()
+    {
+        var files = ServerFiles();
+        var globalKeys = GlobalOwnerKeys(files);
+        var problems = OwnerWrites
+            .Where(e => e.Kind == OwnerWriteKind.OrdinaryReown)
+            .Select(e => CodeOf(files, e.FileName) is { } code && MethodBody(code, e.Member) is { } body
+                ? OrdinaryReownGuardsComeFirst(body, globalKeys) ? null : $"{e.FileName}.{e.Member}: a guard is missing or after the owner write"
+                : $"{e.FileName}.{e.Member}: not found")
+            .Where(p => p is not null)
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "OrdinaryReown owner writes without their guards (task 183):" + Environment.NewLine + string.Join(Environment.NewLine, problems));
+
+        // Negative control: the seeded member loses one guard at a time.
+        const string write = "fields[\"ownerid\"] = new EntityReference(\"team\", teamId);";
+        var guarded = "{ if (!OrdinaryReownTables.Contains(name)) throw new ArgumentException(); "
+                      + "var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(d, c, ct); "
+                      + "if (bu.Id == x) return Result(OrdinaryRowReownOutcome.RefusedSecure); " + write + " }";
+        Assert.True(OrdinaryReownGuardsComeFirst(guarded));
+        foreach (var guard in OrdinaryReownGuards)
+            Assert.False(OrdinaryReownGuardsComeFirst(guarded.Replace(guard, "Other(")), $"without {guard}");
+        Assert.False(OrdinaryReownGuardsComeFirst("{ " + write + " " + guarded[1..]), "a write before the guards");
+    }
+
+    /// <summary>
+    /// Ontology task 148 (uac-r2 F3): every CALLER of <c>SecureChildReconciler.ReownOrdinaryRowAsync</c>, by member, with its
+    /// count. The entry point's team is the caller's, so each caller must decide it from the resolver's answer (D-130/D-134)
+    /// with secure-parent precedence; a new caller is reviewed here, not found later.
+    /// </summary>
+    private sealed record OrdinaryReownCaller(string FileName, string Member, int Calls, string Reason);
+
+    private static readonly IReadOnlyList<OrdinaryReownCaller> OrdinaryReownCallers = new[]
+    {
+        new OrdinaryReownCaller("SignalWriter.cs", "ReassignNoCoreOwnerAsync", 1,
+            "Ontology task 143: the nightly evaluator's no-core Signal follows its item's owner answer (the team DeriveCoreRecordAsync " +
+            "resolved through IRecordOwnershipResolver, D-130/D-134)."),
+        new OrdinaryReownCaller("TodoAssigneeOwnerReconciliationJob.cs", "RepairAsync", 1,
+            "Ontology task 148 (D-135 item 2): a personal To Do's Signal or Decision Record follows its current Assigned To's team " +
+            "(PersonalToDoAssignee + IRecordOwnershipResolver.ForUserTeam), or the resolver's answer for the To Do; skipped when " +
+            "the row's parents resolve secure or refuse, when the row is cored, user-owned or Secure-team-owned. Report-only " +
+            "unless Ontology:TodoAssigneeOwner:WritesEnabled=true."),
+    };
+
+    private static readonly Regex OrdinaryReownCall = new(@"\.ReownOrdinaryRowAsync\s*\(", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Ontology 148: every caller of ReownOrdinaryRowAsync is censused, by member, with its count")]
+    public void EveryOrdinaryReownCallerIsCensused()
+    {
+        var actual = ScanCalls(ServerFiles(), OrdinaryReownCall);
+        var expected = OrdinaryReownCallers.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED re-own caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE census entry {k.FileName}.{k.Member}"));
+        Assert.True(problems.Count == 0,
+            "The ReownOrdinaryRowAsync caller census does not match the source (ontology task 148, uac-r2 F3). A caller names the " +
+            "team, so it must take it from the resolver with secure-parent precedence; list it with its reason:\n" +
+            string.Join("\n", problems));
+
+        // Negative control: the scan sees a call (and attributes it to its member) and ignores the declaration.
+        var seeded = new Dictionary<string, string>
+        {
+            ["Seed.cs"] = "public sealed class Seed {\n public async Task<int> Caller(Guid id) {\n" +
+                          "  var r = await reconciler.ReownOrdinaryRowAsync(\"sprk_signal\", id, team, ct);\n return 1; }\n" +
+                          " public async Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct) { return null; }\n}",
+        };
+        Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, OrdinaryReownCall).Keys.ToArray());
+    }
+
+    /// <summary>(file, member) → the 1-based lines of each match of <paramref name="call"/>.</summary>
+    private static Dictionary<(string File, string Member), List<int>> ScanCalls(IReadOnlyDictionary<string, string> files, Regex call)
+    {
+        var sites = new Dictionary<(string, string), List<int>>();
+        foreach (var (fileName, code) in files)
+        {
+            var members = MemberDeclaration.Matches(code).ToList();
+            foreach (Match match in call.Matches(code))
+            {
+                var site = (fileName, MemberNameAt(code, members, match.Index));
+                if (!sites.TryGetValue(site, out var list))
+                    sites[site] = list = new List<int>();
+                list.Add(SourceScan.LineOf(code, match.Index));
+            }
+        }
+
+        return sites;
+    }
+
+    /// <summary>True when every <see cref="OrdinaryReownGuards"/> appears, in order, before the member's first owner write.</summary>
+    private static bool OrdinaryReownGuardsComeFirst(string memberBody, IReadOnlySet<string>? globalKeys = null)
+    {
+        var writes = OwnerWritesIn(memberBody, globalKeys ?? new HashSet<string>()).Select(w => w.Index).ToList();
+        if (writes.Count == 0)
+            return false;
+
+        var at = 0;
+        foreach (var guard in OrdinaryReownGuards)
+        {
+            var index = memberBody.IndexOf(guard, at, StringComparison.Ordinal);
+            if (index < 0 || index > writes.Min())
+                return false;
+            at = index + guard.Length;
+        }
+
+        return true;
+    }
+
+    /// <summary>The scan of one written key against its census list: unlisted members, changed counts, stale entries.</summary>
+    private static List<string> WriteCensusProblems(
+        IReadOnlyDictionary<(string File, string Member), List<int>> actual, IEnumerable<OwnerWriteEntry> entries, string what)
+    {
+        var expected = entries.ToDictionary(e => (e.FileName, e.Member), e => e.Writes);
+        var problems = new List<string>();
+
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED {what} in {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count} (lines {string.Join(", ", lines)})");
+        }
+
+        foreach (var key in expected.Keys.Where(k => !actual.ContainsKey(k)))
+            problems.Add($"CENSUSED BUT ABSENT: {key.FileName}.{key.Member}. Remove the entry if the {what} was deleted.");
+
+        return problems;
+    }
+
+    // =============================================================================================
+    // DIRECT owningbusinessunit WRITES (task 182, ontology child-record contract C3/C7, audit F4)
+    // ---------------------------------------------------------------------------------------------
+    // A row's business unit DERIVES from its owner (RecordOwnershipResolver remarks). A writer that sets
+    // owningbusinessunit itself places the row in a business unit no owner decision chose, so its readers are not the
+    // resolver's (contract C3: "No direct owningbusinessunit writes"). Every such write in the server is listed here,
+    // by member, with the ontology task that removes it, and an unlisted one fails the build. The scan is the owner-write
+    // scan (every shape and spelling it sees, KNOWN LIMITS included) run on the owningbusinessunit key.
+    // MAINTENANCE: never list a new write. Route the owner through IRecordOwnershipResolver and let the unit derive.
+    // =============================================================================================
+
+    private static readonly WrittenKey BusinessUnitKey = new(
+        @"(?:\$@|@\$|\$|@)?""owningbusinessunit(?:@odata\.bind)?""",
+        new Regex(@"const\s+string\s+(?<name>\w+)\s*=\s*(?:\$@|@\$|\$|@)?""owningbusinessunit(?:@odata\.bind)?""\s*;", RegexOptions.Compiled));
+
+    // Empty since ontology task 143 removed the last one (SignalWriter.BuildEntity's FR-14 write): every Signal now takes the
+    // resolver's team, and its business unit derives from it.
+    private static readonly IReadOnlyList<OwnerWriteEntry> BusinessUnitWrites = Array.Empty<OwnerWriteEntry>();
+
+    [Fact(DisplayName = "Task 182: every direct owningbusinessunit write in the server is censused, and each is Pending removal")]
+    public void EveryBusinessUnitWriteIsCensused()
+    {
+        var problems = WriteCensusProblems(ScanWrites(ServerFiles(), BusinessUnitKey), BusinessUnitWrites, "owningbusinessunit write");
+        problems.AddRange(BusinessUnitWrites
+            .Where(e => e.Kind != OwnerWriteKind.Pending || !Regex.IsMatch(e.Reason, @"\bontology task \d+"))
+            .Select(e => $"{e.FileName}.{e.Member}: a direct owningbusinessunit write is only ever Pending removal by a named ontology task"));
+
+        Assert.True(
+            problems.Count == 0,
+            "Direct owningbusinessunit writes that the census does not match (task 182, contract C3). A row's business unit "
+            + "derives from the owner IRecordOwnershipResolver decides; no writer sets it:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 182: negative control — an unlisted owningbusinessunit write fails the census; a read or a column list does not")]
+    public void BusinessUnitWriteDetector_NegativeControl()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string BuKey = \"owningbusinessunit\";",
+            "    private void Indexer(Entity row, Guid bu) { row[\"owningbusinessunit\"] = new EntityReference(\"businessunit\", bu); }",
+            "    private void Bind(Dictionary<string, object?> body, Guid bu) { body.Add(\"owningbusinessunit@odata.bind\", $\"/businessunits({bu})\"); }",
+            "    private void ThroughConst(Entity row, Guid bu) { row.SetAttributeValue(BuKey, new EntityReference(\"businessunit\", bu)); }",
+            "    private void Verbatim(Entity row, Guid bu) { row[@\"owningbusinessunit\"] = new EntityReference(\"businessunit\", bu); }",
+            "    private void Reads(Entity row) { var bu = row.GetAttributeValue<EntityReference>(\"owningbusinessunit\"); var c = new ColumnSet(\"owningbusinessunit\"); var v = row[\"owningbusinessunit\"] == null; }",
+            "    private static readonly HashSet<string> SystemColumns = new() { \"ownerid\", \"owningteam\", \"owningbusinessunit\" };",
+            "    private void Selects(List<string> c) { c.Add(\"owningbusinessunit\"); var s = \"_owningbusinessunit_value\"; }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var sites = ScanWrites(files, BusinessUnitKey);
+        Assert.Equal(
+            new[] { "Bind", "Indexer", "ThroughConst", "Verbatim" },
+            sites.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        // Listing three of the four leaves the fourth UNLISTED; a listed write that is gone is CENSUSED BUT ABSENT.
+        var listed = new[] { "Indexer", "Bind", "ThroughConst", "Gone" }
+            .Select(m => new OwnerWriteEntry("Seeded.cs", m, 1, OwnerWriteKind.Pending, "ontology task 0"));
+        var problems = WriteCensusProblems(sites, listed, "owningbusinessunit write");
+        Assert.Equal(2, problems.Count);
+        Assert.Contains(problems, p => p.StartsWith("UNLISTED owningbusinessunit write in Seeded.cs.Verbatim", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.StartsWith("CENSUSED BUT ABSENT: Seeded.cs.Gone", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Task 146 r2: Routed owner writes sit in files that call the resolver; UnfiledOnly writes check the filing first")]
@@ -585,17 +864,22 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>(file, member) → the 1-based lines of each owner write in it.</summary>
     private static Dictionary<(string File, string Member), List<int>> ScanOwnerWrites(IReadOnlyDictionary<string, string> files)
+        => ScanWrites(files, OwnerKey);
+
+    /// <summary>(file, member) → the 1-based lines of each write of <paramref name="key"/> in it (task 182: the owner-write
+    /// scan, for any written key).</summary>
+    private static Dictionary<(string File, string Member), List<int>> ScanWrites(IReadOnlyDictionary<string, string> files, WrittenKey key)
     {
-        var globalKeys = GlobalOwnerKeys(files);
+        var globalKeys = GlobalKeys(files, key);
         var sites = new Dictionary<(string, string), List<int>>();
         foreach (var (fileName, code) in files)
         {
             var members = MemberDeclaration.Matches(code).ToList();
-            foreach (var (index, _) in OwnerWritesIn(code, globalKeys))
+            foreach (var (index, _) in KeyWritesIn(code, key, globalKeys))
             {
-                var key = (fileName, MemberNameAt(code, members, index));
-                if (!sites.TryGetValue(key, out var list))
-                    sites[key] = list = new List<int>();
+                var site = (fileName, MemberNameAt(code, members, index));
+                if (!sites.TryGetValue(site, out var list))
+                    sites[site] = list = new List<int>();
                 list.Add(SourceScan.LineOf(code, index));
             }
         }
@@ -604,9 +888,12 @@ public class RecordOwnerAssignmentCensusTests
     }
 
     /// <summary>Every const, anywhere in the server, whose value is an owner key.</summary>
-    private static HashSet<string> GlobalOwnerKeys(IReadOnlyDictionary<string, string> files) =>
+    private static HashSet<string> GlobalOwnerKeys(IReadOnlyDictionary<string, string> files) => GlobalKeys(files, OwnerKey);
+
+    /// <summary>Every const, anywhere in the server, whose value is <paramref name="key"/>.</summary>
+    private static HashSet<string> GlobalKeys(IReadOnlyDictionary<string, string> files, WrittenKey key) =>
         files.Values
-            .SelectMany(code => OwnerKeyConst.Matches(code).Select(m => m.Groups["name"].Value))
+            .SelectMany(code => key.Const.Matches(code).Select(m => m.Groups["name"].Value))
             .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
@@ -621,11 +908,16 @@ public class RecordOwnerAssignmentCensusTests
     /// </list>
     /// </summary>
     private static IEnumerable<(int Index, int ValueStart)> OwnerWritesIn(string code, IReadOnlySet<string> globalKeys)
+        => KeyWritesIn(code, OwnerKey, globalKeys);
+
+    /// <summary>The writes of <paramref name="key"/> in <paramref name="code"/>, in the four shapes of
+    /// <see cref="OwnerWritesIn"/> (task 182: the same scan for any written key).</summary>
+    private static IEnumerable<(int Index, int ValueStart)> KeyWritesIn(string code, WrittenKey key, IReadOnlySet<string> globalKeys)
     {
-        var keys = string.Join("|", OwnerKeyConst.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
+        var keys = string.Join("|", key.Const.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
             .Concat(globalKeys.Select(Regex.Escape))
             .Distinct()
-            .Prepend(OwnerKeyLiteral));
+            .Prepend(key.Literal));
 
         foreach (Match m in new Regex(@"\[\s*(?:" + keys + @")\s*\]\s*=(?![=>])").Matches(code))
             yield return (m.Index, m.Index + m.Length);
@@ -1384,8 +1676,19 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+        ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
+                                           + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
+                                           + "is written, so nothing is created or re-filed.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
+        ["DecisionActionExecutors.cs"] = "Ontology platform R1 task 044: the caller PATCHes ONE budget amount column (sprk_totalbudget, D-55) and, on a work "
+                                         + "assignment, sprk_responseduedate / sprk_respondedon / sprk_responseoutcome after their Write — plain columns, never a "
+                                         + "lookup or an owner, so nothing is re-filed. The budget revision is created by the writer, owned through "
+                                         + "IRecordOwnershipResolver (ApplyTo); the To Do and event writes go through the child-records cores.",
+        ["EventDueAssigneeWrite.cs"] = "Ontology platform R1 task 044 (#29): PATCHes an event's sprk_duedate and/or its assignee CONTACT "
+                                       + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
+                                       + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
+                                       + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
@@ -1804,7 +2107,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("CommunicationService.cs", "SendMessageAsync", "message sender (HTTP caller)"),
         new PersonBearingWriter("CommunicationService.cs", "ArchiveExistingAsync", "the caller asking for an archive"),
         new PersonBearingWriter("CommunicationEndpoints.cs", "ArchiveCommunicationAsync", "hands the HTTP caller to the archive"),
-        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureAsync", "the Office user who saved the email"),
+        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", "the Office user who saved the email"), // task 121: the body moved
         new PersonBearingWriter("MessageAttachmentMaterializer.cs", "MaterializeAsync", "the message's sender, when the caller knows them"),
         new PersonBearingWriter("ThreadResolver.cs", "CreateRecordThreadAsync", "the caller creating a record thread"),
         new PersonBearingWriter("CommunicationProposalApplyService.cs", "ResolveAuditRowOwnerAsync", "the confirming user"),
@@ -1824,10 +2127,17 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
+        new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
+        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person)"),
+        new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", "seam: maps CreatedByPersonId"),
+        // R3 task 030 (FR-25): the external portal stamps its resolved principal (systemuser -> sprk_createdbyperson, contact -> sprk_createdbycontact).
+        new PersonBearingWriter("ExternalDataService.cs", "StampCreator", "the resolved external principal"),
+        // R3 task 034 (FR-11): the external thread post stamps its resolved author (StampCreator) on the sprk_communication it creates.
+        new PersonBearingWriter("CommunicationService.cs", "PostToRecordThreadAsync", "the external-plane author (StampCreator)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
@@ -1849,14 +2159,46 @@ public class RecordOwnerAssignmentCensusTests
         ["SpendSnapshotService.cs"] = "scheduled spend snapshots: system work",
         ["DataverseObservationMirror.cs"] = "insight observation mirror: system work",
         ["AppOnlyAnalysisService.cs"] = "background document profile: system work",
-        ["ExternalDataService.cs"] = "external portal: the person is a CONTACT, and sprk_createdbyperson names a systemuser",
         ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
         ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
+        ["SignalReevaluationJob.cs"] = "job-raised Signals (the nightly pass and the event triggers, through the same evaluate-plan-write path): "
+            + "nobody asked, so SignalWriteRequest.RequestedBy is null (ontology task 143)",
     };
 
     private static readonly Regex PersonToken = new(
-        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller)\b",
+        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller|StampCreator|EnsureCanStampCreator)\b",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// The created tables without the creator-person column. No table is exempt: task 182 carried one reasoned exemption
+    /// (<c>sprk_budgetrevision</c>, #1777) until ontology task 147 made <c>ReviseBudgetExecutor</c> pass <c>RequestedBy</c>
+    /// and added the table to <c>RecordCreatorPerson.StampedChildTables</c>; a table that gains a gap needs the column, not a waiver.
+    /// </summary>
+    private static List<string> MissingCreatorPersonColumn(IReadOnlySet<string> created, IReadOnlySet<string> stamped) =>
+        created
+            .Where(t => !stamped.Contains(t))
+            .OrderBy(t => t, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 147: negative control — a created table without the creator-person column is reported, with no exemption for any table")]
+    public void CreatorPersonColumn_NegativeControl()
+    {
+        var created = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" };
+
+        // A table the stamped set lacks is reported, including the former exemption's table: nothing is waived.
+        Assert.Equal(new[] { "sprk_budgetrevision", "sprk_newchild" },
+            MissingCreatorPersonColumn(created, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" }));
+
+        // A table that carries the column is not reported.
+        Assert.Empty(MissingCreatorPersonColumn(created,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" }));
+
+        // The real stamped set carries the budget revision (ontology task 147), the Decision Record (task 142) and the Signal
+        // (task 143), so none is reported.
+        Assert.Contains("sprk_budgetrevision", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
+        Assert.Contains("sprk_decisionrecord", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
+        Assert.Contains("sprk_signal", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
+    }
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]
     public void EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn()
@@ -1865,7 +2207,7 @@ public class RecordOwnerAssignmentCensusTests
         var created = Census.Where(e => e.Disposition is Disposition.Routed or Disposition.Seam).Select(e => e.Table)
             .Append("sprk_spendsnapshot") // an unscanned keyed UpsertRequest (SpendSnapshotService) — see UnscannedWriters
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var missing = created.Where(t => !stamped.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        var missing = MissingCreatorPersonColumn(created, stamped);
         Assert.True(missing.Count == 0,
             "Child tables the server creates app-only, without the creator-person column in RecordCreatorPerson."
             + "StampedChildTables (and scripts/Set-ChildRecordCreatorPersonSchema.ps1): " + string.Join(", ", missing));

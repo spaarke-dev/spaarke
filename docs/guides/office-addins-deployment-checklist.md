@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Deployment Checklist
 
 > **Version**: 1.3
-> **Last Updated**: 2026-09-10 — corrected manifest upload guidance: use the manifest served by the deployed SWA, not a local `dist/` build; fixed Outlook build-output filename (`outlook-manifest.xml`, not `manifest.xml`)
+> **Last Updated**: 2026-10-14 — security role block corrected (base role, not "Spaarke Office Add In User"). 2026-09-10 — corrected manifest upload guidance: use the manifest served by the deployed SWA, not a local `dist/` build; fixed Outlook build-output filename (`outlook-manifest.xml`, not `manifest.xml`)
 > **Purpose**: Pre-deployment verification for IT Administrators
 
 ---
@@ -22,7 +22,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
   - Health check passes: `GET /healthz` returns "Healthy"
 - [ ] Static Web Apps deployed for add-in hosting
   - Dev Resource: `spaarke-office-addins` (`icy-desert-0bfdbb61e.6.azurestaticapps.net`)
-  - Prod Resource: `spe-office-addins-prod`
+  - Prod Resource: `swa-spaarke-office-addins-prod` in `rg-spaarke-shared-prod` ("Spaarke Shared Production"), custom domain `https://addins.spaarke.com` — use the custom domain, never the default `*.azurestaticapps.net` host (corrected 2026-10-07; `spe-office-addins-prod` never existed)
   - Taskpane URL accessible: `https://{swa-hostname}/outlook/taskpane.html`
 - [ ] Redis Cache provisioned
   - Resource: `spaarke-redis-prod`
@@ -82,26 +82,13 @@ pac entity list --environment {env-id} | Select-String "sprk_processingjob|sprk_
 ```
 
 #### Security Role Configuration
-- [ ] Security role created: "Spaarke Office Add In User"
-- [ ] Role added to "Spaarke Office Add In" solution
-- [ ] **User-level permissions** configured for Office tables:
-  - [ ] `sprk_processingjob`: Create, Read, Write, Append
-  - [ ] `sprk_emailartifact`: Create, Read, Write, Append
-  - [ ] `sprk_attachmentartifact`: Create, Read, Write, Append
-  - [ ] `sprk_document`: Create, Read, Write, Append
-- [ ] **Organization-level Read permissions** for lookup entities:
-  - [ ] `sprk_matter`: Read
-  - [ ] `sprk_project`: Read
-  - [ ] `sprk_contact`: Read
-  - [ ] `sprk_account`: Read
-- [ ] Role assigned to all Office add-in users
+> Corrected 2026-10-14: the add-ins do not need the "Spaarke Office Add In User" role. See the admin guide, Section 7.5.
+
+- [ ] Every add-in user holds one base role: **Spaarke Basic User** or **Spaarke Core User**, directly or through a team
+- [ ] "Spaarke Office Add In User" (optional) is assigned only to users who should create and edit matters, projects, events, invoices, memos and work assignments across their business unit. Check team assignments: a team's roles apply to every member.
 - [ ] Service principal (app user) verified to have System Administrator role
 
-**Verification**:
-```powershell
-# Verify security role exists
-pac security-role list --environment {env-id} | Select-String "Spaarke Office Add In User"
-```
+**Verification**: in the Power Platform admin center, open **Environment > Settings > Users + permissions > Users**, select a pilot user and choose **Manage security roles**. Confirm the base role, then check the roles of the user's teams. Who receives the add-in is set separately, in the M365 admin center (Section 5).
 
 ### 3. Azure AD Configuration
 
@@ -112,8 +99,10 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
   - [ ] `brk-multihub://localhost` (reserved for future NAA support)
   - [ ] `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/taskpane.html` (Dev SPA)
   - [ ] `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/auth-dialog.html` (Dev Dialog API)
-  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` (Prod SPA)
-  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` (Prod Dialog API)
+- [ ] **Production** uses its own app registration — `Spaarke Office Add-in (Production)`, client ID `1958aec2-0218-495e-8e3c-37133e9b8357` (created 2026-10-07):
+  - [ ] SPA redirects `brk-multihub://addins.spaarke.com` and `https://addins.spaarke.com/auth-callback.html`
+  - [ ] Graph `email profile User.Read` admin-consented
+  - [ ] Pre-authorized on each customer backend's app registration (customer provisioning, step H3) — no API permission on the add-in app itself
 - [ ] API permissions added:
   - [ ] `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation` (delegated)
   - [ ] `User.Read` (delegated)
@@ -219,7 +208,7 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 #### Outlook Manifest (outlook-manifest.xml)
 - [ ] All URLs updated for target environment:
   - [ ] Dev: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html`
-  - [ ] Prod: `https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html`
+  - [ ] Prod: `https://addins.spaarke.com/outlook/taskpane.html`
   - [ ] Icon URLs (16, 32, 64, 80) point to correct static hosting
   - [ ] AppDomain includes hosting URL
 - [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)
@@ -235,7 +224,7 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 #### Word Manifest (word-manifest.xml)
 - [ ] All URLs updated for target environment:
   - [ ] Dev: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html`
-  - [ ] Prod: `https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html`
+  - [ ] Prod: `https://addins.spaarke.com/word/taskpane.html`
   - [ ] IconUrl and HighResolutionIconUrl point to correct hosting
   - [ ] AppDomain includes hosting URL
 - [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)

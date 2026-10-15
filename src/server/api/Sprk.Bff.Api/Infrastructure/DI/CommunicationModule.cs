@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -43,6 +45,11 @@ public static class CommunicationModule
         // host and any deployment that has not turned the webhook feature on. Kept as a deferred bind;
         // required-when-provisioned validation stays at the webhook use-sites. See task-061 exemption list.
         services.Configure<CommunicationOptions>(configuration.GetSection(CommunicationOptions.SectionName));
+
+        // The system sender (Communication:DefaultMailbox) is the ONE member checked at start, outside Development/Testing
+        // (owner decision 2026-10-11; RegistrationEmailService no longer carries a literal sender). StartupValidationService
+        // reads the options at host start, which runs this validator.
+        services.AddSingleton<IValidateOptions<CommunicationOptions>, CommunicationOptionsValidator>();
 
         // Auto-file kill-switch + threshold (ADR-018 / FR-11). Bound from "Communication:AutoFile" and
         // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
@@ -119,6 +126,13 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // Budget Inquiry executor (ontology task 070): called by the decision commit route; scoped because it holds the
+        // caller's IDataverseUserClient. The sender delegates to the singleton CommunicationService above.
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryEmailSender>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.PolicyActionRateService>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryReplyTodoCreator>();
         // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
         // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
         services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());
@@ -277,6 +291,11 @@ public static class CommunicationModule
         //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so this module is self-contained
         //     even if the AI module (its usual registrant) is not composed, without clobbering that registration.
         services.AddSingleton<IImpersonatedCommunicationQuery, DataverseImpersonatedCommunicationQuery>();
+        // The app-only twin for the EXTERNAL-plane message read only (spaarke-SPA-external-access-platform-r3 task 033,
+        // FR-04): a contact has no systemuser to impersonate and the external plane forbids OBO. Consumed solely by
+        // CommunicationThreadReadService.ReadRegardingAppOnlyAsync, after ExternalMessageEndpoints has checked the record
+        // against the caller's accessible set. Same singleton pass-through shape as the impersonated seam above.
+        services.AddSingleton<IAppOnlyCommunicationQuery, DataverseAppOnlyCommunicationQuery>();
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
@@ -592,6 +611,15 @@ public static class CommunicationModule
         services.AddSingleton<IThreadKeyStrategy, EmailThreadKeyStrategy>();
         services.AddSingleton<IThreadKeyStrategy, MessagingThreadKeyStrategy>();
         services.AddSingleton<IThreadResolver, ThreadResolver>();
+
+        // spaarkeai-word-add-in-r1 task 129 — the backfill / safety-net sweep that makes existing filed emails show on their
+        // records and gives anchored threads their S6 owner (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"). Registered
+        // DISABLED: it runs only when an admin triggers it (POST /api/admin/jobs/communication-thread-filing-sweep/trigger,
+        // SystemAdmin) or enables the schedule, and writes only while CommunicationThreadFilingSweep:Apply is true. Beside
+        // the resolver it calls, so it exists wherever the resolver does (bff-extensions.md §F.1).
+        services.AddScheduledJob<CommunicationThreadFilingSweepJob>(
+            CommunicationThreadFilingSweepJob.DefaultCronSchedule, enabled: false);
+        services.TryAddSingleton(TimeProvider.System);
     }
 
     /// <summary>

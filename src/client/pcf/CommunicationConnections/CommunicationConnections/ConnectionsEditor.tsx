@@ -203,8 +203,6 @@ const LINK_TYPE_LABEL: Record<string, string> = {
   sprk_workassignment: 'Work Assignment',
   sprk_budget: 'Budget',
   sprk_analysis: 'Analysis',
-  sprk_document: 'Document',
-  sprk_communication: 'Communication',
   sprk_reportcard: 'Report Card',
 };
 const LINK_TYPE_ORDER = [
@@ -217,8 +215,7 @@ const LINK_TYPE_ORDER = [
   'sprk_workassignment',
   'sprk_budget',
   'sprk_analysis',
-  'sprk_document',
-  'sprk_communication',
+  // No sprk_document / sprk_communication: an email is not linked to those (owner 2026-10-13).
   'sprk_reportcard',
 ];
 const LINK_ANOTHER_TYPES: { entityType: string; label: string }[] = LINK_TYPE_ORDER.filter(et =>

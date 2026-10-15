@@ -1,0 +1,15 @@
+<aiskillconfig uniquename="ais_FormFillFieldOptOut_sprk_invoice_sprk_invoiceduedate">
+  <aiskill>FormFillFieldOptOut</aiskill>
+  <attribute>
+    <entityid.logicalname>sprk_invoice</entityid.logicalname>
+    <logicalname>sprk_invoiceduedate</logicalname>
+  </attribute>
+  <description>sprk_invoice - Invoice Due Date Form fill opt out</description>
+  <entity>
+    <logicalname>sprk_invoice</logicalname>
+  </entity>
+  <iscustomizable>1</iscustomizable>
+  <scope>1</scope>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+</aiskillconfig>

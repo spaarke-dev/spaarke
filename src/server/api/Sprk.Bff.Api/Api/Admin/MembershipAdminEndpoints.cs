@@ -107,7 +107,7 @@ public static class MembershipAdminEndpoints
     {
         if (string.IsNullOrWhiteSpace(entityType))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "entityType route parameter is required",
@@ -128,7 +128,7 @@ public static class MembershipAdminEndpoints
             logger.LogWarning(ex,
                 "MembershipAdminEndpoints: invalid entity type '{EntityType}' for discovered audit",
                 entityType);
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = ex.Message,
@@ -140,7 +140,7 @@ public static class MembershipAdminEndpoints
         {
             // Service surfaces unknown entities as InvalidOperationException
             // "Entity 'X' not found in Dataverse metadata."
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = ex.Message,

@@ -26,7 +26,8 @@
 #     type is a read-only info check).
 #
 # CI USAGE:
-#   Add to sdap-ci.yml:
+#   Not currently wired into CI (sdap-ci.yml, which this note used to name, was retired 2026-10-14).
+#   To enforce per push, add this step to an existing workflow job:
 #     - name: Validate prereqs recipe authoring
 #       run: pwsh scripts/provisioning-prereqs/validate-recipe-authoring.ps1
 #

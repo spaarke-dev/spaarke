@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="254" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Optional per-customer OpenAI spend limit (G37, owner decision 2026-10-06): no cap by default; an operator can set or change a monthly limit for a customer at intake or later, and a customer over its limit gets a clean 429</title>
+    <phase>Model 1 dedicated-stamp remediation — gap G37</phase>
+    <gate>after 230b</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Intake + H4b settings + BFF exception mapping (BFF §10) + operator procedure; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches the BFF error pipeline and a Spaarke-billing control.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path + skill (main session).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, bff-api, model1-dedicated, cost, testing</tags>
+    <deps>230b</deps>
+  </metadata>
+
+  <prompt>Let an operator cap a customer's monthly OpenAI spend when needed, without ever capping by default.</prompt>
+
+  <role>SPAARKE platform developer (L2 intake + H4b, BFF metering).</role>
+
+  <goal>
+    Owner, 2026-10-06: "we do not want to prevent a customer from activating and working, but we do want to have the ability
+    to have a cap if necessary; i.e., no cap but allow for a per customer spend limit if desired." The BFF already has the
+    gate (Services/Ai/Metering: `TenantBudget:Tenants:{tenantId}` = `Model1Gated` + `MonthlyBudgetUsd` → TenantBudgetExceededException);
+    nothing configures it. After this task: a run without a limit writes nothing (uncapped); a run with the optional intake value
+    writes the entry on both slots; the operator can add, change or remove the limit later by a documented, idempotent procedure;
+    and an over-limit AI call returns 429 ProblemDetails with Retry-After (today the exception reaches the global handler → 500).
+  </goal>
+
+  <context>
+    <background>
+      Found by T229 (2026-10-06): the gate's rationale was the retired shared OpenAI quota; under D-12 a Model 1 stamp's OpenAI bill
+      is Spaarke's. TenantBudgetExceededException derives from InvalidOperationException and only a TenantBudgetResults helper
+      maps it to 429 — no endpoint uses it (task-077 follow-on #1 never landed), and MiddlewarePipelineExtensions.UseExceptionHandler
+      has no mapping for it. Settings flow: intake → IntakeParameterCatalog → H4b per_env_settings (manifest.yaml) → App Service.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Metering/*; Infrastructure/DI/MiddlewarePipelineExtensions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs; Api/Api/RunsEndpoints.cs; Handlers/BulkAppSettings/**; scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json; .claude/skills/provision-environment/SKILL.md; docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner">Default is NO cap: no setting is written unless the operator supplies a limit. Never block activation or provisioning on it.</constraint>
+    <constraint source="BFF §10">Global-handler mapping (or the endpoint filter pattern) with tests; publish size vs fresh master; CVE check.</constraint>
+    <constraint source="parity">Intake schema + POST /api/runs agree on the optional value (positive decimal); a later change uses the same setting names.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">BFF: TenantBudgetExceededException → 429 ProblemDetails (+ Retry-After to the next UTC month start); tests.</step>
+    <step order="2">Intake: optional `openAiMonthlyLimitUsd`; catalog + schema + endpoint validation; H4b writes the two TenantBudget settings for the run's tenant on both slots only when present; tests.</step>
+    <step order="3">Operator procedure (guide + skill + script if needed): add / change / remove a limit on an existing stamp, both slots, idempotent.</step>
+    <step order="4">Verify; Step 9.5; close.</step>
+  </steps>
+
+  <justification>
+    Existing: task 077's TenantBudget* (per-tid map, per-process ledger — wiring lost by merge 28c2c1b385) and
+    AgentCostControlMiddleware (per-session turn budget, not stamp spend). Extension rejected: a per-tid key matches no
+    caller on a dedicated stamp (users' tid = the customer's workforce tenant; jobs carry none) and a per-process store
+    resets on restart and multiplies by instance count — replaced, not extended (notes/t254-ai-spend-limit-decisions.md
+    D1–D3). Cost of doing nothing: no cap can be set, and an over-limit call would surface as HTTP 500.
+  </justification>
+
+  <acceptance-criteria>
+    <!-- Superseded wording (2026-10-06, decision D1): one stamp-wide setting AiSpendLimit__MonthlyLimitUsd replaces the
+         per-tenant TenantBudget map; "TenancyMode=Model1Gated" no longer exists. -->
+    <criterion testable="true">Without the intake value nothing spend-limit-related is written; with it both slots get AiSpendLimit__MonthlyLimitUsd.</criterion>
+    <criterion testable="true">An AI call over the limit returns 429 ProblemDetails with Retry-After; under the limit, and for unconfigured tenants, behaviour is unchanged.</criterion>
+    <criterion testable="true">The documented procedure changes or removes a limit on an existing stamp.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 41). Commits f5d193709 (BFF), 46096d320 (intake / H4b / generator / script), 6458bcd5d
+    (docs), 105db5087 (Step 9.5 round 1), aaefd709d (round 2 + design §17), plus this close. Decisions + K1–K7:
+    notes/t254-ai-spend-limit-decisions.md; placement, publish size and ADR tensions: design.md §17 (T254 bullet).
+    - FOUND: task 077's gate was inert — merge 28c2c1b385 dropped its OpenAiClient wiring; the chat loop was never gated;
+      per-tid keying matches no Model 1 caller; the ledger was per process; 3 of 10 OpenAiClient methods recorded usage.
+    - D1 one OPTIONAL limit per STAMP (AiSpendLimit__MonthlyLimitUsd; unset = no limit) — replaces TenantBudget*;
+      D2 Redis ledger (integer micro-USD, {InstanceName}ai-spend:month:{yyyy-MM}, SystemCacheKeys.AiSpendMonth = 17th
+      entry, owner-approved 2026-10-07); D3 both seams (every public OpenAiClient method + AiSpendLimitChatClient inside
+      UseFunctionInvocation; usage now recorded on every completion path); D4 fail-open on the store (250 ms bounded read)
+      and on unbindable settings (logged once); D5 429 ProblemDetails + Retry-After (next UTC month), chat SendMessage +
+      RefineText pre-check before SSE, in-band code mid-turn; client shows the server message (describeTooManyRequests /
+      requestFailedMessage); D6 list-price estimate, rates configurable; D7 intake openAiMonthlyLimitUsd
+      (OpenAiMonthlyLimitRule, POST /api/runs) → H4b required:false entry (generator now supports optional per-env
+      sources) → scripts/Set-AiSpendLimit.ps1 for later add/change/remove (both slots, idempotent, -WhatIf).
+    - Step 9.5: code-review (5 W, 17 S) + adr-check (13 W, 3 V) → round 1 fixed all W and most S; V1 (single-setting
+      script writes vs provisioning.md) + V2 (no ValidateOnStart) = Path A recorded in design §17, owner-approved
+      2026-10-07; V3 eviction = K4. Verifier pass on the fix diff: 1 W (refine 429 rendered raw JSON client-side) +
+      suggestions → round 2 fixed. No round 3.
+    - BFF §10: publish (fresh short-path worktrees, Compress-Archive Optimal, PDBs incl.) pre-task 3eeb76788 36.15 MB / 192
+      files, origin/master fdfd4cec5 36.15 MB / 192, branch 105db5087 36.16 MB / 192 = +0.01 MB; CVE none; ADR-010
+      ceiling 159 → 157.
+    - Tests: BFF full (round 1) 18118/0 (54 skip); ArchTests 836/836; ControlPlane 2224/0 (1 skip); Pester 11/11;
+      jest SprkChat 210/210; round-2 full run: BFF 18120/0 (54 skip), ArchTests 836/836, ControlPlane 2224/0 (1 skip).
+    - Not deployed. Client change ships with the next code-page / PCF build. Live check at T186: streaming usage arrives
+      on the final update (include_usage) — the estimate depends on it.
+  </notes>
+</task>

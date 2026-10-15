@@ -7,10 +7,32 @@
 
 ## Project Status
 
-- **Phase**: Tasks generated — **execution owner-gated (NOT auto-started)**.
-- **Last Updated**: 2026-08-13
-- **Current Task**: Not started
-- **Next Action**: Owner go-ahead to begin Phase 0 (task 001) via task-execute. Baseline is current (synced to `033c43a91`).
+- **Phase**: All code tasks + 080 deploy DONE; owner UAT ongoing (fix-forward). Only **090** (wrap-up + `/test-diet`) remains.
+- **Last Updated**: 2026-10-08
+- **Current Task**: none active — see `current-task.md`
+- **Next Action**: Fix-forward on owner UAT findings; run 090 when owner signs off UAT.
+
+---
+
+## Standing directives & gotchas
+
+**Owner directives**
+- (2026-08-17) **Fix, don't defer** — defer only when there is a known better owner; otherwise fix in-project.
+- (2026-08-17) Commit/push only when asked; merge via auto-merge PR (`gh pr merge --auto --merge`) — master is protected.
+- (2026-10-08) In the SpaarkeAi Assistant, playbook selection is NOT a user feature — SprkChat `enablePlaybookDiscovery` stays off (Assistant uses the ADR-039 closed catalog).
+
+**Deploy gotchas**
+- `sprk_spaarkeai` and the BFF are **last-write-wins** across all projects: ALWAYS fast-forward the worktree to current `origin/master` before building/deploying, or you roll back other projects' work.
+- SpaarkeAi Vite resolves `@spaarke/*` to shared-lib **`src/`** (not `dist/`) — no shared-lib rebuild needed; clear `dist/ node_modules/.vite/ .vite/` and `npm run build`. Verify a change marker in `dist/spaarkeai.html` before deploying.
+- `npm run build` ends with `build:ribbon`, which fails locally on `@spaarke/sdap-client` (no `dist/` in worktree) — environmental; the ribbon scripts are not part of `sprk_spaarkeai`, deploy proceeds.
+- `npm install` churns `package-lock.json` (SpaarkeAi, AI.Widgets) — revert it before committing.
+- `scripts/Deploy-AnalysisAction.ps1` cannot seed `infra/dataverse/actions/list-tasks.action.json` (single object, numeric `actionType`, no modelTier/temperature/allow-list mapping) — seed via REST PATCH from the authored JSON.
+- Chat-loop projection: a non-empty `sprk_tooldescription` is the SOLE opt-in (`SelectTextProjectable` ignores `sprk_surfaces`) — tracked D-UAT-01 / issue #957. Projectable-catalog cache TTL = 5 min.
+- BFF telemetry: App Insights appId `6a76b012-46d9-412f-b4ab-4905658a9559` (`az monitor app-insights query`) — use it for empirical UAT diagnosis before guessing.
+
+**UAT learnings**
+- Upload → `chat-classify` (all formats incl. PDF) → "Review an NDA" offered ONLY when `docType == "nda"`. Compose reads PDFs (compose-r7 task 050/051). The `nda_sample*.pdf` test files are NOT NDAs (employment agreement / consulting excerpt).
+- A persisted `playbookId` (localStorage `sprk_ai2_playbookId`) suppresses Quick Start welcome cards; "New session" now clears it.
 
 ---
 

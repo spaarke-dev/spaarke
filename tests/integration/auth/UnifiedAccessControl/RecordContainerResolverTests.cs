@@ -3,8 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
-using NSubstitute.ExceptionExtensions;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -196,8 +195,8 @@ public class RecordContainerResolverTests
         //
         // Task 155 f3: moved again, contact → account. The f3 live sweep found contact's own sprk_invoice lookup,
         // whose target can belong to a matter, so a contact must now be read. account names no root by any column.
-        var entityService = Substitute.For<IGenericEntityService>();
-        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+        var entityService = new Mock<IGenericEntityService>();
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService.Object);
 
         var decision = await resolver.ResolveForRecordAsync(
             "account", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
@@ -205,8 +204,9 @@ public class RecordContainerResolverTests
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         decision.ContainerId.Should().Be(SharedBuContainer);
 
-        await entityService.DidNotReceiveWithAnyArgs()
-            .RetrieveAsync(default!, default, default!, default);
+        entityService.Verify(
+            s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     [Fact(DisplayName = "Task 075: 'unresolved' is reachable ONLY for a non-secure record")]
@@ -246,12 +246,12 @@ public class RecordContainerResolverTests
         // The subtle version of the same bug. If an unavailable metadata service were read as "this entity
         // is not securable", every record would silently resolve to the shared fallback — the identical
         // isolation failure, with an extra step and no log line saying so.
-        var registry = Substitute.For<ISecurableEntityRegistry>();
-        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        var registry = new Mock<ISecurableEntityRegistry>();
+        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse metadata unavailable"));
 
         var resolver = new RecordContainerResolver(
-            registry, Substitute.For<IGenericEntityService>(),
+            registry.Object, new Mock<IGenericEntityService>().Object,
             NullLogger<RecordContainerResolver>.Instance);
 
         // Both a securable and a non-securable name: the single classification call is the only place either
@@ -269,12 +269,12 @@ public class RecordContainerResolverTests
     [Fact(DisplayName = "Task 075: a record-read failure PROPAGATES rather than defaulting to not-secure")]
     public async Task RecordReadFailure_Propagates()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
-        entityService.RetrieveAsync(
-                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var entityService = new Mock<IGenericEntityService>();
+        entityService.Setup(s => s.RetrieveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("Dataverse timed out"));
 
-        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService.Object);
 
         var act = async () => await resolver.ResolveForRecordAsync(
             SecureProjectEntity, RecordId, SharedBuContainer);
@@ -319,17 +319,17 @@ public class RecordContainerResolverTests
     {
         // #1038 itself: "project" was not in the (logical-name-keyed) securable set, so a SECURE project read as
         // "not securable" and its content resolved to a shared container that SPE cannot un-share.
-        var byAlias = Substitute.For<IGenericEntityService>();
-        var byLogical = Substitute.For<IGenericEntityService>();
+        var byAlias = new Mock<IGenericEntityService>();
+        var byLogical = new Mock<IGenericEntityService>();
         foreach (var svc in new[] { byAlias, byLogical })
         {
-            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            svc.Setup(s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(Row(isSecure: true, containerId: OwnContainer)));
         }
 
-        var aliasDecision = await Build(securable: SecurableRoots, entityService: byAlias)
+        var aliasDecision = await Build(securable: SecurableRoots, entityService: byAlias.Object)
             .ResolveForRecordAsync(alias, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
-        var logicalDecision = await Build(securable: SecurableRoots, entityService: byLogical)
+        var logicalDecision = await Build(securable: SecurableRoots, entityService: byLogical.Object)
             .ResolveForRecordAsync(logicalName, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
         aliasDecision.Should().Be(logicalDecision);
@@ -338,8 +338,9 @@ public class RecordContainerResolverTests
             "an alias must reach the secure branch — reading it as non-securable is the #1038 fail-open");
 
         // The SAME record is read: the logical entity, never the alias spelling.
-        await byAlias.Received(1).RetrieveAsync(
-            logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        byAlias.Verify(
+            s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
     }
 
     [Theory(DisplayName = "Task 151: a SECURE record with no container FAILS CLOSED by alias exactly as by logical name")]
@@ -351,11 +352,11 @@ public class RecordContainerResolverTests
     {
         foreach (var name in new[] { alias, logicalName })
         {
-            var svc = Substitute.For<IGenericEntityService>();
-            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            var svc = new Mock<IGenericEntityService>();
+            svc.Setup(s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(Row(isSecure: true, containerId: null)));
 
-            var resolver = Build(securable: SecurableRoots, entityService: svc);
+            var resolver = Build(securable: SecurableRoots, entityService: svc.Object);
 
             var act = async () => await resolver.ResolveForRecordAsync(
                 name, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
@@ -375,17 +376,17 @@ public class RecordContainerResolverTests
     {
         // Covers both non-secure shapes: a securable entity whose record is not secure (project), and a
         // non-securable entity (invoice / event / todo), which short-circuits before any record read.
-        var aliasSvc = Substitute.For<IGenericEntityService>();
-        var logicalSvc = Substitute.For<IGenericEntityService>();
+        var aliasSvc = new Mock<IGenericEntityService>();
+        var logicalSvc = new Mock<IGenericEntityService>();
         foreach (var svc in new[] { aliasSvc, logicalSvc })
         {
-            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            svc.Setup(s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(Row(isSecure: false, containerId: null)));
         }
 
-        var aliasDecision = await Build(securable: SecurableRoots, entityService: aliasSvc)
+        var aliasDecision = await Build(securable: SecurableRoots, entityService: aliasSvc.Object)
             .ResolveForRecordAsync(alias, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
-        var logicalDecision = await Build(securable: SecurableRoots, entityService: logicalSvc)
+        var logicalDecision = await Build(securable: SecurableRoots, entityService: logicalSvc.Object)
             .ResolveForRecordAsync(logicalName, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
         aliasDecision.Should().Be(logicalDecision);
@@ -412,15 +413,17 @@ public class RecordContainerResolverTests
         //     "No storage container is configured" 409. It now reads the record —
         //     RecordContainerResolverTests.NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit.
         // The explicit-fallback leg below is the four-argument path, and its assertions are unchanged.
-        var entityService = Substitute.For<IGenericEntityService>();
-        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+        var entityService = new Mock<IGenericEntityService>();
+        var resolver = Build(securable: SecurableRoots, entityService: entityService.Object);
 
         var withFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, SharedBuContainer);
 
         withFallback.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         withFallback.ContainerId.Should().Be(SharedBuContainer);
 
-        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+        entityService.Verify(
+            s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     [Theory(DisplayName = "Task 155: with NO fallback, a non-securable entity derives the RECORD's own business-unit container (no misleading Unresolved)")]
@@ -429,16 +432,16 @@ public class RecordContainerResolverTests
     public async Task NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit(string logicalName)
     {
         var buId = Guid.Parse("12121212-1212-1212-1212-121212121212");
-        var entityService = Substitute.For<IGenericEntityService>();
-        entityService.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var entityService = new Mock<IGenericEntityService>();
+        entityService.Setup(s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity(logicalName, RecordId)
             {
                 ["owningbusinessunit"] = new EntityReference("businessunit", buId)
             }));
-        entityService.RetrieveAsync("businessunit", buId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        entityService.Setup(s => s.RetrieveAsync("businessunit", buId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("businessunit", buId) { ["sprk_containerid"] = SharedBuContainer }));
 
-        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+        var resolver = Build(securable: SecurableRoots, entityService: entityService.Object);
 
         var twoArg = await resolver.ResolveForRecordAsync(logicalName, RecordId);
         var nullFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, null);
@@ -458,8 +461,8 @@ public class RecordContainerResolverTests
     [InlineData("organization")]  // a friendly name no alias table carries
     public async Task UnknownEntityName_IsRefused_ByBothOverloads_WithoutReadingAnyRecord(string name)
     {
-        var entityService = Substitute.For<IGenericEntityService>();
-        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+        var entityService = new Mock<IGenericEntityService>();
+        var resolver = Build(securable: SecurableRoots, entityService: entityService.Object);
 
         // A usable non-secure fallback is supplied on purpose: the failure being prevented is "a fallback was
         // available and the unknown name quietly used it".
@@ -475,7 +478,9 @@ public class RecordContainerResolverTests
                 + "clients branch on");
         }
 
-        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+        entityService.Verify(
+            s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     [Fact(DisplayName = "Task 151: the bare name 'invoice' means sprk_invoice — the alias table wins over a same-named OOB entity (stated exception to the byte-for-byte rule)")]
@@ -492,13 +497,13 @@ public class RecordContainerResolverTests
         // test made sprk_invoice SECURABLE in its own right, as live dev's metadata has it; owner round 10 item 11
         // ruled an invoice follows its matter, so its own flag is no longer a security input.)
         var matterId = Guid.Parse("15015015-0000-0000-0000-0000000a11a5");
-        var svc = Substitute.For<IGenericEntityService>();
-        svc.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var svc = new Mock<IGenericEntityService>();
+        svc.Setup(s => s.RetrieveAsync("sprk_invoice", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
             {
                 ["sprk_matter"] = new EntityReference("sprk_matter", matterId)
             }));
-        svc.RetrieveAsync("sprk_matter", matterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        svc.Setup(s => s.RetrieveAsync("sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(new Entity("sprk_matter", matterId)
             {
                 ["sprk_issecure"] = true,
@@ -507,7 +512,7 @@ public class RecordContainerResolverTests
 
         var resolver = Build(
             securable: SecurableRoots,
-            entityService: svc,
+            entityService: svc.Object,
             extraKnownEntities: ["invoice"]);
 
         var decision = await resolver.ResolveForRecordAsync("invoice", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
@@ -517,8 +522,12 @@ public class RecordContainerResolverTests
             "'invoice' is sprk_invoice here; reading it as the OOB entity would route the content of an invoice under a "
             + "secure matter to the shared fallback");
 
-        await svc.Received(1).RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
-        await svc.DidNotReceive().RetrieveAsync("invoice", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        svc.Verify(
+            s => s.RetrieveAsync("sprk_invoice", RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
+        svc.Verify(
+            s => s.RetrieveAsync("invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     // ============================================================================================
@@ -781,9 +790,9 @@ public class RecordContainerResolverTests
     [Fact(DisplayName = "Task 075 (N-4): a typed ObjectDoesNotExist fault becomes the documented 404")]
     public async Task RecordNotFound_IsClassifiedFromTheTypedFault()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
-        entityService.RetrieveAsync(
-                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var entityService = new Mock<IGenericEntityService>();
+        entityService.Setup(s => s.RetrieveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaultException<OrganizationServiceFault>(
                 new OrganizationServiceFault { ErrorCode = -2147220969 },
                 // Deliberately NOT an English "does not exist" message: the classification must come from the
@@ -791,7 +800,7 @@ public class RecordContainerResolverTests
                 // silently stopped working on a non-English org.
                 new FaultReason("Die angeforderte Entität existiert nicht.")));
 
-        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService.Object);
 
         var act = async () => await resolver.ResolveForRecordAsync(
             SecureProjectEntity, RecordId, SharedBuContainer);
@@ -806,14 +815,14 @@ public class RecordContainerResolverTests
         // The over-breadth half of N-4. "Attribute sprk_issecure was not found" is a schema or field-level
         // security error — precisely the masked-attribute case the absent-flag warning exists to surface —
         // and reporting it to an operator as "the record does not exist" misdiagnoses it. It must propagate.
-        var entityService = Substitute.For<IGenericEntityService>();
-        entityService.RetrieveAsync(
-                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        var entityService = new Mock<IGenericEntityService>();
+        entityService.Setup(s => s.RetrieveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaultException<OrganizationServiceFault>(
                 new OrganizationServiceFault { ErrorCode = -2147217149 },
                 new FaultReason("Attribute sprk_issecure was not found in the metadata cache.")));
 
-        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService.Object);
 
         var act = async () => await resolver.ResolveForRecordAsync(
             SecureProjectEntity, RecordId, SharedBuContainer);
@@ -825,13 +834,14 @@ public class RecordContainerResolverTests
     [Fact(DisplayName = "Task 075 reverse: a blank container id resolves to null without querying")]
     public async Task Reverse_BlankContainerId_ResolvesToNull()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
-        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+        var entityService = new Mock<IGenericEntityService>();
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService.Object);
 
         (await resolver.ResolveOwningRecordAsync("   ")).Should().BeNull();
 
-        await entityService.DidNotReceiveWithAnyArgs()
-            .RetrieveMultipleAsync(default(QueryExpression)!, default);
+        entityService.Verify(
+            s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     // ============================================================================================
@@ -1054,7 +1064,7 @@ public class RecordContainerResolverTests
         Claimant[]? explicitClaimants = null,
         string[]? extraKnownEntities = null)
     {
-        var registry = Substitute.For<ISecurableEntityRegistry>();
+        var registry = new Mock<ISecurableEntityRegistry>();
         var set = new HashSet<string>(securable.Select(s => s.ToLowerInvariant()), StringComparer.Ordinal);
 
         // Task 151: the org's entity catalog, keyed on LOGICAL names only — exactly as the production registry
@@ -1066,17 +1076,18 @@ public class RecordContainerResolverTests
         known.UnionWith(set);
         known.UnionWith(extraKnownEntities ?? []);
 
-        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<IReadOnlySet<string>>(set));
-        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), set, known)));
+        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, CancellationToken _) => Task.FromResult(TestEntityCatalog.Classify(entity, set, known)));
 
-        var svc = entityService ?? Substitute.For<IGenericEntityService>();
+        var svcMock = entityService is null ? new Mock<IGenericEntityService>() : null;
+        var svc = entityService ?? svcMock!.Object;
 
-        if (entityService is null)
+        if (svcMock is not null)
         {
-            svc.RetrieveAsync(
-                    Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            svcMock.Setup(s => s.RetrieveAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(record!));
 
             // The reverse direction issues TWO queries per securable entity (the C-2 fix), so this double
@@ -1093,11 +1104,9 @@ public class RecordContainerResolverTests
             // load-bearing there (it is the NULL-flag fix), so it is a stable key.
             var stored = storedContainerOverride ?? OwnContainer;
 
-            svc.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
+            svcMock.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns((QueryExpression query, CancellationToken _) =>
                 {
-                    var query = call.Arg<QueryExpression>();
-
                     var collection = new EntityCollection();
 
                     // TopCount IS HONOURED, and that is the D-1 fix.
@@ -1161,6 +1170,6 @@ public class RecordContainerResolverTests
                 });
         }
 
-        return new RecordContainerResolver(registry, svc, NullLogger<RecordContainerResolver>.Instance);
+        return new RecordContainerResolver(registry.Object, svc, NullLogger<RecordContainerResolver>.Instance);
     }
 }

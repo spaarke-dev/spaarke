@@ -73,7 +73,7 @@ public static class RecordSearchEndpoints
         // Validate: Query not empty
         if (string.IsNullOrWhiteSpace(request.Query))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Query Required",
                 Detail = "query is required and must not be empty.",
@@ -85,7 +85,7 @@ public static class RecordSearchEndpoints
         // Validate: RecordTypes not empty
         if (request.RecordTypes == null || request.RecordTypes.Count == 0)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Record Types Required",
                 Detail = "recordTypes is required and must contain at least one record type.",
@@ -101,7 +101,7 @@ public static class RecordSearchEndpoints
 
         if (invalidTypes.Count > 0)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Record Types",
                 Detail = $"Invalid recordTypes value(s): {string.Join(", ", invalidTypes.Select(t => $"'{t}'"))}. Valid values: {string.Join(", ", RecordEntityType.ValidTypes)}.",

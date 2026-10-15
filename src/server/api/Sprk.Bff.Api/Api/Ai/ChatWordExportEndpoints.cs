@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// <para>⚠️ CORRECTED 2026-08-29. This line previously read "ADR-013: ChatHostContext flows through pipeline
 /// for container resolution." <b>It does not.</b> <see cref="ResolveContainerId"/> takes a
 /// <c>ChatSession</c> parameter and never reads it: the container is
-/// <c>SharePointEmbedded:StagingContainerId</c>, falling back to <c>EmailProcessing:DefaultContainerId</c> —
+/// <c>EmailProcessing:DefaultContainerId</c> (task 227f retired the optional staging container read first) —
 /// pure configuration, with no per-entity decision anywhere in this file. The claim mattered because it made
 /// the export look record-scoped when it is tenant-global; the sink is classified ServerDerivedConfig in
 /// <c>tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs</c> for exactly that reason.</para>
@@ -244,7 +244,7 @@ public static class ChatWordExportEndpoints
 
     /// <summary>
     /// Resolves the SPE container ID for file upload.
-    /// Uses the staging container from configuration as the export destination.
+    /// Uses the stamp's default container from configuration as the export destination.
     /// </summary>
     private static string? ResolveContainerId(ChatSession session, IConfiguration configuration)
     {
@@ -253,17 +253,9 @@ public static class ChatWordExportEndpoints
         // writing any doc that says otherwise.
         _ = session;
 
-        // Use the staging container for exports (consistent with MatterPreFillService pattern).
-        // The staging container is accessible to all authenticated users via OBO.
-        var stagingContainerId = configuration["SharePointEmbedded:StagingContainerId"];
-        if (!string.IsNullOrEmpty(stagingContainerId))
-        {
-            return stagingContainerId;
-        }
-
-        // Fallback: default container from email processing config
-        var defaultContainerId = configuration["EmailProcessing:DefaultContainerId"];
-        return defaultContainerId;
+        // The stamp's default container. (An optional staging container was read here first; no environment ever
+        // configured it, and it was retired by customer-provisioning-orchestration-r1 task 227f.)
+        return configuration["EmailProcessing:DefaultContainerId"];
     }
 
     /// <summary>

@@ -40,6 +40,9 @@ Before starting this skill, Claude MUST:
   1. Verify Plan Mode is active (look for "⏸ plan mode on" indicator)
   2. If NOT in Plan Mode → STOP and ask user to press Shift+Tab twice
   3. Do NOT proceed with design analysis until Plan Mode is confirmed
+  4. NON-INTERACTIVE session (headless / `-p`, nobody to press Shift+Tab): say that Plan Mode cannot be
+     confirmed, run the analysis phase read-only and output the analysis in the transcript; spec.md is
+     written in an interactive session (or when the invoking prompt explicitly authorizes writes).
 
 WHY: Plan Mode forces "understand before write" discipline. This skill reads and
      analyzes design documents, discovers ADR constraints, and extracts requirements.

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deploy the in-app wizard migration and verify on dev</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>111, 113 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment of the Console and Legal Workspace code pages to a shared environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted deploy plus a fixed live checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
+    <deps>111, 113</deps>
+    <tags>deploy,frontend,modal</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Merge master, build and deploy the SpaarkeAi and LegalWorkspace code pages carrying tasks 112-113, and verify every migrated wizard on dev in light and dark at 100% and large display size.</prompt>
+  <role>SPAARKE platform engineer.</role>
+  <goal>On dev, all nine migrated wizards open in-app from the Console with no platform header, and the ribbon paths still work.</goal>
+
+  <context>
+    <background>D-26: the white header disappears from today's shipped wizards only once in-app callers stop using navigateTo (modal note section 5.2 P5). This task deploys that change and records the live result, including the Console-in-an-Xrm-dialog case (80% x 80%, v4-prototype-vs-solution #35).</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-SpaarkeAi.ps1</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: MERGE MASTER FIRST and confirm 0 behind.</constraint>
+    <constraint source="project">Scope: Vite solutions install with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+    <constraint source="project">Scope: verify on real dev, never a mock; test each wizard from the Console full page and from the Console opened as an Xrm dialog; test each ribbon entry once.</constraint>
+    <constraint source="owner">ADDED 2026-10-08 (D-81, no-parking sweep): NO tenant-wide publish (no PublishAllXml, no pac solution import --publish-changes, no pac solution publish-all). "LegalWorkspace" is not a separate deploy target if task 121 confirms it is compiled into the Console (sprk_spaarkeai, via embedded LegalWorkspaceApp; the standalone sprk_corporateworkspace is retired): then deploying SpaarkeAi with Deploy-SpaarkeAi.ps1 (PublishXml for that web resource only) ships it. Follow task 121's recorded path (notes/scoped-solution-import.md) for anything that is a solution import. The deploy itself needs owner approval unless an owner decision for it is recorded.</constraint>
+    <constraint source="project">ADDED 2026-10-08: once task 127 (#1412) merges, the Deploy SpaarkeAi workflow deploys master's Console to spaarkedev1 automatically on every qualifying master push. Check `gh run list --workflow deploy-spaarke-ai.yml` before deploying and record which build is live; do not race the workflow. Tasks 113's #1420/#1421 fixes are verified here too (Assign Work reports its record to Quick Start; the create-project widget opens in-app).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code page deployment</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Merge origin/master; confirm 0 behind.</step>
+    <step order="2">Build and deploy SpaarkeAi and LegalWorkspace per code-page-deploy.</step>
+    <step order="3">Open each of the nine migrated wizards in-app (full page and in an Xrm dialog), light and dark, 100% and large.</step>
+    <step order="4">Open each wizard once from the ribbon.</step>
+    <step order="5">Record results in notes/deploy-log.md.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any migrated wizard fails on dev, STOP and escalate; do not revert other projects' work by redeploying an older build.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="No white header">
+      <steps>
+        <step>Open each migrated wizard from the Console in dark mode</step>
+      </steps>
+      <expected>No platform title bar; the wizard is themed end to end.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat in light mode and at large display size</step>
+      </steps>
+      <expected>All surfaces adapt and scale.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="pwsh">Deployment scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the nine migrated wizards, when opened from the dev Console (full page and Xrm dialog) in light and dark at both sizes, then it opens in-app with no platform header.</criterion>
+    <criterion testable="true">Given each ribbon entry, when used once, then it still opens via navigateTo.</criterion>
+    <criterion testable="true">Negative: verification was not done against a mock; the branch was merged up to master first; the environment is named in the log.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-60; D-26.
+2026-10-09: dependency on 121 (LegalWorkspace deploy path) removed — 121 deferred by D-106; 114 runs as part of the D-112 end-to-end dev deploy.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

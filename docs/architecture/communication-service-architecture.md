@@ -35,7 +35,6 @@ The critical design principle is **Graph send is the critical path** — if the 
 | DailySendCountResetService | `src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs` | BackgroundService (midnight UTC): resets `sprk_sendstoday` to 0 for all accounts |
 | MailboxVerificationService | `src/server/api/Sprk.Bff.Api/Services/Communication/MailboxVerificationService.cs` | Tests send/read capabilities, persists results, auto-creates Graph subscription on successful read verification |
 | EmlGenerationService | `src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs` | Generates RFC 2822 `.eml` files for archival |
-| GraphAttachmentAdapter | `src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs` | Adapts Graph attachment objects for processing |
 | GraphMessageToEmlConverter | `src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs` | Converts Graph Message to .eml format |
 | CommunicationJobProcessor | `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationJobProcessor.cs` | Job handler for async communication processing |
 

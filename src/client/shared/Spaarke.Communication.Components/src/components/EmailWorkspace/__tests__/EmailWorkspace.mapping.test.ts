@@ -20,9 +20,10 @@ import {
 } from '../EmailWorkspace.mapping';
 
 describe('Access Permission is inherited, never read from the communication (task 138, owner Q6)', () => {
-  it('the record state carries no access permission, even when the retired column still holds a value', () => {
-    // A live retrieveRecord (no $select) still returns the retired column until the operator script deletes
-    // it. The workspace must ignore it: a communication's effective permission is its parent's.
+  it('the record state carries no access permission, even when the column holds a value', () => {
+    // A live retrieveRecord (no $select) returns sprk_accesspermission: since task 173 (owner round 81) it is a
+    // DISPLAY copy of the parent's value, written by the BFF and never read by enforcement. The workspace must ignore
+    // it: a communication's effective permission is its parent's.
     const state = toWorkspaceRecordState({ sprk_accesspermission: 100000002, sprk_ismonitored: true });
 
     expect(state).not.toHaveProperty('accessPermission');

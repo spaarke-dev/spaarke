@@ -8,7 +8,7 @@
 Querying Dataverse data from PCF controls via WebAPI or context.
 
 ## Read These Files
-1. `src/client/pcf/UniversalQuickCreate/control/services/MetadataService.ts` — Metadata queries via Xrm.WebApi
+1. `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/DataverseMetadataService.ts` — Metadata queries via Xrm.WebApi
 2. `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts` — Entity navigation queries
 3. `src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/RelatedDocumentCount.tsx` — FetchXML aggregate query
 

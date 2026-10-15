@@ -897,7 +897,10 @@ public class AnalysisEndpointsAuthorizationContractTests
         var response = await host.SendAsync(Execute(documentId, playbookId: null));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // ProblemDetails (ADR-019) so authenticatedFetch reads the text; the legacy `error` member is kept.
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        body["detail"]!.GetValue<string>().Should().Be(AnalysisEndpoints.PlaybookIdRequiredMessage);
         body["error"]!.GetValue<string>().Should().Be(AnalysisEndpoints.PlaybookIdRequiredMessage);
         host.Routing.VerifyNoOtherCalls();
         host.PlaybookService.VerifyNoOtherCalls();

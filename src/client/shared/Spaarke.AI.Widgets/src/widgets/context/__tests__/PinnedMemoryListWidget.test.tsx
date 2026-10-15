@@ -28,6 +28,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
+import { ApiError, AuthError } from '@spaarke/auth';
 import type { PinDto } from '../../../components/memory/pinned-memory-contracts';
 
 // ---------------------------------------------------------------------------
@@ -352,6 +353,73 @@ describe('PinnedMemoryListWidget — delete flow (POML test #6)', () => {
     const deleteCalls = mockAuthenticatedFetch.mock.calls.filter(c => c[1]?.method === 'DELETE');
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0][0]).toBe(`https://bff.test/api/memory/pins/${SIX_PINS[0].pinId}`);
+  });
+});
+
+// ===========================================================================
+// Server detail on failure — what authenticatedFetch THROWS (ApiError with ProblemDetails; it never
+// returns a non-OK Response). Before the fix the catch always showed the generic sentence, hiding e.g.
+// the server's length-cap message.
+// ===========================================================================
+
+describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
+  const lengthCap = 'Title must be 200 characters or fewer.';
+
+  it('Create: shows the ProblemDetails detail in the dialog', async () => {
+    const user = userEvent.setup();
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: [SIX_PINS[0]], count: 1 }));
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+    await screen.findByTestId('pinned-memory-groups');
+
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      new ApiError(lengthCap, 400, { title: 'Validation Error', status: 400, detail: lengthCap })
+    );
+    await user.click(screen.getByTestId('pinned-memory-create-button'));
+    fireEvent.change(screen.getByTestId('pinned-memory-edit-title'), { target: { value: 'A title' } });
+    fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), { target: { value: 'Some content' } });
+    await user.click(screen.getByRole('button', { name: 'Create pin' }));
+
+    expect(await screen.findByText(lengthCap)).toBeInTheDocument();
+    expect(screen.queryByText('Could not save the pin. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('Delete: shows the ProblemDetails detail', async () => {
+    const user = userEvent.setup();
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: [SIX_PINS[0]], count: 1 }));
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+    await screen.findByText(SIX_PINS[0].title);
+
+    const denied = 'You can only delete pins you created.';
+    mockAuthenticatedFetch.mockRejectedValueOnce(new ApiError(denied, 403, { title: 'Forbidden', status: 403, detail: denied }));
+    await user.click(within(screen.getAllByTestId('pinned-memory-item')[0]).getByTestId('pinned-memory-delete-button'));
+    await screen.findByTestId('pinned-memory-delete-confirmation');
+    await user.click(screen.getByRole('button', { name: 'Delete pin' }));
+
+    expect(await screen.findByText(denied)).toBeInTheDocument();
+  });
+
+  it('Load: shows the ProblemDetails title when there is no detail', async () => {
+    mockAuthenticatedFetch.mockRejectedValueOnce(new ApiError('Memory store unavailable', 503, { title: 'Memory store unavailable', status: 503 }));
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+
+    expect(await screen.findByText('Memory store unavailable')).toBeInTheDocument();
+  });
+
+  it('a network failure keeps the generic sentence', async () => {
+    mockAuthenticatedFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+
+    expect(await screen.findByText('Could not load pinned memory. Please try again.')).toBeInTheDocument();
+  });
+
+  it('an expired sign-in (AuthError) says to sign in again, not "try again"', async () => {
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      new AuthError('Authentication failed after all retry attempts', 'auth_exhausted')
+    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+
+    expect(await screen.findByText('Your sign-in has expired. Refresh the page and sign in again.')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load pinned memory. Please try again.')).not.toBeInTheDocument();
   });
 });
 

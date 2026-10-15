@@ -25,7 +25,11 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from "@fluentui/react-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
-import { EmailComposer, createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
+import {
+    EmailComposer,
+    createXrmEmailComposeHandlers,
+    describeSendFailure,
+} from "@spaarke/ui-components/components/EmailComposer";
 import type { IWizardContext, IEmailComposerHandle } from "@spaarke/ui-components/components/EmailComposer";
 import type { ILookupItem } from "@spaarke/ui-components/types/LookupTypes";
 import type { ICommunicationAssociation } from "@spaarke/ui-components/services/communicationApi";
@@ -317,7 +321,13 @@ export function DocumentEmailStep({
                 onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
                 onDraftWithAi={composeHandlers.onDraftWithAi}
                 onSent={() => setIsSent(true)}
-                onError={(err) => setSendError(err?.detail || "Failed to send email.")}
+                // This step tells the user itself (the MessageBar above), so the composer's own
+                // "Email not sent" dialog is switched off — one report per failure.
+                sendFailureDisplay="host"
+                onError={(err) => {
+                    const failure = describeSendFailure(err);
+                    setSendError(failure.reference ? `${failure.message} Reference: ${failure.reference}` : failure.message);
+                }}
             />
         </div>
     );

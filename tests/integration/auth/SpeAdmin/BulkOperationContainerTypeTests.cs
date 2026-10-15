@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.Contract.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -31,6 +32,12 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// sent" is the absence of a recorded DELETE / permissions POST — not a mock expectation. ADR-038 §2 path #1; no
 /// <c>Mock&lt;HttpMessageHandler&gt;</c>.
 /// </para>
+/// <para>
+/// <b>#1652.</b> A soft delete first writes this stamp's ownership record of the container (the REAL
+/// <see cref="SpeDeletedContainerRecordStore"/> over an in-memory Cosmos container): Graph keeps no marker or stamp on a
+/// deleted container, so without the record the container is unreachable in the recycle bin. When the record cannot be
+/// written, no DELETE is sent.
+/// </para>
 /// </remarks>
 public sealed class BulkOperationContainerTypeTests : IDisposable
 {
@@ -50,8 +57,14 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
     private static readonly SpeAdminCallerScope RootAdmin = new(Root, IsPlatformOperator: true, new HashSet<Guid> { Root, UnitA, UnitASub, UnitB });
 
     private readonly GraphWireMockFixture _graph = new();
-    private readonly BulkOperationService _sut = new(CreateGraphService(), NullLogger<BulkOperationService>.Instance);
+    private readonly FakeSpeDeletedContainerRecords _records = new();
+    private readonly BulkOperationService _sut;
     private readonly Guid _operationId = Guid.NewGuid();
+
+    public BulkOperationContainerTypeTests()
+    {
+        _sut = new BulkOperationService(CreateGraphService(_records), NullLogger<BulkOperationService>.Instance);
+    }
 
     private static readonly SpeAdminGraphService.ContainerTypeConfig Config = new(
         ConfigId: Guid.Parse("ca000000-0000-0000-0000-00000000000a"),
@@ -98,6 +111,7 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
         error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError,
             "a leaf admin of Unit A must not soft-delete Unit B's container just because it shares the container type");
         Writes("DELETE", "c-b").Should().BeEmpty();
+        _records.Calls.Should().BeEmpty("a refused container gets no ownership record");
     }
 
     [Fact]
@@ -222,6 +236,42 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
         Writes("DELETE", "c-same").Should().ContainSingle();
     }
 
+    // ── #1652: the ownership record is written BEFORE the delete; no record, no delete ──
+
+    [Fact]
+    public async Task Delete_WritesThisStampsOwnershipRecord_FromTheBindingJustRead_BeforeTheDelete()
+    {
+        StubContainer("c-same", ConfigType, UnitASub);
+        _graph.StubDelete($"{ContainersPath}/c-same");
+
+        var error = await Delete("c-same", LeafA);
+
+        error.Should().BeNull();
+        var record = _records.RecordOf("c-same");
+        record.Should().NotBeNull("the bulk delete is the admin plane's soft delete — it records who owned the container");
+        record!.CustomerId.Should().Be(TestSpeOwnership.AllowAllCustomer);
+        record.BusinessUnitId.Should().Be(UnitASub);
+        record.ConfigId.Should().Be(Config.ConfigId);
+        record.ContainerTypeId.Should().Be(ConfigType);
+        record.DeletedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5));
+        _records.CallsOf("Upsert").Should().ContainSingle().Which.Partition.Should().Be(FakeSpeDeletedContainerRecords.RecordPartition);
+        _records.ContainersAsked.Should().OnlyContain(c => c.Container == "memory" && c.Database == "spaarke-ai",
+            "the record reuses the stamp's existing Cosmos memory container");
+    }
+
+    [Fact]
+    public async Task Delete_WhenTheOwnershipRecordCannotBeWritten_IsRefused_AndNoDeleteIsSent()
+    {
+        StubContainer("c-same", ConfigType, UnitA);
+        _graph.StubDelete($"{ContainersPath}/c-same");
+        _records.FaultWrites = true;
+
+        var error = await Delete("c-same", LeafA);
+
+        error!.ErrorMessage.Should().Be(BulkOperationService.OwnershipRecordUnavailableError);
+        Writes("DELETE", "c-same").Should().BeEmpty("a container deleted without its record would be stranded in the recycle bin");
+    }
+
     [Fact]
     public async Task Grant_OnAContainerOfTheCallersOwnUnit_OfTheConfigsType_IsSent()
     {
@@ -261,7 +311,7 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
 
         foreach (var (write, method) in new[]
                  {
-                     ("SoftDeleteContainerAsync(", "DeleteContainerInScopeAsync("),
+                     ("RecordAndSoftDeleteContainerAsync(", "DeleteContainerInScopeAsync("),
                      ("GrantContainerPermissionAsync(", "GrantOnContainerInScopeAsync("),
                  })
         {
@@ -274,6 +324,9 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             var methodEnd = nextMember < 0 ? code.Length : nextMember;
             callSites[0].Should().BeInRange(methodStart, methodEnd, "{0} must sit inside {1}", write, method);
         }
+
+        Regex.Matches(code, Regex.Escape(".SoftDeleteContainerAsync(")).Should().BeEmpty(
+            "#1652: the bulk job never soft-deletes without writing the ownership record first");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -314,7 +367,7 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             .ToList();
 
     /// <summary>A real service with unusable credentials — the same construction the archival contract tests use.</summary>
-    private static SpeAdminGraphService CreateGraphService()
+    private static SpeAdminGraphService CreateGraphService(FakeSpeDeletedContainerRecords records)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://unused.invalid" })
@@ -324,7 +377,10 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             dataverseClient: new DataverseWebApiClient(
                 configuration, NullLogger<DataverseWebApiClient>.Instance, new UnusableCredential()),
             configuration: configuration,
-            logger: NullLogger<SpeAdminGraphService>.Instance);
+            logger: NullLogger<SpeAdminGraphService>.Instance,
+            // The per-item methods get the container's client from the job; the guard only names this stamp's customer.
+            ownership: TestSpeOwnership.AllowAll(new NoGraphClientFactory()),
+            deletedRecords: records.Store);
         return service;
     }
 
@@ -335,6 +391,18 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             dir = dir.Parent;
 
         return dir!.FullName;
+    }
+
+    private sealed class NoGraphClientFactory : IGraphClientFactory
+    {
+        public Microsoft.Graph.GraphServiceClient ForApp() =>
+            throw new InvalidOperationException("The per-item methods are handed their client; none is created here.");
+
+        public Task<Microsoft.Graph.GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+            throw new InvalidOperationException("Delegated Graph is not under test here.");
+
+        public Task<Microsoft.Graph.GraphServiceClient> ForUserBetaAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+            throw new InvalidOperationException("Delegated Graph is not under test here.");
     }
 
     private sealed class UnusedHttpClientFactory : IHttpClientFactory

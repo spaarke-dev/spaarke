@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
@@ -12,6 +13,7 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -93,7 +95,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// writer runs (the row's mirror, then the pass over what is filed under it). A pass below a CHILD row never reads the
     /// platform-cascade rows, so it needs no Web API client.
     /// </summary>
-    private SecureChildReconciler Children() => SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!);
+    private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
+        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads);
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -118,6 +121,68 @@ public sealed partial class SecureChildOwnershipAiToolTests
         fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind")
             .WhoseValue.Should().Be($"/systemusers({Caller:D})", "createdby is the application; the person is recorded");
         ((IValueHttpResult)result).Value.Should().BeEquivalentTo(new { id });
+    }
+
+    // ── An ORGANIZATION-OWNED lookup target (the ADR-024 record-type catalog every resolver payload binds). Live,
+    //    RetrievePrincipalAccess refuses such a table (400 0x80040800), so before this fix every wizard payload carrying
+    //    sprk_RegardingRecordType was answered "not found" — for every caller, a System Administrator included (measured on
+    //    spaarkedev1 2026-10-07 through this route: the same to-do is 201 without the lookup, 404 with it). ──────────────
+
+    private static readonly Guid RecordTypeMatter = Guid.Parse("a2470000-0000-4000-8000-0000000000c1");
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated_WhenTheCallerHoldsItsAppendToPrivilege()
+    {
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Bind(_appCreates.Should().ContainSingle().Subject.Fields, "sprk_RegardingRecordType@odata.bind")
+            .Should().Be($"/sprk_recordtype_refs({RecordTypeMatter:D})");
+    }
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_WithoutItsAppendToPrivilege_IsTheUniform404_AndNothingIsCreated()
+    {
+        _user.Held.Remove("prvAppendTosprk_recordtype_ref");
+
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingARecordTypeRowThatDoesNotExist_IsTheSame404_AndNothingIsCreated()
+    {
+        _user.InvisibleRows.Add(RecordTypeMatter);
+
+        var missing = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+        _user.InvisibleRows.Clear();
+        _user.Held.Remove("prvAppendTosprk_recordtype_ref");
+        var denied = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        (Status(missing), ReasonCode(missing), Detail(missing)).Should().Be((Status(denied), ReasonCode(denied), Detail(denied)),
+            "a missing reference row and one the caller may not append to answer alike");
+        Status(missing).Should().Be(StatusCodes.Status404NotFound);
+        _appCreates.Should().BeEmpty();
     }
 
     [Fact]
@@ -318,8 +383,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public void TheCensusTheory_CoversEveryCreateTable()
     {
+        // Ontology task 046: a work assignment is a ROOT on this route — under a secure matter it is created INTO isolation
+        // (not owned by the named team as a child), so its secure/ordinary/refusal cases are its own
+        // (SecureChildOwnershipAiToolTests.WorkAssignmentCreate.cs, SecureRootInheritanceWriterTests.ChildRecordRoute.cs).
         CensusCreateTablesUnderAMatter.Select(row => (string)row[0]).Should()
-            .BeEquivalentTo(ChildRecordEndpoints.CreateTables, "a table added to the route gets its secure/ordinary/refusal cases");
+            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t)),
+                "a table added to the route gets its secure/ordinary/refusal cases");
     }
 
     [Theory]
@@ -787,6 +856,73 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
+    public async Task CommunicationFiling_AWrittenFiling_ReconcilesTheCommunicationsThread_AfterTheOwnerIsAssigned()
+    {
+        // spaarkeai-word-add-in-r1 task 129: the thread follows the filing, so the email shows on the record's Messages panel.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()))
+            .Callback(() => _world.Assignments.Should().NotBeEmpty("the reconcile runs after the filing and its owner are written"))
+            .Returns(Task.CompletedTask);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_ARefusedFiling_LeavesTheThreadAlone()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateTool_ReFilingACommunication_ReconcilesItsThreadOnce_ThroughTheAfterRefileStep()
+    {
+        // Behaviour review F3: dataverse.update_record re-files a communication through the ONE re-file core and then runs
+        // SecureChildReconciler.AfterRefileAsync — which now reconciles the thread, so the tool needs no call of its own.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateTool_ARefusedReFileOfACommunication_NeverReconcilesItsThread()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeFalse();
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact]
     public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
     {
         var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
@@ -989,10 +1125,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// <summary>The chat update tool with a scope that resolves the REAL reconciler (and its synchronizer) over this test's
     /// share world.</summary>
     private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
-        string table, Guid id, params (string Column, JsonElement Value)[] item)
+        string table, Guid id, params (string Column, JsonElement Value)[] item) =>
+        UpdateRecordWithShares(table, id, threads: null, item);
+
+    private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
+        string table, Guid id, Sprk.Bff.Api.Services.Communication.IThreadResolver? threads,
+        params (string Column, JsonElement Value)[] item)
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Children());
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Children(threads));
         var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
         var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
             .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(provider);
@@ -1199,10 +1340,19 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> CreateChild(string table, Dictionary<string, object?> payload) =>
+    /// <summary>
+    /// POST /api/v1/child-records/{table}'s REAL handler. The secure-create plan is a gate over a Dataverse with no rows (no
+    /// record is filed under anything secure) unless a test passes its own (ontology task 046: a work assignment's plan);
+    /// the host has no AssignedAccessMaterializer (its inline step logs and leaves a root to the job — never fails).
+    /// </summary>
+    private Task<IResult> CreateChild(
+        string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
+        IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(), HttpContextOfCaller(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+            gate ?? SecureRootFilingGateFixtures.NothingSecure(),
+            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
@@ -1216,10 +1366,16 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Event, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
-    /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
-    private Task<IResult> RefileCommunication(Guid communication, Dictionary<string, object?> payload) =>
+    /// <summary>The ONE re-file core (<see cref="ChildRecordEndpoints.UpdateAsync"/>, filing columns only) that
+    /// PATCH /api/communications/{id}/filing calls. It does NOT run the route handler, so it queues no Signal trigger; the
+    /// route's trigger is driven by <c>RefileCommunicationWithTrigger</c>.</summary>
+    /// <remarks>Task 129: <paramref name="threads"/> is the reconciler's thread resolver — the route reaches the thread
+    /// reconcile only through SecureChildReconciler.AfterRefileAsync.</remarks>
+    private Task<IResult> RefileCommunication(
+        Guid communication, Dictionary<string, object?> payload,
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         ChildRecordEndpoints.UpdateAsync(
-            "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(),
+            "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
 
     private static CoreAncestorRestamper Restamper() =>

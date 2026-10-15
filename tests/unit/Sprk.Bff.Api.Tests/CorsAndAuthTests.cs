@@ -9,7 +9,12 @@ namespace Sprk.Bff.Api.Tests;
 public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
-    public CorsAndAuthTests(CustomWebAppFactory f) => _client = f.CreateClient();
+    private readonly CustomWebAppFactory _factory;
+    public CorsAndAuthTests(CustomWebAppFactory f)
+    {
+        _factory = f;
+        _client = f.CreateClient();
+    }
 
     [Fact]
     public async Task Cors_Preflight_AllowsConfiguredOrigin()
@@ -20,6 +25,21 @@ public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
         var res = await _client.SendAsync(req);
         res.StatusCode.Should().Be(HttpStatusCode.NoContent);
         res.Headers.TryGetValues("Access-Control-Allow-Origin", out var values).Should().BeTrue();
+    }
+
+    // Task 185 (uac-r2): the external SPA sends the invite code as X-Spaarke-Invite-Code on its BFF calls. It is
+    // cross-origin, so without this header in the allow-list the browser's preflight refuses every such call.
+    [Fact]
+    public async Task Cors_Preflight_AllowsTheInviteCodeHeader()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Options, "/api/v1/external/me/entitlements");
+        req.Headers.Add("Origin", "https://localhost:5173");
+        req.Headers.Add("Access-Control-Request-Method", "GET");
+        req.Headers.Add("Access-Control-Request-Headers", "authorization,x-spaarke-invite-code");
+        var res = await _client.SendAsync(req);
+        res.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        res.Headers.TryGetValues("Access-Control-Allow-Headers", out var allowed).Should().BeTrue();
+        string.Join(",", allowed!).Should().ContainEquivalentOf("X-Spaarke-Invite-Code");
     }
 
     // Repointed TWICE, and the reason is the same both times: this test checks BEARER ENFORCEMENT, so
@@ -34,12 +54,15 @@ public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
     //
     // Route ABSENCE for all five retired routes is asserted by
     // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs.
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - OBO endpoint returns 500 without Graph client")]
+    [Fact]
     public async Task Obo_Endpoints_RequireBearer()
     {
         using var body = new ByteArrayContent(new byte[] { 1, 2, 3 });
         var res = await _client.PutAsync("/api/obo/me/files/probe.txt", body);
+        // A bare 401 challenge (no problem+json body): the auth layer rejects the request before the
+        // handler runs, so no Graph client is needed. The FallbackPolicy answers 401 for an unmapped
+        // route too, so the endpoint table is what proves this route still exists.
         res.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        res.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        EndpointTable.AssertMapped(_factory, "PUT", "/api/obo/me/files/probe.txt");
     }
 }

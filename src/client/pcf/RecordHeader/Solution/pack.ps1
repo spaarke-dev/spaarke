@@ -28,7 +28,7 @@ Set-Location $PSScriptRoot
 # ADR-020 version-sync location 5 of 5. Keep in lockstep with:
 #   control/ControlManifest.Input.xml, control/version.ts, Solution/solution.xml,
 #   Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml
-$version = "1.1.11.0"
+$version = "1.1.12.0"
 $solutionName = "RecordHeaderPcf"
 $controlSchemaName = "sprk_Spaarke.Records.RecordHeader"
 # ABSOLUTE paths throughout. `Set-Location` updates PowerShell's location but NOT
@@ -166,10 +166,10 @@ Write-Host ""
 # Report import command (works whether or not pac is present)
 if (Get-Command pac -ErrorAction SilentlyContinue) {
     Write-Host "To import, run:" -ForegroundColor Cyan
-    Write-Host "  pac solution import --path `"$((Resolve-Path $zipPath).Path)`" --publish-changes"
+    Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath `"$((Resolve-Path $zipPath).Path)`" -SolutionUniqueName <name>"
 } else {
     Write-Host "pac CLI not found on PATH. Install Power Platform CLI to import:" -ForegroundColor Yellow
     Write-Host "  https://learn.microsoft.com/power-platform/developer/cli/introduction"
     Write-Host "Then run:"
-    Write-Host "  pac solution import --path `"$((Resolve-Path $zipPath).Path)`" --publish-changes"
+    Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath `"$((Resolve-Path $zipPath).Path)`" -SolutionUniqueName <name>"
 }

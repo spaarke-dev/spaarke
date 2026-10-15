@@ -723,8 +723,15 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         _fixture.Access.Grant(WritableDocument, AccessRights.Read | AccessRights.Write)
             .Grant(ParentMatter, AccessRights.Read | AccessRights.AppendTo);
 
-    private void ArrangeRow(DocumentEntity row) =>
+    private void ArrangeRow(DocumentEntity row)
+    {
         _fixture.Documents.Setup(d => d.GetDocumentAsync(row.Id, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        // Task 177: the index-parent decision reads the links DocumentEntity cannot carry (work assignment, related event);
+        // this row has neither.
+        _fixture.Entities
+            .Setup(e => e.RetrieveAsync("sprk_document", Guid.Parse(row.Id), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", Guid.Parse(row.Id)));
+    }
 
     private void VerifyNoStamp() =>
         _fixture.Documents.Verify(

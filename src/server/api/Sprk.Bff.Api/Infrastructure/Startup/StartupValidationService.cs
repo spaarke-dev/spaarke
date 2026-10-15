@@ -14,14 +14,17 @@ public class StartupValidationService : IHostedService
     private readonly IOptions<DataverseOptions> _dataverseOptions;
     private readonly IOptions<ServiceBusOptions> _serviceBusOptions;
     private readonly IOptions<RedisOptions> _redisOptions;
+    private readonly IOptions<CommunicationOptions> _communicationOptions;
 
     public StartupValidationService(
         ILogger<StartupValidationService> logger,
         IOptions<GraphOptions> graphOptions,
         IOptions<DataverseOptions> dataverseOptions,
         IOptions<ServiceBusOptions> serviceBusOptions,
-        IOptions<RedisOptions> redisOptions)
+        IOptions<RedisOptions> redisOptions,
+        IOptions<CommunicationOptions> communicationOptions)
     {
+        _communicationOptions = communicationOptions;
         _logger = logger;
         _graphOptions = graphOptions;
         _dataverseOptions = dataverseOptions;
@@ -40,6 +43,9 @@ public class StartupValidationService : IHostedService
             _ = _dataverseOptions.Value;
             _ = _serviceBusOptions.Value;
             _ = _redisOptions.Value;
+            // Runs CommunicationOptionsValidator: the system sender mailbox (outside Development/Testing). The rest of
+            // CommunicationOptions stays unvalidated at start (webhook members exist only where that feature is provisioned).
+            _ = _communicationOptions.Value;
 
             _logger.LogInformation("✅ Configuration validation successful");
             LogConfigurationSummary();

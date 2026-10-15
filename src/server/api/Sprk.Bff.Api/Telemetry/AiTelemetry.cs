@@ -296,8 +296,14 @@ public class AiTelemetry : IDisposable
     /// <summary>Shield evaluation outcome: the 100ms hard deadline elapsed and the request proceeded unshielded.</summary>
     public const string ShieldOutcomeFailedOpenTimeout = "failed_open_timeout";
 
-    /// <summary>Shield evaluation outcome: 429/5xx/network/auth/parse failure and the request proceeded unshielded.</summary>
+    /// <summary>Shield evaluation outcome: 429/5xx/network/parse failure and the request proceeded unshielded.</summary>
     public const string ShieldOutcomeFailedOpenError = "failed_open_error";
+
+    /// <summary>
+    /// Shield evaluation outcome: Content Safety refused the BFF identity (HTTP 401/403) or no token could be
+    /// acquired, and the request proceeded unshielded. Not transient — task 230b.
+    /// </summary>
+    public const string ShieldOutcomeFailedOpenAuth = "failed_open_auth";
 
     /// <summary>
     /// Record one Prompt Shield evaluation outcome (AI-ARCHITECTURE assessment rec 2a).
@@ -310,7 +316,8 @@ public class AiTelemetry : IDisposable
     /// (queried by <c>scripts/kql/ai-metering/shield-coverage.kql</c>). Dimensions are BOUNDED
     /// (NFR-07 / ADR-015 — identifiers/counts only, never prompt or document content):
     /// <c>outcome</c> ∈ { <see cref="ShieldOutcomeCompleted"/>, <see cref="ShieldOutcomeBlocked"/>,
-    /// <see cref="ShieldOutcomeFailedOpenTimeout"/>, <see cref="ShieldOutcomeFailedOpenError"/> }
+    /// <see cref="ShieldOutcomeFailedOpenTimeout"/>, <see cref="ShieldOutcomeFailedOpenError"/>,
+    /// <see cref="ShieldOutcomeFailedOpenAuth"/> }
     /// plus optional <c>tenant.id</c> (opaque AAD GUID). When <paramref name="tenantId"/> is
     /// null the tenant falls back to the ambient <see cref="AiMeteringContext"/> scope set at
     /// the entry seams (same attribution plumbing as <see cref="RecordMeteredTokens"/>);

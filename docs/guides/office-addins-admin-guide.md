@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Administrator Guide
 
-> **Version**: 1.3
-> **Last Updated**: 2026-09-10 — corrected: `manifest-working.xml` does not exist (upload the manifest served by the deployed SWA instead); `npm run build` IS the production build, there is no `build:prod` script
+> **Version**: 1.4
+> **Last Updated**: 2026-10-14 — §7.5 corrected: the add-ins need a base role (Spaarke Basic User or Core User), not "Spaarke Office Add In User". 2026-09-10 — corrected: `manifest-working.xml` does not exist (upload the manifest served by the deployed SWA instead); `npm run build` IS the production build, there is no `build:prod` script
 > **Audience**: IT Administrators, System Administrators, DevOps Engineers
 
 ---
@@ -105,7 +105,7 @@ Users (Outlook/Word)
 | Resource | Purpose | Resource Group |
 |----------|---------|----------------|
 | `spe-api-prod-*` | BFF API hosting | `rg-spaarke-prod-westus2` |
-| `spe-office-addins-prod` | Static asset hosting | `rg-spaarke-prod-westus2` |
+| `swa-spaarke-office-addins-prod` — custom domain `https://addins.spaarke.com` (corrected 2026-10-07; the `spe-office-addins-prod` named here before never existed) | Static asset hosting (production, all Model 1 customers) | `rg-spaarke-shared-prod`, subscription "Spaarke Shared Production" |
 | `spaarke-redis-prod` | Caching, rate limiting | `rg-spaarke-prod-westus2` |
 | `spaarke-servicebus-prod` | Job queue processing | `rg-spaarke-prod-westus2` |
 | `spe-insights-prod-*` | Application monitoring | `rg-spaarke-prod-westus2` |
@@ -125,8 +125,7 @@ Before deploying the add-ins, ensure the following are in place:
 - [ ] Service Bus namespace and queues created (`office-jobs` queue)
 - [ ] Application Insights configured
 - [ ] **Dataverse tables created**: `sprk_processingjob`, `sprk_emailartifact`, `sprk_attachmentartifact`
-- [ ] **Dataverse security role configured**: "Spaarke Office Add In User" (see Section 7.5)
-- [ ] **Users assigned security role**: All Office add-in users
+- [ ] **Base Dataverse role**: every add-in user holds Spaarke Basic User or Spaarke Core User (see Section 7.5). "Spaarke Office Add In User" is optional and not needed for the add-ins.
 
 ### 3.2 Administrative Access Requirements
 
@@ -179,8 +178,8 @@ The Office add-in uses a public client (SPA) registration with Dialog API authen
 | `brk-multihub://localhost` | Reserved for future NAA support |
 | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/taskpane.html` | Dev SPA redirect |
 | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/auth-dialog.html` | Dev Dialog API authentication |
-| `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` | Production SPA redirect |
-| `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` | Production Dialog API authentication |
+
+> **Production uses its own app registration** (corrected 2026-10-07): **Spaarke Office Add-in (Production)**, client ID `1958aec2-0218-495e-8e3c-37133e9b8357`, single tenant, SPA redirects `brk-multihub://addins.spaarke.com` and `https://addins.spaarke.com/auth-callback.html`, Graph `email profile User.Read` admin-consented. It has no API permission of its own: each customer backend pre-authorizes it (customer provisioning, step H3). The app above (`c1258e2d…`) is the **dev** identity only.
 
 > **Note**: When adding new Static Web Apps, ensure their redirect URIs are added to the app registration.
 
@@ -549,57 +548,42 @@ if (uri.Host.EndsWith(".azurestaticapps.net", StringComparison.OrdinalIgnoreCase
 > 2. The add-in's origin matches one of the allowed patterns
 > 3. Preflight OPTIONS requests return correct `Access-Control-Allow-Origin` headers
 
-### 7.5 Dataverse Security Roles
+### 7.5 Who Can Use the Add-ins, and Dataverse Security Roles
 
-Users must have appropriate Dataverse security roles to use the add-in:
+> **Corrected 2026-10-14.** This section used to say that every add-in user needs the "Spaarke Office Add In User" role. No code checks that role, and the add-ins work without it. It also listed roles that do not exist (Spaarke User, Spaarke Power User, Spaarke Administrator).
 
-| Role | Capabilities |
+Two separate things decide what an add-in user can do:
+
+1. **Who gets the add-in.** This is set in the Microsoft 365 admin center, not in Dataverse: **Settings > Integrated apps**, deployment scope (Section 5.2, Step 3). Assign the add-ins to the group of Power Apps licensed users. The user must also be able to sign in through Entra ID.
+2. **What they can reach once signed in.** The BFF checks each record against the user's own Dataverse rights (Read, Append To and the others). It combines every role the user holds, directly or through a team. Saved documents and communications are created by the BFF's service identity, so users need no Create privilege on `sprk_document` or `sprk_communication`.
+
+#### Required: one base role
+
+Every add-in user holds one base role, **Spaarke Basic User** or **Spaarke Core User**. These are alternatives; a user does not need both. Either role carries the Read and Append To rights on matters, projects, documents and communications that the add-ins check. Saving an email or document with no related record is supported under either role.
+
+| Base role | Use for |
 |------|--------------|
-| **Spaarke User** | Create/read documents, search entities |
-| **Spaarke Power User** | Above + Quick Create entities |
-| **Spaarke Office Add In User** | Office add-in operations, create Office entities |
-| **Spaarke Administrator** | Full access |
+| **Spaarke Basic User** | Users who file and read documents and communications |
+| **Spaarke Core User** | Users who also create and manage matters, projects and documents |
 
-#### Configuring the "Spaarke Office Add In User" Security Role
+The baseline role model is owned by the unified access control work. See `docs/architecture/uac-access-control.md`.
 
-The "Spaarke Office Add In User" role provides access to Office add-in-specific Dataverse tables. This role should be assigned to all users who will use the Outlook or Word add-ins.
+#### Optional: "Spaarke Office Add In User"
 
-**Required Tables and Permissions**:
+This role is **not required** by the add-ins, and nothing in the code checks for it. It adds rights on top of the base role:
 
-| Table | Permission Level | Operations | Why Required |
-|-------|------------------|------------|--------------|
-| `sprk_document` | User | Create, Read, Write, Append | Save documents and view existing |
-| `sprk_processingjob` | User | Create, Read, Write | Track async job status |
-| `sprk_emailartifact` | User | Create, Read, Write | Save email metadata |
-| `sprk_attachmentartifact` | User | Create, Read, Write | Save attachment metadata |
-| `sprk_matter` | Organization | Read | Associate documents with matters |
-| `sprk_project` | Organization | Read | Associate documents with projects |
-| `sprk_contact` | Organization | Read | Associate documents with contacts |
-| `sprk_account` | Organization | Read | Associate documents with accounts |
+- Create, Read, Write, Append and Append To at **Deep** (the user's business unit and its child units) on matters, projects, events, invoices, memos and work assignments.
+- User-level rights on the legacy `sprk_emailartifact`, `sprk_attachmentartifact` and `sprk_processingjob` tables.
+- No Share privilege on project, matter or work assignment. Share on those tables lets a user manage access (owner round 89), and the add-ins do not need it.
 
-**Setup Instructions**:
+Assign it only to users who should create and edit those records across their business unit. Do not assign it just to make the add-ins work.
 
-1. Navigate to Power Platform Admin Center > Your environment > Settings > Users + permissions > Security roles
-2. Click "New role" (or edit existing "Spaarke Office Add In User")
-3. Select the **Custom Entities** tab
-4. For each table listed above, set the permission level:
-   - **User level**: Four circles filled (Create, Read, Write, Append)
-   - **Organization level**: All five circles filled (Read only for lookup entities)
-5. Save the security role
-6. Assign to users via Power Platform Admin Center > Users > Manage security roles
+**Check team assignments.** A role assigned to a team applies to every member. If a business unit's default team holds this role, every user in that unit gets its Deep rights.
 
-**Permission Level Explanation**:
+#### Verification
 
-- **User level**: Users can only access records they own or that are shared with them
-- **Organization level**: Users can access all records in the organization (for read-only lookups)
-
-**Verification**:
-
-```powershell
-# Verify security role configuration
-pac admin list --environment {env-id}
-pac security-role list --environment {env-id}
-```
+1. In the M365 admin center, open **Settings > Integrated apps**, select each add-in and confirm the assigned users or groups.
+2. In the Power Platform admin center, open **Environment > Settings > Users + permissions > Users**, select a user and choose **Manage security roles**. Confirm the user holds Spaarke Basic User or Spaarke Core User. Then check the roles of the teams the user belongs to.
 
 After configuration, users should be able to:
 - Save emails and attachments from Outlook
@@ -740,7 +724,7 @@ curl https://spe-api-prod-*.azurewebsites.net/healthz
 curl -H "Authorization: Bearer {token}" https://spe-api-prod-*.azurewebsites.net/office/search/matter-types
 
 # Check static assets
-curl -I https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html
+curl -I https://addins.spaarke.com/outlook/taskpane.html   # production (after the first production deploy)
 
 # Stream App Service logs
 az webapp log tail --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
@@ -939,7 +923,7 @@ Is add-in causing Office crashes?
 | M365 Admin Center | https://admin.microsoft.com |
 | Azure Portal | https://portal.azure.com |
 | BFF API Health | https://spe-api-prod-*.azurewebsites.net/healthz |
-| Static Assets | https://spe-office-addins-prod.azurestaticapps.net |
+| Static Assets | https://addins.spaarke.com (production) |
 
 ### Key Commands
 

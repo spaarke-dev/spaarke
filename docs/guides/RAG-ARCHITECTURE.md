@@ -30,7 +30,7 @@
 The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retrieval capabilities for AI Document Intelligence features. It enables:
 
 - **Hybrid Search**: Combines keyword, vector, and semantic ranking for optimal relevance
-- **Per-Customer Isolation**: a dedicated AI Search service and index per customer (`Dedicated`, the default), or the customer's own AI Search under BYOK (`CustomerOwned`). The former `Shared` model is **retired** — see [Deployment Models](#deployment-models).
+- **Per-Customer Isolation**: a dedicated AI Search service per customer (each stamp's own), in both Model 1 and Model 2; the setting `Analysis:DefaultRagModel` stays at its code default `Shared`, which reads the stamp's own `AiSearch:KnowledgeIndexName` (`spaarke-files-index`, created by H2b); `Dedicated` reads `{tenantId}-knowledge`, which nothing creates — never set it (corrected 2026-10-08, T235; #1432) — see [Deployment Models](#deployment-models).
 - **High Performance**: Redis-cached embeddings, P95 < 500ms target latency
 - **Scalability**: Per-customer indexes for every customer
 
@@ -104,8 +104,8 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │  ├── {tenant}-knowledge                                         │
 │  └── Customer indexes                                           │
 │                                                                 │
-│  Redis Cache                    Key Vault                       │
-│  └── sdap:embedding:{hash}      └── CustomerOwned API keys      │
+│  Redis Cache                                                    │
+│  └── sdap:embedding:{hash}                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -234,20 +234,21 @@ The RAG indexing pipeline provides end-to-end file indexing with three entry poi
 
 ## Deployment Models
 
-> **Rewritten 2026-09-28 (D-12)**: this section previously named a triad **Shared / Dedicated /
-> CustomerOwned** and marked **Shared** as the **default**, isolated by a `tenantId` filter. 🔴 **`Shared` is
-> RETIRED — never provision it.** **`Dedicated` is now the default.** See the retirement note below for why
-> the `tenantId` filter never delivered *customer* isolation.
+> **Corrected 2026-10-08 (T235).** The 2026-09-28 (D-12) rewrite of this section said "`Shared` is RETIRED —
+> never provision it; `Dedicated` is the default". The *architecture* it described is right — every customer has
+> its own AI Search service — but it mapped that onto the wrong setting value. In code
+> (`KnowledgeDeploymentService.CreateDefaultConfig`) **`Shared` = "the configured `AiSearch:KnowledgeIndexName`"**,
+> which on a stamp is that stamp's own index; **`Dedicated` = "`{tenantId}-knowledge`"**, an index nothing creates.
+> What D-12 retired is one AI Search service holding several customers — not the `Shared` setting value.
 
-The `RagDeploymentModel` enum still carries three values, but only two are provisionable:
+The `RagDeploymentModel` enum carries two values:
 
 | Value | Status | When |
 |---|---|---|
-| **`Dedicated`** | ✅ **DEFAULT** | Model 1 and Model 2 — a dedicated AI Search service and index per customer |
-| **`CustomerOwned`** | ✅ supported | Model 2 + BYOK — AI Search in the customer's own Azure subscription |
-| ~~`Shared`~~ | 🔴 **RETIRED — never provision** | — |
+| **`Shared`** (code default) | ✅ **use — leave the setting unset** | Every stamp, Model 1 and Model 2: reads `AiSearch:KnowledgeIndexName` in the stamp's own AI Search service |
+| `Dedicated` | 🔴 **never set** | Reads `{tenantId}-knowledge`, which no provisioning step creates (#1432) |
 
-### Dedicated Model (Default)
+### Per-customer AI Search service (every stamp)
 
 Every customer gets their own AI Search service and index, in their own Azure subscription — Spaarke's
 Azure tenant under Model 1, the customer's own tenant under Model 2.
@@ -263,22 +264,21 @@ Azure tenant under Model 1, the customer's own tenant under Model 2.
 
 | Aspect | Details |
 |--------|---------|
-| **Index Name** | `{sanitizedTenantId}-knowledge` — see the naming note below |
+| **Index Name** | `AiSearch:KnowledgeIndexName` — `spaarke-files-index` by default, created by H2b with the stamp's other canonical indexes |
 | **Isolation** | Physical — a separate AI Search **service** per customer, not merely a separate index |
 | **Cost** | A real per-customer AI Search floor. Pay it; this is the highest-value segregation case. |
 | **Use Case** | **All customers**, both models — the default |
-| **Configuration** | `Model = Dedicated` in deployment config |
+| **Configuration** | None — `Analysis:DefaultRagModel` stays at its default `Shared` |
 
-⚠️ **Naming note.** The index name is derived from the *tenant* ID today. Under Model 1 every customer
-presents **Spaarke's** tenant GUID, so the derived *name* does not distinguish customers. That is harmless
-here **only because the AI Search service itself is per-customer** — the resource boundary, not the name,
-is what isolates. Do not rely on the name as a customer discriminator, and do not reintroduce a design in
-which two customers' documents can land in one service under differently-derived index names.
+⚠️ **Naming note.** Index names on a stamp are the same in every stamp; they do not distinguish customers and
+need not — **the AI Search service itself is per-customer**, and the resource boundary, not the name, is what
+isolates. Do not reintroduce a design in which two customers' documents can land in one service.
 
-### 🔴 Retired: the Shared model
+### 🔴 Retired: one AI Search service shared across customers
 
-The `Shared` model placed **every customer's document text and embeddings in one AI Search index**
-(`spaarke-knowledge-index-v2`) and isolated them with a per-query `tenantId eq '…'` filter.
+Before D-12 the shared Model 1 tier placed **every customer's document text and embeddings in one AI Search
+index** (`spaarke-knowledge-index-v2` on Spaarke's service) and isolated them with a per-query `tenantId eq '…'`
+filter. (The `Shared` setting value pointed at that index then; today it points at the stamp's own index.)
 
 It is retired for one decisive reason: **under Model 1 every customer presents the same `tenantId`**
 (Spaarke's), so the filter separates **Entra tenants** only — never **customers** — while every test and
@@ -286,9 +286,10 @@ health signal keyed on it reports success. A filter must also be written correct
 by everyone; a resource boundary cannot be forgotten. For a product holding privileged legal material, that
 difference is the whole argument.
 
-**Do not provision `Shared`, and do not add new code paths that depend on it.**
+**Never put two customers' documents in one AI Search service, and never rely on a `tenantId` filter for
+customer isolation.**
 
-**Index Name Sanitization**:
+**Index Name Sanitization** (the unused `Dedicated` value only):
 - Converted to lowercase
 - Non-alphanumeric characters removed (except hyphens)
 - Format: `{sanitized-tenant}-knowledge`
@@ -300,55 +301,20 @@ Examples:
 | `ENTERPRISE_CORP` | `enterprisecorp-knowledge` |
 | `acme.inc` | `acmeinc-knowledge` |
 
-### CustomerOwned Model
+### Removed: the CustomerOwned model
 
-```
-┌──────────────────────────────────────────┐
-│  Customer's Azure Subscription           │
-├──────────────────────────────────────────┤
-│  customer-search-instance                │
-│  └── customer-knowledge-index            │
-└──────────────────────────────────────────┘
-              ▲
-              │ API Key from Key Vault
-┌──────────────────────────────────────────┐
-│  Spaarke Key Vault                       │
-│  └── secret: customer-api-key-secret     │
-└──────────────────────────────────────────┘
-```
-
-| Aspect | Details |
-|--------|---------|
-| **Index Name** | Customer-provided |
-| **Isolation** | Complete (customer's Azure subscription) |
-| **Cost** | Customer-managed |
-| **Use Case** | Data sovereignty, BYOK requirements |
-| **Configuration** | `SearchEndpoint`, `IndexName`, `ApiKeySecretName` |
-
-**Required Configuration**:
-
-```csharp
-new KnowledgeDeploymentConfig
-{
-    TenantId = "customer-id",
-    Model = RagDeploymentModel.CustomerOwned,
-    SearchEndpoint = "https://customer-search.search.windows.net",
-    IndexName = "customer-knowledge-index",
-    ApiKeySecretName = "customer-api-key-secret",  // Key Vault secret name
-    IsActive = true
-}
-```
+The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
 ### Model Comparison
 
-| Feature | Dedicated (default) | CustomerOwned | ~~Shared~~ (retired) |
-|---------|---------------------|---------------|----------------------|
-| Physical Isolation | Yes | Yes | ~~No~~ |
-| Index Location | The customer's own subscription (Spaarke's Azure tenant under Model 1, the customer's under Model 2) | Customer's own tenant | ~~One Spaarke index for everyone~~ |
-| Cost to Customer | Directly attributable — their own subscription | Customer pays Azure directly | ~~Included~~ |
-| Setup Complexity | Low | Medium | ~~None~~ |
-| Data Sovereignty | Partial (full under Model 2) | Full | ~~No~~ |
-| Compliance (SOC2, etc.) | Dedicated | Customer-managed | ~~Shared~~ |
+| Feature | Per-customer service (every stamp; setting default `Shared`) | ~~One service for all customers~~ (retired, D-12) |
+|---------|---------------------|----------------------|
+| Physical Isolation | Yes | ~~No~~ |
+| Index Location | The customer's own subscription (Spaarke's Azure tenant under Model 1, the customer's under Model 2) | ~~One Spaarke index for everyone~~ |
+| Cost to Customer | Directly attributable — their own subscription | ~~Included~~ |
+| Setup Complexity | Low | ~~None~~ |
+| Data Sovereignty | Partial (full under Model 2) | ~~No~~ |
+| Compliance (SOC2, etc.) | Dedicated | ~~Shared~~ |
 
 ---
 
@@ -678,7 +644,7 @@ If embedding generation fails:
 | `id` | String | No | Yes | Unique document chunk ID |
 | `tenantId` | String | No | Yes | Tenant isolation |
 | `deploymentId` | String | No | Yes | Deployment config reference |
-| `deploymentModel` | String | No | Yes | Shared/Dedicated/CustomerOwned |
+| `deploymentModel` | String | No | Yes | Shared/Dedicated |
 | `documentId` | String | No | Yes | Parent document reference |
 | `documentName` | String | Yes | No | Human-readable name |
 | `documentType` | String | Yes | Yes | Classification (contract, policy, etc.) |
@@ -747,17 +713,14 @@ public interface IKnowledgeDeploymentService
 
     // Persist deployment configuration
     Task<KnowledgeDeploymentConfig> SaveDeploymentConfigAsync(KnowledgeDeploymentConfig config);
-
-    // Validate CustomerOwned deployment settings
-    Task<DeploymentValidationResult> ValidateCustomerOwnedDeploymentAsync(KnowledgeDeploymentConfig config);
 }
 ```
 
 **Key Behaviors**:
 - Caches SearchClient instances per tenant
-- Creates a default config if none exists — ⚠️ **the code default is still `Shared`, which is RETIRED.**
-  Set `Model = Dedicated` explicitly on every deployment; do not rely on the fallback.
-- Validates CustomerOwned configs before activation
+- Creates a default config if none exists — the code default `Shared` reads `AiSearch:KnowledgeIndexName`
+  (the stamp's own index), which is correct on every stamp. Do not set `Dedicated` (`{tenantId}-knowledge`
+  exists nowhere — #1432).
 - Sanitizes tenant IDs for index naming
 
 ### IRagService
@@ -968,9 +931,8 @@ catch (Exception ex)
 
 | Model | Isolation Method | Security Level |
 |-------|-----------------|----------------|
-| **Dedicated** (default) | A separate AI Search **service** per customer, in that customer's own subscription | Physical — a resource boundary |
-| **CustomerOwned** | The customer's own Azure subscription and tenant | Complete |
-| ~~Shared~~ (retired) | ~~`tenantId` filter on all queries~~ | 🔴 **None between customers** — see below |
+| **Per-customer service** (every stamp; setting default `Shared`) | A separate AI Search **service** per customer, in that customer's own subscription | Physical — a resource boundary |
+| ~~One service for all customers~~ (retired, D-12) | ~~`tenantId` filter on all queries~~ | 🔴 **None between customers** — see below |
 
 ### Query filter — what it does and does not enforce
 
@@ -991,11 +953,10 @@ nothing. It is retained as belt-and-braces (it is correct and cheap, and it is l
 where tenants really do differ), but **the isolation that matters comes from the dedicated AI Search
 service**, not from this predicate. Never cite a `tenantId` filter as evidence of *customer* isolation.
 
-### CustomerOwned Security
+### Search authentication
 
-- API keys stored in Spaarke Key Vault (not in code/config)
-- Keys retrieved at runtime via managed identity
-- Customer controls their own Azure AI Search instance
+The BFF reaches its stamp's own AI Search service with its managed identity — no API key. The former
+key-based `CustomerOwned` path was removed (task 230b, 2026-10-06); see [Deployment Models](#deployment-models).
 
 ### API Authentication
 
@@ -1035,7 +996,7 @@ group.MapPost("/search", Search)
 | High query volume | Increase AI Search replicas |
 | Large document corpus | Scale that customer's own AI Search SKU — every customer is already on `Dedicated` |
 | Many concurrent users | Scale that customer's Redis (dedicated, Standard tier) |
-| Customer requires data sovereignty / BYOK | `CustomerOwned` under Model 2 |
+| Customer requires data sovereignty / BYOK | Model 2 — a dedicated stamp in the customer's own subscription/tenant (`Dedicated`) |
 
 ---
 

@@ -101,7 +101,9 @@
       <EnableRules>
         <EnableRule Id="Spaarke.Playbook.NewFromList.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_analysisplaybook.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_playbook_commands.js"
                            FunctionName="Spaarke_NewPlaybookFromList">
@@ -143,7 +145,9 @@
       <EnableRules>
         <EnableRule Id="Spaarke.Playbook.NewFromForm.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_analysisplaybook.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_playbook_commands.js"
                            FunctionName="Spaarke_NewPlaybookBuilder">
@@ -155,6 +159,11 @@
   </CommandDefinitions>
 
   <RuleDefinitions>
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_analysisplaybook.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_analysisplaybook" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
 
       <!-- Enable Rule: New from List (always enabled) -->

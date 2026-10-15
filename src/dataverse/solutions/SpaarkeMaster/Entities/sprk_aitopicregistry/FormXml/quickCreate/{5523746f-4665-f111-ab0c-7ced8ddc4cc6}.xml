@@ -1,0 +1,95 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{5523746f-4665-f111-ab0c-7ced8ddc4cc6}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>0</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab name="tab_qc" id="{c0a1c012-9001-4000-8000-000000000001}" IsUserDefined="1" locklevel="0" showlabel="false" expanded="true">
+          <labels>
+            <label description="Add Topic" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_qc" showlabel="false" showbar="false" locklevel="0" id="{c0a1c012-9002-4000-8000-000000000001}" IsUserDefined="1" columns="1">
+                  <labels>
+                    <label description="Add Topic" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000001}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000002}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Topic name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_topicname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_topicname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000003}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Mode" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mode" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_mode" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000004}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Playbook name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_playbookname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_playbookname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000005}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Host entity" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_hostentity" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_hostentity" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000006}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Target field" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_targetfield" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_targetfield" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-9003-4000-8000-000000000007}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Display name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_displayname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_displayname" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Add Topic" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Quick Create form for adding a topic registry row (Insights Engine Widgets r1, Phase 1 Task 012)." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

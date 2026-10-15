@@ -310,10 +310,14 @@ public class CommunicationWorkspaceReadSeamTests
 
         // The read service's dependency shape is the access-model-decision collaborators (impersonated query, the
         // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
-        // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true (5 total).
+        // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true — PLUS the
+        // optional IAppOnlyCommunicationQuery (spaarke-SPA-external-access-platform-r3 task 033: the external-plane read,
+        // used only by ReadRegardingAppOnlyAsync after the external endpoint gates the record; 6 total).
         // The banned-seam guard above is the durable protection against a resurrected union path; the identity
-        // resolver is explicitly the ONLY sanctioned addition.
-        readServiceParamTypeNames.Should().HaveCount(5);
+        // resolver and the app-only external seam are the ONLY sanctioned additions.
+        readServiceParamTypeNames.Should().HaveCount(6);
+        readServiceParamTypeNames.Should().Contain("IAppOnlyCommunicationQuery",
+            "task 033 adds the external-plane app-only seam; it is the only other sanctioned addition");
         readServiceParamTypeNames.Should().Contain("ISystemUserIdentityResolver",
             "the #675 fix injects the authoritative per-caller internal/external resolver (not a membership/grant union)");
     }

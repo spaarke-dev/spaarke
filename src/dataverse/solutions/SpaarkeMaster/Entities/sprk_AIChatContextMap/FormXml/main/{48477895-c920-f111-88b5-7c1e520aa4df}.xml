@@ -1,0 +1,124 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{48477895-c920-f111-88b5-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>0</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab name="tab_general" id="{a1b2c3d4-0001-0001-0001-000000000001}" IsUserDefined="1" locklevel="0" showlabel="true" expanded="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" showlabel="true" showbar="false" locklevel="0" id="{a1b2c3d4-0002-0001-0001-000000000001}" IsUserDefined="1" columns="2">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000001}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000002}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Entity Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_entitytype" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_entitytype" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000003}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Page Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_pagetype" classid="{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}" datafieldname="sprk_pagetype" />
+                      </cell>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000004}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Playbook" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_playbookid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_playbookid" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000005}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Sort Order" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_sortorder" classid="{C6D124CA-7EDA-4a60-AEA9-7FB8D318B68F}" datafieldname="sprk_sortorder" />
+                      </cell>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000006}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_details" id="{a1b2c3d4-0001-0001-0001-000000000002}" IsUserDefined="1" locklevel="0" showlabel="true" expanded="true">
+          <labels>
+            <label description="Details" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_description" showlabel="true" showbar="false" locklevel="0" id="{a1b2c3d4-0002-0001-0001-000000000002}" IsUserDefined="1" columns="1">
+                  <labels>
+                    <label description="Description" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{a1b2c3d4-0003-0001-0001-000000000007}" showlabel="true" locklevel="0" rowspan="4">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{E0DECE4B-6FC8-4a8f-A065-082708572369}" datafieldname="sprk_description" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{a1b2c3d4-0005-0001-0001-000000000001}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{a1b2c3d4-0004-0001-0001-000000000001}" showlabel="true" locklevel="0">
+              <labels>
+                <label description="Is Active" languagecode="1033" />
+              </labels>
+              <control id="header_sprk_isactive" classid="{B0C6723A-8503-4fd7-BB28-C8A06AC933C2}" datafieldname="sprk_isactive" />
+            </cell>
+            <cell id="{a1b2c3d4-0004-0001-0001-000000000002}" showlabel="true" locklevel="0">
+              <labels>
+                <label description="Is Default" languagecode="1033" />
+              </labels>
+              <control id="header_sprk_isdefault" classid="{B0C6723A-8503-4fd7-BB28-C8A06AC933C2}" datafieldname="sprk_isdefault" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="AI Chat Context Map" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Admin form for managing AI chat context-to-playbook mappings" languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

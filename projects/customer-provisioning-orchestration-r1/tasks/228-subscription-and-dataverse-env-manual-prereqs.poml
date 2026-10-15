@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="228" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Subscription + Dataverse environment become manual prerequisites: intake requires both (and containerTypeId); H1 proves the subscription is the customer's own; H5 adopts the operator's environment and never creates one; H10 runs before H6; Model 1 deploys the customer stamp</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T228 (D4, Q1, G3, G19)</phase>
+    <gate>after 227g (✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 API intake + handlers H1/H5/H10 + DAG + ARM runner, Bicep RBAC, schema/prereqs, the operator skill, binding docs; security-relevant (subscription Owner grant, cross-customer adoption guards).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting provisioning-pipeline change with isolation guards and a DAG reorder.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints and the provision-environment skill (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, dataverse, bicep, model1-dedicated, tenant-isolation, testing</tags>
+    <deps>227g</deps>
+  </metadata>
+
+  <prompt>Make the customer's Azure subscription and Dataverse environment operator-created prerequisites that L2 verifies and adopts, so Model 1 runs can be dispatched.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, ARM, Dataverse Web API, Bicep, operator skill).</role>
+
+  <goal>
+    D4/Q1 (owner): the operator creates the customer's subscription and Dataverse environment; L2 never creates either.
+    Owner decision 2026-10-06: the L2 identity holds **Owner** on each customer subscription (customer.bicep writes role
+    assignments; Contributor cannot). After this task a Model 1 run goes intake → H0 … H13 with no shared or default
+    subscription anywhere, and a run can never act on another customer's subscription or environment.
+  </goal>
+
+  <context>
+    <background>
+      Mapped 2026-10-06: there is NO server-side shared subscription — Model 1 without `subscriptionId` silently used the
+      operator's `az account show` subscription (skill Step 4.0). H5 creates the environment through the BAP admin API
+      (BapRestEnvironmentCreator) and reads `region`/`tier`, which the skill fills with an Azure region and the COST tier.
+      The run DAG has H10 (makes the BFF app registration a Dataverse application user) AFTER H7, while H6 and H7 already
+      sign in to Dataverse as that app registration — so H6 would be refused in any environment it did not create. H8 and
+      H10 read/write the environment as the L2 Worker identity, which previously had access only as the BAP creator.
+      ArmDeploymentRunner's Model 1 arm throws (T225a). controlplane-subscription-rbac.bicep grants the L2 UAMI Contributor on
+      the PLATFORM subscription ("fleet") — under D-12 no stamp lives there.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs (ISH-02 498-527; pairing 1130-1187); Core/Models/IntakeParameterCatalog.cs</file>
+      <file>Core/Handlers/SubscriptionReadiness/{H1SubscriptionReadinessHandler,ArmSubscriptionReadinessProbe}.cs</file>
+      <file>Core/Handlers/DataverseEnvCreation/** (H5, BapRestEnvironmentCreator, IDataverseEnvCreator, PacAdmin…, DataverseWebApiHealthProbe, options); Worker/Program.cs registrations; Core/Handlers/Preflight/BapRestEnvironmentRateProbe.cs</file>
+      <file>Core/Reconciler/{DagAdvancer,HandlerRunInputs}.cs; Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</file>
+      <file>infrastructure/bicep/{platform-controlplane.bicep,modules/controlplane-subscription-rbac.bicep}</file>
+      <file>scripts/provisioning-prereqs/{intake.schema.json,prereqs.yaml,context-defaults.*.json}; .claude/skills/provision-environment/SKILL.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.3/§2.4/§3/§5/§7.2/§7.4; docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md; .claude/constraints/provisioning.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner">No default, shared or ambient subscription anywhere (server, schema, skill). L2 creates no subscription and no Dataverse environment.</constraint>
+    <constraint source="owner">The L2 identity's per-customer grant is Owner on that subscription, granted by the operator (repurposed controlplane-subscription-rbac.bicep, deployed at the customer subscription); remove the platform-subscription grant from platform-controlplane.bicep. Never run a live role change here — the module and its runbook step only.</constraint>
+    <constraint source="isolation">H1 refuses a subscription outside the run's tenant or holding another customer's `rg-spaarke-{otherId}-*` resource group; H5 refuses an environment whose host does not belong to this customer (`spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}`). Refusals are Resumable and name what they found; nothing is written.</constraint>
+    <constraint source="needed-or-remove">Code that only served environment creation goes (BAP creator, its interface/options, the pac creator, the H0 creation-rate probe and PRQ-C-04, `dataverseDisplayName`, H5's region/tier inputs) unless something else reads it.</constraint>
+    <constraint source="tests">Real HTTP against hand-written handlers; never Mock&lt;HttpMessageHandler&gt;.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Intake: `subscriptionId` required for every model; new `dataverseEnvUrl` (https, `*.dynamics.com` origin, host label per the naming rule); `containerTypeId` required GUID (G19); schema + catalog + endpoint parity; tests.</step>
+    <step order="2">H1: subscription tenant matches the run's tenant; no other customer's `rg-spaarke-*`; tests.</step>
+    <step order="3">H5 → adopt: read `dataverseEnvUrl`, enforce the host rule, prove reachability as the Worker identity (WhoAmI; 401/403 → Resumable naming the prerequisite), write `DataverseEnvUrl`; delete the creation code; DAG: H10 ← H3, H5; H6 ← H5, H3, H10; H8 ← H3, H5, H10; H11 ← H10, H7; tests (incl. DAG parity / run-context contract).</step>
+    <step order="4">ArmDeploymentRunner Model 1 → `customer`; controlplane-subscription-rbac.bicep → Owner at the customer subscription; platform-controlplane.bicep stops deploying it; recompile JSON where tracked.</step>
+    <step order="5">prereqs.yaml (subscription exists + dedicated; PRQ-S-04 Owner via the module; operator creates the environment + adds the L2 Worker identity as System Administrator application user; PRQ-C-04 retired), skill (Step 1 prompts subscriptionId + dataverseEnvUrl; remove Step 1e and the az-account default; registry row gets the real URL), guide/inventory/constraints.</step>
+    <step order="6">Verify (ControlPlane tests, ArchTests, Worker + Api builds, bicep build); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateRun returns 400 for a Model 1 or Model 2 request without `subscriptionId`, without/with a malformed `dataverseEnvUrl`, or without/with a non-GUID `containerTypeId`; schema and endpoint agree (parity tests).</criterion>
+    <criterion testable="true">H1: another tenant's subscription → Resumable refusal; a subscription with `rg-spaarke-{otherCustomer}-{env}` → Resumable refusal naming it; this customer's own RG is accepted.</criterion>
+    <criterion testable="true">H5 never calls a creation API (the code is gone); host rule violation → Resumable; WhoAmI 401/403 → Resumable naming the Worker-app-user prerequisite; reachable → DataverseEnvUrl written and completed.</criterion>
+    <criterion testable="true">DAG: H10 precedes H6 and H8; no cycle; run-context contract green.</criterion>
+    <criterion testable="true">Model 1 resolves the `customer` template; no "Model 1 not deployable" path remains.</criterion>
+    <criterion testable="true">`git grep` finds no shared/default subscription for Model 1 in src, scripts, the skill or the schema; Step 1e is gone.</criterion>
+    <criterion testable="true">ControlPlane.Tests, ArchTests pass; Worker/Api build with 0 warnings; bicep builds.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Something other than H5 turns out to need Dataverse environment creation (a reader of the creator or rate probe).</trigger>
+    <trigger>A live action would be required to verify (role assignment, environment creation) — ask the owner first.</trigger>
+  </escalation>
+
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 39). Owner decision during the task: the L2 identity holds OWNER on each customer
+    subscription (asked with the constrained RBAC-Administrator and operator-applies-RBAC alternatives; owner chose Owner).
+    - Intake (POST /api/runs + intake.schema.json): subscriptionId (GUID), containerTypeId (GUID, G19) and new
+      dataverseEnvUrl required for EVERY model — ISH-02's Model 1 exemption and the skill's `az account show` default are
+      gone. dataverseEnvUrl goes through Core/Models/DataverseEnvironmentUrlRule (https origin, {domain}.crm[N].dynamics.com,
+      domain spaarke-{customerId} or spaarke-{customerId}-{environmentName}; commercial cloud only) — the guard against
+      adopting another customer's environment; all three values stored canonically (URL https://{host}/, GUIDs "D").
+      Catalog: dataverseDisplayName + H0 rate keys removed.
+    - H1: CheckSubscriptionDedicatedAsync (ARM resource-group listing) + pure SubscriptionDedication — refuses a subscription
+      holding another rg-spaarke-{id}-{env} (incl. Spaarke's platform/shared/byok groups) before provider registration;
+      a listing failure has its own code (subready-subscription-listing-failed). The tenant check already existed.
+    - H5 → H5DataverseEnvAdoptionHandler (folder/namespace DataverseEnvCreation kept): URL rule + WhoAmI as the Worker
+      identity; new probe result AccessDenied (401/403) → worker-not-app-user naming PRQ-C-09. Removed: BapRestEnvironmentCreator,
+      IDataverseEnvCreator, PacAdminDataverseEnvCreator, H0's BapRestEnvironmentRateProbe (+ check name), scripts/preflight/
+      Test-DataverseEnvCreationRate.ps1 and their tests (none under a KEEP path). Options → DataverseEnvAdoptionOptions.
+    - DAG: H10 ← H3, H5; H6 ← H5, H3, H10; H11 ← H10, H7. DEVIATION from step 3 / AC4 ("H10 precedes H6 and H8"): H8 is
+      NOT made to wait for H10 — H8 (and H5) act as the L2 Worker identity, which the operator makes an application user
+      (PRQ-C-09); H10 registers the stamp's identities (BFF app registration + stamp UAMI), which only H6/H7 use. Adding the
+      edge would serialize H8 behind H10 for no data. (code-review F3 / adr-check W7 accepted this record.)
+    - ArmDeploymentRunner: Model 1 → `customer` (same template as Model 2).
+    - Bicep: modules/controlplane-subscription-rbac.bicep repurposed — Owner for the L2 UAMI at the customer subscription,
+      applied by the operator (PRQ-S-04); no longer deployed by platform-controlplane.bicep (+ output removed, JSON
+      recompiled). The live Contributor assignment on the platform subscription stays until an owner removes it.
+    - prereqs.yaml v8: PRQ-S-00 + PRQ-C-09 added, PRQ-S-04 → Owner, PRQ-C-04 retired; every PRQ-S-* is once_per_customer
+      against {stampSubscriptionId} (one subscription per customer), so skill Step 0.5 never checks the operator's ambient
+      subscription; H1/H2a enforce server-side. Skill: Step 1b-bis, Step 1e hard stop removed, Step 1f stores the real URL,
+      Step 2.5 rebinds $subId to the customer's, Step 4.0 sends dataverseEnvUrl. pac flags verified locally
+      (pac admin create --domain; assign-user --application-user takes the application id; a taken domain gets a digit
+      appended — the rule refuses it, documented).
+    - Docs: guide §2.3/§2.4/§3/§5/§5.1/§7.2/§7.4/§12, PROVISIONING-PREREQUISITES v6, inventory, constraints (new binding
+      section), DATAVERSE-WRITE-PATH unaffected, infrastructure/README, spec ADR Tensions (+2 ADR-027 rows: the Owner grant
+      as a documented exception with the rejected alternatives; management groups deferred → plan G36), plan G3/G19 closed,
+      CHANGELOG.
+    - Step 9.5: code-review 1 Critical (F1: PRQ-S-04's {stampSubscriptionId} unresolvable at Step 0.5 → fixed by the
+      once_per_customer re-scope) + warnings F2 (ambient subscription in skill checks — fixed), F4 (prereqs guide drift —
+      fixed), F5 (GUID canonicalization — fixed), F6 (tests — added: ARM-transport dedication tests, WhoAmI status mapping
+      via a credential seam); suggestions F7/F10/F12-F15 fixed, F8 (Lighthouse-before-dedication ordering, Model 2 only) and
+      F9 (H1 regex ignores env-less rg-spaarke-x; the prereq recipe is stricter, which is acceptable for an operator check)
+      and F11 (code name) accepted. adr-check: V1/V2 → ADR Tensions (path A, owner-decided / booked G36); W1 (Model 2 Owner
+      via Lighthouse) noted — Model 2 out of scope; W2/W3/W4/W8 fixed; W5/W9 accepted (IDataverseHealthProbe seam predates;
+      SecretClientKvWriter's default-subscription probe works once PRQ-S-04 grants Owner).
+    - Observation: scripts/provisioning-prereqs/validate-recipe-authoring.ps1 (advisory, not in CI) reports 24 pre-existing
+      recipes without an empty-result guard (26 before this task).
+    - Tests: ControlPlane 2178 / 0 failed (1 skip; the creation and rate-probe tests went with their code; new tests cover intake, the URL rule, H1, H5, the WhoAmI mapping and the DAG); ArchTests 831/831;
+      Worker + Api 0 warnings; bicep builds; prereqs validate OK. No BFF code changed.
+    - T186 live unknowns added: H5's WhoAmI as the Worker identity in an operator-created environment; H1's resource-group
+      listing under the Owner grant; H6 signing in as the BFF app registration right after H10.
+  </notes>
+</task>

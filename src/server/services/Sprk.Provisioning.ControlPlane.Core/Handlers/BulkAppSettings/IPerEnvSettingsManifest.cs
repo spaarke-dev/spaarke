@@ -2,20 +2,21 @@
 // IPerEnvSettingsManifest.cs
 //
 // Task 201 — Reader abstraction over the Phase H canonical secret-catalog
-// manifest's NEW top-level `per_env_settings:` list (added task 201 alongside
-// the existing `secrets:` list). Sibling of IKvSecretManifest (task 084/126) —
-// intentionally split so per-env LITERAL settings (URIs, public GUIDs,
-// generated signing keys) do not muddle the secrets-focused KV manifest
-// contract.
+// manifest's top-level `per_env_settings:` list (added task 201 alongside the
+// existing `secrets:` list) AND, since task 253, each secret's `app_settings`
+// (the Key Vault references the BFF reads). Sibling of IKvSecretManifest
+// (task 084/126) — intentionally split so per-env LITERAL settings (URIs,
+// public GUIDs, generated signing keys) do not muddle the secrets-focused KV
+// manifest contract H4 consumes.
 //
 // PURPOSE (per H4b):
 //   H4b BulkAppSettings handler resolves each per_env_settings entry through
 //   PerEnvSourceCatalog (typed InterStepState output or intake value — task
-//   245a) via the entry's `per_env_source`, then
-//   shells to the generated Configure-AppServiceSettings.generated.ps1 script
-//   which writes ALL settings (KV-refs + per-env literals) in ONE batched
-//   `az webapp config appsettings set --settings @settings` call → ONE App
-//   Service restart cycle.
+//   245a) via the entry's `per_env_source`, builds the full settings set (the
+//   Key Vault references + the per-env values — exactly what the generated
+//   Configure-AppServiceSettings.generated.ps1 writes) and merges it into the
+//   BFF's production site and staging slot through IAppServiceSettingsWriter
+//   (ARM SDK, task 253) — one write per slot → one App Service restart cycle.
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 implementations exist from day 1:
@@ -92,13 +93,29 @@ public interface IPerEnvSettingsManifest
 /// H4b includes this in its diagnostic on missing-input failures so operators
 /// can trace fail-fast root cause immediately.
 /// </param>
+/// <param name="Indexed">
+/// Task 255: the entry is a .NET configuration LIST (manifest <c>indexed: true</c>) fed by a list source
+/// (<see cref="PerEnvSource.IsList"/>). <see cref="Key"/> is the base name; H4b writes <c>{Key}__0</c> …
+/// <c>{Key}__{n-1}</c> and removes every other <c>{Key}__*</c> setting on both slots. Always required.
+/// </param>
 public sealed record PerEnvSettingEntry(
     string Key,
     PerEnvSettingSource PerEnvSource,
     string? LiteralValue,
     string? ParameterKey,
     bool Required,
-    string IOptionsModuleName);
+    string IOptionsModuleName,
+    bool Indexed = false);
+
+/// <summary>
+/// One App Service setting whose value is a Key Vault reference to a catalog secret — a manifest
+/// <c>secrets[].app_settings</c> entry (task 253). H4b writes it as
+/// <c>@Microsoft.KeyVault(VaultName={stamp vault};SecretName={SecretName})</c>, the form the generated
+/// Configure script's <c>Format-KvRef</c> emits.
+/// </summary>
+/// <param name="AppSettingKey">App Service app-setting name (e.g. <c>AzureOpenAI__Endpoint</c>).</param>
+/// <param name="SecretName">The secret's <c>canonical_name</c> in the stamp vault (e.g. <c>AzureOpenAI-Endpoint</c>).</param>
+public sealed record KeyVaultReferenceSetting(string AppSettingKey, string SecretName);
 
 /// <summary>
 /// Parsed form of the manifest's <c>per_env_source</c> string.
@@ -127,8 +144,13 @@ public abstract record PerEnvSettingsManifestReadResult
     /// Manifest read OK — entries in canonical (alphabetical-by-Key) order. <paramref name="ContentVersion"/>
     /// is the <see cref="ArtifactVersion"/> of the manifest text (task 245b) — the <c>secretsVer</c> of H4b's
     /// idempotency key <c>appsettings-{env}-{secretsVer}</c>; the same manifest as H4's, so the same value.
+    /// <paramref name="KeyVaultReferences"/> (task 253) are the <c>secrets[].app_settings</c> pairs in manifest
+    /// order (secrets by <c>canonical_name</c>, ordinal) — every App Service setting that is a Key Vault reference.
     /// </summary>
-    public sealed record Success(IReadOnlyList<PerEnvSettingEntry> Entries, string ContentVersion) : PerEnvSettingsManifestReadResult;
+    public sealed record Success(
+        IReadOnlyList<PerEnvSettingEntry> Entries,
+        string ContentVersion,
+        IReadOnlyList<KeyVaultReferenceSetting> KeyVaultReferences) : PerEnvSettingsManifestReadResult;
 
     /// <summary>Manifest read failed — operator-facing diagnostic.</summary>
     public sealed record Failure(string Diagnostic) : PerEnvSettingsManifestReadResult;

@@ -16,7 +16,13 @@ const LOG_PREFIX = '[SummarizeService]';
 // Authenticated fetch type
 // ---------------------------------------------------------------------------
 
-/** Type for an authenticated fetch function matching the standard Fetch API signature. */
+/**
+ * Type for an authenticated fetch function matching the standard Fetch API signature.
+ *
+ * Deliberately the wide, either-shape type (a fetch that may return `ok: false`), not the throwing
+ * `AuthenticatedFetchFn` of `utils/fetchTypes`: the dialog also hands it to `provisionSecureProject`
+ * / `SecureProvisioningOutcome`, which take `typeof fetch` and handle both failure shapes.
+ */
 export type AuthenticatedFetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 // ---------------------------------------------------------------------------

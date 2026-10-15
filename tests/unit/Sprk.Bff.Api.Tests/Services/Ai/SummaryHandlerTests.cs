@@ -395,7 +395,7 @@ public class SummaryHandlerTests
         Assert.True(result.Execution.OutputTokens > 0);
     }
 
-    [Fact(Skip = "Summary structured format section extraction logic changed")]
+    [Fact]
     public async Task ExecuteAsync_WithStructuredFormat_ExtractsSections()
     {
         // Arrange
@@ -418,7 +418,7 @@ This is the executive summary.
 - Important clause 1
 """;
 
-        var jsonResponse = $$"""{"summary": "{{structuredSummary.Replace("\n", "\\n").Replace("\"", "\\\"")}}", "confidence": 0.88}""";
+        var jsonResponse = $$"""{"summary": "{{structuredSummary.Replace("\r\n", "\n").Replace("\n", "\\n").Replace("\"", "\\\"")}}", "confidence": 0.88}""";
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -436,6 +436,8 @@ This is the executive summary.
         Assert.NotNull(data.Sections);
         Assert.True(data.Sections.Count > 0);
         Assert.True(data.Sections.ContainsKey("Executive Summary"));
+        Assert.Equal("This is the executive summary.", data.Sections["Executive Summary"]);
+        Assert.True(data.Sections.ContainsKey("Key Terms"));
     }
 
     [Fact]

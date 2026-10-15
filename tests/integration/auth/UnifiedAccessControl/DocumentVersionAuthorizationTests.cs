@@ -442,7 +442,8 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         }
 
         private const string NotModelled =
-            "DocumentVersionTestFixture's SPE double models only the two version reads. A version "
+            "DocumentVersionTestFixture's SPE double models only the version reads (list, prior content, current id and "
+            + "current content). A version "
             + "route that reaches any other facade member is doing something this task did not "
             + "intend — model it deliberately.";
 
@@ -451,7 +452,13 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         public Task<FileHandleDto?> GetFileMetadataAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> GetFileMetadataAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<SpeItemCreator?>>();
-        public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
+        // F4 (task 171 attach-fix PR): the CURRENT version (the newest listed, "4.0") is served through the same app-only
+        // download /content uses — Graph refuses it through the versions API.
+        public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default)
+        {
+            _byteReads.Add((driveId, itemId, "current"));
+            return Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes($"{PriorVersionBytesMarker}:current")));
+        }
         // Deliberately UNMODELLED (task 171): the version routes no longer read as the user. If one ever reaches an OBO
         // member again, access would once more depend on the caller holding a container role — which per-record secure
         // containers never grant — so this throws instead of quietly returning a version list.
@@ -460,7 +467,8 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         public Task<FileHandleDto?> GetFileMetadataUncachedAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<Stream?> DownloadFileAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         public Task<string?> GetCurrentVersionIdAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
-        public Task<string?> GetCurrentVersionIdAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
+        public Task<string?> GetCurrentVersionIdAsync(string driveId, string itemId, CancellationToken ct = default)
+            => Task.FromResult<string?>("4.0");
         public Task<FileHandleDto?> ReplaceFileContentAsync(string driveId, string itemId, Stream content, string? ifMatch, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();

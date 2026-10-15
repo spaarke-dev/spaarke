@@ -118,4 +118,38 @@ public class MessagingIngestorTests
         result.CommunicationId.Should().Be(newId);
         generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IngestAsync_GrantsExactlyTheAssignmentTheResolverReturned(bool anchored)
+    {
+        // #1629 F3: the inbound path hands the grant the resolver's assignment unchanged — its audience and anchor —
+        // never a different audience or a re-derived one.
+        var newId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var assignment = anchored
+            ? ThreadAssignment.Anchored(threadId, "sprk_matter", Guid.NewGuid())
+            : ThreadAssignment.Direct(threadId);
+        var generic = new Mock<IGenericEntityService>();
+        generic
+            .Setup(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newId);
+        var resolver = new Mock<IThreadResolver>();
+        resolver
+            .Setup(r => r.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(assignment);
+        var grant = new Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService>();
+        var sut = new MessagingIngestor(
+            generic.Object, new Mock<ICommunicationEnrichmentService>().Object, Mock.Of<ILogger<MessagingIngestor>>(),
+            resolver.Object, grant.Object);
+
+        await sut.IngestAsync(MessageRequest());
+
+        resolver.Verify(
+            r => r.ResolveAndAssignAsync(It.Is<ThreadResolutionRequest>(q => q.CommunicationId == newId), It.IsAny<CancellationToken>()),
+            Times.Once);
+        grant.Verify(g => g.GrantMessageAccessAsync(newId, assignment, It.IsAny<CancellationToken>()), Times.Once);
+        grant.Verify(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

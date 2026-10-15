@@ -10,7 +10,7 @@
  * @spaarke/auth has NO React dependency — safe for React 16 PCF controls.
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 import { getApiBaseUrl, getMsalClientId, getBffApiAppId, getTenantId } from '../../shared/utils/environmentVariables';
 
@@ -84,14 +84,13 @@ export async function initializeAuth(webApi: ComponentFramework.WebApi): Promise
 
   const redirectUri = getClientUrl();
 
-  // authority intentionally omitted — @spaarke/auth resolves tenant-specific
-  // authority via resolveTenantFromXrm() (reads
-  // Xrm.Utility.getGlobalContext().organizationSettings.tenantId via frame-walk).
-  // Passing an explicit authority bypasses that resolution and was the cause of
-  // the popup regression discovered 2026-05-13. The sprk_TenantId env var query
-  // above is kept defensively but is no longer used for MSAL config.
+  // Pass the environment's tenant (sprk_TenantId) so the sign-in authority is tenant-specific
+  // (a B2B guest signed in against /organizations lands in their home tenant — #1453). The
+  // 2026-05-13 popup regression was a malformed `/undefined` authority, which @spaarke/auth now
+  // rejects; isValidTenant() keeps an invalid value from being passed at all.
   const config: IAuthConfig = {
     clientId,
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     redirectUri,
     bffApiScope: `api://${bffAppId}/user_impersonation`,
     bffBaseUrl: bffApiUrl,

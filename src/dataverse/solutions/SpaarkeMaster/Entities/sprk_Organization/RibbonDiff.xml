@@ -1,0 +1,167 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Activate.Hide" Location="Mscrm.Form.sprk_organization.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.AddConnection.Hide" Location="Mscrm.Form.sprk_organization.AddConnection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.AddToQueue.Hide" Location="Mscrm.Form.sprk_organization.AddToQueue" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Assign.Hide" Location="Mscrm.Form.sprk_organization.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Close.Hide" Location="Mscrm.Form.sprk_organization.Close" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Convert.Case.Hide" Location="Mscrm.Form.sprk_organization.Convert.Case" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Convert.Opportunity.Hide" Location="Mscrm.Form.sprk_organization.Convert.Opportunity" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Deactivate.Hide" Location="Mscrm.Form.sprk_organization.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.Form.sprk_organization.Flows.RefreshCommandBar.Flows" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Flows.RefreshCommandBar.Hide" Location="Mscrm.Form.sprk_organization.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Permissions.Grant.Hide" Location="Mscrm.Form.sprk_organization.Permissions.Grant" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Permissions.GrantUCI.Hide" Location="Mscrm.Form.sprk_organization.Permissions.GrantUCI" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.PromoteToResponse.Hide" Location="Mscrm.Form.sprk_organization.PromoteToResponse" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.QueueItemDetail.Hide" Location="Mscrm.Form.sprk_organization.QueueItemDetail" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.Reports.Hide" Location="Mscrm.Form.sprk_organization.Reports" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.RunScript.Hide" Location="Mscrm.Form.sprk_organization.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.RunWorkflow.Hide" Location="Mscrm.Form.sprk_organization.RunWorkflow" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.SaveAsComplete.Hide" Location="Mscrm.Form.sprk_organization.SaveAsComplete" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.SuggestProduct.Hide" Location="Mscrm.Form.sprk_organization.SuggestProduct" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_organization.ViewHierarchy.Hide" Location="Mscrm.Form.sprk_organization.ViewHierarchy" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_organization.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.AddConnection.Hide" Location="Mscrm.HomepageGrid.sprk_organization.AddConnection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.AddToQueue.Hide" Location="Mscrm.HomepageGrid.sprk_organization.AddToQueue" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.ChangeDataSetControlButton.Hide" Location="Mscrm.HomepageGrid.sprk_organization.ChangeDataSetControlButton" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.Deactivate.Hide" Location="Mscrm.HomepageGrid.sprk_organization.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.Detect.Hide" Location="Mscrm.HomepageGrid.sprk_organization.Detect" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.HomepageGrid.sprk_organization.Flows.RefreshCommandBar.Flows" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.Flows.RefreshCommandBar.Hide" Location="Mscrm.HomepageGrid.sprk_organization.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.MBPF.ConvertTo.Hide" Location="Mscrm.HomepageGrid.sprk_organization.MBPF.ConvertTo" />
+    <CustomAction Id="sprk.Mscrm.HomepageGrid.sprk_organization.NewRecord.CustomAction" Location="Mscrm.HomepageGrid.sprk_organization.MainTab.Management.Controls._children" Sequence="10">
+      <CommandUIDefinition>
+        <Button Alt="$Resources:Ribbon.HomepageGrid.MainTab.New" Command="Mscrm.NewRecordFromGrid" Id="Mscrm.HomepageGrid.sprk_organization.NewRecord" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/New_16.png" LabelText="$Resources:Ribbon.HomepageGrid.MainTab.New" Sequence="10" TemplateAlias="o1" ToolTipTitle="$Resources:Ribbon.HomepageGrid.MainTab.New" ToolTipDescription="$LocLabels:Mscrm.HomepageGrid.sprk_organization.NewRecord.ToolTipDescription" ModernImage="New" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Mscrm.HomepageGrid.sprk_organization.NewRecordForBPFEntity.CustomAction" Location="Mscrm.HomepageGrid.sprk_organization.MainTab.Management.Controls._children" Sequence="10">
+      <CommandUIDefinition>
+        <Button Alt="$Resources:Ribbon.HomepageGrid.MainTab.New" Command="Mscrm.HomepageGrid.NewRecordForBPFEntity" Id="Mscrm.HomepageGrid.sprk_organization.NewRecordForBPFEntity" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/NewRecord_16.png" LabelText="$Resources:Ribbon.HomepageGrid.MainTab.New" Sequence="10" TemplateAlias="o1" ToolTipTitle="$Resources:Ribbon.HomepageGrid.MainTab.New" ToolTipDescription="$LocLabels:Mscrm.HomepageGrid.sprk_organization.NewRecordForBPFEntity.ToolTipDescription" ModernImage="New" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.RunScript.Hide" Location="Mscrm.HomepageGrid.sprk_organization.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_organization.RunWorkflow.Hide" Location="Mscrm.HomepageGrid.sprk_organization.RunWorkflow" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.Activate.Hide" Location="Mscrm.SubGrid.sprk_organization.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.AddConnection.Hide" Location="Mscrm.SubGrid.sprk_organization.AddConnection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.AddEmail.Hide" Location="Mscrm.SubGrid.sprk_organization.AddEmail" />
+    <CustomAction Id="sprk.Mscrm.SubGrid.sprk_organization.AddExistingAssoc.CustomAction" Location="Mscrm.SubGrid.sprk_organization.MainTab.Management.Controls._children" Sequence="40">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingAssoc.Alt" Command="Mscrm.AddExistingRecordFromSubGridAssociated" Id="Mscrm.SubGrid.sprk_organization.AddExistingAssoc" Image32by32="/_imgs/ribbon/AddExistingStandard_32.png" Image16by16="/_imgs/ribbon/AddExistingStandard_16.png" LabelText="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingAssoc.LabelText" Sequence="40" TemplateAlias="o1" ToolTipTitle="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingAssoc.ToolTipTitle" ToolTipDescription="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingAssoc.ToolTipDescription" ModernImage="AddExisting" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Mscrm.SubGrid.sprk_organization.AddExistingStandard.CustomAction" Location="Mscrm.SubGrid.sprk_organization.MainTab.Management.Controls._children" Sequence="30">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingStandard.Alt" Command="Mscrm.AddExistingRecordFromSubGridStandard" Id="Mscrm.SubGrid.sprk_organization.AddExistingStandard" Image32by32="/_imgs/ribbon/AddExistingStandard_32.png" Image16by16="/_imgs/ribbon/AddExistingStandard_16.png" LabelText="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingStandard.LabelText" Sequence="30" TemplateAlias="o1" ToolTipTitle="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingStandard.ToolTipTitle" ToolTipDescription="$LocLabels:Mscrm.SubGrid.sprk_organization.AddExistingStandard.ToolTipDescription" ModernImage="AddExisting" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.AddToQueue.Hide" Location="Mscrm.SubGrid.sprk_organization.AddToQueue" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.AdvMergeRecords.Hide" Location="Mscrm.SubGrid.sprk_organization.AdvMergeRecords" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.Assign.Hide" Location="Mscrm.SubGrid.sprk_organization.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.AssociateParentChildCase.Hide" Location="Mscrm.SubGrid.sprk_organization.AssociateParentChildCase" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.Deactivate.Hide" Location="Mscrm.SubGrid.sprk_organization.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.Detect.Hide" Location="Mscrm.SubGrid.sprk_organization.Detect" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.Flows.RefreshCommandBar.Hide" Location="Mscrm.SubGrid.sprk_organization.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.MailMerge.Hide" Location="Mscrm.SubGrid.sprk_organization.MailMerge" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.modern.AddEmail.Hide" Location="Mscrm.SubGrid.sprk_organization.modern.AddEmail" />
+    <CustomAction Id="sprk.Mscrm.SubGrid.sprk_organization.NewRecord.CustomAction" Location="Mscrm.SubGrid.sprk_organization.MainTab.Management.Controls._children" Sequence="10">
+      <CommandUIDefinition>
+        <Button Command="Mscrm.NewRecordFromGrid" Id="Mscrm.SubGrid.sprk_organization.NewRecord" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/New_16.png" LabelText="$Resources(EntityDisplayName):Ribbon.SubGrid.MainTab.New" Sequence="10" TemplateAlias="o1" ToolTipTitle="$Resources(EntityDisplayName):Ribbon.SubGrid.MainTab.New" ToolTipDescription="$LocLabels:Mscrm.SubGrid.sprk_organization.NewRecord.ToolTipDescription" ModernImage="New" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.RunReport.Hide" Location="Mscrm.SubGrid.sprk_organization.RunReport" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.RunScript.Hide" Location="Mscrm.SubGrid.sprk_organization.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_organization.RunWorkflow.Hide" Location="Mscrm.SubGrid.sprk_organization.RunWorkflow" />
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.Form.ConvertToCase">
+      <EnableRules>
+        <EnableRule Id="Mscrm.ConvertActivity" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ConvertActivity" />
+        <DisplayRule Id="Mscrm.HideOnModern" />
+      </DisplayRules>
+      <Actions />
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="Mscrm.ConvertActivity">
+        <EntityPropertyRule AppliesTo="PrimaryEntity" PropertyName="IsActivity" PropertyValue="true" />
+        <EntityPrivilegeRule PrivilegeType="Write" PrivilegeDepth="Basic" EntityName="activitypointer" />
+        <EntityPrivilegeRule PrivilegeType="AppendTo" PrivilegeDepth="Basic" EntityName="activitypointer" />
+      </DisplayRule>
+      <DisplayRule Id="Mscrm.HideOnModern">
+        <CommandClientTypeRule Type="Modern" InvertResult="true" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="Mscrm.ConvertActivity">
+        <FormStateRule State="Create" InvertResult="true" />
+        <FormStateRule State="Disabled" InvertResult="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Mscrm.HomepageGrid.sprk_organization.NewRecord.ToolTipDescription">
+      <Titles>
+        <Title description="Create a {0} record." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.HomepageGrid.sprk_organization.NewRecordForBPFEntity.ToolTipDescription">
+      <Titles>
+        <Title description="Create a {0} record." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingAssoc.Alt">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingAssoc.LabelText">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingAssoc.ToolTipDescription">
+      <Titles>
+        <Title description="Add a {0} to the record you are working with." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingAssoc.ToolTipTitle">
+      <Titles>
+        <Title description="Add​​ {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingStandard.Alt">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingStandard.LabelText">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingStandard.ToolTipDescription">
+      <Titles>
+        <Title description="Add a {0} to the record you are working with." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.AddExistingStandard.ToolTipTitle">
+      <Titles>
+        <Title description="Add​​ {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.sprk_organization.NewRecord.ToolTipDescription">
+      <Titles>
+        <Title description="Create a {0} record." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

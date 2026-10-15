@@ -42,7 +42,7 @@ Spaarke.AssignedAccess.Config = {
     apiBaseUrl: null,
     syncPath: "/api/v1/external-access/assigned-access/sync",
     notificationId: "sprk_assignedaccess_sync",
-    version: "1.0.0"
+    version: "1.1.1"
 };
 
 /** The record types the sync route accepts, by table. */
@@ -53,6 +53,16 @@ Spaarke.AssignedAccess.RecordTypes = {
 };
 
 Spaarke.AssignedAccess._cachedApiBaseUrl = null;
+
+/**
+ * The BFF base URL as the HOST only (#1488): trailing slashes removed, then a trailing "/api" (any case). Every path
+ * this script and sprk_/scripts/bff_auth.js append starts with "/api/", and sprk_BffApiBaseUrl carries "/api" on some
+ * environments (dev: https://spaarke-bff-dev.azurewebsites.net/api), so an unnormalised value called /api/api/... (401).
+ * The repo rule (sprk_emailactions.js, Spaarke.Auth resolveRuntimeConfig.ts). An empty value gives "".
+ */
+Spaarke.AssignedAccess._normalizeBaseUrl = function (value) {
+    return value ? String(value).replace(/\/+$/, "").replace(/\/api$/i, "") : "";
+};
 
 /** Resolves the BFF base URL from the sprk_BffApiBaseUrl environment variable (value override, else default). */
 Spaarke.AssignedAccess.getApiBaseUrl = function () {
@@ -75,11 +85,12 @@ Spaarke.AssignedAccess.getApiBaseUrl = function () {
             "'&$select=value"
         ).then(function (values) {
             var value = values.entities && values.entities.length > 0 ? values.entities[0].value : definition.defaultvalue;
-            if (!value) {
+            var baseUrl = Spaarke.AssignedAccess._normalizeBaseUrl(value);
+            if (!baseUrl) {
                 throw new Error("Environment variable sprk_BffApiBaseUrl has no value.");
             }
 
-            Spaarke.AssignedAccess._cachedApiBaseUrl = value.replace(/\/+$/, "");
+            Spaarke.AssignedAccess._cachedApiBaseUrl = baseUrl;
             return Spaarke.AssignedAccess._cachedApiBaseUrl;
         });
     });
@@ -103,7 +114,8 @@ Spaarke.AssignedAccess.recordOf = function (formContext) {
  */
 Spaarke.AssignedAccess.sync = async function (record) {
     try {
-        var baseUrl = Spaarke.AssignedAccess.Config.apiBaseUrl || await Spaarke.AssignedAccess.getApiBaseUrl();
+        var baseUrl = Spaarke.AssignedAccess._normalizeBaseUrl(Spaarke.AssignedAccess.Config.apiBaseUrl) ||
+            await Spaarke.AssignedAccess.getApiBaseUrl();
         if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
             console.error("[Assigned Access] Spaarke.BffAuth is not loaded (register sprk_/scripts/bff_auth.js first); " +
                 "the 5-minute job will update this record.");
@@ -218,6 +230,24 @@ Spaarke.AssignedAccess.summarize = function (response) {
             "hide the record.");
     }
 
+    // Task 114 (owner round 67): a Restricted record keeps no share of a user flagged external.
+    var restricted = (response && response.restrictedExternal) || {};
+    var removedExternal = (restricted.removed || []).length;
+    if (removedExternal > 0) {
+        messages.push("Removed access for " + removedExternal + " external " + (removedExternal === 1 ? "user" : "users") +
+            ": this record is Restricted to internal users.");
+    }
+
+    if (restricted.ownerIsExternal) {
+        messages.push("This record is owned by a user flagged as external, who keeps access as its owner: ask an " +
+            "administrator to reassign it to an internal owner.");
+    }
+
+    if (restricted.noInternalReader) {
+        messages.push("Nobody internal can open this record now: it is Restricted and its only other readers were " +
+            "external users. Ask an administrator to share it with an internal user.");
+    }
+
     return messages.join(" ");
 };
 
@@ -247,6 +277,15 @@ Spaarke.AssignedAccess.onLoad = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
         formContext.data.entity.addOnPostSave(Spaarke.AssignedAccess.onPostSave);
+
+        // Task 114: the Share command is hidden on a Restricted record (access_ribbon.js isShareAllowed reads this field),
+        // so a change to the field refreshes the command bar at once rather than after the next save.
+        var accessPermission = formContext.getAttribute && formContext.getAttribute("sprk_accesspermission");
+        if (accessPermission) {
+            accessPermission.addOnChange(function () {
+                try { formContext.ui.refreshRibbon(); } catch (e) { /* never break the form */ }
+            });
+        }
         Spaarke.AssignedAccess.getApiBaseUrl().then(function (url) {
             Spaarke.AssignedAccess.Config.apiBaseUrl = url;
         }).catch(function (error) {

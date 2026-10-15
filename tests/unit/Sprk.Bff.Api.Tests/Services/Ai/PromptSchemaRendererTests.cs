@@ -631,7 +631,7 @@ public class PromptSchemaRendererTests
         result.SchemaName.Should().Be("prompt_response");
     }
 
-    [Fact(Skip = "Render method signature changed - test calls outdated 6-parameter overload")]
+    [Fact]
     public void StructuredOutput_JsonSchemaHasCorrectProperties()
     {
         // Arrange
@@ -687,9 +687,9 @@ public class PromptSchemaRendererTests
         enumArray.Should().HaveCount(3);
         enumArray[0]!.GetValue<string>().Should().Be("contract");
 
-        // Verify numeric constraints
-        props["confidence"]!["minimum"]!.GetValue<double>().Should().Be(0);
-        props["confidence"]!["maximum"]!.GetValue<double>().Should().Be(1);
+        // minimum/maximum are stripped: Azure OpenAI strict structured output rejects them (HTTP 400)
+        props["confidence"]!.AsObject().ContainsKey("minimum").Should().BeFalse();
+        props["confidence"]!.AsObject().ContainsKey("maximum").Should().BeFalse();
 
         // Verify required array
         var required = jsonSchema["required"]!.AsArray();
@@ -1670,5 +1670,26 @@ public class PromptSchemaRendererTests
             }
         };
         return JsonSerializer.Serialize(config);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Render_GuidanceSideKey_RendersGuidanceSection_ForStructuredAndTextOutput(bool structured)
+    {
+        const string choicesRef = "lookup:sprk_triagecategory.sprk_name";
+        var jps = "{\"$schema\":\"https://spaarke.com/schemas/prompt/v1\",\"instruction\":{\"role\":\"r\",\"task\":\"t\"},"
+            + "\"output\":{\"structuredOutput\":" + (structured ? "true" : "false") + ",\"fields\":[{\"name\":\"category\",\"type\":\"string\",\"$choices\":\"" + choicesRef + "\"}]}}";
+        var choices = new Dictionary<string, string[]>
+        {
+            [choicesRef] = new[] { "Fee / rate change", "Scheduling" },
+            [LookupChoicesResolver.GuidanceKey(choicesRef)] = new[] { "Fee / rate change — a rate change", "Scheduling" },
+        };
+
+        var result = _sut.Render(jps, null, null, null, null, null, preResolvedLookupChoices: choices);
+
+        result.PromptText.Should().Contain("## Allowed values for 'category'");
+        result.PromptText.Should().Contain("- Fee / rate change — a rate change");
+        result.PromptText.Should().Contain("- Scheduling");
     }
 }

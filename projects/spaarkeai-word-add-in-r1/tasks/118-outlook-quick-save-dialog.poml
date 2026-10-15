@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 12 (O5) — Outlook Quick Save shows the same progress dialog as Word; an unfileable suggestion saves unfiled</title>
+    <phase>7 UAT round 12 (2026-10-08)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts` (Outlook + Word ribbon commands, shared dialog controller), the shared notify page and webpack, plus tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only, fully specified; reuses task 110.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT12</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns `outlook/commands/**`, `shared/commands/**`, `word/commands/**` (shared-controller move only), `shared/taskpane/services/quickSaveHelpers.ts`, the commands/notify entries of `webpack.config.js` and their tests. Do not edit SaveFlow/SaveView/App/useSaveFlow/communicationLookupService/Find components, `src/server/**`, ci-gated-suites.txt, TASK-INDEX or current-task.</parallel-reason>
+    <deps>110, 116</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 12, item O5. Record: `projects/spaarkeai-word-add-in-r1/notes/042-uat-round12-2026-10-08.md`.</prompt>
+
+  <goal>Outlook's Quick Save opens the same Spaarke progress -> result dialog as Word's (task 110) with an "Open in Spaarke" link to the saved .eml record; a suggestion the user cannot file to saves the email UNFILED and says so instead of refusing.</goal>
+
+  <context>
+    <background>
+      - Word's controller `word/commands/quickSaveDialog.ts` and page `word/commands/notify.html` (task 110) are host-neutral except the page path; Outlook previously posted an item info bar and, for a non-fileable suggestion, did not save at all.
+      - An unfiled save is a supported, required case (owner standing decision); the server accepts a save without `targetEntity`.
+      - `GET …/communications/by-message-id/{id}/suggestions` 404 = "not saved yet"; `communicationSuggestionsService.fetchModel` already maps it to `null`.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner O5">Reuse the Word controller and page (move the host-neutral parts to `shared/commands/`); Word behaviour unchanged.</constraint>
+    <constraint source="owner standing decision">No fileable suggestion (none, 404, or `canFile === false`) -> save unfiled, say so in the dialog ("Saved to Spaarke — not filed to a record. Open Spaarke to file it."); a fileable one is still filed. Never auto-file a guess.</constraint>
+    <constraint source="no stale UI">No Outlook item info bar is left behind; the dialog is the only surface.</constraint>
+    <constraint source="ADR-038">Tests: dialog opens before the save; success with link; unfileable -> unfiled + message; fileable -> filed; error path; event.completed once (via the dialog controller); 404 not logged as an error; Word tests unchanged in behaviour.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Outlook dialog opens before the prediction is read or the save posted, on `/outlook/commands-notify.html`.</criterion>
+    <criterion testable="true">Success shows the record link built from ORG_URL + the job's artifact id; no link without ORG_URL.</criterion>
+    <criterion testable="true">`canFile === false`, no prediction, or a failed prediction posts a save without `targetEntity` and shows the unfiled message; `canFile` true/null/absent files to the suggestion with the friendly type name.</criterion>
+    <criterion testable="true">A failed job / failed POST / unreadable email show the error with no link; the command completes once through the dialog.</criterion>
+    <criterion testable="true">The build emits the notify page for both hosts; gates: jest green, lint 0, no production tsc errors, test-file TS errors not above 68.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Move controller + page to `shared/commands/`, add a `pagePath` dep; webpack emits the page for both hosts; shared `readSavedDocument`.</step>
+    <step>Rewrite Outlook `quickSave` around the dialog; unfiled path (`buildEmailSaveRequest(…, null, …)`).</step>
+    <step>Tests; gates; write `notes/118-outlook-quick-save-dialog.md`.</step>
+  </steps>
+
+  <justification>
+    <existing>Task 110 controller/page; `buildQuickSaveRecordLink`; `readSavedDocument`.</existing>
+    <extension>Yes — moved to shared and reused; no new component.</extension>
+    <cost-of-doing-nothing>UAT O5: Outlook Quick Save gave no pop-up, no link, and refused a save when the suggestion was a contact.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/outlook/commands/index.ts</file>
+    <file role="move">src/client/office-addins/shared/commands/quickSaveDialog.ts</file>
+    <file role="move">src/client/office-addins/shared/commands/notify.html</file>
+    <file role="new">src/client/office-addins/shared/commands/readSavedDocument.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+    <file role="edit">src/client/office-addins/webpack.config.js</file>
+  </relevant-files>
+</task>

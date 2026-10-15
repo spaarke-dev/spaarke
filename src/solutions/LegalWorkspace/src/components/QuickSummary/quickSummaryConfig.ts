@@ -8,6 +8,7 @@ import {
   ReceiptRegular,
 } from "@fluentui/react-icons";
 
+import { formatDateOnly } from "@spaarke/ui-components";
 import { buildOwnerFilter } from "../../services/queryHelpers";
 import type { IOwnershipContext } from "../../services/queryHelpers";
 
@@ -122,8 +123,11 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
       `${buildOwnerFilter(ctx)} and statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`,
     badgeType: "overdue",
     badgeFilter: (ctx) => {
-      const now = new Date().toISOString();
-      return `${buildOwnerFilter(ctx)} and statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001) and sprk_duedate lt ${now}`;
+      // sprk_duedate is Date Only (task 106): overdue = due before the user's LOCAL today. A timestamp literal is
+      // compared by its UTC date (probed live), so `lt <now ISO>` counted a to-do due today as overdue from 20:00
+      // Eastern.
+      const today = formatDateOnly(new Date());
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001) and sprk_duedate lt ${today}`;
     },
   },
   {

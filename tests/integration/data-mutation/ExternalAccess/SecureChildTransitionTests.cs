@@ -132,13 +132,14 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         var otherProject = Guid.NewGuid();
         world.OrdinaryRoot("sprk_project", otherProject);
         world.OrdinaryChild("sprk_document", family.OtherRecordsDocument, ("sprk_project", "sprk_project", otherProject));
-        // A ROOT of its own reachable from the record — filed under the record's EVENT. Task 158 (owner round 6) secures a
-        // work assignment filed DIRECTLY under a secure matter or project (its own provisioning; SecureRootInheritanceTests),
-        // so this decoy is filed through an intermediate, which neither the child pass (roots are never walked) nor the
-        // round-6 rule (a matter or project parent only) touches. Before task 158 it named the project directly.
+        // A ROOT of its own reachable from the record — filed under the record's COMMUNICATION. Task 158 (owner round 6)
+        // secures a work assignment filed DIRECTLY under a secure matter or project (its own provisioning;
+        // SecureRootInheritanceTests), and #1630 (owner Option A) one filed under the record's INVOICE or EVENT, so this
+        // decoy is filed through a communication, which neither the child pass (roots are never walked) nor the inheritance
+        // rule touches. Before task 158 it named the project directly; before #1630 it was filed under the record's event.
         world.Add("sprk_workassignment", family.ChildRoot,
             ("owningteam", new Microsoft.Xrm.Sdk.EntityReference("team", GeneralTeam)), ("sprk_issecure", true),
-            ("sprk_regardingevent", new Microsoft.Xrm.Sdk.EntityReference("sprk_event", family.Event)));
+            ("sprk_regardingcommunication", new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", family.Communication)));
         world.OrdinaryChild("sprk_todo", family.ChildRootsTodo,
             ("sprk_regardingworkassignment", "sprk_workassignment", family.ChildRoot));
 
@@ -215,7 +216,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
                 $"{table} {id} is an existing child of the record now secure");
             _fixture.SharesOn(id).Should().Equal(
                 new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = creatorMirror },
-                "a child's sharees are exactly the record's, at the record's rights without Share");
+                "a child's sharees are exactly the record's, at the record's rights (Share included since round 91)");
         }
 
         AssertDecoysUntouched(family, decoysBefore);
@@ -1163,8 +1164,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         applied.GetProperty("changed").GetInt32().Should().Be(2);
         sweep.World.OwnerOf("sprk_document", c1).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
         sweep.World.OwnerOf("sprk_event", c2).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
-        sweep.Shares.MaskOf("sprk_document", c1, DataversePrincipalRef.User(Creator)).Should().Be(23,
-            "the record's sharee is mirrored onto the re-owned child, without Share");
+        sweep.Shares.MaskOf("sprk_document", c1, DataversePrincipalRef.User(Creator)).Should().Be(262167,
+            "the record's sharee is mirrored onto the re-owned child at the record's rights, Share included (round 91)");
         applied.GetProperty("changes").EnumerateArray()
             .Single(c => c.GetProperty("id").GetGuid() == c2)
             .GetProperty("previousOwner").GetString().Should().Be($"teams({GeneralTeam:D})");
@@ -1594,6 +1595,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
                 accessCacheInvalidator: accessCacheInvalidator));
             // Task 147: the job's recent-changes pass finds the records above changed rows through the synchronizer.
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(_world, shares ?? Shares));
+            services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(_world)); // task 173: as the host registers it
             _provider = services.BuildServiceProvider();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,

@@ -774,34 +774,33 @@ public sealed class H4KvSecretsPopulationHandlerTests
     }
 
     // =========================================================================
-    // T226 — from-topology-constants (SPE-ContainerTypeId) projection
+    // Intake-value projection (T226 / task 245a)
     // =========================================================================
 
-    // The value reaches the run from operator-maintained spaarke-constants.yaml (via the
-    // /provision-environment intake) — surrounding whitespace would otherwise be written
-    // into the vault as part of the id.
+    // The value reaches the run from the /provision-environment intake — surrounding whitespace
+    // would otherwise be written into the vault as part of the value.
     [Theory]
-    [InlineData("ct-guid")]
-    [InlineData("  ct-guid\n")]
-    public void BuildTopologyConstantValues_MapsContainerTypeIdRunParameterToCanonicalName(string raw)
+    [InlineData("tenant-guid")]
+    [InlineData("  tenant-guid\n")]
+    public void BuildIntakeValues_MapsTheIntakeParameterToCanonicalName_Trimmed(string raw)
     {
         var values = H4KvSecretsPopulationHandler.BuildIntakeValues(
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["containerTypeId"] = raw });
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["tenantId"] = raw });
 
         values.Should().ContainSingle()
-            .Which.Should().Be(new KeyValuePair<string, string>("SPE-ContainerTypeId", "ct-guid"));
+            .Which.Should().Be(new KeyValuePair<string, string>("TenantId", "tenant-guid"));
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void BuildTopologyConstantValues_MissingOrBlankParameter_IsLeftOut(string? raw)
+    public void BuildIntakeValues_MissingOrBlankParameter_IsLeftOut(string? raw)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
         if (raw is not null)
         {
-            parameters["containerTypeId"] = raw;
+            parameters["tenantId"] = raw;
         }
 
         H4KvSecretsPopulationHandler.BuildIntakeValues(parameters).Should().BeEmpty(
@@ -809,18 +808,12 @@ public sealed class H4KvSecretsPopulationHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_RunWithContainerTypeId_PassesItToTheWriterAsTopologyConstant()
+    public void BuildIntakeValues_ContainerTypeId_IsNoLongerASecret()
     {
-        var run = BuildRun();
-        run.Parameters.NonSecret["containerTypeId"] = "ct-guid";
-        var repo = new FakeRepository(run, etag: "etag-t226-topology");
-        var writer = FakeWriter.AllWrote();
-        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
-            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
-
-        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        writer.LastRequest!.IntakeValues.Should().Contain("SPE-ContainerTypeId", "ct-guid");
+        // T227e: SPE-ContainerTypeId had no reader; the BFF gets the container type as a plain H4b setting.
+        H4KvSecretsPopulationHandler.BuildIntakeValues(
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["containerTypeId"] = "ct-guid" })
+            .Should().BeEmpty();
     }
 
     [Fact]

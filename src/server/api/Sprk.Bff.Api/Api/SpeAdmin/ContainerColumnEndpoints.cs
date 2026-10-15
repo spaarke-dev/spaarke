@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -155,7 +156,7 @@ public static class ContainerColumnEndpoints
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(ex, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "ListColumns: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -230,7 +231,7 @@ public static class ContainerColumnEndpoints
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(ex, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "CreateColumn: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -341,7 +342,7 @@ public static class ContainerColumnEndpoints
                 columnId, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(ex, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "UpdateColumn: unexpected error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -432,7 +433,7 @@ public static class ContainerColumnEndpoints
                 columnId, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(ex, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "DeleteColumn: unexpected error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",

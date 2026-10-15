@@ -16,6 +16,18 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// never re-created); renewal of a still-assigned auto grant inside the reminder window (owner A5). The job adds no rule
 /// of its own — the ONE owner decides.</para>
 ///
+/// <para><b>Restricted records and users flagged external</b> (unified-access-control-r2 task 114, owner round 67 amendment
+/// 4(b)). Every RESTRICTED root is a candidate too (<see cref="AssignedAccessStore.ScanRestrictedRootsAsync"/>), and on each
+/// one <see cref="RestrictedExternalShareRemover"/> removes the direct shares of users flagged <c>sprk_isexternal = true</c>
+/// — before the materializer, as the sync route orders them — the backstop for a share made after the record became
+/// Restricted (the platform's Share dialog, which the Access ribbon hides on such records). WRITES ON, like task 143's No
+/// Access job: it only ever removes, inside its own rules, and is not the ended-assignment removal the revoke switch below
+/// governs. Restricted wins over the last-reader rule (owner round 67 item 3): a secure Restricted record left with no
+/// internal reader is counted (<c>noInternalReader</c>) and logged naming the record — an administrator shares it with an
+/// internal user; it does not make the run partial. A Restricted
+/// record OWNED by a user flagged external is counted (<c>ownerIsExternal</c>) and logged as a warning naming the record —
+/// an administrator reassigns it; it does not make the run partial (ownership is not a share, and is never changed here).</para>
+///
 /// <para><b>Posture</b> (owner answer R3 / escalation (g), as amended by round 3 R3/R4 "minutes, never hourly"):
 /// registered ENABLED, every 5 minutes, with writes ON for create, convert and renew. Its REMOVAL direction —
 /// revoke-on-change for a field cleared outside the product — is gated on <see cref="RevokeOnChangeConfigKey"/>, named
@@ -124,7 +136,8 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         "Every 5 minutes, gives every contact or organization named in an 'Assigned *' column of a project, matter or work " +
         "assignment its Collaborate access (or a share for a linked internal user), renews it before it lapses, records " +
         "access an operator removed outside the product so it is never re-created, and — when its switch is on — removes " +
-        "the automatic access of an assignment that ended. Ledger rows whose record was deleted are marked revoked.";
+        "the automatic access of an assignment that ended. Ledger rows whose record was deleted are marked revoked. On a " +
+        "Restricted record, removes the shares of users flagged external.";
 
     /// <summary>Whether the job may REMOVE access on an ended assignment. Report-only unless explicitly true.</summary>
     internal bool RevokeOnChangeEnabled =>
@@ -148,6 +161,10 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         var rotating = false;
         var incompleteRoots = new List<Guid>();
         var rootless = new RootlessLedgerReport();
+        var restrictedCandidates = 0;
+        var externalSharesRemoved = 0;
+        var noInternalReader = 0;
+        var ownerIsExternal = 0;
 
         var tenant = ImpersonatedRootSetSource.DeploymentCacheTenant(_configuration);
         var cacheTenants = tenant is null ? Array.Empty<string>() : new[] { tenant };
@@ -165,22 +182,92 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             using var scope = _scopeFactory.CreateScope();
             var store = scope.ServiceProvider.GetRequiredService<AssignedAccessStore>();
             var materializer = scope.ServiceProvider.GetRequiredService<AssignedAccessMaterializer>();
+            var restrictedRemover = scope.ServiceProvider.GetRequiredService<RestrictedExternalShareRemover>();
 
             // ── Candidates: every root with an Assigned column set, and every root holding a live ledger row ──
             var all = new Dictionary<(ExternalGrantRootType, Guid), DateTimeOffset?>();
+            var assigned = new HashSet<(ExternalGrantRootType, Guid)>();
             foreach (var type in RootTypes)
             {
                 var fields = materializer.RegistryFor(type).Select(r => r.Field).ToList();
                 var (roots, scanTruncated) = await store.ScanAssignedRootsAsync(type, fields, cancellationToken).ConfigureAwait(false);
                 truncated |= scanTruncated;
                 foreach (var r in roots)
+                {
                     all[(r.RootType, r.RootId)] = r.ModifiedOn;
+                    assigned.Add((r.RootType, r.RootId));
+                }
             }
 
             var (ledgerRoots, ledgerTruncated) = await store.ScanLedgerRootsAsync(cancellationToken).ConfigureAwait(false);
             truncated |= ledgerTruncated;
             foreach (var r in ledgerRoots)
+            {
                 all.TryAdd((r.RootType, r.RootId), null);
+                assigned.Add((r.RootType, r.RootId));
+            }
+
+            // ── Task 114 (owner round 67 amendment 4(b)): every RESTRICTED root, for the external-user share rule — the
+            //    backstop for a share made after the record became Restricted (the platform's own Share dialog) ──
+            var restricted = new HashSet<(ExternalGrantRootType, Guid)>();
+            foreach (var type in RootTypes)
+            {
+                var (roots, scanTruncated) = await store.ScanRestrictedRootsAsync(type, cancellationToken).ConfigureAwait(false);
+                truncated |= scanTruncated;
+                foreach (var r in roots)
+                {
+                    if (all.TryGetValue((r.RootType, r.RootId), out var known))
+                        all[(r.RootType, r.RootId)] = known ?? r.ModifiedOn;
+                    else
+                        all[(r.RootType, r.RootId)] = r.ModifiedOn;
+                    restricted.Add((r.RootType, r.RootId));
+                }
+            }
+
+            // ── #1478 (task 175): the work assignments and projects filed BELOW a Restricted matter or project are Restricted
+            //    through it (task 174's effective rule) before their own column catches up — candidates too. A listing that
+            //    cannot complete is a problem of this run (the next run lists them again); nothing is decided on part of it. ──
+            var restrictedParents = restricted
+                .Where(r => r.Item1 is ExternalGrantRootType.Matter or ExternalGrantRootType.Project)
+                .Select(r => (ExternalGrantRoot.LogicalNameFor(r.Item1), r.Item2))
+                .ToList();
+            if (restrictedParents.Count > 0)
+            {
+                var generic = scope.ServiceProvider.GetService<Spaarke.Dataverse.IGenericEntityService>();
+                if (generic is null)
+                {
+                    problems.Add("RESTRICTED-BELOW: no Dataverse reader is configured, so records filed under Restricted records were not listed.");
+                }
+                else
+                {
+                    try
+                    {
+                        var below = await Sprk.Bff.Api.Services.Access.SecureRootInheritance.ListFiledRootsBelowAsync(
+                            generic, _logger, restrictedParents, cancellationToken).ConfigureAwait(false);
+                        foreach (var filed in below.Roots.Where(r => r.Confirmed))
+                        {
+                            var type = string.Equals(filed.Table, ExternalGrantRoot.LogicalNameFor(ExternalGrantRootType.Project),
+                                StringComparison.OrdinalIgnoreCase)
+                                ? ExternalGrantRootType.Project
+                                : ExternalGrantRootType.WorkAssignment;
+                            all.TryAdd((type, filed.Id), null);
+                            restricted.Add((type, filed.Id));
+                        }
+
+                        if (below.DepthBoundReached)
+                            problems.Add("RESTRICTED-BELOW: a filing chain below a Restricted record is deeper than the walk follows; the rest were not listed.");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(ex,
+                            "[ASSIGNED-ACCESS-RECON] The records filed under {Count} Restricted record(s) could not be listed; they " +
+                            "are listed again next run.", restrictedParents.Count);
+                        problems.Add("RESTRICTED-BELOW: the records filed under Restricted records could not be listed this run.");
+                    }
+                }
+            }
+
+            restrictedCandidates = restricted.Count;
 
             if (truncated)
                 problems.Add($"TRUNCATED: a candidate scan returned more than {AssignedAccessStore.MaxScanRows} rows; the rest were not read.");
@@ -198,6 +285,28 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             foreach (var (type, id) in window)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Before the materializer, as on the sync route: a share removed here is recorded by it as Restricted.
+                if (restricted.Contains((type, id)))
+                {
+                    var report = await restrictedRemover.RemoveForRecordAsync(type, id, cacheTenants, cancellationToken)
+                        .ConfigureAwait(false);
+                    externalSharesRemoved += report.Removed.Count;
+                    writes += report.Removed.Count;
+                    if (report.NoInternalReader)
+                        noInternalReader++; // the remover logged the record; an administrator shares it with an internal user
+                    if (report.OwnerIsExternal is not null)
+                        ownerIsExternal++; // the remover logged the record once this run; an administrator reassigns it
+                    if (!report.Complete)
+                        incompleteRoots.Add(id);
+                }
+
+                if (!assigned.Contains((type, id)))
+                {
+                    AdvanceCursor((type, id), rotating);
+                    continue; // a Restricted root with no Assigned column or ledger row: nothing for the materializer
+                }
+
                 var outcome = await materializer.MaterializeAsync(
                     new AssignedAccessRequest(type, id, AssignedAccessTrigger.Job, GrantorOid: null, revokeOnChange, cacheTenants),
                     cancellationToken).ConfigureAwait(false);
@@ -212,8 +321,8 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 if (outcome.Status is AssignedAccessStatus.NotFound or AssignedAccessStatus.NoRegistry)
                     continue;
 
-                if (!outcome.Complete)
-                    incompleteRoots.Add(id);
+                if (!outcome.Complete && !incompleteRoots.Contains(id))
+                    incompleteRoots.Add(id); // once per root, even when the Restricted rule above also left it incomplete
             }
 
             // ── Ledger rows whose record was deleted (owner round 71) ──
@@ -290,13 +399,16 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             "truncated={Truncated} rotating={Rotating} cacheTenantConfigured={CacheTenant} " +
             "rootlessFound={RootlessFound} rootlessRevoked={RootlessRevoked} rootlessRecordExists={RootlessRecordExists} " +
             "rootlessKeyUnparseable={RootlessKeyUnparseable} rootlessUnresolved={RootlessUnresolved} " +
-            "rootlessDeferred={RootlessDeferred} rootlessScanFailed={RootlessScanFailed} durationMs={DurationMs} " +
+            "rootlessDeferred={RootlessDeferred} rootlessScanFailed={RootlessScanFailed} " +
+            "restrictedCandidates={RestrictedCandidates} externalSharesRemoved={ExternalSharesRemoved} " +
+            "noInternalReader={NoInternalReader} ownerIsExternal={OwnerIsExternal} durationMs={DurationMs} " +
             "attempt={Attempt} correlationId={CorrelationId}",
             status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, denyListUnreadable,
             truncated, rotating,
             tenant is not null,
             rootless.Found, rootless.Revoked, rootless.RecordExists, rootless.KeyUnparseable, rootless.Unresolved,
             rootless.Deferred, rootless.ScanFailed,
+            restrictedCandidates, externalSharesRemoved, noInternalReader, ownerIsExternal,
             (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
 
         return new JobRunResult(
@@ -320,6 +432,10 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     incompleteTotal = incompleteRoots.Count,
                     denyListUnreadable,
                     rootlessLedger = rootless.ToReport(),
+                    restrictedCandidates,
+                    externalSharesRemoved,
+                    noInternalReader,
+                    ownerIsExternal,
                     attempt = context.Attempt,
                 },
                 ResultJsonOptions));

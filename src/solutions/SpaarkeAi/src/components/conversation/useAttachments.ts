@@ -29,6 +29,7 @@
 import * as React from "react";
 import type { AttachmentChip, ChatAttachment, IChatMessage } from "@spaarke/ui-components";
 import type { ContextPaneEvent } from "@spaarke/ai-widgets";
+import { isApiError } from "@spaarke/auth";
 import type { EventBatchMachine } from "./useEventBatch";
 import {
   routeSummarizeIntent,
@@ -41,6 +42,11 @@ import {
 const READY_CONFIRMATION_DEBOUNCE_MS = 250;
 const MAX_PROMOTE_ATTEMPTS = 2;
 const PROMOTE_RETRY_DELAY_MS = 1000;
+
+/** A thrown `ApiError` with a 5xx status — the server-side failures a promote retry can outlast. */
+function isRetryableHttpFailure(err: unknown): boolean {
+  return isApiError(err) && err.status >= 500;
+}
 
 export interface AttachmentsDeps {
   bffBaseUrl: string;
@@ -476,7 +482,10 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
           errName,
           errKind
         );
-        const shouldRetry = attemptNumber < MAX_PROMOTE_ATTEMPTS && errKind === "network-or-cors";
+        // authenticatedFetch THROWS ApiError for a non-OK response, so the 5xx retry the `!response.ok`
+        // branch above describes is decided here too (4xx won't succeed on retry).
+        const shouldRetry =
+          attemptNumber < MAX_PROMOTE_ATTEMPTS && (errKind === "network-or-cors" || isRetryableHttpFailure(err));
         if (shouldRetry) {
           await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS));
           pendingPromotionIdsRef.current.delete(chipId);
@@ -571,7 +580,9 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
             filename,
             errKind
           );
-          const shouldRetry = attemptNumber < MAX_PROMOTE_ATTEMPTS && errKind === "network-or-cors";
+          // authenticatedFetch THROWS ApiError for a non-OK response — retry a thrown 5xx as above.
+          const shouldRetry =
+            attemptNumber < MAX_PROMOTE_ATTEMPTS && (errKind === "network-or-cors" || isRetryableHttpFailure(err));
           if (shouldRetry) {
             await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS));
             continue;

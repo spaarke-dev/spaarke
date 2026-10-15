@@ -102,7 +102,7 @@ az account show --query "{Name:name, Id:id}" -o table
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key for Email webhooks (48-byte base64) |
 
 **Full environment reference**: See `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` → Environment Configuration
-**Auth-specific runbook**: See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10 sections including §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy
+**Auth-specific runbook**: See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — §6.5 App Service configuration, §7.7 Graph app roles + Dataverse Application User, §7.9 Exchange mailbox access (`auth-deployment-setup.md` is a retired stub)
 **Canonical auth ADR**: [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI for outbound, HMAC webhooks, named API keys
 
 ---
@@ -120,7 +120,7 @@ az account show --query "{Name:name, Id:id}" -o table
 | Stack | Path | Purpose |
 |-------|------|---------|
 | AI Foundry | `infrastructure/bicep/stacks/ai-foundry-stack.bicep` | AI Hub, Project, Storage, KV |
-| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12); file deleted by task 225a (2026-10-01)** with `model1-customer.bicep` and `parameters/{dev,staging,prod}.bicepparam`. Model 1 customers are dedicated stamps built by the L2 control plane (H2a refuses Model 1 runs until tasks 225b + 228). |
+| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12); file deleted by task 225a (2026-10-01)** with `model1-customer.bicep` and `parameters/{dev,staging,prod}.bicepparam`. Model 1 customers are dedicated stamps built by the L2 control plane (H2a deploys them with `customer.bicep` since task 228). |
 | Customer stamp (**both models**) | `infrastructure/bicep/customer.bicep` — the ONLY customer-stamp template, deployed by L2 handler H2a (task 249, owner D19, 2026-10-02: `stacks/model2-full.bicep` and its parameter files were deleted) | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). Not deployed by any GitHub workflow — `deploy-infrastructure.yml` only validates. |
 
 ### Deploy Infrastructure

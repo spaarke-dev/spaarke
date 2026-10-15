@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Auth consumers pass the environment tenant explicitly; ribbon scripts and scope names fixed</title>
+    <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth configuration across ~20 client surfaces.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical, fully specified per file once 122 lands.</model-tier-reason>
+    <effort>high</effort>
+    <deps>122</deps>
+    <tags>frontend, auth, pcf, code-page, webresource</tags>
+  </metadata>
+  <prompt>Read `notes/122-guest-signin-review.md` ("Surfaces that fail" + defects 7-9). Each surface that already has the environment tenant passes it to @spaarke/auth explicitly, so the library's fallback chain (task 122) is a safety net, not the main path.</prompt>
+  <goal>Every listed surface initialises auth with a validated tenant-specific authority; no surface hardcodes an environment; one BFF scope name.</goal>
+  <constraints>
+    <constraint>Edit only the auth-init code of the listed surfaces (and their tests). No feature changes. Delete the "authority intentionally omitted … popup regression 2026-05-13" comments and explain the real cause (malformed `/undefined`, guarded by 122).</constraint>
+    <constraint>Check each surface for concurrent edits in other open PRs/worktrees before editing (e.g. TrackingFieldTrio is in PR #1450, UAC-r2) — if overlapping, coordinate through the owner instead of editing.</constraint>
+    <constraint>Do not deploy (task 125 does).</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>PCFs — pass the tenant they already load (`sprk_TenantId`): RelatedDocumentCount, SemanticSearchControl, CommunicationActions, CommunicationConversationPanel, CommunicationMessageActions, CommunicationTimeline, CommunicationTimelineRegarding, CommunicationAttachments, TrackingFieldTrio. DocumentRelationshipViewer PCF: guard the empty tenant (never `…microsoftonline.com/`).</step>
+    <step>Code pages — pass `tenantId` from their runtime config: DailyBriefing, EmailPage, CommunicationReconciliation (createCodePageAuthInitializer), Reporting, SpeAdminApp, DocumentUploadWizard, FindSimilarCodePage, code-pages/DocumentRelationshipViewer, code-pages/PlaybookBuilder (also fix its global name `__SPAARKE_BFF_BASE_URL__` → what the library reads, and pass the scope).</step>
+    <step>Web resources: `sprk_registrationribbon.js` and `sprk_aichatcontextmap_ribbon.js` read client id / tenant / redirect from Dataverse env vars (as `sprk_DocumentOperations.js` does) instead of hardcoded dev values; align the BFF scope in those and `sprk_emailactions.js` to `user_impersonation` (confirm the BFF app exposes it — the review says it exposes both).</step>
+    <step>Tenant ids sent to the BFF (RelatedDocumentCount, DocumentRelationshipViewer, FindSimilar, DocumentUploadWizard query params; `X-Tenant-Id` in useSseStream; `sendToIndex` body) — take them from the token's `tid` / resolved tenant, never an MSAL account's home tenant; drop the visualization `?tenantId=` (the BFF ignores it).</step>
+    <step>Build each touched surface (`npm run build:prod` for PCFs via scripts/Invoke-PcfBuildProd.ps1; each code page's build) and run its tests.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">grep: no listed surface calls initAuth / createCodePageAuthInitializer without a tenant or authority; no hardcoded tenant GUID or spaarkedev1 URL in the two ribbon scripts.</criterion>
+    <criterion testable="true">One scope name (`user_impersonation`) across the touched surfaces.</criterion>
+    <criterion testable="true">Each touched surface builds (PCF build:prod judged from output) and its tests pass.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>The surfaces already load the tenant; they discard it.</existing>
+    <extension>Yes — pass the existing value; no new component.</extension>
+    <cost-of-doing-nothing>Surfaces depend on the library fallback chain alone (an extra round trip, and the /api/config/client rate limit for shared-IP customers); the ribbons break outside dev.</cost-of-doing-nothing>
+  </justification>
+  <notes>DONE 2026-10-08. 10 PCFs pass the environment tenant (validated with isValidTenant; else the library discovers it): RelatedDocumentCount 1.21.5, SemanticSearchControl 1.1.83, CommunicationAttachments 1.3.2, CommunicationActions 1.3.18, CommunicationConversationPanel 1.18.1, CommunicationMessageActions 1.0.4, CommunicationTimeline 1.0.3, CommunicationTimelineRegarding 1.0.2, TrackingFieldTrio 1.0.42, DocumentRelationshipViewer 1.0.37. Shared resolveSignInIdentity (pcf/shared/utils/environmentVariables.ts): env vars FIRST, form properties only as fallback (the Matter main form binds the dev tenant statically; found by the verifier). 9 code pages pass tenantId (DailyBriefing, EmailPage, CommunicationReconciliation, Reporting, SpeAdminApp 1.0.1, DocumentUploadWizard, FindSimilarCodePage, code-pages DocumentRelationshipViewer, PlaybookBuilder: correct BFF global + setAuthRuntimeConfig). Web resources: sprk_registrationribbon.js 2.1.0 and sprk_aichatcontextmap_ribbon.js 1.1.0 read env vars (no hardcoded dev client/tenant/URL); user_impersonation everywhere (sprk_emailactions.js 1.2.1); sprk_DocumentOperations.js 1.28.1 sendToIndex uses the environment tenant and refuses a non-GUID tenant. Dropped the ignored ?tenantId= on visualization/related calls (BFF reads tid). All 10 PCFs build:prod PASS, all 9 code pages build; tests: CommunicationAttachments 52, CommunicationActions 24, ConversationPanel 38, MessageActions 6, Timeline 6, TimelineRegarding 16, PlaybookBuilder 105, DocumentUploadWizard 13. Independent verifier: one F2 (form dev tenant winning) fixed + F4 comments fixed. Pre-existing failing suites and follow-ups: #1477; toolchain CVEs #1476. Open PRs to reconcile at merge: #1415 (SemanticSearchControl 1.1.82), #1467 (pack.ps1 lines).</notes>
+</task>

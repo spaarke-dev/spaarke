@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
+using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
@@ -256,11 +256,11 @@ public class ContainerDocumentListAuthorizationTests
     [InlineData("   ")]
     public async Task QuerySource_AMissingContainerId_IsTheFiltersOwn400_AndNeverReachesTheHandler(string? containerId)
     {
-        var registry = Substitute.For<ISecurableEntityRegistry>();
-        var entityService = Substitute.For<IGenericEntityService>();
+        var registry = new Mock<ISecurableEntityRegistry>();
+        var entityService = new Mock<IGenericEntityService>();
         var accessDataSource = new StubAccessDataSource(AccessRights.Read);
         var filter = new ContainerDocumentAuthorizationFilter(
-            new RecordContainerResolver(registry, entityService, NullLogger<RecordContainerResolver>.Instance),
+            new RecordContainerResolver(registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance),
             new AuthorizationService(accessDataSource, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance),
             NullLogger<ContainerDocumentAuthorizationFilter>.Instance,
             queryParameter: "containerId");
@@ -286,8 +286,8 @@ public class ContainerDocumentListAuthorizationTests
         problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         problem.ProblemDetails.Detail.Should().Be(ContainerDocumentAuthorizationFilter.MissingQueryContainerIdDetail);
         problem.ProblemDetails.Detail.Should().Be("ContainerId is required for listing documents");
-        registry.ReceivedCalls().Should().BeEmpty("no resolver question is asked for a missing id");
-        entityService.ReceivedCalls().Should().BeEmpty("no Dataverse call is made for a missing id");
+        registry.Invocations.Should().BeEmpty("no resolver question is asked for a missing id");
+        entityService.Invocations.Should().BeEmpty("no Dataverse call is made for a missing id");
         accessDataSource.WasConsulted.Should().BeFalse();
     }
 
@@ -359,20 +359,19 @@ public class ContainerDocumentListAuthorizationTests
     {
         var securable = new HashSet<string>(StringComparer.Ordinal) { SecureEntity };
 
-        var registry = Substitute.For<ISecurableEntityRegistry>();
+        var registry = new Mock<ISecurableEntityRegistry>();
 
         // Only GetSecurableEntitiesAsync is stubbed: the REVERSE direction is the only one this filter
         // uses, and it never calls ClassifyEntityAsync. Stubbing that too would imply a dependency the code
         // under test does not have.
-        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
 
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
 
-        entityService.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        entityService.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
             {
-                var query = call.Arg<QueryExpression>();
                 var collection = new EntityCollection();
 
                 // Only the SECURE probe (sprk_issecure == true) has claimants in this fixture. The
@@ -400,7 +399,7 @@ public class ContainerDocumentListAuthorizationTests
             });
 
         return new RecordContainerResolver(
-            registry, entityService, NullLogger<RecordContainerResolver>.Instance);
+            registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance);
     }
 
     private static Entity SecureRow(Guid id)

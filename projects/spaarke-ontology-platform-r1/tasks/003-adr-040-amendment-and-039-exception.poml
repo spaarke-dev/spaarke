@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ADR-040 amendment and ADR-039 exception (D-9)</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architectural decision record change; CLAUDE.md section 6.5 forbids silent compliance and this unblocks the evaluator.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR authoring with repo-wide blast radius; the amendment defines how two ledgers relate for every future consumer.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/ paths, which sub-agents cannot write (root CLAUDE.md section 3). Main session only.</parallel-reason>
+    <deps>none</deps>
+    <tags>adr,architecture,documentation</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-040 to name SessionGate and the Decision Record as siblings, and record the ADR-039 project-scoped exception. Both paths were chosen by the owner on 2026-10-03 as D-9.</prompt>
+  <role>SPAARKE architect. ADRs are codified prior decisions, not immutable laws; amend deliberately and narrowly.</role>
+  <goal>ADR-040 states that a durable, per-matter-queryable decision ledger is a sibling of the chat-session gate ledger rather than a competing one, with the link named. The ADR-039 exception is documented where code-review will look for it.</goal>
+
+  <context>
+    <background>design.md section 6 surfaced both tensions and left the path deferred by owner decision 2026-09-30: evaluate or revise this ADR once we get the solution actually decided. The solution is now decided and D-2 is settled with the table built, so the condition is met. CLAUDE.md section 6.5 allows three paths and forbids a fourth: silent violation is not available.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-040-session-ledger.md</file>
+      <file role="modify">docs/adr/ADR-040-session-ledger.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ADR-039 gets path A, a PROJECT-SCOPED EXCEPTION. Do NOT amend ADR-039. The reasoning is that Policy decides whether a claim is TRUE while Binding decides what EXECUTES, which are different axes, and CommunicationRuleGate already accepted this for its own rule store by owner decision 2026-07-22.</constraint>
+    <constraint source="project">Scope: ADR-040 gets path B, an AMENDMENT. Keep it narrow: name the two ledgers as siblings and name the link (sprk_decisionrecord.sprk_gatesessionid). Do NOT broaden ADR-040 into a general ledger ADR.</constraint>
+    <constraint source="project">Scope: both the concise .claude/adr/ copy and the full docs/adr/ copy must be updated and must not contradict each other.</constraint>
+    <constraint source="project">Scope: every PR touching root CLAUDE.md or .claude/ procedure surface adds a .claude/CHANGELOG.md entry (root CLAUDE.md section 18).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR amendment and conflict resolution</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read both copies of ADR-040 and establish exactly what it currently asserts about ownership of gate decisions.</step>
+    <step order="2">Draft the amendment: SessionGate is chat-session-shaped and Redis to Cosmos tiered; a Decision Record is a durable Dataverse row queryable per matter. They are siblings. Name sprk_decisionrecord.sprk_gatesessionid as the link. State what each one owns and what neither owns.</step>
+    <step order="3">State explicitly what the amendment does NOT do: it does not make SessionGate durable, and it does not move authority, policy version, evidence or confirmer into SessionGate.</step>
+    <step order="4">Apply the amendment to both the concise and the full copy.</step>
+    <step order="5">Record the ADR-039 path A exception in spec.md ADR Tensions (already drafted) and verify the wording is concrete rather than boilerplate, since project-pipeline Step 1.7 and code-review Step 6.6 both check that.</step>
+    <step order="6">Add a .claude/CHANGELOG.md entry describing the amendment and citing this project.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If amending ADR-040 cannot be kept narrow (for example it turns out other consumers depend on SessionGate being the only gate ledger), STOP and escalate per CLAUDE.md section 6.5 rather than broadening the amendment unilaterally. A wide ADR change made to unblock one project is the failure mode section 6.5 exists to prevent.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">.claude/adr/ADR-040-session-ledger.md</output>
+    <output type="doc">docs/adr/ADR-040-session-ledger.md</output>
+    <output type="doc">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ADR-040 after the amendment, when read, then it names SessionGate and the Decision Record as siblings and names the linking column.</criterion>
+    <criterion testable="true">Given ADR-040 after the amendment, when read, then it states what the amendment does NOT change.</criterion>
+    <criterion testable="true">Both the .claude/adr and docs/adr copies carry the amendment and do not contradict each other.</criterion>
+    <criterion testable="true">A .claude/CHANGELOG.md entry exists for this change.</criterion>
+    <criterion testable="true">Negative: ADR-039 is NOT amended; its resolution is an exception documented in spec.md and cited in the PR description.</criterion>
+    <criterion testable="true">The amendment is merged before or alongside task 031 (the evaluator). Confirm the sequencing is reflected in TASK-INDEX.md.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">Amendment applied to both ADR-040 copies (sibling table, the named link sprk_decisionrecord.sprk_gatesessionid, 2 new MUSTs, 2 new MUST NOTs, explicit does-NOT-do list); .claude/CHANGELOG.md entry added; ADR-039 NOT amended (exception stands in spec.md section 6). Escalation trigger evaluated and did not fire: SessionGate has no authority/policy-version/evidence/confirmer field, and sprk_emailreviewlog already ships as a durable per-decision authority record, so no consumer depended on SessionGate being the only record of a decision. Deviation: step 5 found the ADR-039 precedent citation pointed at a nonexistent path and corrected it to projects/spaarke-notification-spine-r1/notes/041-rule-store-decision.md in spec.md and design.md. Record: notes/003-adr-040-amendment.md</completion>
+  <notes>spec.md section 6 and section 9 (D-9). design.md section 8.0c. This task is parallel-safe false because sub-agents cannot write .claude/ paths; that boundary is working correctly, not a bug.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

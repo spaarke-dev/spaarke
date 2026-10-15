@@ -22,18 +22,18 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// <c>b!</c> followed by 20+ URL-safe base64 characters (canonical Graph SPE
 /// container-ID format, see
 /// <see href="https://learn.microsoft.com/graph/api/resources/filestoragecontainer"/>).
-/// Constants derived from <c>IOptions</c> bags or the
-/// <c>ITenantContainerResolver</c> service ARE compliant — those are
-/// per-tenant / per-request lookups; only inline string LITERALS are
-/// forbidden.
+/// Ids from <c>IOptions</c> bags / settings bound per stamp, or from the record being served, ARE compliant — and every
+/// app-only use of one passes <c>SpeContainerOwnershipGuard</c>, the BFF's one definition of the stamp's containers
+/// (T227d; the older resolver was retired by T227f). Only inline string LITERALS are forbidden.
 /// </para>
 ///
 /// <para>
 /// <b>Compliant lookup pattern</b>:
 /// <code>
-/// var containerId = await _tenantContainerResolver.ResolveAsync(tenantId, ct);
+/// var containerId = record.ContainerId;               // the record being served
 /// // or:
-/// var containerId = _speOptions.ContainerId;   // bound from KV / env at boot
+/// var containerId = _options.DefaultContainerId;      // a stamp setting, bound per stamp by H4b
+/// // app-only use: await _ownership.ForOwnedContainerAsync(containerId, ct)
 /// </code>
 /// </para>
 /// </summary>
@@ -98,9 +98,9 @@ public class I4_SpeContainerIdLiteralTests
                     : $"{literal.Substring(0, 20)}...{literal[^6..]}";
                 offenders.Add(
                     $"{rel}:{lineNumber} — SPE container-ID literal {displayed} " +
-                    $"(shape 'b!' + 20+ url-safe chars) in BFF service. Fix: resolve the container ID " +
-                    $"per-tenant via `ITenantContainerResolver` (preferred) or read it from an IOptions bag " +
-                    $"whose value is bound from the customer's KV secret / Dataverse env-var at boot. " +
+                    $"(shape 'b!' + 20+ url-safe chars) in BFF service. Fix: take the container ID from the record " +
+                    $"being served or from a stamp setting (IOptions, bound per stamp by H4b); app-only use goes " +
+                    $"through SpeContainerOwnershipGuard, the one definition of this stamp's containers. " +
                     $"Reference: spec.md FR-31 / design.md §4D I4.");
             }
         }
@@ -109,7 +109,8 @@ public class I4_SpeContainerIdLiteralTests
             offenders.Count == 0,
             "§4D I4 violation: SPE container-ID string literal(s) in BFF Services/**. A fallback-default " +
             "container ID routes a customer's SPE uploads to another customer's container — CATASTROPHIC " +
-            "(privileged docs in wrong hands). Resolve container IDs per-tenant via ITenantContainerResolver.\n" +
+            "(privileged docs in wrong hands). Take container IDs from the record or the stamp's settings; app-only use goes " +
+            "through SpeContainerOwnershipGuard (the one definition of this stamp's containers).\n" +
             $"Offenders:\n{string.Join("\n", offenders.OrderBy(x => x, StringComparer.Ordinal))}");
     }
 

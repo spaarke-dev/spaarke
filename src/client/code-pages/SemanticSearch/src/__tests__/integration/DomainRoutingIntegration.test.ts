@@ -32,13 +32,17 @@ jest.mock('../../services/authInit', () => ({
   isAuthenticated: jest.fn().mockReturnValue(true),
 }));
 
-jest.mock('@spaarke/auth', () => ({
-  resolveRuntimeConfig: jest.fn().mockResolvedValue({
-    bffBaseUrl: 'https://test-bff-api.example.com',
-    bffOAuthScope: 'api://test-app-id/user_impersonation',
-    msalClientId: 'test-client-id',
-  }),
-}));
+jest.mock('@spaarke/auth', () => {
+  const { createAuthenticatedFetchMock } = jest.requireActual('../helpers/authenticatedFetchMock');
+  return {
+    ...createAuthenticatedFetchMock(async () => 'Bearer fake-routing-token'),
+    resolveRuntimeConfig: jest.fn().mockResolvedValue({
+      bffBaseUrl: 'https://test-bff-api.example.com',
+      bffOAuthScope: 'api://test-app-id/user_impersonation',
+      msalClientId: 'test-client-id',
+    }),
+  };
+});
 
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();

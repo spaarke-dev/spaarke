@@ -99,7 +99,7 @@ COMMON PATTERNS:
 | `Deploy-CustomPage.ps1` | Deploy custom pages | After custom page changes |
 | `Deploy-ThemeIcons.ps1` | Deploy theme icons | After icon updates |
 | `Deploy-SubgridCommands.ps1` | Deploy subgrid commands | After ribbon changes |
-| `Deploy-CorporateWorkspace.ps1` | Deploy LegalWorkspace HTML web resource | After `src/solutions/LegalWorkspace/` changes |
+| `Deploy-SpaarkeAi.ps1` | Deploy the Console bundle (includes LegalWorkspace; `sprk_corporateworkspace` is retired) | After `src/solutions/SpaarkeAi/` or `src/solutions/LegalWorkspace/` changes |
 | `Deploy-EventsPage.ps1` | Deploy EventsPage HTML web resource | After `src/solutions/EventsPage/` changes |
 | `Deploy-EventDetailSidePane.ps1` | Deploy EventDetailSidePane web resource | After side pane changes |
 

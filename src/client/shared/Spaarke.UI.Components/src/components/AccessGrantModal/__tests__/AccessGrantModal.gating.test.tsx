@@ -23,6 +23,7 @@ import * as path from 'path';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal, describeAccessPermission } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import { resolveAccessPermissionState } from '../accessPermissionState';
 import type {
   IAccessGrantModalProps,
@@ -61,7 +62,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: async () => body,
+    // A BFF ProblemDetails always carries `status`.
+    json: async () => (status >= 200 && status < 300 ? body : { status, ...(body as Record<string, unknown>) }),
   } as unknown as Response;
 }
 
@@ -79,7 +81,7 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   );
   const pickOrganization = jest.fn(async (): Promise<IOrganizationPick | null> => ({ id: 'org-9', name: 'Acme LLP' }));
   const pickUser = jest.fn(async (): Promise<IUserPick | null> => PICKED_USER);
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
     if (url.includes('/share-user')) return jsonResponse({ systemUserId: PICKED_USER.id, narrowed: false });
     if (url.includes('/invite-and-grant')) {
@@ -271,7 +273,8 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 138)', () =>
       (props.authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
         if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
         if (url.includes('/invite-and-grant') || url.includes('/grant')) {
-          return jsonResponse({ reasonCode: 'sdap.access.grant.record_restricted', detail }, 422);
+          // authenticatedFetch THROWS the refusal (it never returns a non-2xx).
+          throw apiErrorFor(422, { title: 'Refused', status: 422, reasonCode: 'sdap.access.grant.record_restricted', detail });
         }
         return jsonResponse({});
       });

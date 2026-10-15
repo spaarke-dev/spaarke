@@ -20,40 +20,39 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 
 // Mock @spaarke/auth at module-boundary BEFORE importing the hook.
+// The real error classes and guards stay (the hook reads what authenticatedFetch THROWS).
 jest.mock('@spaarke/auth', () => ({
+  ...jest.requireActual('@spaarke/auth'),
   authenticatedFetch: jest.fn(),
 }));
 
-import { authenticatedFetch } from '@spaarke/auth';
+import { ApiError, AuthError, authenticatedFetch, type OkResponse, type OkStatus } from '@spaarke/auth';
 import { useDocumentActions } from '../../src/hooks/useDocumentActions';
 
 const BFF = 'https://bff.example.com';
 const mockedFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
-
-// Minimal Response-like shape that satisfies the hook's reads (.ok, .status,
+// Minimal SUCCESS Response-like shape that satisfies the hook's reads (.ok, .status,
 // .json, .blob, .headers.get). Using a typed factory keeps assertions honest
 // without forcing us to construct full Response objects.
-function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {}): Response {
-  const status = init.status ?? 200;
-  const ok = init.ok ?? (status >= 200 && status < 300);
+function jsonResponse(body: unknown, init: { status?: OkStatus } = {}): OkResponse {
   return {
-    ok,
-    status,
-    statusText: ok ? 'OK' : 'Error',
+    ok: true,
+    status: init.status ?? 200,
+    statusText: 'OK',
     json: jest.fn().mockResolvedValue(body),
     blob: jest.fn().mockResolvedValue(new Blob(['x'])),
     headers: { get: () => null },
-  } as unknown as Response;
+  } as unknown as OkResponse;
 }
 
-function blobResponse(disposition: string | null = null): Response {
+function blobResponse(disposition: string | null = null): OkResponse {
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
     blob: jest.fn().mockResolvedValue(new Blob(['x'])),
     headers: { get: (name: string) => (name === 'Content-Disposition' ? disposition : null) },
-  } as unknown as Response;
+  } as unknown as OkResponse;
 }
 
 beforeEach(() => {
@@ -111,19 +110,6 @@ describe('useDocumentActions — openInWeb', () => {
     expect(result.current.isActing).toBe(false);
   });
 
-  test('on non-OK response sets actionError with status', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 500, ok: false }));
-
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.openInWeb('doc-1');
-    });
-
-    expect(window.open).not.toHaveBeenCalled();
-    expect(result.current.actionError).toContain('500');
-    expect(result.current.isActing).toBe(false);
-  });
 });
 
 describe('useDocumentActions — openInDesktop', () => {
@@ -245,19 +231,6 @@ describe('useDocumentActions — deleteDocuments', () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  test('sets actionError when DELETE returns non-OK', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 403, ok: false }));
-
-    const onSuccess = jest.fn();
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.deleteDocuments(['a'], onSuccess);
-    });
-
-    expect(onSuccess).not.toHaveBeenCalled();
-    await waitFor(() => expect(result.current.actionError).toContain('403'));
-  });
 });
 
 describe('useDocumentActions — emailLink', () => {
@@ -290,24 +263,13 @@ describe('useDocumentActions — emailLink', () => {
     errSpy.mockRestore();
   });
 
-  test('sets actionError when open-links returns non-OK', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 404, ok: false }));
-
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.emailLink('missing');
-    });
-
-    await waitFor(() => expect(result.current.actionError).toContain('404'));
-  });
 });
 
 describe('useDocumentActions — sendToIndex', () => {
   test('POSTs analyze per id and treats 202 as success', async () => {
     mockedFetch
-      .mockResolvedValueOnce(jsonResponse({}, { status: 202, ok: false }))
-      .mockResolvedValueOnce(jsonResponse({}, { status: 202, ok: false }));
+      .mockResolvedValueOnce(jsonResponse({}, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({}, { status: 202 }));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
@@ -320,15 +282,106 @@ describe('useDocumentActions — sendToIndex', () => {
     expect(result.current.actionError).toBeNull();
   });
 
-  test('sets actionError when analyze returns non-success status', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 500, ok: false }));
+});
+
+// ===========================================================================
+// What production sees: `@spaarke/auth`'s authenticatedFetch THROWS ApiError (status + ProblemDetails) or,
+// once its 401 retries are spent, AuthError. Before the fix every catch showed the thrown message as-is —
+// a bare "HTTP 500" — and the `Failed to …: <status>` frames never ran.
+// ===========================================================================
+
+describe('useDocumentActions — thrown failures (production fetch shape)', () => {
+  test("delete: a thrown ApiError shows the server's detail in the action frame", async () => {
+    const detail = 'The document is checked out by another user.';
+    mockedFetch.mockRejectedValueOnce(new ApiError(detail, 409, { title: 'Conflict', status: 409, detail }));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.deleteDocuments(['a'], jest.fn());
+    });
 
+    expect(result.current.actionError).toBe(`Couldn't delete the document: ${detail}`);
+  });
+
+  test('delete of several: the frame counts them', async () => {
+    mockedFetch
+      .mockResolvedValueOnce(jsonResponse({}, { status: 204 }))
+      .mockRejectedValueOnce(new ApiError('HTTP 403', 403));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.deleteDocuments(['a', 'b'], jest.fn());
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't delete 2 documents: You do not have permission to do this with this document."
+    );
+  });
+
+  test('open: a thrown bare 500 reads "temporarily unavailable", not "HTTP 500"', async () => {
+    mockedFetch.mockRejectedValueOnce(new ApiError('HTTP 500', 500));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.openInWeb('doc-1');
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't open the document: The document service is temporarily unavailable. Try again in a few minutes."
+    );
+  });
+
+  test('open in desktop: a thrown 404 reads "not found"', async () => {
+    mockedFetch.mockRejectedValueOnce(new ApiError('HTTP 404', 404));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.openInDesktop('doc-1');
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't open the document in the desktop app: The document was not found."
+    );
+  });
+
+  test('download: an expired sign-in (thrown AuthError) says so', async () => {
+    mockedFetch.mockRejectedValueOnce(
+      new AuthError('Authentication failed after all retry attempts', 'auth_exhausted')
+    );
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.download('doc-1');
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't download the document: Your sign-in has expired. Refresh the page to sign in again."
+    );
+  });
+
+  test('email link: a network failure does not show "Failed to fetch"', async () => {
+    mockedFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+    await act(async () => {
+      await result.current.emailLink('doc-1');
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't create the email link: The Spaarke server could not be reached. Check your connection."
+    );
+  });
+
+  test('send to index: a thrown 429 asks the user to wait', async () => {
+    mockedFetch.mockRejectedValueOnce(new ApiError('HTTP 429', 429));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
     await act(async () => {
       await result.current.sendToIndex(['a']);
     });
 
-    await waitFor(() => expect(result.current.actionError).toContain('500'));
+    expect(result.current.actionError).toBe(
+      "Couldn't send the document to the index: Too many requests. Wait a moment and try again."
+    );
   });
 });

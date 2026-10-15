@@ -136,7 +136,8 @@ assert them as literals rather than deriving them from the table under test.
   name as a missing share.
 - **Refusals** are ProblemDetails with `reasonCode` + `traceId`. Stable codes:
   `sdap.access.user_share.record_unresolved` (400), `.user_required` (400), `.level_invalid` (400),
-  `.user_not_found` (404), `.user_disabled` (422), `.user_not_a_person` (422), `.user_not_internal` (422),
+  `.user_not_found` (404), `.user_disabled` (422), `.user_not_a_person` (422), `.user_not_internal` (422 —
+  since task 114 ONLY on a Restricted record for a user flagged `sprk_isexternal = true`),
   `.read_failed` (500 — nothing was written), `.write_not_confirmed` (500 — a write was sent and its
   result could not be confirmed; reload before retrying).
   ⚠️ `record_unresolved` is **defence-in-depth and unreachable through the route** (Step 9.5 review
@@ -154,9 +155,14 @@ assert them as literals rather than deriving them from the table under test.
   **or whose rights cannot be established at all**, gets `403 sdap.access.user_share.caller_cannot_grant`
   and nothing is written. Task 065 should show what was actually granted rather than what was asked for;
   the requested level is the client's own input and is deliberately not echoed back.
-- **Who can receive a share**: an existing, enabled person (access mode Read-Write, Administrative or
-  Read; no application id) whose `sprk_isexternal` flag confirms them internal. **Unsharing checks only
-  that the user exists** — a share must stay removable after its holder is disabled or reclassified.
+- **Who can receive a share** (superseded by task 114, owner round 67, 2026-10-06 —
+  `InternalShareEndpoints.ClassifyEligibility`, the ONE rule `/share-user` and the Assigned-To materializer ask): an
+  existing, enabled person (access mode Read-Write, Administrative or Read; no application id). `sprk_isexternal` is
+  consulted only on a **Restricted** record, which refuses a user whose flag is a stored `true` (`user_not_internal`);
+  a blank flag is NOT external. On any other record a licensed user flagged external is shared with like anyone else.
+  The task-063 rule ("whose `sprk_isexternal` flag confirms them internal", a blank flag refused) is retired — see
+  `notes/task-114-isexternal-eligibility.md`. **Unsharing checks only that the user exists** — a share must stay
+  removable after its holder is disabled or reclassified.
 
 ## 6. Cache invalidation
 
@@ -358,10 +364,10 @@ resolve through the same helper `/set-record-share-expiry` uses.
    share on a record, the creating attorney's included. No floor was added and none of the three
    candidates was implemented. The behaviour stands as built: an unshare needs Write on the record and
    nothing more.
-3. **Sharing with an external licensed system user is refused** (`user_not_internal`). An external person
-   is expected to arrive through a contact grant, which carries an expiry and reminders. If the product
-   intends to allow a licensed external system user to be shared with directly, this rule needs to change.
-   **Still open — not yet ruled on.**
+3. ✅ **CLOSED — owner 2026-09-18, refined by owner round 67 (2026-10-06); implemented by task 114.** A licensed
+   user flagged external IS shared with directly, except on a Restricted record (internal use only), which refuses
+   a user whose `sprk_isexternal` is `true` (`user_not_internal`). A blank flag is not external. The original
+   refusal described here ("sharing with an external licensed system user is refused") no longer holds.
 4. **Before merge: confirm against real Dataverse with a DOWNGRADE, not a create.** This is a
    verification step this task owns, not a decision for the owner. Rewritten after the Step 9.5 review,
    which caught that the check as first scoped could not detect the failure the design hinges on. A

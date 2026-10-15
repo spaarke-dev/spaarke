@@ -382,6 +382,21 @@ internal static class AssignedAccessTestDoubles
                 roots.Count > ceiling ? (roots.Take(ceiling).ToList(), true) : (roots, false));
         }
 
+        /// <summary>Task 114: the roots whose Access Permission is Restricted (what the production scan's filter selects).</summary>
+        public ConcurrentDictionary<(ExternalGrantRootType Type, Guid Id), bool> RestrictedRoots { get; } = new();
+
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
+            ExternalGrantRootType rootType, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            var roots = RestrictedRoots.Keys
+                .Where(k => k.Type == rootType)
+                .Select(k => new AssignedRootRef(rootType, k.Id, Modified.TryGetValue(k.Id, out var m) ? m : null))
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
+        }
+
         internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
         {
             if (FailScan)
@@ -491,6 +506,21 @@ internal static class AssignedAccessTestDoubles
         {
         }
 
+        /// <summary>
+        /// Task 114: the OWNING user of a project / matter / work assignment, answered to a root read by id
+        /// (<c>_owninguser_value</c>) — the Restricted remover's external-owner check. A root not listed comes back team-owned.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> RootOwners { get; } = new();
+
+        /// <summary>
+        /// Task 185 slice F: the CREATOR of a project / matter / work assignment (<c>_createdby_value</c>), answered with its
+        /// owner to the same root read. A root in neither dictionary answers no row.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> RootCreators { get; } = new();
+
+        /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
+        public bool FailRootOwnerQueries { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -503,6 +533,15 @@ internal static class AssignedAccessTestDoubles
             ApplicationId = null,
             IsExternal = false,
         };
+
+        /// <summary>
+        /// Task 181: the caller's systemuser by Entra oid — what <c>ResolveGrantedBySystemUserIdAsync</c> reads to tell the
+        /// granter apart. Empty by default (no caller resolves, as before).
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> SystemUserIdsByOid { get; } = new();
+
+        /// <summary>Task 181: a root record's display name, answered to the grant notification's app-only read by id.</summary>
+        public ConcurrentDictionary<Guid, string> RootNames { get; } = new();
 
         public List<(string Set, string Payload)> Creates { get; } = new();
         public List<(string Set, Guid Id, string Payload)> Updates { get; } = new();
@@ -571,13 +610,29 @@ internal static class AssignedAccessTestDoubles
             if (entitySetName == GrantSet)
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
 
+            if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
+                throw new HttpRequestException("Simulated root-owner read failure.");
+
             object rows = entitySetName switch
             {
                 GrantSet => MatchGrants(filter),
-                // The share routes read a user by id; sprk_grantedby resolution reads by oid (no match here).
+                // The share routes read a user by id; sprk_grantedby resolution reads by oid (task 181: SystemUserIdsByOid).
+                "systemusers" when filter is not null && filter.StartsWith("azureactivedirectoryobjectid eq ", StringComparison.Ordinal) =>
+                    SystemUserIdsByOid
+                        .Where(kv => filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                        .Select(kv => new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow { Id = kv.Value })
+                        .ToList(),
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
+                "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners.Keys.Union(RootCreators.Keys)
+                    .Where(id => filter is not null && filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase))
+                    .Select(id => new Dictionary<string, object?>
+                    {
+                        ["_owninguser_value"] = RootOwners.TryGetValue(id, out var owner) ? owner : null,
+                        ["_createdby_value"] = RootCreators.TryGetValue(id, out var creator) ? creator : null,
+                    })
+                    .ToList<object>(),
                 _ => throw new InvalidOperationException($"Unexpected query of {entitySetName} through the grant table."),
             };
 
@@ -587,6 +642,14 @@ internal static class AssignedAccessTestDoubles
         public override Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null,
             CancellationToken cancellationToken = default) where T : default
         {
+            // Task 181: the grant notification reads a root's display name by id, selecting that one column.
+            if (entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
+            {
+                return Task.FromResult(RootNames.TryGetValue(id, out var name) && select is not null
+                    ? JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(new Dictionary<string, object?> { [select] = name }))
+                    : default);
+            }
+
             lock (_gate)
             {
                 var row = _rows.FirstOrDefault(r => r.Id == id);
@@ -745,6 +808,146 @@ internal static class AssignedAccessTestDoubles
         return Options.Create(options);
     }
 
+    /// <summary>
+    /// Task 036: the portal-notification email seam, recording each send instead of reaching the shared mailbox. The
+    /// communication pipeline is never built (the production type only stores it).
+    /// </summary>
+    internal sealed class RecordingEmailService : Sprk.Bff.Api.Services.Registration.RegistrationEmailService
+    {
+        public RecordingEmailService()
+            : base(
+                null!,
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.CommunicationOptions { DefaultMailbox = "mailbox-central@spaarke.com" }),
+                NullLogger<Sprk.Bff.Api.Services.Registration.RegistrationEmailService>.Instance)
+        {
+        }
+
+        public List<(string To, string Subject, string LinkUrl)> Sent { get; } = new();
+
+        /// <summary>Task 036 review: the CIAM onboarding emails sent (a contact onboarded by an invite), recorded, never sent.</summary>
+        public List<string> Onboarding { get; } = new();
+
+        /// <summary>Task 036 review: the message body of each portal email sent, parallel to <see cref="Sent"/>.</summary>
+        public List<string> Messages { get; } = new();
+
+        /// <summary>When true, a send waits on its cancellation token and never completes by itself (a hung mailbox).</summary>
+        public bool HangUntilCancelled { get; set; }
+
+        /// <summary>When set, every send throws this (the shared mailbox refusing or failing).</summary>
+        public Exception? Failure { get; set; }
+
+        /// <summary>Task 185: the invite link each email in <see cref="Onboarding"/> or <see cref="ExistingAccount"/> carried, in send order.</summary>
+        public List<string> InviteUrls { get; } = new();
+
+        /// <summary>
+        /// Task 185 (adversarial pass 2, F2): when set, every INVITE email (onboarding or existing-account) throws this, as the
+        /// shared mailbox does on a Graph 429 or 5xx. Nothing is recorded. Portal notifications use <see cref="Failure"/>.
+        /// </summary>
+        public Exception? InviteEmailFailure { get; set; }
+
+        public override Task SendCiamOnboardingEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
+        {
+            if (InviteEmailFailure is { } inviteFailure)
+                throw inviteFailure;
+            lock (InviteUrls)
+            {
+                Onboarding.Add(recipientEmail);
+                InviteUrls.Add(inviteUrl);
+            }
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Task 184: the "sign in with your existing account" emails sent (an invite whose person already had a CIAM account).</summary>
+        public List<string> ExistingAccount { get; } = new();
+
+        public override Task SendCiamExistingAccountEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
+        {
+            if (InviteEmailFailure is { } inviteFailure)
+                throw inviteFailure;
+            lock (InviteUrls)
+            {
+                ExistingAccount.Add(recipientEmail);
+                InviteUrls.Add(inviteUrl);
+            }
+            return Task.CompletedTask;
+        }
+
+        public override async Task SendPortalNotificationEmailAsync(
+            string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
+            string correlationId, CancellationToken cancellationToken = default)
+        {
+            if (HangUntilCancelled)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            if (Failure is { } failure)
+                throw failure;
+            lock (Sent)
+            {
+                Sent.Add((recipientEmail, subject, linkUrl));
+                Messages.Add(message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Task 185 slice E: the CIAM account seam, recording each create instead of reaching Graph (no Key Vault, no HTTP). A
+    /// <see cref="Failure"/> that is Graph's "already exists" error becomes the production "existing account" exception.
+    /// </summary>
+    internal sealed class RecordingCiamProvisioner : Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService
+    {
+        public RecordingCiamProvisioner()
+            : base(
+                new Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory(
+                    new Azure.Security.KeyVault.Secrets.SecretClient(new Uri("https://vault.test.invalid/"), NoCredential.Instance),
+                    Moq.Mock.Of<IHttpClientFactory>(),
+                    Config(),
+                    NullLogger<Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory>.Instance),
+                new Sprk.Bff.Api.Services.Registration.PasswordGenerator(),
+                Config(),
+                NullLogger<Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService>.Instance)
+        {
+        }
+
+        /// <summary>Every CIAM account created, in order.</summary>
+        public List<(string Email, Guid Oid)> Created { get; } = new();
+
+        /// <summary>Every create attempted (made or failed), in order.</summary>
+        public List<string> Attempts { get; } = new();
+
+        /// <summary>Thrown by every create, as the Graph SDK throws a Graph error.</summary>
+        public Exception? Failure { get; set; }
+
+        public override Task<string> CreateCiamUserAsync(
+            string email, string? firstName, string? lastName, CancellationToken ct = default)
+        {
+            lock (Attempts)
+                Attempts.Add(email);
+            if (Failure is { } failure)
+            {
+                if (failure is Microsoft.Graph.Models.ODataErrors.ODataError graph && IsExistingAccountConflict(graph))
+                    throw new Sprk.Bff.Api.Services.Registration.CiamAccountAlreadyExistsException(email, graph);
+                throw failure;
+            }
+
+            var oid = Guid.NewGuid();
+            lock (Attempts)
+                Created.Add((email, oid));
+            return Task.FromResult(oid.ToString("D"));
+        }
+
+        private static IConfiguration Config() => new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Ciam:Instance"] = "https://test.ciamlogin.com",
+                ["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1",
+                ["Ciam:Domain"] = "test.onmicrosoft.com",
+                ["Ciam:GraphProvisioner:ClientId"] = "provisioner",
+                ["Ciam:GraphProvisioner:CertificateName"] = "cert",
+            })
+            .Build();
+    }
+
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
@@ -753,7 +956,9 @@ internal static class AssignedAccessTestDoubles
 
         public FakeAssignedAccessStore Store { get; }
         public GrantTable Grants { get; } = new();
-        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } = new(RootRecordFlags.None);
+        /// <summary>The flag reads. Settable (task 174) so a test can give it a filing world to walk; by default nothing is
+        /// filed under anything.</summary>
+        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; set; } = new(RootRecordFlags.None);
         /// <summary>The deny list; replace it to model an entry being deactivated (the wall lifted).</summary>
         public GrantPolicyTestDoubles.SeamNoAccessListReader DenyList { get; set; } = new();
         public InMemoryContactIdentityStore Identities { get; } = new();
@@ -813,7 +1018,114 @@ internal static class AssignedAccessTestDoubles
 
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
-            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Scopes);
+
+        /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
+        public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();
+
+        /// <summary>Task 181: when set, every notification write throws this (Dataverse refusing the create).</summary>
+        public Exception? NotificationWriteFailure { get; set; }
+
+        /// <summary>
+        /// Task 181: the PRODUCTION grant notifier over this harness's grant table (names, the caller's oid), identity
+        /// store and ledger store (who a contact represents) and No Access guard; the PRODUCTION NotificationService over
+        /// an entity seam that records each write.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier Notifier
+        {
+            get
+            {
+                var entities = new Moq.Mock<Spaarke.Dataverse.IGenericEntityService>();
+                entities
+                    .Setup(e => e.CreateAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Entity>(), Moq.It.IsAny<CancellationToken>()))
+                    .Returns((Microsoft.Xrm.Sdk.Entity entity, CancellationToken _) =>
+                    {
+                        if (NotificationWriteFailure is { } failure)
+                            throw failure;
+                        SentNotifications.Enqueue(entity);
+                        return Task.FromResult(Guid.NewGuid());
+                    });
+                var settings = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
+                    .Build();
+                return new Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier(
+                    new Sprk.Bff.Api.Services.NotificationService(entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
+                    Grants, Identities, Store, Guard, Participations,
+                    Emails,
+                    new Sprk.Bff.Api.Configuration.CustomerIdentity(
+                        Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
+                        NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
+                    settings,
+                    NotifierLogger);
+            }
+        }
+
+        /// <summary>Task 185 slice F: the grant notifier's logger; set a capturing logger to assert what it writes.</summary>
+        public ILogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier> NotifierLogger { get; set; } =
+            NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance;
+
+        /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
+        public RecordingEmailService Emails { get; } = new();
+
+        /// <summary>Task 185 slice E: the CIAM accounts the invite core created, recorded, never made.</summary>
+        public RecordingCiamProvisioner Ciam { get; } = new();
+
+        /// <summary>
+        /// Task 185 slice E: the PRODUCTION shared invite service over this harness's grant table, CIAM double, recording
+        /// email service and identity store (the REAL binder), with the portal URL and the "acme" customer key.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService Invites => InvitesOver(Identities);
+
+        /// <summary>Task 185 slice E: <see cref="Invites"/> over ANOTHER identity store (a fixture with its own contacts).</summary>
+        /// <param name="ciam">The CIAM provisioner the service is given; this harness's double when null (task 185 slice F:
+        /// injected directly).</param>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InvitesOver(
+            InMemoryContactIdentityStore identities, Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService? ciam = null)
+        {
+            var settings = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
+                .Build();
+            return new Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService(
+                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), settings,
+                new Sprk.Bff.Api.Configuration.CustomerIdentity(
+                    Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
+                    NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
+                Time, InviteLogger);
+        }
+
+        /// <summary>Task 185 slice E: the invite service's logger; set a capturing logger to assert what it writes.</summary>
+        public ILogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService> InviteLogger { get; set; } =
+            NullLogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService>.Instance;
+
+        /// <summary>
+        /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
+        /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
+        /// </summary>
+        public RestrictedExternalShareRemover RestrictedRemover => new(
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease,
+            NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>Task 114: the per-record removal lease the remover shares with task 143's enforcer and /unshare-user.</summary>
+        public Spaarke.Scheduling.IScheduledJobLease Lease { get; set; } = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
+
+        /// <summary>
+        /// Task 114: a system user the share routes and the Restricted remover read (an enabled person; the flag as given —
+        /// <c>null</c> is a blank <c>sprk_isexternal</c>).
+        /// </summary>
+        public Guid SystemUser(bool? isExternal, bool disabled = false, Guid? id = null)
+        {
+            var userId = id ?? Guid.NewGuid();
+            Grants.SystemUsers[userId] = new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow
+            {
+                Id = userId,
+                FullName = $"User {userId:N}",
+                IsDisabled = disabled,
+                AccessMode = 0,
+                ApplicationId = null,
+                IsExternal = isExternal,
+            };
+            return userId;
+        }
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)
@@ -864,6 +1176,33 @@ internal static class AssignedAccessTestDoubles
     /// nothing to mark, so they are no-ops (and never throw).
     /// </summary>
     internal static AssignedAccessMaterializer InertMaterializer() => new Harness().Materializer;
+
+    /// <summary>
+    /// Task 181: a grant notifier over an EMPTY world, for handler tests that are not about the notification: no contact
+    /// represents anyone, and a share's notification is written to an entity seam nobody reads. It never throws.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier InertNotifier() => new Harness().Notifier;
+
+    /// <summary>
+    /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact
+    /// is found, so nothing is invited (it answers Failed, contact_not_active), and it never throws.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites() => new Harness().Invites;
+
+    /// <summary>Task 185 slice F: the provisioner and its Graph client factory, REAL, over a configuration with no Ciam:*.</summary>
+    internal static Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService NoCiamProvisioner()
+    {
+        var empty = new ConfigurationBuilder().Build();
+        return new Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService(
+            new Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory(
+                new Azure.Security.KeyVault.Secrets.SecretClient(new Uri("https://vault.test.invalid/"), NoCredential.Instance),
+                Moq.Mock.Of<IHttpClientFactory>(),
+                empty,
+                NullLogger<Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory>.Instance),
+            new Sprk.Bff.Api.Services.Registration.PasswordGenerator(),
+            empty,
+            NullLogger<Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService>.Instance);
+    }
 
     /// <summary>
     /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No

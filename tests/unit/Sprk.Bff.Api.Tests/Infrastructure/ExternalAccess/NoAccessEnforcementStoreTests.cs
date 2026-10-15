@@ -140,6 +140,59 @@ public class NoAccessEnforcementStoreTests
         act.Should().Throw<InvalidOperationException>().WithMessage("*outside the Web API root*");
     }
 
+    // ── One entry row, as the store reads it (task 064: the display values the per-record read shows) ───────────
+
+    private const string Formatted = "@OData.Community.Display.V1.FormattedValue";
+
+    [Fact]
+    public void AnEntryRow_CarriesItsRuleColumns_AndTheDisplayNamesDataverseFormats()
+    {
+        var entryId = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var org = Guid.NewGuid();
+        var author = Guid.NewGuid();
+        using var doc = System.Text.Json.JsonDocument.Parse($$"""
+            {
+              "sprk_noaccessentryid": "{{entryId}}",
+              "_sprk_subjectcontact_value": "{{contact}}",
+              "_sprk_subjectcontact_value{{Formatted}}": "Pat Walled",
+              "_sprk_objectorganization_value": "{{org}}",
+              "_sprk_objectorganization_value{{Formatted}}": "Org Ltd",
+              "statecode": 0,
+              "_modifiedby_value": "{{author}}",
+              "_modifiedby_value{{Formatted}}": "Alex Author",
+              "sprk_name": "Pat walled from Org",
+              "modifiedon": "2026-10-01T09:30:00Z"
+            }
+            """);
+
+        var entry = NoAccessEnforcementStore.EntryFrom(doc.RootElement, entryId);
+
+        entry.Should().NotBeNull();
+        entry!.IsActive.Should().BeTrue();
+        entry.ModifiedBy.Should().Be(author);
+        entry.Row._sprk_subjectcontact_value.Should().Be(contact);
+        entry.Row._sprk_objectorganization_value.Should().Be(org);
+        entry.Display.Should().Be(new NoAccessEntryDisplay("Pat walled from Org", "Pat Walled", "Org Ltd", "Alex Author",
+            new DateTimeOffset(2026, 10, 1, 9, 30, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void AnEntryRow_ForAnotherId_IsNotTheEntry()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse($$"""{ "sprk_noaccessentryid": "{{Guid.NewGuid()}}", "statecode": 0 }""");
+
+        NoAccessEnforcementStore.EntryFrom(doc.RootElement, Guid.NewGuid()).Should().BeNull();
+    }
+
+    [Fact]
+    public void TheEntryRead_AsksForTheFormattedValues_AndTheDisplayColumns_ButNeverTheReason()
+    {
+        NoAccessEnforcementStore.FormattedValuesPreference.Should().Contain("OData.Community.Display.V1.FormattedValue");
+        NoAccessEnforcementStore.EntrySelect.Split(',').Should().Contain(new[] { "sprk_name", "modifiedon", "statecode", "_modifiedby_value" })
+            .And.NotContain(c => c.Contains("reason", StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>The PRODUCTION store with only its two wire queries answered from memory.</summary>
     private sealed class RecordingStore : NoAccessEnforcementStore
     {

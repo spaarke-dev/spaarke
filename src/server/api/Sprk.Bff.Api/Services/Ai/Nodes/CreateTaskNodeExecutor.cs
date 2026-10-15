@@ -199,9 +199,18 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
             if (config.DueDate is not null)
             {
                 var dueDateStr = _templateEngine.Render(config.DueDate, templateContext);
-                if (DateTime.TryParse(dueDateStr, out var dueDate))
+                // Task 098: sprk_duedate is Date Only. A "yyyy-MM-dd" (or "yyyy-MM-ddT…") value is the calendar date
+                // as written; ToUniversalTime() moved it by the machine's offset before the column stored its date.
+                if (DataverseDateOnly.TryParse(dueDateStr, out var calendarDate))
                 {
-                    scheduledEnd = dueDate.ToUniversalTime();
+                    scheduledEnd = calendarDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+                }
+                else if (DateTimeOffset.TryParse(dueDateStr, System.Globalization.CultureInfo.InvariantCulture,
+                             System.Globalization.DateTimeStyles.None, out var dueDate))
+                {
+                    // Any other date text: invariant culture, and the clock time AS WRITTEN (its own offset) — never
+                    // converted to the server's local time, which would bring the server's day back in.
+                    scheduledEnd = dueDate.DateTime;
                 }
             }
 
@@ -238,6 +247,24 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                     ownerId,
                     ActingUserId: context.UserId),
                 cancellationToken);
+
+            // Task 141 fix round 2: TaskActionCore answers Guid.Empty when it created nothing (a refusal or a Dataverse
+            // rejection, already logged there). Reporting that as "Task created" with an empty id made a downstream node
+            // read a task that does not exist; the node fails instead, in the error shape this executor uses everywhere.
+            if (taskId == Guid.Empty)
+            {
+                _logger.LogError(
+                    "CreateTask node {NodeId} did not create a task for subject: {Subject}",
+                    context.Node.Id,
+                    subject);
+
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    "Task was not created: the task could not be written (see the earlier log entry for the cause).",
+                    NodeErrorCodes.InternalError,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
 
             _logger.LogInformation(
                 "CreateTask node {NodeId} completed - task created with subject: {Subject}, taskId: {TaskId}",

@@ -55,6 +55,7 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Regression.Compose;
 
@@ -183,7 +184,7 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
     }
 
     [Fact]
-    public async Task CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns412WithActionableCopy_NotOpaque500()
+    public async Task CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns409WithActionableCopy_NotOpaque500()
     {
         // FR-08 (task 051/054): the create-on-save counterpart to the 423 test above — extends the DEF-14
         // proof to the NEGATIVE case task 051's own acceptance criteria names explicitly: "a genuinely
@@ -300,7 +301,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://graph.microsoft.com/v1.0/") };
         var graph = new GraphServiceClient(httpClient);
         var factory = new StubGraphClientFactory(graph);
-        return new UploadSessionManager(factory, Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance);
+        return new UploadSessionManager(factory, TestSpeOwnership.AllowAll(factory), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance);
     }
 }
 

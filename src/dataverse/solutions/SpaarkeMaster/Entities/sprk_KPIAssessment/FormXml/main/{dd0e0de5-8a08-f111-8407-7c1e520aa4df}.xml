@@ -1,0 +1,157 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{dd0e0de5-8a08-f111-8407-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{34009216-7f43-4bb9-a8df-e9d0595016af}" IsUserDefined="1" labelid="{e9714ef8-4f31-46ad-a2ba-3320d6f21e56}" name="General" expanded="false">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="66%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{3d29b3b8-a5ac-4d72-ad7a-7a8eec69e4f3}" labelid="{48eb3f09-c211-4c77-9779-18a24ccbe75d}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{dc75c412-85ff-4389-b955-2a30a95740e3}" labelid="{4a008890-a3d2-4bef-9f92-aaa1bb2e01f1}">
+                        <labels>
+                          <label description="KPI Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_kpiname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_kpiname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{559327aa-f376-4ea4-a7a1-7eb33239faec}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Performance Area" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_performancearea" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_performancearea" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{81459c92-8670-4a25-9ec3-1d99d02d37f3}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Grade" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_kpigradescore" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_kpigradescore" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{55a3bd7d-4839-46a5-be6e-c70e1f481df5}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assessment Criteria" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assessmentcriteria" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_assessmentcriteria" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b1e30098-f3b0-49ba-8a6a-1dda1edd4383}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assessment Notes" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assessmentnotes" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_assessmentnotes" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="34%">
+              <sections>
+                <section name="_section_559" id="16af7fdf-9bb2-4667-bbb7-1f8c8d24a2b6" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{c9de4a3c-bc9f-477a-b885-9fd36bee881c}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{2b431e03-be2a-4fc8-b56a-3d7af309c460}" showlabel="false" labelid="{4542d40a-19c9-4803-a51f-331f50772a23}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{f9c075b7-7b97-411c-a114-ef0cb6412e89}" showlabel="false" labelid="{bdefebb4-75e4-439e-b61c-37d9c6643bf3}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{080c685c-eb74-4243-880a-15e39c80c10b}" showlabel="false" labelid="{2b02dc05-3b35-464d-a67a-f2d1315e666c}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{28df3930-03fa-4cf8-8bed-4008cb23ccdc}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{8df8d1fd-4b89-4bb8-98b8-c437a76ce0e8}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{23addefc-843b-44b2-bba4-4577930887c4}" labelid="{599a6f9f-ceb3-496f-8d74-b7fb65643d8e}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{2e8ca873-4002-4a9d-b024-a7fb142190a3}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{33fb3afe-46be-406f-947d-28930fcce5ce}" showlabel="false" labelid="{e5fe273f-3a44-498e-821f-a30c85827ff0}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{5610c89b-9c44-4ba1-8cd0-16edc70bb8d5}" showlabel="false" labelid="{e5608f74-44ac-436d-bead-149e3a6267fd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{cf704369-4f37-42a4-83b7-1d44ca7169f3}" showlabel="false" labelid="{b48a9e36-7146-49a3-b3c3-b811d3a5bcd1}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="KPI Assessment main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

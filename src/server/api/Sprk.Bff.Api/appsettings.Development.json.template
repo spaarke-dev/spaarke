@@ -4,7 +4,7 @@
   "AiSafety": {
     "_ContentSafety_comment": "Local-dev auth for the Content Safety perimeter (PromptShield + Groundedness). EITHER paste the resource key into ApiKey (never commit the copied file) OR leave ApiKey empty and run 'az login' — ContentSafetyAuthHandler falls back to DefaultAzureCredential (managed-identity cascade, assessment rec 3) when the key is absent or ManagedIdentity:Enabled=true. Your az-login identity needs the 'Cognitive Services User' role on the Content Safety resource for the bearer path to work; if neither auth source is available the shield fails open (logged warning + ai.safety.shield_evaluations outcome=failed_open_error).",
     "ContentSafety": {
-      "Endpoint": "https://spaarke-contentsafety-dev.cognitiveservices.azure.com/",
+      "Endpoint": "https://spaarke-openai-dev.cognitiveservices.azure.com/",
       "ApiKey": "",
       "ManagedIdentity": {
         "Enabled": false
