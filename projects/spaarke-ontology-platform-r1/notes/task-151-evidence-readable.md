@@ -42,12 +42,14 @@ The only addition is one caller read per witness table (here one: `sprk_communic
 - **A caller-identity fault on the witness read** (OBO exchange failure after the caller was resolved) is treated as a fault: every detail withheld, list unchanged, not the single 403.
 - **Behaviour change, fail closed:** in an environment with no Secure Record owner team, a detail line whose `ref` names no lineage table (or is not `{table}:{id}`) used to keep its detail; it is now withheld, because the caller's read cannot prove it readable.
 - **URL size:** 200 ids is about 8 KB of GET URL, under Dataverse's 32 KB limit (the core reads use 100).
-- **The exception branch** of the caller read (as opposed to a failed response) has no seeding test; it returns null exactly as the failed-response branch does (K3).
+- **The exception branch** of the caller read is pinned by `D142_WhenTheCallersWitnessReadThrows_EveryDetailOnThePageIsWithheld_AndTheListIsUnchanged` (review pass 1, K-b, closed).
+- **A 403 on a witness table** (no Read on it) withholds only that table's lines and logs nothing; pinned by `D142_WhenTheCallerHasNoReadOnTheWitnessTable_...` (K-a, closed; seeding proof: marking the chunk readable in that branch fails it).
+- **A 401 on a witness read** is a fault (every detail withheld, list unchanged, `WitnessReadFailed` logged). `DataverseUserClient.MapErrorCode` maps 401 and 403 to the same `AccessDenied`, so the witness read tells them apart by `StatusCode`; the client's mapping is unchanged. Pinned by `D142_AWitnessRead401_IsAFault_...` (K-c, closed; fails on the pre-fix service).
 - **`withheld: true` keeps the `ref`** (table and id) of a witness the caller cannot read. This is the existing secure-wall shape the POML mandates; the id carries no subject or sender.
 
 ## Review record
 
-- Two independent adversarial-reviewer launches were refused by the harness (concurrent sub-agent limit, 4 in use by other sessions). The pass was run in-session over `492d00bd1..62431c35f` against the checklist (fail-open paths, ref casing, duplicate refs, both placement branches, 403/fault/unresolved handling, OData shape, other evidence routes, tests that prove nothing, query counts). No F finding; the K items are listed above. An independent pass is still owed (see the PR).
+- Two independent adversarial-reviewer launches were refused by the harness (concurrent sub-agent limit, 4 in use by other sessions). The pass was run in-session over `492d00bd1..62431c35f` against the checklist (fail-open paths, ref casing, duplicate refs, both placement branches, 403/fault/unresolved handling, OData shape, other evidence routes, tests that prove nothing, query counts). No F finding; the K items are listed above. Independent pass 1 then ran: CLEAN (no F). Its four items (K-a to K-d) are closed or filed above; independent pass 2 is still owed before merge (see the PR).
 
 ## Evidence
 
@@ -82,4 +84,5 @@ The only addition is one caller read per witness table (here one: `sprk_communic
 ## Issues filed (D-106)
 
 - **DI-88 [#1900](https://github.com/spaarke-dev/spaarke/issues/1900):** the stored-value residual (above).
+- **DI-89 [#1913](https://github.com/spaarke-dev/spaarke/issues/1913):** K-d. A Decide row's `subjectName` is returned without a caller read of the subject. Latent: no policy on spaarkedev1 is Communication-typed and `sprk_communication` has no catalog row (DI-63), so the name is empty today; a communication's primary name is `Email: <subject>`, so it would expose the subject once both exist. Not a one-line change, so filed.
 - **DI-80 [#1873](https://github.com/spaarke-dev/spaarke/issues/1873):** read side resolved here; its row is updated.

@@ -1002,9 +1002,11 @@ public sealed class SignalReadService
                     continue;
                 }
 
-                if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+                // A 403 is "no Read on the table": none of its witnesses is readable. A 401 is the same mapped code but means the
+                // caller's token failed mid-request, which is a fault (every detail on the page is withheld), not a verdict.
+                if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && response.StatusCode != 401)
                 {
-                    continue; // No Read on the table at all: none of its witnesses is readable.
+                    continue;
                 }
 
                 _logger.LogWarning(SuppressionEvents.WitnessReadFailed,

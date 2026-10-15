@@ -753,6 +753,78 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
+    public async Task D142_WhenTheCallerHasNoReadOnTheWitnessTable_ThoseLinesAreWithheld_AndNothingIsLoggedAsAFault()
+    {
+        // A 403 on the witness table is a verdict ("none of these is readable"), not a fault: only that table's lines lose their
+        // detail, the other table's lines keep theirs, the list is unchanged, and no WitnessReadFailed warning is logged.
+        var world = new World { SecureTeamExists = false };
+        var m = world.Matter(readers: [Alice]);
+        var witness = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        world.OnlyReadableBy(witness, Alice);
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(witness));
+        var plain = world.Signal(Decide, core: (MatterType, m));
+        var document = world.Record("sprk_document", readers: [Alice]);
+        var onDocument = world.Signal(Decide, core: (MatterType, m),
+            evidence: JsonSerializer.Serialize(new[] { new { @ref = $"sprk_document:{document:D}", text = "Engagement letter" } }));
+        world.TableDenied[Alice] = ["sprk_communication"];
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().BeEquivalentTo([s, plain, onDocument]);
+        var line = EvidenceOf(body, s).Single();
+        line.TryGetProperty("text", out _).Should().BeFalse();
+        line.TryGetProperty("source", out _).Should().BeFalse();
+        line.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        EvidenceOf(body, onDocument).Single().GetProperty("text").GetString().Should().Be("Engagement letter");
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains("witnesses", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task D142_WhenTheCallersWitnessReadThrows_EveryDetailOnThePageIsWithheld_AndTheListIsUnchanged()
+    {
+        var world = new World { SecureTeamExists = false };
+        var m = world.Matter(readers: [Alice]);
+        var witness = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        world.OnlyReadableBy(witness, Alice);
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(witness));
+        var plain = world.Signal(Decide, core: (MatterType, m));
+        var document = world.Record("sprk_document", readers: [Alice]);
+        var onDocument = world.Signal(Decide, core: (MatterType, m),
+            evidence: JsonSerializer.Serialize(new[] { new { @ref = $"sprk_document:{document:D}", text = "Engagement letter" } }));
+        world.ThrowingTables.Add("sprk_document");
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().BeEquivalentTo([s, plain, onDocument]);
+        EvidenceOf(body, s).Should().ContainSingle().Which.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        EvidenceOf(body, onDocument).Should().ContainSingle().Which.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the caller's read of sprk_document witnesses faulted", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task D142_AWitnessRead401_IsAFault_NotNoReadOnTheTable_SoEveryDetailOnThePageIsWithheld()
+    {
+        // DataverseUserClient maps 401 and 403 to the same AccessDenied code; a 401 mid-request is the token failing, so the
+        // witness read treats it as a fault (every detail withheld), where a 403 withholds only that table's lines.
+        var world = new World { SecureTeamExists = false };
+        var m = world.Matter(readers: [Alice]);
+        var witness = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        world.OnlyReadableBy(witness, Alice);
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(witness));
+        var document = world.Record("sprk_document", readers: [Alice]);
+        var onDocument = world.Signal(Decide, core: (MatterType, m),
+            evidence: JsonSerializer.Serialize(new[] { new { @ref = $"sprk_document:{document:D}", text = "Engagement letter" } }));
+        world.UnauthorizedTables.Add("sprk_communication");
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().BeEquivalentTo([s, onDocument]);
+        EvidenceOf(body, s).Should().ContainSingle().Which.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        EvidenceOf(body, onDocument).Should().ContainSingle().Which.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the caller's read of sprk_communication witnesses failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task D142_OneCallerReadPerWitnessTablePerRequest_InListsOfAtMost200Ids()
     {
         var world = new World { SecureTeamExists = false };
@@ -941,6 +1013,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public Dictionary<Guid, int> ZoneCodeOfUser { get; } = [];
         public List<string> Requests { get; } = [];
         public HashSet<string> FaultingTables { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The caller's read of these tables throws (a transport exception) or answers 401 (token failed mid-request).</summary>
+        public HashSet<string> ThrowingTables { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> UnauthorizedTables { get; } = new(StringComparer.Ordinal);
         public Dictionary<Guid, string[]> TableDenied { get; } = [];
         public Dictionary<Guid, Guid[]> SignalReaders { get; } = [];
         public Dictionary<Guid, Guid> SubjectOf { get; } = [];
@@ -1204,6 +1280,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             var set = path[..path.IndexOf('?')];
             var table = set[..^1];
             if (FaultingTables.Contains(table)) return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
+            if (ThrowingTables.Contains(table)) throw new TimeoutException("witness read timed out");
+            if (UnauthorizedTables.Contains(table)) return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.AccessDenied, "token expired");
             if (TableDenied.TryGetValue(me2, out var d2) && d2.Contains(table))
                 return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
 
