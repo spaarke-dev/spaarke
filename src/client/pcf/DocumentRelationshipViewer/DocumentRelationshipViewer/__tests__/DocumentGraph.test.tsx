@@ -142,13 +142,15 @@ describe('DocumentGraph', () => {
         sampleNodes,
         sampleEdges,
         expect.objectContaining({
-          centerX: 400,
-          centerY: 300,
+          // Layout is always centred on the origin; React Flow's fitView positions the viewport.
+          // width/height must NOT shift the centre (container-centre caused issues on wide viewports).
+          centerX: 0,
+          centerY: 0,
         })
       );
     });
 
-    it('uses default dimensions when not provided', () => {
+    it('centres the layout on the origin when no dimensions are provided', () => {
       render(
         <TestWrapper>
           <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
@@ -159,8 +161,8 @@ describe('DocumentGraph', () => {
         sampleNodes,
         sampleEdges,
         expect.objectContaining({
-          centerX: 400, // 800 / 2
-          centerY: 300, // 600 / 2
+          centerX: 0,
+          centerY: 0,
         })
       );
     });
@@ -227,8 +229,8 @@ describe('DocumentGraph', () => {
         sampleEdges,
         expect.objectContaining({
           ...customOptions,
-          centerX: 500,
-          centerY: 400,
+          centerX: 0, // width/height (1000x800) do not move the centre
+          centerY: 0,
         })
       );
     });
@@ -255,10 +257,20 @@ describe('DocumentGraph', () => {
       expect(screen.getByTestId('controls')).toBeInTheDocument();
     });
 
-    it('renders MiniMap component', () => {
+    it('does not render MiniMap by default', () => {
       render(
         <TestWrapper>
           <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
+        </TestWrapper>
+      );
+
+      expect(screen.queryByTestId('minimap')).not.toBeInTheDocument();
+    });
+
+    it('renders MiniMap component when showMinimap is true', () => {
+      render(
+        <TestWrapper>
+          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} showMinimap />
         </TestWrapper>
       );
 

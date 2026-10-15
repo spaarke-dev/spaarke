@@ -7,6 +7,13 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — Fluent dialogs hidden from role queries in jsdom (FAILURE-MODES G-21)
+
+Nightly quality alert #1906: three client-test packages failed because jsdom left Fluent's `DialogSurface` `aria-hidden`, so Testing Library role queries could not find the dialog's contents. The fixes shipped in PR #1925.
+
+- **`.claude/FAILURE-MODES.md`**: G-21. It is prose only and says why: a lint rule cannot tell that a query runs inside an open dialog. A real-browser check found that this is not an accessibility defect.
+
+---
 ###### 2026-10-15 — Safe worktree removal + cross-worktree link guard (FAILURE-MODES G-20)
 
 Incident 2026-10-13: a bulk worktree cleanup deleted through `node_modules` junctions that agents had pointed at another worktree, emptying 70 tracked files in the uac-r2 worktree.

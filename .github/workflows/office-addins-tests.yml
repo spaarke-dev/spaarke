@@ -632,12 +632,12 @@ jobs:
   #
   # WHY IT LIVES HERE AND NOT IN TIER 1
   # -----------------------------------
-  # Tier 1 is the natural home and is FROZEN under the shadow-comparison window -
-  # confirmed still open 2026-09-28 by `scripts/ci/shadow-window-status.ps1`:
-  # "Do NOT edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml".
-  # This workflow is the only writable surface that runs on a PR.
+  # Tier 1 was the natural home but was frozen under the shadow-comparison window (the
+  # no-edit rule on the tier files, confirmed open 2026-09-28). That window has closed and the
+  # rule was lifted 2026-10-15, so the migration below is now possible; it has NOT been done
+  # here, because Tier 1 carries a p95 <= 3 min budget this job must be measured against first.
   #
-  # WHEN THE WINDOW CLOSES, MIGRATE THIS JOB INTO TIER 1 AND DELETE IT HERE.
+  # MIGRATE THIS JOB INTO TIER 1 (or a Tier 2 shard) AND DELETE IT HERE.
   # Leaving it in both places is duplication, not defence in depth.
   #
   # SELECTION MECHANISM: an explicit namespace-prefix filter (in the step below)

@@ -3,6 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -691,6 +693,293 @@ public class ClientChildFixUpTests
         job.World.OwnerWrites.Should().BeEmpty();
     }
 
+    // ── #1943: a record made secure by a direct write (Web API, script) changes no child, so the recent-changes pass also
+    //    reconciles every secure record whose OWN modifiedon is in its window ────────────────────────────────────────────
+
+    /// <summary>
+    /// #1943: one scheduled tick over a world whose work assignment is still ordinary, so this instance's catch-up finishes
+    /// (it walks no secure record) and its watermark is set. From then on only the recent-changes pass can reach a record
+    /// on a scheduled tick while the sweep is report-only.
+    /// </summary>
+    private static async Task<(JobHarness Job, Guid Root, Guid Todo)> AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync()
+    {
+        var job = new JobHarness();
+        var (root, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.OrdinaryRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root));
+
+        var settled = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+        settled.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+        job.World.OwnerWrites.Should().BeEmpty("an ordinary record's child keeps today's ownership");
+        return (job, root, todo);
+    }
+
+    /// <summary>What a direct Web API or script write that makes a record secure leaves: its flag set and its owner moved.</summary>
+    private static void MadeSecureByADirectWrite(JobHarness job, Guid root)
+    {
+        job.World.Set("sprk_workassignment", root, "sprk_issecure", true);
+        job.World.MoveOwner("sprk_workassignment", root, DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// #1943 (seen live on dev: Signal and Decision Record children not re-owned after 420 s): a record made secure by a
+    /// direct write changes no child row, so it is not found through a changed child. Its OWN <c>modifiedon</c> is after
+    /// the watermark, so the next SCHEDULED tick — the sweep report-only, the catch-up long finished — re-owns its
+    /// non-isolated child to the Secure Record owner team, and counts the record under <c>recentChanges.rootsChanged</c>.
+    /// An ordinary record changed in the same window is never written.
+    /// </summary>
+    [Fact]
+    public async Task ARecordMadeSecureByADirectWrite_HasItsChildReowned_ByTheNextScheduledTick_WithNoChildChanged()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        var (ordinaryProject, ordinaryTodo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.OrdinaryRoot("sprk_project", ordinaryProject)
+            .Modified("sprk_project", ordinaryProject, DateTime.UtcNow)
+            .UserOwnedChild("sprk_todo", ordinaryTodo, ("sprk_regardingproject", "sprk_project", ordinaryProject));
+
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, DateTime.UtcNow);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the record changed since the watermark, so the recent-changes pass reconciles it");
+        report.GetProperty("sweepRan").GetBoolean().Should().BeFalse("the sweep is report-only: this tick is the L4 net alone");
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("rowsChanged").GetInt32().Should().Be(0, "no child changed");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        recent.GetProperty("corrected").GetInt32().Should().Be(1);
+        report.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == todo)
+            .GetProperty("pass").GetString().Should().Be("recent");
+        job.World.OwnerWrites.Should().NotContain(w => w.Id == ordinaryTodo, "an ordinary record's child is never written");
+        job.LastResult!.Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// #1943, the negative: a secure record whose own <c>modifiedon</c> is BEFORE the watermark, with no child changed, is
+    /// not reconciled by a scheduled tick with the sweep report-only. Nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ASecureRecordNotChangedSinceTheWatermark_IsNotReconciled_ByAScheduledTick()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, MinutesAgo(10));
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerWrites.Should().BeEmpty();
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        report.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32().Should().Be(0);
+        job.LastResult!.ProcessedItems.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #1943: a record found BOTH by its own <c>modifiedon</c> and through a changed child is reconciled once — one item of
+    /// work, its child re-owned by one owner write.
+    /// </summary>
+    [Fact]
+    public async Task ARecordFoundByItsOwnChangeAndThroughAChangedChild_IsReconciledOnce()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, DateTime.UtcNow).Modified("sprk_todo", todo, DateTime.UtcNow);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.LastResult!.ProcessedItems.Should().Be(1);
+        job.World.OwnerWrites.Where(w => w.Id == todo).Should().ContainSingle();
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("roots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal($"sprk_workassignment:{root:D}");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        report.GetProperty("examined").GetInt32().Should().Be(1, "the record's one child was examined once");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// #1943, fail closed: a secure record whose <c>modifiedon</c> comes back empty counts as changed. It is reconciled,
+    /// never silently left out of the recent-changes pass.
+    /// </summary>
+    [Fact]
+    public async Task ASecureRecordWithNoModifiedOn_CountsAsChanged_AndIsReconciled()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Set("sprk_workassignment", root, "modifiedon", null);
+
+        var report = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        report.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>
+    /// #1943, the emergency stop: with <c>RecentChangesWritesEnabled = false</c> a record made secure by a direct write is
+    /// still found by its own <c>modifiedon</c> and counted, but the pass only reports: no owner is written and its child
+    /// keeps its owner.
+    /// </summary>
+    [Fact]
+    public async Task ARecordMadeSecureByADirectWrite_UnderTheEmergencyStop_IsCountedButNothingIsWritten()
+    {
+        var (job, root, todo) = await AnInstancePastItsCatchUp_WithAnOrdinaryRecordAsync();
+        MadeSecureByADirectWrite(job, root);
+        job.World.Modified("sprk_workassignment", root, DateTime.UtcNow);
+
+        var report = await job.RunAsync(writesEnabled: null, recentWritesEnabled: "false", trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerWrites.Should().BeEmpty("the recent-changes pass is stopped");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("mode").GetString().Should().Be("report-only");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        recent.GetProperty("corrected").GetInt32().Should().Be(0);
+        report.GetProperty("wouldChange").GetInt32().Should().Be(1, "the record was reconciled report-only");
+    }
+
+    // ── #1943 review F1: the watermark is taken before the listing; the changed records are capped per run ──────────────
+
+    private static FakeTimeProvider AClock() => new(new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero));
+
+    /// <summary>
+    /// #1943 review F1: one scheduled tick on a fake clock over <paramref name="count"/> ordinary work assignments, each with
+    /// a user-owned to-do, so this instance's catch-up finishes and its watermark is set; the runs take
+    /// <paramref name="cap"/> records each.
+    /// </summary>
+    private static async Task<(JobHarness Job, FakeTimeProvider Clock, (Guid Root, Guid Todo)[] Records)>
+        AnInstancePastItsCatchUp_WithOrdinaryRecordsAsync(int count, string cap)
+    {
+        var clock = AClock();
+        var job = new JobHarness(clock);
+        var records = Enumerable.Range(0, count).Select(_ => (Root: Guid.NewGuid(), Todo: Guid.NewGuid())).ToArray();
+        foreach (var (root, todo) in records)
+        {
+            job.World.OrdinaryRoot("sprk_workassignment", root)
+                .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root));
+        }
+
+        var settled = await job.RunAsync(writesEnabled: null, maxRootsPerRun: cap, trigger: JobRunTrigger.Scheduled);
+        settled.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+        return (job, clock, records);
+    }
+
+    /// <summary>
+    /// #1943 review F1, the watermark: a record made secure WHILE the job lists the secure records — after the run took its
+    /// start time, before a slow listing (paging, throttling: longer than the overlap) finished — is not in that run's
+    /// listing. The watermark derives from the start time taken BEFORE the listing, so the next scheduled run still finds
+    /// the record by its own <c>modifiedon</c> and re-owns its child. Taken after the listing, the watermark passed the
+    /// record's change, and no later run reached it.
+    /// </summary>
+    [Fact]
+    public async Task ARecordMadeSecureWhileASlowListingRuns_IsReconciledByTheNextScheduledTick()
+    {
+        var (job, clock, records) = await AnInstancePastItsCatchUp_WithOrdinaryRecordsAsync(1, cap: "50");
+        var (root, todo) = records[0];
+        clock.Advance(TimeSpan.FromMinutes(2));
+
+        var armed = true;
+        job.AfterQuery = query =>
+        {
+            // The listing of the secure work assignments has just been answered (the record was not secure yet).
+            if (!armed || query.EntityName != "sprk_workassignment"
+                || !query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_issecure"))
+                return;
+            armed = false;
+            clock.Advance(TimeSpan.FromSeconds(30));
+            MadeSecureByADirectWrite(job, root);
+            job.World.Modified("sprk_workassignment", root, clock.GetUtcNow().UtcDateTime);
+            clock.Advance(TimeSpan.FromSeconds(90)); // the listing finishes two minutes after the run started
+        };
+
+        var during = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+        armed.Should().BeFalse("the record was made secure while the job listed the secure records");
+        during.GetProperty("rootsTotal").GetInt32().Should().Be(0, "the listing was answered before the record was secure");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        var next = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the record's own change is inside the window the previous run's watermark leaves open");
+        next.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32().Should().Be(1);
+        next.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeFalse(
+            "the window found it, not a catch-up");
+    }
+
+    /// <summary>
+    /// #1943 review F1, the cap: more changed secure records than <c>MaxRootsPerRun</c> (a script securing many records at
+    /// once). The run reconciles exactly the cap, oldest change first, reports the rest as <c>rootsChangedOverflow</c> and
+    /// re-opens the catch-up, which reconciles the record left out in the next scheduled runs — although the watermark has
+    /// moved past its change.
+    /// </summary>
+    [Fact]
+    public async Task MoreChangedRecordsThanTheCap_AreReconciledCapARun_AndTheRestByTheReopenedCatchUp()
+    {
+        var (job, clock, records) = await AnInstancePastItsCatchUp_WithOrdinaryRecordsAsync(3, cap: "2");
+        var changedAt = clock.GetUtcNow().UtcDateTime;
+        for (var i = 0; i < records.Length; i++)
+        {
+            MadeSecureByADirectWrite(job, records[i].Root);
+            job.World.Modified("sprk_workassignment", records[i].Root, changedAt.AddSeconds(i)); // records[2] changed last
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        var report = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled);
+
+        job.LastResult!.ProcessedItems.Should().Be(2, "one run takes at most the cap");
+        job.World.OwnerOf("sprk_todo", records[0].Todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        job.World.OwnerOf("sprk_todo", records[1].Todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        job.World.OwnerOf("sprk_todo", records[2].Todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "the most recently changed record is past the cap");
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(3);
+        recent.GetProperty("rootsChangedOverflow").GetInt32().Should().Be(1);
+        recent.GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeFalse("the overflow re-opens the catch-up");
+
+        // The next scheduled runs: the watermark has passed every change, so only the re-opened catch-up reaches it.
+        var later = new List<JsonElement>();
+        for (var run = 0; run < 2; run++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(2));
+            later.Add(await job.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled));
+        }
+
+        later.Should().OnlyContain(r => r.GetProperty("recentChanges").GetProperty("rootsChanged").GetInt32() == 0);
+        later.Should().OnlyContain(r => r.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean());
+        job.World.OwnerOf("sprk_todo", records[2].Todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the re-opened catch-up walked every secure record");
+        later.SelectMany(r => r.GetProperty("changes").EnumerateArray())
+            .Single(c => c.GetProperty("id").GetGuid() == records[2].Todo)
+            .GetProperty("pass").GetString().Should().Be("catch-up");
+        later[^1].GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+    }
+
+    /// <summary>
+    /// #1943 review F1, the cap's negative: as many changed secure records as the cap are all reconciled in the run, with
+    /// no overflow, and the catch-up stays complete.
+    /// </summary>
+    [Fact]
+    public async Task ChangedRecordsAtTheCap_AreAllReconciled_AndTheCatchUpIsNotReopened()
+    {
+        var (job, clock, records) = await AnInstancePastItsCatchUp_WithOrdinaryRecordsAsync(2, cap: "2");
+        foreach (var (root, _) in records)
+        {
+            MadeSecureByADirectWrite(job, root);
+            job.World.Modified("sprk_workassignment", root, clock.GetUtcNow().UtcDateTime);
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        var report = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled);
+
+        job.LastResult!.ProcessedItems.Should().Be(2);
+        records.Should().OnlyContain(r => job.World.OwnerOf("sprk_todo", r.Todo) == DataversePrincipalRef.Team(SecureTeam));
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("rootsChanged").GetInt32().Should().Be(2);
+        recent.GetProperty("rootsChangedOverflow").GetInt32().Should().Be(0);
+        recent.GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+        recent.GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeFalse();
+    }
+
     /// <summary>
     /// The job over a world, built as the scheduler builds it: ONE job instance (it keeps its cursor and its watermark),
     /// with the real reconciler and the real synchronizer resolved per run from a scope. Work-assignment roots cascade
@@ -707,9 +996,18 @@ public class ClientChildFixUpTests
         /// <summary>Task 147 r1c: a NEW job instance (a restart, a deploy, a scale-out) over the SAME Dataverse.</summary>
         public JobHarness(SecureChildShareWorld world, FakeRecordShareTable shares) => (World, Shares) = (world, shares);
 
+        /// <summary>#1943: the job on a clock the test moves (the scheduler's TimeProvider).</summary>
+        public JobHarness(TimeProvider clock)
+            : this(SecureChildShareWorld.Standard(), new FakeRecordShareTable()) => _clock = clock;
+
         public SecureChildShareWorld World { get; }
         public FakeRecordShareTable Shares { get; }
         public JobRunResult? LastResult { get; private set; }
+
+        /// <summary>#1943: called after the world answers each query — what happens in Dataverse while the job reads.</summary>
+        public Action<QueryExpression>? AfterQuery { get; set; }
+
+        private readonly TimeProvider _clock = TimeProvider.System;
         private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         private SecureChildReconciliationJob? _job;
         private ServiceProvider? _provider;
@@ -721,14 +1019,23 @@ public class ClientChildFixUpTests
             if (_job is null)
             {
                 var services = new ServiceCollection();
-                services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => World).Object);
+                var entities = SecureChildShareWorld.EntitiesOver(() => World);
+                entities
+                    .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+                    .Returns((QueryExpression query, CancellationToken _) =>
+                    {
+                        var answer = World.Answer(query);
+                        AfterQuery?.Invoke(query);
+                        return Task.FromResult(answer);
+                    });
+                services.AddSingleton(entities.Object);
                 var webApi = webApiNeeded ? NoCascadeRowsWebApi.Create() : null;
                 services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => World, Shares, webApi!));
                 services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(() => World, Shares));
                 services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World)); // task 173: as the host registers it
                 _provider = services.BuildServiceProvider();
                 _job = new SecureChildReconciliationJob(
-                    _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,
+                    _provider.GetRequiredService<IServiceScopeFactory>(), _clock, _configuration,
                     NullLogger<SecureChildReconciliationJob>.Instance);
             }
 
