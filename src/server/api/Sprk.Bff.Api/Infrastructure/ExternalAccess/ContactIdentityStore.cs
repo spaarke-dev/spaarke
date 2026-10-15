@@ -405,13 +405,16 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <summary>
     /// ADR-028 A9 (r3 task 046): the stored-link read. Filters on the FIELD-SECURED pair only (design §5: a mirror edit must
     /// never redirect a sign-in), any state (a disabled link must be seen so it can deny), two rows (an ambiguous link must
-    /// be visible). Selects <c>isdisabled</c> and the secured pair, which the decision re-checks.
+    /// be visible). Selects <c>isdisabled</c> and the secured pair, which the decision re-checks. Ordered
+    /// <c>isdisabled asc</c> (as <c>WorkforcePrincipalResolver.ResolveSystemUserAsync</c>): the two rows are an ENABLED-first
+    /// sample, so [disabled, enabled, enabled] returns two enabled rows and denies <c>home_link_ambiguous</c> rather than
+    /// resolving the second enabled one.
     /// </summary>
     public static string BuildHomeLinkLookupPath(Guid homeTenantId, Guid homeObjectId)
         => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
            + ContactBindingDecision.HomeObjectIdColumn
            + $"&$filter={ContactBindingDecision.HomeTenantIdColumn} eq '{homeTenantId:D}'"
-           + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2";
+           + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2&$orderby=isdisabled asc";
 
     /// <summary>The home contact read's columns: every binding column, plus the home directory.</summary>
     public static readonly string HomeContactSelect = $"{ContactSelect},{ContactBindingDecision.ExternalTenantIdColumn}";
@@ -809,14 +812,28 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public async Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
     {
-        var lookup = await ReadContactsAsync(BuildHomeContactLookupPath(homeTenantId, homeObjectId), "home contact lookup", ct)
-            .ConfigureAwait(false);
-        if (lookup.Status == LookupStatus.ColumnMissing)
+        // Not ReadContactsAsync: its missing-column branch logs the binding-schema script, and a missing A9 column must be
+        // ONE error naming Set-WorkforceHomeIdentitySchema.ps1 (as the home link read above).
+        var (status, _, body, _) = await GetAsync(BuildHomeContactLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
         {
-            LogHomeSchemaMissing("home contact lookup");
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("home contact lookup");
+                return ContactLookup.ColumnMissing;
+            }
+
+            return ContactLookup.Failed;
         }
 
-        return lookup;
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return ContactLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
+        return new ContactLookup(LookupStatus.Read, rows);
     }
 
     private void LogHomeSchemaMissing(string what)

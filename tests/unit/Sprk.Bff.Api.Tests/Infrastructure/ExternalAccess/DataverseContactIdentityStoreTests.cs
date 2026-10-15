@@ -167,6 +167,8 @@ public class DataverseContactIdentityStoreTests
         path.Should().NotContain("azureactivedirectoryobjectid", "a home oid is never compared with the Spaarke-tenant oid (finding (d))");
         path.Should().NotContain("isdisabled eq", "a disabled link must be seen so it can deny");
         path.Should().Contain("$top=2").And.Contain("isdisabled");
+        path.Should().EndWith("&$orderby=isdisabled asc",
+            "the two-row sample must be enabled-first, or [disabled, enabled, enabled] could return one of each and resolve");
     }
 
     [Fact]

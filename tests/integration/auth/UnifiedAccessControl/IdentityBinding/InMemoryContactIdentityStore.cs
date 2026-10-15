@@ -378,6 +378,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
             var rows = SystemUsers.Values
                 .Where(u => OidEquals(u.HomeObjectId, homeObjectId) || OidEquals(u.HomeObjectIdKey, homeObjectId))
+                .OrderBy(u => u.IsDisabled) // mirrors the production `$orderby=isdisabled asc` (enabled rows first)
                 .Take(2)
                 .Select(u => new HomeLinkRow(u.Id, u.IsDisabled, u.HomeTenantId, u.HomeObjectId))
                 .ToArray();

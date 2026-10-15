@@ -676,6 +676,22 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
+    public async Task Home_ADisabledAndTwoEnabledSystemUsersWithTheSameStoredLink_AreDeniedAmbiguous_NotResolvedToAnEnabledOne()
+    {
+        // Seeded disabled-first: without the enabled-first ordering the two-row sample is {disabled, enabled}, which resolves.
+        AddLinkedSystemUser(Guid.Parse("33333333-3333-3333-3333-333333333333"), HomeTenant, HomeOid, disabled: true);
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        AddLinkedSystemUser(Guid.Parse("44444444-4444-4444-4444-444444444444"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyHomeLinkAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
     public async Task Home_TheMatchingContactIsInactive_IsDeniedContactInactive_NotRegistrationRequired()
     {
         AddHomeContact(TestContactId, HomeTenant, HomeOid, stateCode: 1);
