@@ -236,6 +236,11 @@ export interface DecisionEvidenceRef {
   source?: string;
   asOf?: string;
   clause?: string;
+  /**
+   * True when the Signal read route withheld this line's text and source because its witness is on a record the reader may
+   * not see (task 038, read-time witness rule). The line then reads "Details withheld (restricted record)", not "No value recorded".
+   */
+  withheld?: boolean;
 }
 
 /** One offered action as the Decision Record's `sprk_steps` holds it: taken or skipped, with the values actually sent. */
@@ -275,6 +280,11 @@ export interface DecisionResolution {
    * only for an item recorded in this session; the status bar then says "Inquiry sent, still open".
    */
   leftOpen?: boolean;
+  /**
+   * What the status bar says after the state when `leftOpen` is set. Defaults to "Inquiry sent, still open"; the worklist's
+   * Suppressed disclosure (task 059) sets "Not raised again until <date>".
+   */
+  note?: string | null;
   /** The evidence as it stood when the record was written. Shown INSTEAD of `evidence` for a decided item. */
   factSnapshot?: DecisionEvidenceRef[];
 }
