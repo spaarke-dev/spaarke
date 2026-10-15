@@ -89,6 +89,14 @@
       "sortOrder": 11,
       "isDefault": false,
       "description": "ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29). Analysis platform home/launcher — create-by-type cards (Agreement Review live) + a DataGrid of sprk_analysis records with view-by-type. Pattern D dual-use with the `analysis-hub` direct widget in @spaarke/ai-widgets/register-workspace-widgets.ts; the AnalysisHubWidget reads its PaneEventBus + AI session context optionally so the section is safe in any host."
+    },
+    {
+      "name": "Matters",
+      "sectionId": "matters",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 12,
+      "isDefault": false,
+      "description": "Owner request 2026-10-15. LegalWorkspace matters section (Active Matters (Workspace) — sprk_matter). Row-click opens Layout 1 (85%×85%). Skipped in the 2026-07-01 parity seed because a user-authored 'Matters' layout was then visible to all users; #832 (2026-08-27) scoped user layouts to their owner and that record is gone, so Matters had no workspace. sortOrder 12 appends without re-ordering existing records."
     }
   ]
 }
