@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — Safe worktree removal + cross-worktree link guard (FAILURE-MODES G-20)
+
+Incident 2026-10-13: a bulk worktree cleanup deleted through `node_modules` junctions that agents had pointed at another worktree, emptying 70 tracked files in the uac-r2 worktree.
+
+- **`scripts/worktree/Remove-WorktreeSafe.ps1`** (new): unlinks junctions/symlinks as links, then `git worktree remove`; never a recursive-delete fallback. Pester: `tests/scripts/Remove-WorktreeSafe.Tests.ps1`.
+- **`.claude/settings.json`**: new `PreToolUse` hook on `Bash|PowerShell`, `scripts/quality/guard-worktree-links.py`. It denies a link into another worktree and a recursive delete or `git worktree remove` of a worktree root. Controls: `scripts/quality/tests/test_guard_worktree_links.py`.
+- **CI**: `ci-standalone-checks.yml` job `agent-guard-tests` (windows-latest) now runs all `scripts/quality/tests` hook controls (previously run by hand only) and the Pester file.
+- **`worktree-setup` skill + command, `docs/procedures/parallel-claude-sessions.md`**: removal examples use the script; new failure-mode row.
+- **`.claude/FAILURE-MODES.md`**: G-20.
+- **Root `CLAUDE.md`** §16 hooks bullet: one sentence (+403 bytes, no new lines).
+
+---
 ###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
 
 Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.
