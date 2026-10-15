@@ -6,16 +6,34 @@
  *   - Square aspect ratio via CSS `aspect-ratio: 1`
  *   - Loading state renders a Fluent Spinner
  *   - Badge variants: "new" (success/green), "overdue" (danger/red)
+ *   - Count-filter mode (D-24, spaarke-ontology-platform-r1 task 052), all opt-in so existing consumers render unchanged:
+ *     `selected` (toggle, `aria-pressed`), `note` (one line), `progress` ("n of m done today" + bar),
+ *     `disableWhenEmpty` (disabled at count 0) and `layout="wide"` (not square)
  *   - Fluent v9 semantic tokens only — no hard-coded colors
  *   - Dark mode: inherits token values automatically
  *
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
+ *
+ * ⚠️ **This is the clickable count-filter card** — the one FR-27 requires the worklist row
+ * to extend, used with `MetricCardRow`. It is unrelated to `VisualMetricCard` in
+ * `Spaarke.Visuals/src/components/MetricCard.tsx` (serves the `VisualHost` PCF's charts/report
+ * cards). The two were both named `MetricCard` until the Visuals one was renamed 2026-10-03
+ * (item C-3) to remove the collision — this file's name/export did not change.
  */
 
 import * as React from 'react';
-import { Text, Badge, Spinner, makeStyles, shorthands, tokens, mergeClasses } from '@fluentui/react-components';
+import {
+  Text,
+  Badge,
+  Spinner,
+  ProgressBar,
+  makeStyles,
+  shorthands,
+  tokens,
+  mergeClasses,
+} from '@fluentui/react-components';
 import type { FluentIcon } from '@fluentui/react-icons';
-import type { MetricBadgeVariant, MetricTrend } from './types';
+import type { MetricBadgeVariant, MetricCardLayout, MetricProgress, MetricTrend } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -24,8 +42,8 @@ import type { MetricBadgeVariant, MetricTrend } from './types';
 export interface MetricCardProps {
   /** Display label shown below the count. */
   label: string;
-  /** Fluent v9 icon component for the card. */
-  icon: FluentIcon;
+  /** Fluent v9 icon component for the card. Optional: a count-filter card may have none. */
+  icon?: FluentIcon;
   /** Accessible label for the card button. */
   ariaLabel: string;
   /** The numeric value to display. undefined renders an em-dash. */
@@ -42,6 +60,22 @@ export interface MetricCardProps {
   onClick?: () => void;
   /** Additional className applied to the root element. */
   className?: string;
+  /**
+   * Count-filter state (D-24). When defined the card is a toggle button and exposes `aria-pressed={selected}`. When
+   * undefined (the default) the card is a plain button with no `aria-pressed`, exactly as before.
+   */
+  selected?: boolean;
+  /** One line under the label, for example "oldest 4 days" or "3 past due". Truncated with an ellipsis, never wrapped. */
+  note?: string;
+  /** "n of m done today" line plus a thin progress bar. Hidden when `total` is not a positive number. */
+  progress?: MetricProgress;
+  /**
+   * When true the card is disabled while its count is 0: `aria-disabled`, out of the tab order, no click. Default
+   * false, so an existing card showing 0 stays clickable.
+   */
+  disableWhenEmpty?: boolean;
+  /** `square` (default) or `wide` (not square, left aligned). */
+  layout?: MetricCardLayout;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +158,65 @@ const useStyles = makeStyles({
     top: '8px',
     right: '8px',
   },
+  /** Not square: drop the aspect ratio, left-align the content (count-filter cards). */
+  cardWide: {
+    aspectRatio: 'auto',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    rowGap: tokens.spacingVerticalXXS,
+  },
+  labelWide: {
+    textAlign: 'start',
+  },
+  /** Selected count filter: brand border and tint (semantic tokens; dark mode follows the theme). */
+  cardSelected: {
+    backgroundColor: tokens.colorBrandBackground2,
+    ...shorthands.borderColor(tokens.colorBrandStroke1),
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackground2Hover,
+      ...shorthands.borderColor(tokens.colorBrandStroke1),
+    },
+    ':active': {
+      backgroundColor: tokens.colorBrandBackground2Pressed,
+      ...shorthands.borderColor(tokens.colorBrandStroke1),
+    },
+  },
+  cardDisabled: {
+    cursor: 'not-allowed',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1,
+      ...shorthands.borderColor(tokens.colorNeutralStroke2),
+      boxShadow: 'none',
+    },
+    ':active': {
+      backgroundColor: tokens.colorNeutralBackground1,
+      ...shorthands.borderColor(tokens.colorNeutralStroke2),
+      boxShadow: 'none',
+    },
+  },
+  textDisabled: {
+    color: tokens.colorNeutralForegroundDisabled,
+  },
+  note: {
+    color: tokens.colorNeutralForeground3,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: tokens.lineHeightBase100,
+  },
+  progress: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    width: '100%',
+    rowGap: tokens.spacingVerticalXXS,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  progressText: {
+    color: tokens.colorNeutralForeground2,
+    lineHeight: tokens.lineHeightBase100,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -161,29 +254,51 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   badgeCount,
   onClick,
   className,
+  selected,
+  note,
+  progress,
+  disableWhenEmpty = false,
+  layout = 'square',
 }) => {
   const styles = useStyles();
 
+  // Disabled only on request (`disableWhenEmpty`), and only for a loaded count of exactly 0.
+  const isDisabled = disableWhenEmpty && !isLoading && value === 0;
+  const isWide = layout === 'wide';
+
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (isDisabled) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onClick?.();
       }
     },
-    [onClick]
+    [onClick, isDisabled]
   );
+
+  const progressTotal = progress ? progress.total : 0;
+  const showProgress = progressTotal > 0;
+  const progressDone = progress ? Math.min(Math.max(progress.done, 0), progressTotal) : 0;
 
   const showBadge = !isLoading && badgeVariant !== undefined && badgeCount !== undefined && badgeCount > 0;
 
   return (
     <div
       role="button"
-      tabIndex={0}
+      tabIndex={isDisabled ? -1 : 0}
       aria-label={ariaLabel}
-      onClick={onClick}
+      aria-pressed={selected}
+      aria-disabled={isDisabled ? true : undefined}
+      onClick={isDisabled ? undefined : onClick}
       onKeyDown={handleKeyDown}
-      className={mergeClasses(styles.card, className)}
+      className={mergeClasses(
+        styles.card,
+        isWide && styles.cardWide,
+        selected && styles.cardSelected,
+        isDisabled && styles.cardDisabled,
+        className
+      )}
     >
       {/* Notification badge */}
       {showBadge && (
@@ -195,9 +310,11 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       )}
 
       {/* Icon */}
-      <div className={styles.iconWrapper} aria-hidden="true">
-        <Icon fontSize={16} />
-      </div>
+      {Icon && (
+        <div className={styles.iconWrapper} aria-hidden="true">
+          <Icon fontSize={16} />
+        </div>
+      )}
 
       {/* Value / spinner */}
       {isLoading ? (
@@ -205,15 +322,35 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           <Spinner size="small" />
         </div>
       ) : (
-        <Text size={600} weight="semibold" className={styles.value}>
+        <Text size={600} weight="semibold" className={mergeClasses(styles.value, isDisabled && styles.textDisabled)}>
           {value !== undefined ? value : '\u2014'}
         </Text>
       )}
 
       {/* Label */}
-      <Text size={200} className={styles.label}>
+      <Text
+        size={200}
+        className={mergeClasses(styles.label, isWide && styles.labelWide, isDisabled && styles.textDisabled)}
+      >
         {label}
       </Text>
+
+      {/* Count-filter note: one line, e.g. "oldest 4 days" */}
+      {note && (
+        <Text size={100} className={mergeClasses(styles.note, isDisabled && styles.textDisabled)} title={note}>
+          {note}
+        </Text>
+      )}
+
+      {/* Count-filter progress: "n of m done today". The bar is decorative (the text carries the meaning). */}
+      {showProgress && (
+        <div className={styles.progress}>
+          <Text size={100} className={styles.progressText}>
+            {progressDone} of {progressTotal} done today
+          </Text>
+          <ProgressBar value={progressDone} max={progressTotal} thickness="medium" aria-hidden="true" />
+        </div>
+      )}
     </div>
   );
 };

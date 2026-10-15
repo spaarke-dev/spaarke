@@ -1,0 +1,61 @@
+{
+  "playbook": {
+    "id": "be7874be-5f2d-f111-88b5-7ced8d1dc988",
+    "name": "New Work Assignments",
+    "description": "Notifies the user of active sprk_workassignment records created or modified in the last 24 hours on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
+    "configjson": "{\"schedule\":{\"cronExpression\":\"0 */2 * * 1-5\",\"timezone\":\"America/Chicago\",\"description\":\"Every 2 hours on weekdays\"},\"parameters\":{\"timeWindow\":{\"type\":\"string\",\"default\":\"24h\",\"options\":[\"12h\",\"24h\",\"48h\",\"7d\"],\"description\":\"How far back to look for new assignments\"}},\"category\":\"work-assignments\",\"channel\":\"work-assignments\",\"channelLabel\":\"New Work Assignments\"}",
+    "lastrundate": "2026-10-08T11:00:27Z"
+  },
+  "nodes": [
+    {
+      "id": "2f371fa5-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Start",
+      "executortype": 33,
+      "executionorder": 1,
+      "outputvariable": "start",
+      "isactive": true,
+      "dependsonjson": null,
+      "configjson": "{\"__actionType\":33,\"scope\":\"user-matters\",\"resolveUserId\":true,\"description\":\"Scoped to current user's matters via LookupUserMembership\"}"
+    },
+    {
+      "id": "e7b7e6a0-a171-f111-ab0d-7ced8ddc4cc6",
+      "name": "Lookup My Matters",
+      "executortype": 52,
+      "executionorder": 2,
+      "outputvariable": "myMatters",
+      "isactive": true,
+      "dependsonjson": "[\"2f371fa5-a171-f111-ab0d-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":52,\"entityType\":\"sprk_matter\",\"targeting\":\"people\",\"includeRelated\":false,\"description\":\"Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids).\"}"
+    },
+    {
+      "id": "30371fa5-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Query New Work Assignments",
+      "executortype": 51,
+      "executionorder": 3,
+      "outputvariable": "workAssignmentsQuery",
+      "isactive": true,
+      "dependsonjson": "[\"e7b7e6a0-a171-f111-ab0d-7ced8ddc4cc6\"]",
+      "configjson": "{\"__actionType\":51,\"queryMode\":true,\"entityLogicalName\":\"sprk_workassignment\",\"fetchXml\":\"<fetch top=\\\"50\\\"><entity name=\\\"sprk_workassignment\\\"><attribute name=\\\"sprk_name\\\"/><attribute name=\\\"sprk_workassignmentid\\\"/><attribute name=\\\"sprk_workassignmentnumber\\\"/><attribute name=\\\"sprk_priority\\\"/><attribute name=\\\"sprk_responseduedate\\\"/><attribute name=\\\"sprk_assignedto\\\"/><attribute name=\\\"sprk_assignedtointernal\\\"/><attribute name=\\\"sprk_assignedattorney1\\\"/><attribute name=\\\"sprk_assignedparalegal1\\\"/><attribute name=\\\"createdon\\\"/><attribute name=\\\"modifiedon\\\"/><attribute name=\\\"sprk_regardingrecordname\\\"/><attribute name=\\\"sprk_regardingrecordurl\\\"/><attribute name=\\\"sprk_regardingmatter\\\"/><attribute name=\\\"ownerid\\\"/><link-entity name=\\\"sprk_matter\\\" from=\\\"sprk_matterid\\\" to=\\\"sprk_regardingmatter\\\" link-type=\\\"outer\\\" alias=\\\"m\\\"><attribute name=\\\"sprk_mattername\\\"/><attribute name=\\\"sprk_matternumber\\\"/><attribute name=\\\"ownerid\\\"/></link-entity><filter type=\\\"and\\\"><condition attribute=\\\"statecode\\\" operator=\\\"eq\\\" value=\\\"0\\\"/><filter type=\\\"or\\\"><condition attribute=\\\"createdon\\\" operator=\\\"last-x-hours\\\" value=\\\"{{timeWindowHours}}\\\"/><condition attribute=\\\"modifiedon\\\" operator=\\\"last-x-hours\\\" value=\\\"{{timeWindowHours}}\\\"/></filter><filter type=\\\"or\\\"><condition attribute=\\\"sprk_regardingmatter\\\" operator=\\\"in\\\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\\\"m\\\" attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/><condition attribute=\\\"ownerid\\\" operator=\\\"eq-userid\\\"/></filter></filter><order attribute=\\\"createdon\\\" descending=\\\"true\\\"/></entity></fetch>\",\"templateParameters\":{\"timeWindow\":\"{{userPreferences.timeWindow ?? '24h'}}\"},\"description\":\"Active sprk_workassignment rows (statecode 0) created or modified in the last 24 hours (timeWindowHours; the scheduler passes 24), where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the assignment's own owner is the user. Newest createdon first, at most 50.\"}"
+    },
+    {
+      "id": "e8b7e6a0-a171-f111-ab0d-7ced8ddc4cc6",
+      "name": "Has Assignments?",
+      "executortype": 30,
+      "executionorder": 4,
+      "outputvariable": "hasAssignments",
+      "isactive": true,
+      "dependsonjson": "[\"30371fa5-a171-f111-ab0d-7ced8ddc4a05\"]",
+      "configjson": "{\"__actionType\":30,\"condition\":{\"operator\":\"gt\",\"left\":\"{{workAssignmentsQuery.output.count}}\",\"right\":0},\"trueBranch\":\"Create Notification\",\"description\":\"Check if any new work assignments were found\"}"
+    },
+    {
+      "id": "31371fa5-a171-f111-ab0d-7ced8ddc4a05",
+      "name": "Create Notification",
+      "executortype": 50,
+      "executionorder": 5,
+      "outputvariable": "workAssignmentNotification",
+      "isactive": true,
+      "dependsonjson": "[\"e8b7e6a0-a171-f111-ab0d-7ced8ddc4cc6\"]",
+      "configjson": "{\"__actionType\":50,\"title\":\"{{workAssignmentsQuery.output.count}} new work assignment(s)\",\"body\":\"{{#each workAssignmentsQuery.output.items}}{{sprk_name}} on {{sprk_regardingrecordname}} (due {{sprk_responseduedate}}).\\n{{/each}}\",\"category\":\"work-assignments\",\"priority\":200000000,\"recipientId\":\"{{run.userId}}\",\"regardingType\":\"sprk_workassignment\",\"iterateItems\":true,\"itemNotification\":{\"title\":\"New assignment: {{item.sprk_name}}\",\"body\":\"{{item.sprk_name}} on {{item.sprk_regardingrecordname}} (due {{item.sprk_responseduedate}})\",\"category\":\"work-assignments\",\"priority\":200000000,\"actionUrl\":\"/main.aspx?pagetype=entityrecord&etn=sprk_workassignment&id={{item.sprk_workassignmentid}}\",\"recipientId\":\"{{run.userId}}\",\"regardingId\":\"{{item.sprk_workassignmentid}}\",\"regardingType\":\"sprk_workassignment\",\"dueDate\":\"{{item.sprk_responseduedate}}\",\"regardingName\":\"{{item.sprk_name}}\",\"sourceEntityType\":\"sprk_workassignment\",\"sourceId\":\"{{item.sprk_workassignmentid}}\",\"sourceModifiedOn\":\"{{item.modifiedon}}\",\"sourceOwningUser\":\"{{item.ownerid}}\",\"viaMatterId\":\"{{item.sprk_regardingmatter}}\",\"viaMatterName\":\"{{lookup item 'm.sprk_mattername'}}\",\"viaMatterMembershipsVariable\":\"myMatters\"},\"deduplication\":{\"enabled\":true,\"key\":\"work-assignments:{{run.userId}}:{{item.sprk_workassignmentid}}\"}}"
+    }
+  ]
+}

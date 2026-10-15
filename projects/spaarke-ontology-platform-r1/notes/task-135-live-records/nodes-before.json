@@ -1,0 +1,95 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#sprk_playbooknodes(sprk_playbooknodeid,sprk_name,sprk_executortype,sprk_outputvariable,sprk_dependsonjson,sprk_configjson,modifiedon)",
+  "value": [
+    {
+      "@odata.etag": "W/\"13143435\"",
+      "sprk_executortype": 80,
+      "modifiedon": "2026-06-29T14:55:23Z",
+      "sprk_playbooknodeid": "a2d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "sprk_configjson": "{\"subject\":\"matter:{{matterId}}\",\"predicate\":\"currentMatterFacts\",\"$comment\":\"Resolves Matter scalar facts (matter type, attorney, client, opposing counsel, current spend, duration, current composite grade) via ILiveFactResolver. {{matterId}} substituted from Parameters at runtime by ApplyConfigJsonTemplates.\"}",
+      "sprk_name": "queryMatterContext",
+      "sprk_outputvariable": "matterContext",
+      "sprk_dependsonjson": null
+    },
+    {
+      "@odata.etag": "W/\"13143437\"",
+      "sprk_executortype": 100,
+      "modifiedon": "2026-06-29T14:55:24Z",
+      "sprk_playbooknodeid": "a3d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "sprk_configjson": "{\"rules\":[{\"name\":\"kpiAssessments\",\"from\":\"assessments\",\"countFrom\":\"count\",\"minCount\":2,\"$comment-minCount\":\"Decline threshold per design.md \u00a74.4 + Task 020 prompt D7. <2 assessments (or all Notes empty/whitespace \u2014 checked secondarily inside the synthesis prompt) yields verdict=insufficient + structured gap (have:N, need:2-N, rule:'kpiAssessments.min').\"}],\"sufficientBranch\":\"synthesize\",\"insufficientBranch\":\"declineInsufficient\",\"$comment-branches\":\"EvidenceSufficiencyNode emits selectedBranch=sufficientBranch | insufficientBranch. Per the Wave C1 Gap #2 patch (PlaybookOrchestrationService branch-aware skip) shipped by universal-ingest, downstream nodes on the non-selected path are skipped.\"}",
+      "sprk_name": "checkSufficiency",
+      "sprk_outputvariable": "sufficiency",
+      "sprk_dependsonjson": "[\"669c5310-4a65-f111-ab0c-7ced8ddc4cc6\",\"c4284512-4a65-f111-ab0c-7ced8ddc4a05\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143439\"",
+      "sprk_executortype": 110,
+      "modifiedon": "2026-06-29T14:55:24Z",
+      "sprk_playbooknodeid": "1e5ff113-4a65-f111-ab0c-70a8a590c51c",
+      "sprk_configjson": "{\"reason\":\"insufficient-evidence\",\"from\":\"checkSufficiency\",\"explanationTemplate\":\"Insufficient data is available to provide Insights Analysis: only {have} KPI assessments are available for this Matter (need {need} per rule 'kpiAssessments.min' from queryKpiAssessments). Add at least {need} assessments per Performance Area to enable diagnostic Insights.\",\"$comment-explanationTemplate\":\"FR-24 + design.md \u00a74.4 owner-confirmed copy. Surfaced to InsightSummaryCard via the DeclineResponse path; UI renders this verbatim in the FR-06 Decline state alongside the suggested action ('add N more assessments').\",\"suggestedActions\":[\"Add KPI assessments for the Guideline Compliance, Budget Compliance, and Outcomes Achievement Performance Areas (per FR-13)\",\"Ensure each assessment's Notes field is populated with substantive evaluator commentary (the synthesis prompt's themes/inflection dimensions require Notes text)\"],\"confidenceInDecline\":0.95,\"$comment\":\"This node fires ONLY when checkSufficiency.verdict == 'insufficient'. Emits a DeclineResponse \u2014 the cache's DrainEngineStreamAsync returns null (no ReturnInsightArtifactNode output), the orchestrator's null-handling returns Declined(...) to the InsightSummaryCard. Matches r2 predict-matter-cost decline path semantics.\"}",
+      "sprk_name": "declineInsufficient",
+      "sprk_outputvariable": "decline",
+      "sprk_dependsonjson": "[\"a3d49d0d-4a65-f111-ab0c-70a8a590c51c\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143505\"",
+      "sprk_executortype": 90,
+      "modifiedon": "2026-06-29T14:55:47Z",
+      "sprk_playbooknodeid": "c4284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "sprk_configjson": "{\"indexName\":\"spaarke-insights-index\",\"artifactType\":\"observation\",\"filter\":\"matterId eq '{{matterId}}'\",\"vectorQuery\":\"{{matterContext.matterType}} performance themes inflection points client copy gaps deadlines scope\",\"topK\":25,\"requireEvidence\":false,\"$comment-requireEvidence\":\"false \u2014 empty observations is acceptable per FR-11 ('optional \u2014 graceful empty if files-index pipeline unhealthy'). EvidenceSufficiencyNode gates on KPI assessment count instead.\"}",
+      "sprk_name": "retrieveObservations",
+      "sprk_outputvariable": "observations",
+      "sprk_dependsonjson": "[\"a2d49d0d-4a65-f111-ab0c-70a8a590c51c\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143506\"",
+      "sprk_executortype": 120,
+      "modifiedon": "2026-06-29T14:55:48Z",
+      "sprk_playbooknodeid": "d7284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "sprk_configjson": "{\"from\":\"groundCitations\",\"artifactKind\":\"inference\",\"subject\":\"matter:{{matterId}}\",\"predicate\":\"matterHealthDiagnostic\",\"displayHint\":\"diagnostic-narrative\",\"producedById\":\"playbook://matter-health-single\",\"producedByKind\":\"playbook\",\"producedByVersion\":\"1.0\",\"$comment-producedByVersion\":\"Bare '1.0' string version per Q-U1 (NOT 'v1'). Authoritative version source is sprk_analysisplaybook.sprk_version (Dataverse-side) \u2014 this field is the in-envelope projection per FR-14 'playbookVersion' envelope field.\",\"valueFrom\":\"body\",\"evidenceFrom\":\"citations\",\"confidenceFrom\":\"confidence\",\"reasoningFrom\":\"reasoning\",\"allowEmptyEvidence\":false,\"$comment-evidenceGuard\":\"allowEmptyEvidence=false enforces D-A23 / D-48 EvidenceGuard: empty citations after GroundingVerifyNode stripping yields node-level EVIDENCE_REQUIRED error. The orchestrator's null-artifact handling surfaces this as a DeclineResponse to the InsightSummaryCard, which renders the FR-06 Decline state.\"}",
+      "sprk_name": "ReturnInsightArtifactNode",
+      "sprk_outputvariable": "inferenceArtifact",
+      "sprk_dependsonjson": "[\"689c5310-4a65-f111-ab0c-7ced8ddc4cc6\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143507\"",
+      "sprk_executortype": 22,
+      "modifiedon": "2026-06-29T14:55:48Z",
+      "sprk_playbooknodeid": "de284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "sprk_configjson": "{\"entityLogicalName\":\"sprk_matter\",\"$comment-entityLogicalName\":\"Per FR-16 \u2014 write to existing sprk_matter entity (no new entity, no new fields). Resolved to entity-set 'sprk_matters' inside UpdateRecordNodeExecutor.GetEntitySetName for the OData PATCH URL.\",\"recordId\":\"{{matterId}}\",\"$comment-recordId\":\"Subject Matter Guid extracted from playbook Parameters at runtime via ApplyConfigJsonTemplates. The {{matterId}} placeholder resolves to the Guid that the orchestrator parsed out of the 'matter:GUID' Subject (per r2 multi-entity subject scheme). UpdateRecordNodeExecutor.ExecuteAsync calls Guid.TryParse on the rendered value.\",\"fieldMappings\":[{\"field\":\"sprk_performancesummary\",\"$comment-field\":\"Per FR-14 + FR-16 \u2014 the EXISTING longtext field on sprk_matter that previously held R5 placeholder static text. This UpdateRecord call REPLACES that placeholder with the AI-generated JSON envelope. NO new field is added per FR-16 / Q-U6.\",\"type\":\"string\",\"$comment-type\":\"type='string' (FieldMappingType.String) \u2192 UpdateRecordNodeExecutor.CoerceFieldValue returns the rendered string verbatim. We deliberately store serialized JSON as a string in the longtext column (rather than relying on JSON-typed coercion); downstream consumers per FR-15 parse the string as JSON via Power Fx / plugin / view transformations.\",\"value\":\"{\\\"schemaVersion\\\":\\\"1.0\\\",\\\"body\\\":{{{groundCitations.output.body}}},\\\"citations\\\":{{{groundCitations.output.citations}}},\\\"generatedAt\\\":\\\"{{run.startedAtIso}}\\\",\\\"playbookName\\\":\\\"matter-health-single\\\",\\\"tenantId\\\":\\\"{{tenantId}}\\\",\\\"dimensions\\\":{{{groundCitations.output.dimensions}}}}\",\"$comment-value\":\"FR-14 envelope construction as a Handlebars-templated JSON string. The 7 envelope fields per Q-U1 + FR-14: (1) schemaVersion = literal string '1.0' (NOT int 1) per Q-U1; (2) body = markdown narrative from GroundingVerifyNode output (post-citation-stripping synthesis text from the AgentService synthesize node \u2014 groundCitations carries forward the synthesis output with verified citations only); (3) citations = type-discriminated array (FR-07 assessment + document refs); (4) generatedAt = ISO 8601 timestamp from run context (TemplateEngine populates run.startedAtIso); (5) playbookName = BARE 'matter-health-single' (NO @v1 suffix per Q-U1 owner ban); (6) tenantId = from playbook Parameters; (7) dimensions = the 7-element array from synthesis output (composite|trend|themes|inflection|critical|risk|evidenceGaps per FR-13 / Task 020 prompt \u00a76).\",\"$comment-triple-stash\":\"Triple-stash Handlebars ({{{var}}}) on body/citations/dimensions ensures the renderer emits raw values (already-quoted JSON for strings, raw JSON for arrays/objects) without HTML-escaping. The synthesize node's StructuredData output flows through PlaybookOrchestrationService.ApplyConfigJsonTemplates into UpdateRecordNodeExecutor.BuildTemplateContext, which exposes prior outputs as `{{nodeName.output.fieldPath}}`. The synthesis prompt (Task 020 \u00a76 output schema) emits body as a JSON string literal and citations/dimensions as arrays \u2014 Handlebars triple-stash preserves their JSON shape inside the envelope.\",\"$comment-playbookVersion-omission\":\"spec FR-14 example envelope mentions a 'playbookVersion' field, but POML acceptance criterion 'All 7 envelope fields present' enumerates exactly: schemaVersion, body, citations, generatedAt, playbookName, tenantId, dimensions. Per project Q-U1 owner ban + design.md \u00a74.5, version is conveyed via schemaVersion='1.0' (envelope contract version, NOT playbook code version). The Dataverse-side sprk_analysisplaybook.sprk_version row column is authoritative for playbook versioning; the envelope schemaVersion describes the envelope shape itself. Omitting playbookVersion keeps the 7-field count exact and avoids reintroducing version-suffix vernacular.\"}],\"$comment-fieldMappings-shape\":\"Single-entry fieldMappings array because FR-16 binds us to ONE field (sprk_performancesummary). The typed-mappings path is preferred over the legacy flat 'fields' dict per UpdateRecordNodeExecutor.cs XML doc (lines 18-31) \u2014 explicit type='string' avoids HeuristicParse mis-coercion (e.g., a JSON value that starts with a number would be int-parsed under the legacy path).\"}",
+      "sprk_name": "persistEnvelope",
+      "sprk_outputvariable": "persistResult",
+      "sprk_dependsonjson": "[\"d7284512-4a65-f111-ab0c-7ced8ddc4a05\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143526\"",
+      "sprk_executortype": 51,
+      "modifiedon": "2026-06-29T14:55:54Z",
+      "sprk_playbooknodeid": "669c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "sprk_configjson": "{\"entityLogicalName\":\"sprk_kpiassessment\",\"fetchXml\":\"<fetch version='1.0' mapping='logical' distinct='false'><entity name='sprk_kpiassessment'><attribute name='sprk_kpiassessmentid' /><attribute name='sprk_performancearea' /><attribute name='sprk_grade' /><attribute name='sprk_notes' /><attribute name='sprk_assessmentdate' /><attribute name='createdon' /><filter type='and'><condition attribute='sprk_matter' operator='eq' value='{{matterId}}' /></filter><order attribute='sprk_assessmentdate' descending='true' /></entity></fetch>\",\"$comment-fetchXml\":\"Reads all KPI assessments for the Matter across all 3 Performance Areas per FR-13 (Guideline Compliance 100000000, Budget Compliance 100000001, Outcomes Achievement 100000002). {{matterId}} substituted at runtime. QueryDataverseNodeExecutor returns NodeOutput.StructuredData={count,items,entityLogicalName}; the synthesis prompt's {{assessments}} placeholder consumes this via PlaybookOrchestrationService.ApplyConfigJsonTemplates.\"}",
+      "sprk_name": "queryKpiAssessments",
+      "sprk_outputvariable": "assessments",
+      "sprk_dependsonjson": "[\"a2d49d0d-4a65-f111-ab0c-70a8a590c51c\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143527\"",
+      "sprk_executortype": 60,
+      "modifiedon": "2026-06-29T14:55:55Z",
+      "sprk_playbooknodeid": "679c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "sprk_configjson": "{\"tenantId\":\"{{tenantId}}\",\"templateParameters\":{\"matterId\":\"{{matterId}}\",\"currentGrade\":\"{{currentGrade}}\",\"matterContext\":\"{{matterContext}}\",\"assessments\":\"{{assessments}}\",\"observations\":\"{{observations}}\"},\"$comment-prompt-source\":\"Synthesis prompt content lives in sprk_analysisaction[matter-health-synthesis].sprk_systemprompt (Task 020 row 5981632e-4165-f111-ab0c-7ced8ddc4cc6). AgentServiceNodeExecutor reads the prompt at runtime via the actionCode FK; the templateParameters above feed the JPS placeholders {{matterId}}, {{currentGrade}}, {{matterContext}}, {{assessments}}, {{observations}} per Task 020 \u00a79 prompt design. PlaybookOrchestrationService.ApplyConfigJsonTemplates resolves prior-node OutputVariables.\",\"$comment-branching\":\"This node executes ONLY when checkSufficiency.verdict == 'sufficient'. Branch routing handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (universal-ingest Wave C1 Gap #2 patch: a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs).\",\"$comment-output-shape\":\"The synthesis prompt's output.fields per Task 020 \u00a76 produces: { body: string (markdown narrative), citations: array (assessment + document refs), dimensions: array (composite-grade|trend|themes|inflection|critical-assessments|forward-risk|evidence-gap), confidence: number, reasoning: string }. ReturnInsightArtifactNode downstream maps these to InferenceArtifact envelope fields.\"}",
+      "sprk_name": "synthesize",
+      "sprk_outputvariable": "synthesis",
+      "sprk_dependsonjson": "[\"a3d49d0d-4a65-f111-ab0c-70a8a590c51c\"]"
+    },
+    {
+      "@odata.etag": "W/\"13143528\"",
+      "sprk_executortype": 70,
+      "modifiedon": "2026-06-29T14:55:55Z",
+      "sprk_playbooknodeid": "689c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "sprk_configjson": "{\"citationsFrom\":\"synthesize\",\"citationsJsonPath\":\"citations\",\"sourceChunksFrom\":\"retrieveObservations\",\"sourceChunksJsonPath\":\"documents\",\"annotationText\":\"[citation could not be verified]\",\"$comment\":\"Verifies the synthesis citations' excerpts against retrieved observation chunks. Assessment-type citations (FR-07: { type: 'assessment', id: <sprk_kpiassessment Guid>, label, excerpt }) verify against the assessments node output's items (not retrieveObservations); GroundingVerifyNode handles type-discriminated citation streams via citationsJsonPath. Phase 1 implementation may need a follow-up to add 'sourceChunks2From' for the assessments stream \u2014 flagged for downstream task 022/023 if needed.\"}",
+      "sprk_name": "groundCitations",
+      "sprk_outputvariable": "groundedSynthesis",
+      "sprk_dependsonjson": "[\"679c5310-4a65-f111-ab0c-7ced8ddc4cc6\"]"
+    }
+  ]
+}

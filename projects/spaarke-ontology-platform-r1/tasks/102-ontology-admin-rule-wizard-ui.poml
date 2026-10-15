@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin slice (b), UI: the rule-authoring wizard</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>056, 101, 057, 058 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New multi-step authoring UI over admin write routes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A WizardShell consumer over a fixed route contract (101) and v4 HANDOFF section 8 L302.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>056, 101, 057, 058</deps>
+    <tags>frontend,fluent-ui,react,wizard,admin</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the rule wizard in the Ontology admin tab: Basics, Condition, Wording, Actions, Scope and noise, Test, Save, on WizardShell in-app, calling task 101's routes.</prompt>
+  <role>SPAARKE front-end developer. The editor can only offer what compiles.</role>
+  <goal>An administrator authors a new rule (saves Off) or a new version, tests it with a dry run and publishes it, with every refusal shown at the field it concerns.</goal>
+
+  <context>
+    <background>D-22 slice (b); reconciliation M-6, M-7; v4 HANDOFF section 8 L302: Basics, Condition (closed set; an invalid body cannot pass), Wording (only fields the condition reads, task 022's TemplateEligibleFields, not v4's readableTokens), Actions (plan, exclusions, Next steps, dismiss reasons), Scope and noise (scope, priority, counts-toward-suppression, quiet window per D-13 / FR-17a), Test (dry run; any edit invalidates it), Save (new rule saves Off; publish shows how many items will be superseded and re-raised). D-26: same in-app WizardShell host as the decision wizard.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-22, #46): the Condition step builds the body only from task 101's catalog route; free-text JSON entry is not offered.</constraint>
+    <constraint source="owner">Scope (D-22): Save and Publish call task 101; field-level errors from ValidateForSave render on the step and field they concern. Publish is disabled until a dry run on the current body succeeded; any edit after the test disables it again.</constraint>
+    <constraint source="owner">Scope (D-26): WizardShell non-embedded, in-app, dismiss explicit, uiScale; no navigateTo, no WizardModal.</constraint>
+    <constraint source="project">Scope: Wording offers only the compiled predicate's TemplateEligibleFields (task 022); the headline is not templated (D-23).</constraint>
+    <constraint source="project">Scope: Actions offers only task 036's catalog codes for the rule's lane, with their excludes shown.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct; keyboard reachable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule authoring UI</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WizardShell consumer" location="src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx">Task 058's host pattern; mirror its in-app mount and dismiss handling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 8 L302, section 1.3 RuleWizard row L97) in notes.</step>
+    <step order="1">Build the seven steps against task 101's route contract.</step>
+    <step order="2">Wire the test-invalidation and publish counts.</step>
+    <step order="3">Tests per step behaviour.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a v4 authoring behaviour needs a condition the catalog route does not offer, STOP and escalate; do not add a client-side word list (#46).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WizardShell and the task 058 consumer pattern exist; no rule editor exists anywhere (grep RuleWizard in src: none).</existing>
+    <extension>The engine and host are reused; only the step content is new.</extension>
+    <cost-of-doing-nothing>Slice (b) has no UI; rules can only be authored by hand-editing JSON in rows the model-driven app now shows read-only.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Test gates publish">
+      <steps>
+        <step>Author a rule, run Test, edit the window, try to Publish</step>
+      </steps>
+      <expected>Publish is disabled after the edit until Test is run again.</expected>
+    </test>
+    <test name="Invalid body cannot pass">
+      <steps>
+        <step>Choose a condition and remove a required value</step>
+      </steps>
+      <expected>Next is disabled and the field shows the validator's error.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and walk every step</step>
+      </steps>
+      <expected>All surfaces adapt.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a new rule, when saved, then it is created Off via task 101 and appears in the Rules list.</criterion>
+    <criterion testable="true">Given a successful Test, when Publish is clicked, then the confirmation shows the supersede and re-raise counts from the dry run and publishing succeeds.</criterion>
+    <criterion testable="true">Negative: after any edit following a Test, Publish is disabled; free-text JSON entry is not offered; Wording offers only TemplateEligibleFields.</criterion>
+    <criterion testable="true">Negative: Escape and backdrop never close the wizard; it is not opened via navigateTo.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. The packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-58; D-22, D-26; reconciliation M-6, M-7.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -771,7 +771,7 @@ const ENTITY_VIEW_CONFIG_IDS = {
   communications: 'e1826c4c-9575-f111-ab0e-7ced8ddc4a05',
   // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks (Assistant)" — opened by the
   // `list-tasks` capability when the user asks "what are my tasks?". Sources the "My Tasks Open"
-  // saved query (12a510e4; Deadline+Task+Reminder, eventstatus=Open, NO owner filter) and scopes it
+  // saved query (12a510e4; Deadline+Task+Reminder, status=Open (the view still filters the deprecated second status column: task 066 inventory, view V-1), NO owner filter) and scopes it
   // to the caller via the DataGrid `behavior.membershipFilter` feature — "records I'm on" (owner +
   // every assigned-person role), broader than `ownerid eq-userid`. Membership is resolved by the
   // DataverseEntityViewWidget from the AI session's authenticatedFetch.

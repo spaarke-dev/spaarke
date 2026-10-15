@@ -17,6 +17,10 @@
  *    dividers are emitted only between groups that have at least one
  *    visible action (no orphaned/double dividers, no empty groups).
  *
+ * Since C-9 (spaarke-ontology-platform-r1 task 052) the menu scaffold, group + divider logic and item rendering live in
+ * the shared `RowActionMenu`; this file keeps only the document action table (labels, icons, ordering) and the
+ * `disabledActions` mapping, so the rendered menu is unchanged.
+ *
  * Fluent v9 portal gotcha (see `.claude/patterns/ui/fluent-v9-portal-gotcha.md`):
  *  - `Menu` renders its popover through a React portal that escapes the
  *    `FluentProvider` subtree. Spaarke's project convention is for the
@@ -33,17 +37,9 @@
  */
 
 import * as React from 'react';
+import { RowActionMenu } from './RowActionMenu';
+import type { RowActionDescriptor } from './RowActionMenu';
 import {
-  Menu,
-  MenuTrigger,
-  MenuButton,
-  MenuPopover,
-  MenuList,
-  MenuItem,
-  MenuDivider,
-} from '@fluentui/react-components';
-import {
-  MoreVertical20Regular,
   Eye20Regular,
   Sparkle20Regular,
   Open20Regular,
@@ -153,57 +149,23 @@ export const DocumentRowMenu: React.FC<IDocumentRowMenuProps> = ({
   disabledActions,
   className,
 }) => {
-  // Build the filtered groups once per render. We intentionally allocate
-  // small arrays here (≤4 items each) — cheaper than memoization overhead
-  // for this size and avoids React 18-only hooks.
+  // `disabledActions` HIDES the listed actions (see the prop doc); RowActionMenu drops hidden items and places
+  // dividers only between groups that still have a visible item.
   const disabled = disabledActions ?? [];
-  const isVisible = (a: IActionDescriptor): boolean => !disabled.includes(a.key);
-
-  const visibleA = GROUP_A.filter(isVisible);
-  const visibleB = GROUP_B.filter(isVisible);
-  const visibleC = GROUP_C.filter(isVisible);
-
-  // A divider is rendered only when there is at least one visible item BEFORE
-  // and at least one visible item AFTER it — prevents orphaned dividers when
-  // a whole group is hidden via `disabledActions`.
-  const dividerAfterA = visibleA.length > 0 && (visibleB.length > 0 || visibleC.length > 0);
-  const dividerAfterB = visibleB.length > 0 && visibleC.length > 0;
-
-  // Trigger stopPropagation: required by spec FR-SC-02 / FR-DOC-01.
-  // We stop the click here so the row's `onClick` (which opens preview) does
-  // not also fire when the trigger is clicked.
-  const handleTriggerClick = React.useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-  }, []);
-
-  const renderItem = (a: IActionDescriptor): React.ReactElement => (
-    <MenuItem key={a.key} icon={a.icon} onClick={() => onAction(a.key)}>
-      {a.label}
-    </MenuItem>
+  const groups: RowActionDescriptor<DocumentRowAction>[][] = [GROUP_A, GROUP_B, GROUP_C].map(group =>
+    group.map(a => ({ key: a.key, label: a.label, icon: a.icon, hidden: disabled.includes(a.key) }))
   );
 
+  // Trigger stopPropagation: required by spec FR-SC-02 / FR-DOC-01. We stop the click here so the row's `onClick`
+  // (which opens preview) does not also fire when the trigger is clicked.
   return (
-    <Menu>
-      <MenuTrigger disableButtonEnhancement>
-        <MenuButton
-          appearance="subtle"
-          size="small"
-          icon={<MoreVertical20Regular />}
-          aria-label={`More actions for ${document.name}`}
-          className={className}
-          onClick={handleTriggerClick}
-        />
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          {visibleA.map(renderItem)}
-          {dividerAfterA && <MenuDivider />}
-          {visibleB.map(renderItem)}
-          {dividerAfterB && <MenuDivider />}
-          {visibleC.map(renderItem)}
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+    <RowActionMenu<DocumentRowAction>
+      groups={groups}
+      onAction={onAction}
+      ariaLabel={`More actions for ${document.name}`}
+      triggerClassName={className}
+      stopTriggerPropagation
+    />
   );
 };
 

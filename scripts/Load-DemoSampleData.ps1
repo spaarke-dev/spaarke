@@ -367,7 +367,6 @@ if ($solutionsImported) {
         $record = @{
             "sprk_eventname"        = $event.sprk_eventname
             "sprk_eventdescription" = $event.sprk_eventdescription
-            "sprk_eventstatus"      = $event.sprk_eventstatus
         }
 
         New-DataverseRecord `

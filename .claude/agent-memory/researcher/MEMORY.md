@@ -48,6 +48,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [navigateTo dialog chrome vs dark mode (2026-10-05)](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — 5 navOptions, no hideHeader; MDA dark mode unsupported (Spaarke uses undocumented flag); sidePanes hideHeader
 - [PP licensing: multiplexing/ISV/app-only API (2026-10-13)](pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md) — PLG Oct 2026 p.24-25; no API-only SKU; non-licensed req pool 25k/day; ISV licence mgmt = model-driven only
 - [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence; `pac licensing *billing-policy*` (not pac admin); JIT role-assoc by oid alternate key; BAP addUser = tenant admin only
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values

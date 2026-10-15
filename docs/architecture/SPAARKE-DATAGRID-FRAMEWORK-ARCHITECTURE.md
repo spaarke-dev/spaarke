@@ -169,7 +169,7 @@ Console diagnostic: search for `[DataGrid] fetchXml composition` in DevTools —
   configId="…"
   hostFilters={[
     { attribute: 'sprk_eventtype_ref', operator: 'eq', value: eventTypeId },
-    { attribute: 'sprk_eventstatus', operator: 'in', value: [1, 2] },
+    { attribute: 'statuscode', operator: 'in', value: [1, 659490001] },
     { attribute: 'sprk_duedate', operator: 'between', value: [from, to] },
   ]}
   onRecordsLoaded={records => deriveCalendarDots(records)}
@@ -241,7 +241,7 @@ const membershipResolver = createMembershipResolver(
 - **Member of nothing → empty grid.** An empty id list injects an impossible-match condition (`operator='null'` on the id attribute), so the user sees an empty result — never everyone's records.
 - **Composition order** is `base → parentContext → hostFilters → membership → chips`. All layers combine (`and` semantics); membership is memoized on the resolved id set.
 
-**Reference deployment** — the "My Tasks" grid (`sprk_gridconfiguration` "My Tasks (Assistant)"): sources the "My Tasks Open" saved query (Deadline+Task+Reminder, eventstatus=Open, **no owner filter**) and applies `membershipFilter: true`, so the Assistant's `list-tasks` capability opens "the open task-type events I'm on."
+**Reference deployment** — the "My Tasks" grid (`sprk_gridconfiguration` "My Tasks (Assistant)"): sources the "My Tasks Open" saved query (Deadline+Task+Reminder, status=Open (the view still filters the deprecated second status column: task 066 inventory, view V-1), **no owner filter**) and applies `membershipFilter: true`, so the Assistant's `list-tasks` capability opens "the open task-type events I'm on."
 
 **Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 2-min/user since UAC-r2 task 132). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
 

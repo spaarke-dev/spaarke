@@ -743,14 +743,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
-                // #1616 fix round: the Create Work Assignment wizard also files under an invoice or an event.
-                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
-                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // A contact lookup that is NOT a regarding column (task 046 r4: the same-id contact exploit binds the matter's GUID here).
+                ("sprk_assignedattorney1", "contact", "sprk_AssignedAttorney1"),
             },
             ["sprk_communication"] = new[]
             {

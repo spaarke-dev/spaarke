@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Seed dev data plus the two negative controls</title>
+    <phase>0 Foundations</phase>
+    <gate>004 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data seeding; the exit condition is a gate on success criterion 2.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows an explicit checklist with a stated exit condition.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>dataverse,seed-data,testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Seed the data that success criterion 2 needs: the positive triple AND the two negative controls the section 8.1 checklist omits.</prompt>
+  <role>SPAARKE platform developer. Seeded data proves evaluation, never reality.</role>
+  <goal>A matter exists that should fire Path B, plus two matters that should NOT fire it for two different reasons.</goal>
+
+  <context>
+    <background>design.md section 8.1 lists an exit condition covering only the POSITIVE case. Success criterion 2 also requires that the rule does NOT fire when either conjunct is absent, which needs two negative controls. spec.md assumption A-3 adds them.</background>
+    <relevant-files>
+      <file role="modify">Dataverse: sprk_spendsnapshot, sprk_communication, sprk_budgetrevision (spaarkedev1)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: classify the communication through the LIVE enrichment path so the classifier produces the category, not a hand-written row. This is the half most easily faked and least useful if faked, because success criterion 11 measures that same classifier.</constraint>
+    <constraint source="project">Scope: ISS-003 (48 sprk_event rows stranded in Draft) must be addressed before the Do lane seed is meaningful. That is task 060; do not seed the Do lane here and declare it done.</constraint>
+    <constraint source="project">Scope: record which rows are seeded and which are real. Seeded data proves the predicate EVALUATES; only data nobody authored to make it pass proves it FIRES on reality. Keep the two readings apart in any report.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dev data seeding</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Create the smallest sprk_budgetrevision rows needed, per the schema: matter, prior amount, new amount, sprk_revisedon, reason, author.</step>
+    <step order="2">Seed spend on a matter that already carries a budget (REAL-2026-123456.01 and .02 both do). Write sprk_spendsnapshot directly, or invoke SpendSnapshotGenerationJobHandler if it can be triggered in dev; either is acceptable now because the provenance question belongs to the connector phase, which is out of scope.</step>
+    <step order="3">POSITIVE case: classify one real communication on that matter as a scope or fee change through the live enrichment path, and ensure NO sprk_budgetrevision exists inside the window.</step>
+    <step order="4">NEGATIVE CONTROL 1: a matter with the classified communication present AND a sprk_budgetrevision inside the window. Path B must NOT fire.</step>
+    <step order="5">NEGATIVE CONTROL 2: a matter with a budget-exceeding snapshot but NO classified communication. Path B must NOT fire.</step>
+    <step order="6">Record the exit condition state in notes/: which matter satisfies the positive triple, and which two are the controls.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live enrichment path cannot be triggered in dev, STOP and escalate rather than hand-writing the classification row. A hand-written category makes success criterion 11 unmeasurable and hides exactly the weakness design.md section 1.2 names as the conjunction weakest input.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: the positive triple plus two negative controls</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/seed-data-state.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the positive matter, when the Path B predicate is evaluated by hand, then both conjuncts hold.</criterion>
+    <criterion testable="true">Given negative control 1, when evaluated, then the notExists conjunct fails because a budget revision exists in the window.</criterion>
+    <criterion testable="true">Given negative control 2, when evaluated, then the exists conjunct fails because no classified communication is present.</criterion>
+    <criterion testable="true">The communication classification on the positive matter was produced by the live classifier, not authored by hand, and the record id is noted.</criterion>
+    <criterion testable="true">notes/seed-data-state.md records which rows are seeded versus real.</criterion>
+  </acceptance-criteria>
+
+  <notes>design.md section 8.1 (checklist) plus spec.md assumption A-3 (the two controls). Without the controls, success criterion 2 is only half-tested.
+
+COMPLETED 2026-10-04. Full record: projects/spaarke-ontology-platform-r1/notes/seed-data-state.md. Summary:
+POSITIVE = REAL-2026-123456.01 (real matter, seeded communication f00b6389-8fbf-f111-aaaf-0022482913fc classified
+"Fee / rate change" via the LIVE TRIAGE-EMAIL Action through POST /api/office/save -- escalation trigger not
+fired). NEGATIVE CONTROL 1 = REAL-2026-123456.02 (real matter, seeded communication 9848e2b0-8fbf-f111-aaaf-0022482913fc
+classified "Scope / budget change" live, PLUS seeded sprk_budgetrevision e4e5dbe6-8fbf-f111-aaaf-0022482913fc inside
+the 30-day window -- notExists conjunct fails). NEGATIVE CONTROL 2 = a new dev matter
+d14d79f4-8fbf-f111-aaaf-0022482913fc ("ONTOLOGY DEV SEED 005 - Negative Control 2") with a budget-exceeding
+sprk_spendsnapshot but zero communications -- exists conjunct fails. All three hand-evaluated against the task
+004 rulebody's actual two-clause predicate. sprk_policy.sprk_enabled re-verified false after all writes. No Do-lane
+rows seeded (task 060 scope). No sprk_signal/sprk_decisionrecord rows (evaluator, task 021, not yet built).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

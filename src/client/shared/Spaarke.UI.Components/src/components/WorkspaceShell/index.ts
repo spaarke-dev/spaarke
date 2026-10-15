@@ -49,6 +49,8 @@ export type {
   ContentSectionConfig,
   ActionCardConfig,
   MetricCardConfig,
+  MetricCardLayout,
+  MetricProgress,
   MetricTrend,
   MetricBadgeVariant,
   SectionType,

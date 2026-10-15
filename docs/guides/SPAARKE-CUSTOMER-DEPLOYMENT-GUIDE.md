@@ -1756,6 +1756,84 @@ Published at `docs/deployment/version-compatibility-matrix.md` (task 006). H0 pr
 
 `az deployment group what-if` on H2a; solution import version-check on H6; ArchTest naming-conformance on every PR.
 
+### 10.5 Upgrade note: `sprk_signal.sprk_regardingrecordtype` changed from text to a lookup (2026-10-12)
+
+**Who is affected.** Any environment that already has the `sprk_signal` table from a SpaarkeMaster package built before
+this change (1.2.0.0 and 1.2.1.0 both carry the old `String(100)` column). A solution import **cannot change a
+column's type**: importing the new version over the old column fails (or leaves the text column in place), and the
+Signal writer then fails on every create. As of 2026-10-12 the only environment that has `sprk_signal` is
+**spaarkedev1** (unmanaged, already converted); `spaarke-demo`, `spaarke-model1-prod` and the Teams default environment have no
+`sprk_signal`, `sprk_decisionrecord` or `sprk_policy`, so they take the new package as a first install and need nothing
+here. Re-check with the query in step 1 before every upgrade; do not rely on this list.
+
+**What changed.** `sprk_signal.sprk_regardingrecordtype` is now a Lookup to `sprk_recordtype_ref` (the ADR-024 shape
+`sprk_todo`, `sprk_event` and `sprk_communication` use), same logical name. `sprk_decisionrecord` gains the 14 standard
+regarding columns (nine subject lookups, `sprk_regardingrecordid`, `sprk_regardingrecordtype`,
+`sprk_regardingrecordname`, `sprk_regardingrecordnumber`, `sprk_regardingrecordurl`); additive, no action needed.
+
+**Which runbook.** SpaarkeMaster is **managed by default** in customer environments (ADR-027;
+`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`), so the managed runbook is the normal case. Check the environment's
+`ismanaged` flag on the `SpaarkeMaster` solution row first and follow exactly one of the two.
+
+> **Status of the behaviour below: expected, not tested.** No solution import was run for this change (D-83, #1618). That a
+> type-changing import fails, and that a `StageAndUpgrade` that drops the column deletes it, is the documented Dataverse
+> behaviour, not something this project observed. Treat the first managed upgrade as the test and have a backup.
+
+#### A. Unmanaged environment (e.g. spaarkedev1)
+
+Delete the column through the API, then import or recreate. Do this before importing the new SpaarkeMaster version:
+
+1. **Check it needs doing.** `GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_signal')/Attributes(LogicalName='sprk_regardingrecordtype')?$select=AttributeType`
+   returns `String` (needs the runbook), `Lookup` (already done), or 404 (table absent: nothing to do).
+2. **Stop Signal writers.** Confirm no Signal job is writing: the Signal writer is only live where
+   `Ontology:Writer:ManagedIdentityClientId` is set on the BFF; clear it (or stop the app) for the window.
+3. **Decide about existing rows.** The old column held the subject's logical name as text; the new lookup needs the
+   matching `sprk_recordtype_ref` row. Dev rows were test data and were dropped with the column. For a non-dev
+   environment, export the rows first (`sprk_signalid`, `sprk_regardingrecordtype`) and back-fill the lookup after the
+   import by mapping each text value to the `sprk_recordtype_ref` whose `sprk_recordlogicalname` equals it.
+4. **Read-only dependency check.** `GET RetrieveDependenciesForDelete(ObjectId=<attribute MetadataId>,ComponentType=2)`
+   must return an empty `value`; also confirm no alternate key, view, form, chart or flow uses the column
+   (`sprk_signaldedupekey` covers `sprk_dedupekey` only). Any dependency: stop and escalate; do not delete.
+5. **Delete the String column** (`DELETE EntityDefinitions(LogicalName='sprk_signal')/Attributes(<MetadataId>)`).
+6. **Import the new SpaarkeMaster version.** The import creates the lookup under the same logical name. If it does not,
+   create it by the Web API recipe (`POST RelationshipDefinitions`, lookup schema name `sprk_RegardingRecordType`,
+   referenced entity `sprk_recordtype_ref`, relationship `sprk_signal_regrecordtype_recordtype_ref`, header
+   `MSCRM.SolutionUniqueName`) and publish `sprk_signal` and `sprk_decisionrecord` only (`PublishXml`).
+7. **Verify** the metadata read now returns `Lookup` with `Targets = [sprk_recordtype_ref]`, then re-enable the writers
+   (they must be on a build that writes the lookup, task 141) and clear the cached entity metadata
+   (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
+
+Between steps 5 and 6 the column is absent; keep that gap short and do not run Signal jobs inside it.
+
+#### B. Managed environment (the default)
+
+**Do not delete the column through the API and do not recreate it with the Web API.** In a managed environment the column
+belongs to the managed SpaarkeMaster layer: the API refuses the delete, and a column created by the Web API fallback would
+sit in an unmanaged layer under the same name and collide with the packaged lookup on the next import. The only supported
+way to remove a managed column is to ship a SpaarkeMaster version that no longer contains it and apply that version with
+`StageAndUpgrade` (H6 does; "a component removed from the package is deleted together with its data"). So the change
+goes out in **two SpaarkeMaster versions**:
+
+1. **Check it needs doing** (step 1 above). `Lookup` or 404: nothing to do. `String`: continue.
+2. **Stop Signal writers, decide about existing rows, run the read-only dependency check** (steps 2-4 above). The
+   `StageAndUpgrade` in step 4 deletes the column with its data, so export the rows (`sprk_signalid`,
+   `sprk_regardingrecordtype`) first if any exist.
+3. **Ship an intermediate SpaarkeMaster version WITHOUT `sprk_signal.sprk_regardingrecordtype`.** Build it from the source
+   with that attribute removed from `Entities/sprk_Signal/Entity.xml` (everything else unchanged). The published 1.2.x
+   packages, which carry the `String` column, are the **old** side of this sequence: the intermediate version must be
+   higher than the installed one (H6 refuses a downgrade) and is a **Major** bump because it removes a component.
+4. **Apply it with `StageAndUpgrade`.** This deletes the `String` column. Verify the step-1 query now returns 404.
+5. **Ship the final SpaarkeMaster version WITH the lookup** (the source on this branch: `sprk_RegardingRecordType` ->
+   `sprk_recordtype_ref`, relationship `sprk_signal_regrecordtype_recordtype_ref`), higher again, and apply it with
+   `StageAndUpgrade`. Creating the lookup is then an ordinary additive change.
+6. **Verify** the metadata read returns `Lookup` with `Targets = [sprk_recordtype_ref]`, back-fill the lookup from the
+   exported rows if there were any, then re-enable the writers (a build that writes the lookup, task 141) and clear the
+   cached entity metadata (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
+
+Between steps 4 and 5 the column is absent; keep that gap short and do not run Signal jobs inside it. Both versions are
+cut at release time (`Assemble-SpaarkeMasterSolution.ps1 -Version`); this task did not bump the version, and the source
+still carries `IntroducedVersion` `1.0.0.0` on the new components.
+
 ---
 
 ## 11. Rollback & Quarantine (§4C reference)

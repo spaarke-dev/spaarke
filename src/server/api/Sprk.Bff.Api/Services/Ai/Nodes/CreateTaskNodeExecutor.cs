@@ -248,6 +248,24 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                     ActingUserId: context.UserId),
                 cancellationToken);
 
+            // Task 141 fix round 2: TaskActionCore answers Guid.Empty when it created nothing (a refusal or a Dataverse
+            // rejection, already logged there). Reporting that as "Task created" with an empty id made a downstream node
+            // read a task that does not exist; the node fails instead, in the error shape this executor uses everywhere.
+            if (taskId == Guid.Empty)
+            {
+                _logger.LogError(
+                    "CreateTask node {NodeId} did not create a task for subject: {Subject}",
+                    context.Node.Id,
+                    subject);
+
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    "Task was not created: the task could not be written (see the earlier log entry for the cause).",
+                    NodeErrorCodes.InternalError,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
+
             _logger.LogInformation(
                 "CreateTask node {NodeId} completed - task created with subject: {Subject}, taskId: {TaskId}",
                 context.Node.Id,

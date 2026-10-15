@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="145" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract T5: classify every reader of typed sprk_matter (context vs filing), backfill typed core columns into sprk_regarding*, and stop secure communication detail leaking into matter-Signal evidence</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 141, 142, 144 done; backfill run needs the owner's dev-data approval</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>D-123 secure-family leak fix plus a data backfill.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive; cross-cutting audit of readers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SignalWriter/SignalEvaluator after 141-144.</parallel-reason>
+    <deps>141,142,144</deps>
+    <tags>bff-api,security,dataverse,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Finish the D-34 split: decide for every reader of the typed core columns whether it means "context at decision time" (move it to sprk_corerecordid) or "filing" (follow the live sprk_regarding* stamp), backfill and retire the typed columns from filing, and fix the evidence leak uac-r2 found.</prompt>
+  <role>SPAARKE BFF engineer working to the child-record contract.</role>
+  <goal>No reader treats a frozen column as live filing; the typed core columns are backfilled; secure communication detail never lands on an ordinary matter's Signal.</goal>
+
+  <context>
+    <background>D-131 (uac-r2 amendment: the stamp lives in sprk_regarding*; typed sprk_matter/sprk_project/sprk_workassignment on DR and sprk_matter on Signal are backfilled, stop being written as filing, and leave the lineage row only after the backfill is verified — uac-r2 edits the lineage). Evidence leak (uac-r2 #1747 finding e, pre-existing, D-123): matter-Signal evidence persists a communication's sprk_subject/sprk_from even when the communication is secure through another filing.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (~:695 dedupe key {policy}|sprk_matter|{matterId}|{episode}; ~:1243 evidence)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluator.cs (~:561-567 evidence)</file>
+      <file>every reader of sprk_matter / sprk_project / sprk_workassignment on sprk_signal and sprk_decisionrecord (grep src/server, src/solutions, src/client)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="144 review K1 (2026-10-14)">The stamp follows the SUBJECT, not the core: sprk_signal has no typed sprk_project/sprk_workassignment lookup, so after a subject re-file P→Q the live sprk_regarding* stamp says Q while sprk_corerecordid stays P (CoreAncestorResolver.cs:255-263, SecureChildLineage.cs:97-98, DecisionRecordWriter.cs:296). Do NOT retire a typed core lookup from lineage on a "stamp equals core" or "backfill verified" premise; that would drop the core (including a matter core) from lineage. Step 4's retirement by uac-r2 needs that premise re-proved per column, or the column kept as context.</constraint>
+    <constraint source="D-34">Context readers use sprk_corerecordid/sprk_corerecordtype; filing readers use the live sprk_regarding* stamp. Record each reader's classification in notes/145-matter-readers.md.</constraint>
+    <constraint source="D-123">Evidence for a Signal must not carry detail (subject, sender, body excerpts) of a record whose secure-root set differs from the Signal's own partition; Undetermined counts as secure. Test with a communication filed to ordinary M and to secure X.</constraint>
+    <constraint source="project">The backfill is a dev data change: write it as a re-runnable, report-first script; run the report; STOP for owner approval before writing. Do not edit SecureChildLineage (uac-r2's). Never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory and classify readers; fix each.</step>
+    <step order="2">Fix the evidence leak with tests (mutation check on the partition test).</step>
+    <step order="3">Backfill script, report-only run, report to the main session; write run only after owner approval.</step>
+    <step order="4">Build, suites, ArchTests; draft PR; send to uac-r2 (they then retire the typed columns from lineage).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a reader needs both meanings, or the dedupe key's matter component cannot be classified without changing existing keys, STOP and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every reader is classified in the notes file and uses the matching column.</criterion>
+    <criterion testable="true">A communication filed to ordinary M and secure X contributes no subject/sender to M's Signal evidence; a purely ordinary communication still does.</criterion>
+    <criterion testable="true">New Signal/DR rows no longer write typed core columns as filing (or the notes state why one is kept as context).</criterion>
+    <criterion testable="true">The backfill report exists; no write ran without the owner's approval.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131); evidence leak from uac-r2's stopped #1747 review, finding (e).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

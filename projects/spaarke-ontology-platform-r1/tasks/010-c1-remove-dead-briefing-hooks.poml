@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>C-1: delete the dead briefing hooks and fix two stale comments</title>
+    <phase>1 Cleanup that gates the row</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shipped client code and removes a misdirection hazard that would otherwise be designed against.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deletion plus two comment fixes against verified evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,cleanup,technical-debt</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete the three dead briefing hooks and fix the two live comments that point a reader at the wrong data mechanism. This gates the worklist row.</prompt>
+  <role>SPAARKE front-end developer. Remove the trap before building next to it.</role>
+  <goal>The dead hooks are gone and no live file describes appnotification read-state as the Briefing data or dismiss mechanism.</goal>
+
+  <context>
+    <background>useBriefingNotifications, useBriefingNarration and useBriefingActions (backed by notificationService.ts appnotification writes) are dead. The live path is fetchBriefingLive behind USE_LIVE_RENDER=true (briefingService.ts:397). They are NOT barrel-exported, so the hazard is misdirection rather than a compile path. Two live files still describe them as the mechanism.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: verify the hooks are genuinely unreferenced before deleting. An earlier revision of this project asserted they were still barrel-exported; that was checked and found FALSE. Assert nothing about the mechanism without grepping it.</constraint>
+    <constraint source="project">Scope: the two stale comments are at dailyBriefing.registration.ts:48 and SpaarkeAi/src/main.tsx:252. Fix the comments to name fetchBriefingLive and the USE_LIVE_RENDER flag.</constraint>
+    <constraint source="project">Scope: do NOT repurpose appnotification read-state as a dismiss path anywhere. Writing Dismiss there records bell-panel read-state instead of a Decision Record: it would appear to work, record nothing, break row-contract requirement 5 and starve success criterion 4 suppression input.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dead code removal and misdirection hazards</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Grep for each of the three hook names across the whole repo and record every hit with file and line. Confirm none is a live call site and none is exported from the package index.</step>
+    <step order="2">Delete the three hooks and any now-unreferenced helper in notificationService.ts that existed only to serve them.</step>
+    <step order="3">Fix the comment at dailyBriefing.registration.ts:48 to describe the actual mechanism: fetchBriefingLive behind USE_LIVE_RENDER.</step>
+    <step order="4">Fix the comment at SpaarkeAi/src/main.tsx:252 the same way.</step>
+    <step order="5">Build the affected packages and run their tests.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the three hooks turns out to have a live call site, STOP and escalate rather than deleting it. The whole basis of this task is that they are dead, and that claim was already wrong once in this project.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Daily Briefing still renders after the deletion">
+      <steps>
+        <step>Open the SpaarkeAi Console with USE_LIVE_RENDER=true</step>
+        <step>Open the Daily Briefing widget</step>
+        <step>Confirm items render and the browser console shows no errors</step>
+      </steps>
+      <expected>The Briefing renders from fetchBriefingLive with no regression and no console errors.</expected>
+    </test>
+    <test name="Dark mode unaffected">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Re-open the Daily Briefing widget</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens per ADR-021; nothing hardcoded is revealed by the deletion.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client packages (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a repo-wide grep for the three hook names, when run after this task, then there are zero hits outside git history.</criterion>
+    <criterion testable="true">Given dailyBriefing.registration.ts and SpaarkeAi/src/main.tsx, when read, then neither describes appnotification read-state as the Briefing data or dismiss mechanism.</criterion>
+    <criterion testable="true">Negative: no file anywhere writes appnotification read-state as a dismissal of a Work Item.</criterion>
+    <criterion testable="true">The affected packages build and their existing tests pass.</criterion>
+    <criterion testable="true">The Daily Briefing widget still renders with no console errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-41 (C-1). Sized XS but it GATES the worklist row, which is why it is in Phase 1.
+
+  Completed 2026-10-03. Verified via repo-wide grep that none of the three hooks had a live
+  call site (escalation trigger did not fire) before deleting. Deleted the three hooks, the
+  three matching unit tests, and the ENTIRE notificationService.ts module (not just the 3
+  write helpers named in the background) once verification showed every one of its exports
+  — fetchNotifications/fetchAndGroupNotifications/groupByCategory/computeTimeWindowIso/
+  filterByDueWithinDays/buildDisabledChannelsFilter/markAllBriefingsChecked, plus the 3 named
+  writes — had zero production callers once the two hooks that used them were gone. Also
+  deleted two already-`describe.skip`'d smoke test suites that mocked the now-deleted module
+  and would otherwise fail ts-jest module resolution. Fixed the two named comments plus
+  further misdirection-class comments in files within the Spaarke.DailyBriefing.Components
+  output dir, and two live docs (SPAARKEAI-COMPONENT-MODEL.md, BUILD-A-NEW-NARRATIVE-OUTPUT-
+  CONSUMER.md). Left untouched (documented in notes/task-010-remove-dead-briefing-hooks-
+  deviations.md): one dated historical doc entry, a BFF comment + its test (out of BFF-
+  hygiene scope for a comment fix), and ~65 files of OTHER completed projects' historical
+  task/spec/notes records. `npm run build` (tsc --noEmit) clean; `npm test` 130/131 passing,
+  1 failing + 2 suites failing to compile — all three verified pre-existing/unrelated to
+  this change (none touch files this task modified). Full deviation record in
+  projects/spaarke-ontology-platform-r1/notes/task-010-remove-dead-briefing-hooks-deviations.md.
+  </notes>
+
+  <completion>2026-10-04: criterion 5 cannot be checked on dev until a Console built from this branch is deployed (dev runs master's build; the owner confirmed the widget renders there, which is the baseline). Verification moved to task 055 as an acceptance criterion.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

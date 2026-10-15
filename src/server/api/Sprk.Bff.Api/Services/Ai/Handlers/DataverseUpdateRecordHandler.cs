@@ -284,6 +284,11 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 }
             }
 
+            // Ontology D-48 / #1659: the matter a communication is filed to BEFORE this write (for the Signal trigger below).
+            var matterBefore = IsCommunication(tablename) && MayRefile(tablename, mapped.Item!)
+                ? await ReadCommunicationMatterAsync(recordId).ConfigureAwait(false)
+                : default;
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
                 tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
@@ -346,6 +351,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     tablename, recordId,
                     () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
                     CancellationToken.None).ConfigureAwait(false);
+            }
+
+            // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
+            // is a classified-then-filed email too, so it reaches the same association-confirmed Signal trigger as the
+            // filing route and the Office reconcile. Additive: runs only after the re-file was written, and never changes
+            // this tool's result.
+            if (refile.Written && IsCommunication(tablename))
+            {
+                await TriggerSignalForFiledCommunicationAsync(recordId, matterBefore).ConfigureAwait(false);
             }
 
             // Task 158 (owner round 6; §6.5 path B — see the class remarks): a work assignment or project the caller's own
@@ -443,6 +457,69 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }
+
+    /// <summary>
+    /// Ontology D-48 / #1659 (owner decision D-125): after this tool re-filed a communication, queues the matter's Signal
+    /// re-evaluation when the communication is classified and on a matter — the one check the filing route and the Office
+    /// reconcile call (<see cref="Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger"/>). Both services come from a
+    /// fresh scope (same as the re-file's other scoped services); absent either, nothing happens. Never throws and never
+    /// changes the tool's result: the re-file is already written and the nightly pass remains the backstop.
+    /// </summary>
+    private async Task TriggerSignalForFiledCommunicationAsync(
+        Guid communicationId, Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger.MatterBefore matterBefore)
+    {
+        try
+        {
+            using var scope = _scopes?.CreateScope();
+            var provider = scope?.ServiceProvider;
+            var entities = provider?.GetService<Spaarke.Dataverse.IGenericEntityService>();
+            if (entities is null)
+                return;
+
+            await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+                .EnqueueIfClassifiedOnMatterAsync(
+                    entities, provider!.GetService<Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger>(),
+                    communicationId, _logger, matterBefore)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(Sprk.Bff.Api.Services.Signals.SignalTriggerEvents.FilingReadFailed, ex,
+                "[dataverse.update_record] could not queue the Signal trigger for re-filed communication {CommunicationId}; " +
+                "the nightly pass will pick it up ({ExceptionType}).",
+                communicationId, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>The matter a communication is filed to before this tool's write (bounded app-only read; unknown when it
+    /// cannot be read or no trigger is registered). Never throws.</summary>
+    private async Task<Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger.MatterBefore> ReadCommunicationMatterAsync(
+        Guid communicationId)
+    {
+        try
+        {
+            using var scope = _scopes?.CreateScope();
+            var entities = scope?.ServiceProvider.GetService<Spaarke.Dataverse.IGenericEntityService>();
+            return entities is null
+                ? default
+                : await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+                    .ReadMatterAsync(
+                        entities, scope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Signals.SignalEvaluationTrigger>(),
+                        communicationId, _logger)
+                    .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(Sprk.Bff.Api.Services.Signals.SignalTriggerEvents.FilingReadFailed, ex,
+                "[dataverse.update_record] could not read the matter of communication {CommunicationId} before the update; " +
+                "the Signal trigger will queue its current matter only ({ExceptionType}).",
+                communicationId, ex.GetType().Name);
+            return default;
+        }
+    }
+
+    private static bool IsCommunication(string tablename) =>
+        string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The tool result for a re-file the core refused (nothing was written).</summary>
     private ToolResult RefileRefusal(

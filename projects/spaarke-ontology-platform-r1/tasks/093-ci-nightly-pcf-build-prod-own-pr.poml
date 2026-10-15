@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>CI: nightly advisory PCF build:prod, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits a CI workflow (hot path: ci-workflows); a wrong trigger or blocking flag affects every project's merges.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified, with an existing workflow to mirror.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and branch; touches only .github/workflows.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-workflows,pcf,separate-pr</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt093, branch ci/nightly-pcf-build-prod (created off origin/master when this task starts). Add a nightly, ADVISORY CI run of npm run build:prod for every PCF control.</prompt>
+  <role>SPAARKE engineer who owns CI hygiene. Visibility first; never block other projects' merges.</role>
+  <goal>Every PCF's production build runs nightly in CI and its pass/fail is recorded, so a PCF that cannot be built from master is visible the next morning instead of seven weeks later.</goal>
+
+  <context>
+    <background>OWNER DECISION 2026-10-04. Task 092 (PR #1123) found that no GitHub Actions workflow runs npm run build:prod; six Communication PCFs could not be built from master from 2026-08-14 until #1123, and nothing turned red. .github/workflows/client-tests.yml is the precedent: a nightly, advisory Phase 1 baseline (ci-cd-unit-test-remediation-r1, CICD-095) that discovers packages, runs one matrix leg per package with continue-on-error, and writes a pass/fail table to the job summary. Its header explains why it is nightly and not on pull_request (runner contention against the CI shadow window) and says not to add it to the tier-1/tier-2 blocking workflows.</background>
+    <relevant-files>
+      <file role="reference">.github/workflows/client-tests.yml</file>
+      <file role="reference">src/client/pcf/CLAUDE.md</file>
+      <file role="reference">projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ADVISORY ONLY, matching client-tests.yml: nightly schedule plus workflow_dispatch, continue-on-error per leg, results in the job summary. Do NOT add it to ci-tier1-blocking.yml or ci-tier2-advisory.yml, do NOT trigger on pull_request or push, and do NOT make any check required.</constraint>
+    <constraint source="project">Scope: build with npm run build:prod (never npm run build), install with npm install --legacy-peer-deps --no-audit --no-fund, and discover PCFs from the repo (each src/client/pcf/*/ with a build:prod script) rather than a hand-written list that will drift.</constraint>
+    <constraint source="project">Scope: schedule it so it does not overlap nightly-health.yml (06:00 UTC) or client-tests.yml (07:00 UTC), and bound matrix concurrency the way client-tests.yml does.</constraint>
+    <constraint source="project">Scope: decide, with evidence, whether this belongs as a new job in client-tests.yml or as a separate workflow file. client-tests.yml's header scopes it to Jest; prefer a separate file unless sharing is clearly simpler. State the choice in the PR.</constraint>
+    <constraint source="project">Scope: check projects/INDEX.md for other active projects that declare ci-workflows = Y and name them in the PR body so they are aware; do not edit their files.</constraint>
+    <constraint source="project">Scope: this lands in its OWN pull request. Work ONLY in the worktree named in the prompt; do not edit the ontology worktree, its TASK-INDEX.md or this POML. Never use --no-verify or bare git stash. You CANNOT write .claude/ paths.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI workflow conventions</topic>
+    <files>
+      <file>.github/workflows/client-tests.yml</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Read client-tests.yml end to end and mirror its discovery, matrix, concurrency bound, continue-on-error and summary-table conventions.</step>
+    <step order="2">Write the workflow. Validate it locally (actionlint if available, otherwise a YAML parse) and confirm the discovered PCF list matches the folders that have a build:prod script.</step>
+    <step order="3">Push the branch and run it once via workflow_dispatch on the branch. Quote the summary table. Expect the six Communication PCFs to fail until PR #1123 merges; that is correct, not a defect of this task.</step>
+    <step order="4">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Open a pull request against master, ready for review. The PR body states the owner decision, the advisory scope, the schedule, the dispatch-run result, the ci-workflows projects notified, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="5">Report back: PR URL, each acceptance criterion with evidence, and the dispatch-run summary.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If running every PCF build nightly would exceed what the runner budget or concurrency in client-tests.yml implies is acceptable, STOP and report the measured duration and options.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="gh">Dispatch the workflow and open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workflow runs npm run build:prod for every discovered PCF on a nightly schedule and on workflow_dispatch, and writes a per-PCF pass/fail table to the job summary.</criterion>
+    <criterion testable="true">A workflow_dispatch run on the branch completed, and its summary table is quoted in the PR.</criterion>
+    <criterion testable="true">Negative: the workflow has no pull_request or push trigger, is not referenced by the tier-1 or tier-2 workflows, and a failing PCF does not fail the run.</criterion>
+    <criterion testable="true">A pull request against master is open and ready for review, touching only .github/workflows/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-04 from task 092's CI finding, on the owner's decision to add it.</notes>
+
+  <completion>COMPLETED 2026-10-04. PR #1282 merged (e7f1129ec): .github/workflows/pcf-build-prod-nightly.yml, nightly 08:00 UTC + workflow_dispatch, advisory, discovers PCFs with a build:prod script and primes the three shared libs they need. First run (37213447388, master, ubuntu-latest, Node 20.20.2): 17 of 18 PCFs pass. ScopeConfigEditor fails (Cannot find module 'eslint', an undeclared build dependency). Surprise: the six Communication PCFs PASS in CI, while they fail locally on Windows/Node 22.14, so task 092's pdfjs break is environment-dependent; sent back to 092 to root-cause before PR #1123 merges. Acceptance criterion 2 (dispatch run) was met after merge, because GitHub only dispatches workflows present on the default branch. CORRECTION 2026-10-04 (REOPENED): the first run's table was FALSE. pcf-scripts build exits 0 when webpack fails, so every PCF recorded 'pass'. Scanning each job log for [build] Failed/Succeeded gives: 9 failed at build (6 Communication*, CommunicationAttachments, VisualHost, UpdateRelatedButton), ScopeConfigEditor failed before build (eslint), 8 succeeded. The pdfjs break is therefore NOT environment-dependent (the earlier conclusion came from this false signal). A second workflow defect: shared-lib prep was decided from each PCF's prebuild script, so UpdateRelatedButton got none. Follow-up fix in progress (branch ci/pcf-nightly-detect-failure): detect failure from output, decide prep from dependencies, and list scripts that trust build:prod's exit code before deploying. Completes when that PR merges and a run's table matches its logs. CLOSED 2026-10-04: follow-up PR #1285 merged (2c15700d7). It judges results from the output ([build] Failed / compiled with N errors / [pcf-1033] fail; [build] Succeeded passes; plus a non-zero exit) and decides shared-lib prep from dependencies. Its dispatch run 37226529553 reported 10 fail / 8 pass, matching every job log line for line. Scripts that trusted the exit code are fixed by task 094.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

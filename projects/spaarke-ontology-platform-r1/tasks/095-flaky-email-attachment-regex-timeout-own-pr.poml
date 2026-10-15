@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Flaky EmailAttachmentProcessorTests regex timeout, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes build/deploy procedure or test code; quality gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow, well-specified fix.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and branch; one test area.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing,bff-api,separate-pr</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt095, branch fix/email-attachment-regex-timeout (off origin/master). Root-cause and fix the load-sensitive failure of EmailAttachmentProcessorTests.ShouldFilterAttachment_LogoPattern_ReturnsTrue.</prompt>
+  <role>SPAARKE engineer. A failed build or a flaky test must never look like success.</role>
+  <goal>The test passes deterministically under load, with the root cause fixed rather than masked.</goal>
+
+  <context>
+    <background>Owner approved 2026-10-04. The test failed once in a contended full BFF run and passed alone. Its filter helper builds Regex(..., RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1)) (tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentProcessorTests.cs:59). Hypothesis: under CPU starvation a match exceeds 1 s, throws RegexMatchTimeoutException, and the helper returns false. The helper may be a COPY of production logic inside the test file; check whether production EmailAttachmentProcessor has the same pattern, and whether the test tests production code at all.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: own PR. Prove the mechanism first (e.g. a forced tiny timeout), then fix the cause.</constraint>
+    <constraint source="project">Scope: if the test exercises a hand-copied helper rather than production code, make it test production code (ADR-038: a test must exercise the real thing) and say so.</constraint>
+    <constraint source="project">Scope: if production code has the same timeout on a hot path, decide with evidence whether a timeout that throws under load is a production defect too (attachments silently not filtered), and fix or report it.</constraint>
+    <constraint source="project">Scope: do not just raise the timeout unless the evidence shows that is the root cause, and say so. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Read the test and the production EmailAttachmentProcessor; determine what the test really exercises.</step>
+    <step order="2">Prove the failure mechanism.</step>
+    <step order="3">Fix the root cause in the test and, if affected, in production.</step>
+    <step order="4">Run the email tests and the full BFF suite once (report contention honestly), open the PR against master, report back.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The failure mechanism is shown with evidence, not assumed.</criterion>
+    <criterion testable="true">The test exercises production code, or the PR explains why it cannot.</criterion>
+    <criterion testable="true">The test passes under a forced-slow condition that previously failed it.</criterion>
+    <criterion testable="true">A PR against master is open with the evidence in its body.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-04; owner approved the fix in its own PR.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1287 (fix/email-attachment-regex-timeout), ef6784096. Root cause: the test asserted against a private hand-copied AttachmentFilterTestHelper (ADR-038 violation) whose regex had the same 1 s timeout but NO try/catch, so a timeout under load threw instead of failing open like production. Fix: helper deleted; tests construct the real EmailAttachmentProcessor and call ShouldFilterAttachment. Mechanism proven (forced FromTicks(1): 2000/2000 throws; old helper shape throws unhandled; production catches). Could not reproduce a genuine &gt;1 s stall from CPU spin contention (max ~2.7 ms), reported honestly. Production unchanged: 1 s + fail-open is a convention in 12+ files. New EmailProcessingOptions.SignatureImageRegexTimeout (default 1 s, byte-identical) is a config seam; tests use 5 s, stated in the PR. Permanent regression test pins fail-open on timeout. Targeted 57/57; full suite 1 unrelated failure (InsightsSearchEndpointContractTests) that passed alone in 5 s.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

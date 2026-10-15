@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/ontology/threshold-rule.schema.json",
+  "title": "Threshold rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Threshold (task 025; spec FR-05 as amended by D-16). ONE numeric comparison between ONE column of the subject and a declared number, e.g. a matter whose sprk_budgetutilizationpercent is at least 90, optionally narrowed by the same 'when' scope filter an Existence body allows. Deliberately NOT here, and refused rather than ignored (additionalProperties=false everywhere): arithmetic or a ratio between columns (the compared value is a number, never a column name or an expression), a second comparison, any related entity ('all', 'exists', 'notExists', 'path'), and a variable binding. The column must also be one of the compiler's verified numeric columns (PredicateCompiler.ThresholdColumns); that is a compiler refusal, not a schema one, because a column's type is not in the body. The $defs below are a verbatim copy of existence-rule.schema.json's filter grammar so a 'when' value cannot carry what an Existence clause value may not; a unit test fails if the two copies drift.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "subject", "threshold"],
+  "properties": {
+    "type": {
+      "const": "Threshold"
+    },
+    "subject": {
+      "description": "The subject entity's logical name this rule evaluates against (e.g. sprk_matter).",
+      "type": "string",
+      "minLength": 1
+    },
+    "threshold": {
+      "description": "The single comparison: the subject's own 'field' compared with the declared 'value'. Dataverse evaluates a comparison against a null column as false, so a subject with no value for 'field' never fires, for any operator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {
+          "description": "A column of the subject (a Dataverse logical name). Never an expression and never another entity's column.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "operator": {
+          "description": "gt (>), ge (>=), lt (<) or le (<=). Equality is not a threshold.",
+          "enum": [">", ">=", "<", "<="]
+        },
+        "value": {
+          "description": "The declared literal, a JSON number. A string (including a column name or '$' reference) is refused.",
+          "type": "number"
+        }
+      }
+    },
+    "when": {
+      "description": "Optional scope filter over the subject, with the same grammar as an Existence body's 'when' (shared field -> value/operator filterConditions). May be empty or absent: the threshold comparison itself scopes the subject.",
+      "$ref": "#/$defs/filterConditions"
+    },
+    "quietWindowDays": {
+      "description": "Per-rule quiet window in days after a dismissal before the subject may re-raise (D-13, spec FR-17a). Optional; absent means the 14-day default. Integer, 0..3650.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    "then": {
+      "description": "RESERVED, and refused (task 022 rework round 3, L2), exactly as for Existence; RuleBodySchemaValidator reports it with its own message before schema evaluation.",
+      "not": {}
+    }
+  },
+  "$defs": {
+    "filterConditions": {
+      "description": "The field -> value/operator grammar shared by every clause 'filter' and by the subject's 'when' scope (task 022 rework round 2, F7: 'when' previously accepted any object, so its values skipped the per-value rules below).",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/filterValue"
+      }
+    },
+    "filterValue": {
+      "description": "A scalar, an array of scalars (e.g. an id list), a single-operator comparison object, a two-bound relative-date range, or a null test (task 061). No variant admits a cross-clause variable reference.",
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scalar" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "patternProperties": {
+            "^(>=|<=|>|<|<>|=)$": { "$ref": "#/$defs/scalar" }
+          }
+        },
+        { "$ref": "#/$defs/dateRange" },
+        { "$ref": "#/$defs/nullTest" }
+      ]
+    },
+    "nullTest": {
+      "description": "Task 061 (D-54): a null test on the row's OWN column, written {\"null\": true} (the column has no value) or {\"notNull\": true} (it has one). It carries no operand: the only accepted value is the literal true, so a value that looks like a comparison ({\"null\": \"x\"}, {\"null\": 5}, {\"null\": false}) is refused rather than guessed at, and null is never written as a JSON null (that would overload '=' and '<>'). Exactly one member, so the two tests cannot be combined. Compiles to FetchXML operator 'null' / 'not-null' on the column, in the same AND filter as every other condition.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "null": { "const": true },
+        "notNull": { "const": true }
+      }
+    },
+    "dateRange": {
+      "description": "Owner decision D-40 (task 024): a date field may take exactly ONE lower bound ('>=' or '>') plus ONE upper bound ('<=' or '<'), both relative dates, e.g. {\">=\": \"now\", \"<=\": \"now+3d\"}. Compiles to two conditions in the same AND filter -- still one Dataverse filter (CM-3). Nothing more: no third bound, no two lower or two upper bounds, no '=' or '<>', no absolute or numeric bound.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        ">=": { "$ref": "#/$defs/relativeDate" },
+        ">": { "$ref": "#/$defs/relativeDate" },
+        "<=": { "$ref": "#/$defs/relativeDate" },
+        "<": { "$ref": "#/$defs/relativeDate" }
+      },
+      "not": {
+        "anyOf": [{ "required": [">=", ">"] }, { "required": ["<=", "<"] }]
+      }
+    },
+    "relativeDate": {
+      "description": "'now', 'now-{N}d' or 'now+{N}d' (N = 1-4 digits), resolved by the compiler against one window anchor (UTC). The lookahead refuses a newline anywhere: this library's '$' also matches before a trailing newline (review F3).",
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\n)now(?:[-+][0-9]{1,4}d)?$"
+    },
+    "scalar": {
+      "description": "A literal string, number or boolean. Strings MUST NOT begin with '$' -- that token is reserved for cross-clause variable dereferencing (e.g. '$commitment.sprk_receiveddate'), which this grammar does not support (design.md section 8.0.1(a)).",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?!\\$).*$"
+        },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    }
+  }
+}

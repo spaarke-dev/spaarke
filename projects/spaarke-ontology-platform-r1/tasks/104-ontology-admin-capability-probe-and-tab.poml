@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin: BFF capability probe and the role-gated workspace tab</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>008, 059 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-adjacent BFF route plus a gated UI entry point.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: the probe must reflect Dataverse privileges as the caller and must never become the security boundary.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>100, 101, 102 and 103 mount inside this tab and reuse its probe.</parallel-reason>
+    <deps>008, 059</deps>
+    <tags>bff-api,auth,security,frontend,admin</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a BFF probe that answers, as the caller, whether they can create sprk_policyversion, and an "Ontology admin" workspace tab that registers only when the probe says yes.</prompt>
+  <role>SPAARKE full-stack developer. The probe decides what is shown; Dataverse privileges decide what is allowed.</role>
+  <goal>The owner's account (Spaarke Ontology Administrator, task 008) sees the Ontology admin tab; a Console User does not; the probe is in the route census.</goal>
+
+  <context>
+    <background>D-22 (spec section 9; #41, #42, #47): a workspace tab "Ontology admin", shown only when a BFF capability probe says the caller can create sprk_policyversion; admin writes go through the BFF as the caller. There is no client-side role check anywhere in src/client or src/solutions, and BFF policies know app roles, not Dataverse security roles (#42). The Console has no top bar and no full-page mode, only three panes (#47). Owner decision 2 (2026-10-05): Ontology admin is its own phase after 031-034 and the worklist core.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminEndpoints.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/OntologyAdminTab.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-22): the probe checks, AS THE CALLER (IDataverseUserClient), whether the caller holds prvCreatesprk_PolicyVersion (e.g. RetrievePrincipalAccess / privilege check), and returns only a boolean capability set; it caches per caller for at most the token lifetime.</constraint>
+    <constraint source="owner">Scope (D-22): the tab is registered only when the probe returns true; it is a workspace tab, not a top bar or full page. Every admin write route (tasks 100, 101, 103) still authorizes itself as the caller; the probe is never the security boundary.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entry, RequireAuthorization, single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: the tab shell has three sub-areas (Rules, Classification, and nothing else in R1); M-11..M-14 pages (Actions, Suppression, Health, Access) are not built.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Role-gated admin entry</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 8) in notes.</step>
+    <step order="1">Implement the probe route with its census entry.</step>
+    <step order="2">Implement the tab shell and conditional registration.</step>
+    <step order="3">Tests as the owner's admin user and as a Console User.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the caller's privilege cannot be read as the caller without a privilege Console Users lack, STOP and escalate rather than probing with the service identity.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No client-side role check and no BFF probe of Dataverse privileges exists (#42). Workspace tabs register through WorkspaceWidgetRegistry.</existing>
+    <extension>Registration is reused; the probe is new because no route answers a Dataverse-privilege question for the caller.</extension>
+    <cost-of-doing-nothing>Every Console user would see admin screens whose writes then fail, or admin would need a separate app (#47 option b), which D-22 rejected.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Tab visibility">
+      <steps>
+        <step>Open the Console as the owner (administrator) and as a Console User</step>
+      </steps>
+      <expected>Only the administrator sees Ontology admin.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode with the tab open</step>
+      </steps>
+      <expected>The tab adapts via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="npm">Build the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/OntologyAdminTab.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the owner's admin user, when the probe is called, then it returns canAuthorPolicies true and the tab appears.</criterion>
+    <criterion testable="true">Given a Console User, when the probe is called, then it returns false and the tab is not registered.</criterion>
+    <criterion testable="true">Negative: an unauthenticated call gets 401; an unresolved caller gets 403; the route is in the census.</criterion>
+    <criterion testable="true">Negative: no Actions, Suppression, Health or Access page exists.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-56, NFR-10; D-22. Admin pages beyond slices a-c are reconciliation C-16, undecided.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -103,9 +103,9 @@ public sealed class AiClassificationRung : IAssociationRung
         var elapsed = Stopwatch.GetElapsedTime(startTs);
 
         _logger.LogInformation(
-            "Rung 5 (AI classify) fired | SubjectChars: {SubjectChars}, BodyChars: {BodyChars}, Signals: {SignalCount}, PrivilegeFlagged: {Privilege}, ElapsedMs: {ElapsedMs}",
+            "Rung 5 (AI classify) fired | SubjectChars: {SubjectChars}, BodyChars: {BodyChars}, Signals: {SignalCount}, PrivilegeFlagged: {Privilege}, TriageCategory: {TriageCategory}, ElapsedMs: {ElapsedMs}",
             subject.Length, body.Length, matches.Count,
-            result?.PrivilegeFlagged ?? false, (long)elapsed.TotalMilliseconds);
+            result?.PrivilegeFlagged ?? false, result?.TriageCategory, (long)elapsed.TotalMilliseconds);
 
         return matches;
     }
@@ -161,6 +161,9 @@ public sealed class AiClassificationRung : IAssociationRung
             Provenance =
                 $"ai-classify:category={category}:urgency={urgency}:types=[{string.Join(",", candidateTypes)}]:actions=[{actions}]:{rationale}",
             Rung = RungKind.AiClassification,
+            // D-117(b): the editable-taxonomy choice rides structurally (not in the provenance string, whose format
+            // the review UI parses), so the TRIAGE-EMAIL step can read it back as its hint.
+            TriageCategory = string.IsNullOrWhiteSpace(result.TriageCategory) ? null : result.TriageCategory,
         });
 
         // Privilege is a SIGNAL only (ADR-015) — never a filing decision. Emitted as a separate metadata-only

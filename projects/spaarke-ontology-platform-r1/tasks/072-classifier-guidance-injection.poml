@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Guidance injection into the classifier prompt</title>
+    <phase>7 Inquiry and the classifier</phase>
+    <gate>004 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes classifier behavior, which is the conjunction weakest input.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified change to one resolver.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>bff-api,ai,classifier</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend LookupChoicesResolver to emit name plus guidance, leaving the schema enum unchanged, so the ten authored guidance rows stop being inert.</prompt>
+  <role>SPAARKE backend developer. The taxonomy stays bounded.</role>
+  <goal>The model sees category guidance in the prompt while constrained decoding still binds to the bare category names.</goal>
+
+  <context>
+    <background>LookupChoicesResolver resolves sprk_name only, so the ten authored sprk_classifierguidance rows are inert and the model still sees bare labels. It cannot tell Fee or rate change from Invoice or Billing.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: emit name then guidance into the PROMPT. The JSON-Schema enum used for constrained decoding stays the bare names, UNCHANGED. If the enum changes, the model can emit a value nothing maps to.</constraint>
+    <constraint source="project">Scope: the zero-deployment taxonomy property comes from binding the prompt and the schema enum to the same Dataverse rows at run time. Preserve it.</constraint>
+    <constraint source="project">Scope: choices resolution is BEST-EFFORT (NFR-04), and a Dataverse read failure degrades SILENTLY to the pre-2026-09-04 behavior (category null on 100 percent of captures). Do not make that worse, and emit to App Insights when it happens (issue 1049).</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Prompt construction and bounded taxonomies</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Extend the resolver to read sprk_classifierguidance alongside sprk_name.</step>
+    <step order="2">Emit name then guidance into the prompt choices block.</step>
+    <step order="3">Leave the schema enum as the bare names and assert this in a test.</step>
+    <step order="4">Add App Insights emission when choices resolution fails, so the silent degradation becomes visible.</step>
+    <step order="5">Add tests: guidance appears in the prompt; the enum is unchanged; a resolution failure is observable.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If emitting guidance requires changing the schema enum, STOP and escalate. A changed enum lets the model emit a value nothing maps to, which is worse than bare labels.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Resolvers</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the ten authored guidance rows, when the prompt is built, then each category appears with its guidance.</criterion>
+    <criterion testable="true">Given the same build, when the JSON Schema is inspected, then the enum contains the bare category names only.</criterion>
+    <criterion testable="true">Given a new taxonomy row with guidance, when the next enrichment runs, then it is live with NO deployment.</criterion>
+    <criterion testable="true">Negative: given a Dataverse read failure during choices resolution, then the failure is emitted to App Insights rather than degrading silently.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-38 and NFR-09. Issue 1049 is the silent-degradation tracker.</notes>
+
+  <completion>
+    <date>2026-10-07</date>
+    <summary>LookupChoicesResolver reads sprk_classifierguidance for sprk_triagecategory (single entry in a guidance-column map) and places "name - guidance" lines on a side key (guidance:{ref}); the value at the reference key, which becomes the schema enum, stays the bare names. PromptSchemaRenderer renders an "Allowed values" section for both structured and text output (the TRIAGE-EMAIL action is structuredOutput:true, where the prompt previously listed no categories at all). Choices-resolution failures (read threw, empty result, guidance read failed) emit ai_choices_resolution_failures_total on the existing Sprk.Bff.Api.Ai meter (#1049). Deviation: the change also touches PromptSchemaRenderer, IScopeResolverService and ScopeResolverService, not only the resolver; see notes/072-progress.md.</summary>
+    <evidence>Round 2 (review fixes): Services.Ai + Seam tests 6566 passed, 0 failed (the Signals live seams fail only when SIGNALS_LIVE_DATAVERSE_URL is set without their other settings; unrelated). TriageGuidanceLiveSchemaTests passes live against spaarkedev1 using the shared URL builders and the sprk_enabled filter; a one-off disabled row (zz-072-disabled, since deleted and confirmed gone) was returned by "statecode eq 0" (11 rows) and excluded by the production filter (10 rows). Publish size, PowerShell Compress-Archive Optimal, fresh worktrees on short paths C:\w72m/w72b/w72p, publish default Release output with the 4 PDBs it contains included, 192 files on all three sides: fresh master 36ff14147 = 36.22 MB; branch parent 65ff77650 = 36.23 MB; branch head = 36.24 MB; delta vs parent +0.01 MB. No vulnerable packages. Out-of-scope defect filed: issue 1387 (ISS-007).</evidence>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

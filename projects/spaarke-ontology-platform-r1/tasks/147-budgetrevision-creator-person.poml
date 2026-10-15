@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="147" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Budget revision records its requester: ReviseBudgetExecutor stamps sprk_createdbyperson; drop the UAC 182 census exemption (#1777)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: #1780 (UAC 182) merged</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies a .cs write path and an ArchTest census.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-writer change following the existing RequestedBy pattern in other stamped child writers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only DecisionActionExecutors (ReviseBudgetExecutor), RecordCreatorPerson.StampedChildTables, the creator-person script table list and the census test; 142/143 add their own tables to the same two lists — coordinate by rebasing, entries are independent lines.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,dataverse,testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make every budget revision record the person who requested it, so the census guard holds for sprk_budgetrevision without an exemption.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>#1777 closed: ReviseBudgetExecutor passes RequestedBy, sprk_budgetrevision is a stamped child table, and the single-table exemption UAC 182 added is removed.</goal>
+
+  <context>
+    <background>D-135 (Q27): the owner created sprk_budgetrevision.sprk_createdbyperson (lookup → systemuser, nav sprk_CreatedByPerson, relationship name form `sprk_{table}_CreatedByPerson_systemuser`) on spaarkedev1. Issue #1777 holds the full description. Field security / profile grants and SpaarkeCore membership are open owner items (D-135 (c)(d)) — not this task.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs (ReviseBudgetExecutor; resolver call ~:429, ApplyTo ~:532)</file>
+      <file>RecordCreatorPerson.StampedChildTables (Grep for it)</file>
+      <file>scripts/Set-ChildRecordCreatorPersonSchema.ps1 ($Tables; relationship-name check)</file>
+      <file>tests/Spaarke.ArchTests — RecordOwnerAssignmentCensusTests (CreatorPersonColumnPending), ChildRecordCreatorPersonSchemaAgreementTests</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="#1777">RequestedBy is the acting user of the decision commit (the person who caused the revision), passed through the resolver context so ApplyTo stamps it — copy how an existing stamped child writer passes RequestedBy (Grep `RequestedBy =`).</constraint>
+    <constraint source="D-135">Add sprk_budgetrevision to StampedChildTables AND the script's $Tables in the same commit; teach the script's relationship-name check the `sprk_{table}_CreatedByPerson_systemuser` form (it is not an error) instead of accepting a warning.</constraint>
+    <constraint source="project">No schema, role or field-security changes; no live data writes. Never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Wire RequestedBy in ReviseBudgetExecutor; add the table to both lists; remove the CreatorPersonColumnPending exemption and its negative-control case that targets it (keep the other negative controls).</step>
+    <step order="2">Tests; build; ArchTests; draft PR targeting docs/ontology-platform-design; send to uac-r2 (they own the census guard).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A revision created by the executor carries sprk_createdbyperson = the acting user (unit test on the built entity).</criterion>
+    <criterion testable="true">With no resolvable acting user the executor behaves as today for ownership and records no person (no throw), with a test.</criterion>
+    <criterion testable="true">EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn passes with no sprk_budgetrevision exemption; ChildRecordCreatorPersonSchemaAgreementTests passes.</criterion>
+    <criterion testable="true">The script's relationship-name check accepts the alternate name form (a script test or a Pester case if the script has tests; otherwise a one-line note in the PR explaining the manual check).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-135, #1777). No new surface (§11 n/a: modifies existing writer and lists). D-135 (c)/(d) CLOSED on dev 2026-10-12 (uac-r2 verified): sprk_createdbyperson is field-secured on budgetrevision/decisionrecord/signal with Readers (Read) and Writers (Read/Create/Update), and travels in SpaarkeMaster and OntologyPlatformSolution, both of which hold the whole table. When adding the table to `scripts/Set-ChildRecordCreatorPersonSchema.ps1` `$Tables`, teach the script two things: the SpaarkeMaster/OntologyPlatformSolution membership, so its SpaarkeCore check is not a false gap; and the `sprk_{table}_CreatedByPerson_systemuser` relationship name.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

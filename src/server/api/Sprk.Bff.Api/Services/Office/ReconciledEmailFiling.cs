@@ -5,6 +5,8 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -40,7 +42,9 @@ public enum ReconciledFilingResult
 /// the owner re-derived by <see cref="Dataverse.IRecordOwnershipResolver.ReparentAsync"/> (the named Secure team under a
 /// secure record). It applies the decision the capture already evaluated for THIS save, with the save's record as the
 /// caller-supplied regarding (rung 0) — narrowed by the resolver to that one record, so nothing else the engine proposed is
-/// written by the caller's act, and the provenance marks every dropped candidate not written. Then <see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step after every re-file (the row's share
+/// written by the caller's act, and the provenance marks every dropped candidate not written. Then the core-ancestor re-stamp
+/// of what is filed under the communication (<see cref="CoreAncestorRestamper.AfterWriteAsync"/>, ontology task 144 — the
+/// same call the communication filing route and the AI update tool make), then <see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step after every re-file (the row's share
 /// mirror and task 148's pass over what is filed under it). Nothing here writes a regarding column by hand.</para>
 /// <para><b>Authorization: the communication re-file rule.</b> <c>PATCH /api/communications/{id}/filing</c> requires Write on
 /// the communication as the caller (<c>CommunicationRecordAuthorizationFilter</c>, <c>Refile</c>) and AppendTo on the record
@@ -68,20 +72,28 @@ public sealed class ReconciledEmailFiling
     private readonly IGenericEntityService _dataverse;
     private readonly CallerRecordAccessProbe _accessProbe;
     private readonly SecureChildReconciler _children;
+    private readonly CoreAncestorRestamper _restamper;
     private readonly ILogger<ReconciledEmailFiling> _logger;
+    private readonly SignalEvaluationTrigger? _signalTrigger;
 
+    /// <param name="signalTrigger">Ontology D-48 (#1659): queues the matter's Signal re-evaluation once a classified communication
+    /// is filed to it. Registered in production; null only where a test builds the filing without it.</param>
     public ReconciledEmailFiling(
         IncomingAssociationResolver associationResolver,
         IGenericEntityService dataverse,
         CallerRecordAccessProbe accessProbe,
         SecureChildReconciler children,
-        ILogger<ReconciledEmailFiling> logger)
+        CoreAncestorRestamper restamper,
+        ILogger<ReconciledEmailFiling> logger,
+        SignalEvaluationTrigger? signalTrigger = null)
     {
         _associationResolver = associationResolver ?? throw new ArgumentNullException(nameof(associationResolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
         _children = children ?? throw new ArgumentNullException(nameof(children));
+        _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
         _logger = logger;
+        _signalTrigger = signalTrigger;
     }
 
     /// <summary>
@@ -124,6 +136,36 @@ public sealed class ReconciledEmailFiling
                 .ApplyToExistingRecordAsync(communicationId, capture.Decision, target.EntityId, ct)
                 .ConfigureAwait(false);
 
+            // Ontology task 144: the rows filed under the communication (to-dos, events, Signals, Decision Records) copy its
+            // root, so they are re-stamped NOW, in the same operation — the filing route and the AI update tool do the same.
+            // A stamp left stale since the communication was unfiled outside the BFF is corrected here rather than at the
+            // 5-minute job. Before the step below, which reads those stamps as ownership parents. The restamper never throws
+            // by contract (no caller token is passed); a fault here is still caught locally, because the filing has landed and
+            // the ownership step and the Signal trigger below must run whatever happens to the re-stamp.
+            try
+            {
+                var restamp = await _restamper
+                    .AfterWriteAsync(CommunicationEntity, communicationId, FilingColumns, CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!restamp.Complete)
+                {
+                    _logger.LogWarning(
+                        "Office save filed communication {CommunicationId}, but the core-ancestor re-stamp of what is filed under " +
+                        "it did not finish (failures={Failures} truncated={Truncated}); the reconciliation job repairs it within one " +
+                        "cycle, except Signals and Decision Records while they are report-only there (ontology task 144).",
+                        communicationId, restamp.Failures.Count, restamp.Truncated);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Office save filed communication {CommunicationId}, but the core-ancestor re-stamp of what is filed under it " +
+                    "faulted; the filing stands, and the reconciliation job re-stamps them within one cycle, except Signals and " +
+                    "Decision Records while they are report-only there (ontology task 144).",
+                    communicationId);
+            }
+
             // The one step after every re-file. Never throws; the filing above stands.
             await _children.AfterRefileAsync(
                 CommunicationEntity, communicationId,
@@ -135,6 +177,12 @@ public sealed class ReconciledEmailFiling
             _logger.LogInformation(
                 "Office save filed the unfiled communication {CommunicationId} it reconciled to under {EntityType} {EntityId} " +
                 "(task 121).", communicationId, target.EntityType, target.EntityId);
+
+            // Ontology D-48 / #1659 (additive): a communication classified first and filed to a matter now is evaluated for
+            // that matter's Signals at once, not at the nightly pass. Never throws; the filing above stands either way.
+            await FiledCommunicationSignalTrigger
+                .EnqueueIfClassifiedOnMatterAsync(_dataverse, _signalTrigger, communicationId, _logger)
+                .ConfigureAwait(false);
             return ReconciledFilingResult.Filed;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
