@@ -22,6 +22,7 @@
 - **Ontology:**
   - CLEAN and merged or merging: #1854 (143), #1858 (148: report-only first, and UAC reviews the dev run before the owner enables writes), #1862 (144).
   - #1874 (145) CLEAN at `75114b170`; #1878 (042) CLEAN at `72fe75054`. #1871 closed (not planned).
+  - #1891 (038): CLEAN. UAC's K1 fix (witness walker batching) is PR #1892 (`uac/k1-witness-batch`, worktree `C:/wtk1891`), which ontology reviews and merges after #1891. DI-86 and K2 go to the owner through ontology.
   - Task 183 (#1797) closes after ontology's 148 live gate (412 → Conflict).
 - **Provisioning:** 185's release gate is MET. SpaarkeMaster 1.2.3.0 is published (CI run 38603706393, master `bd52b6290`, PR #1860) and carries `contact.sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. T240d builds on `6da771b96`.
 - **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
