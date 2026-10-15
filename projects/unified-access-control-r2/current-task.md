@@ -10,7 +10,7 @@
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
 | **Running** | Nothing. The ontology reviews are done: #1874 (145) CLEAN at `75114b170`, #1878 (042) CLEAN at `72fe75054`. Ontology merges them. Their D-139 follow-up PR (one DR per gate decision, written by an ADR-004 job) comes to UAC for review. |
-| **Next Action** | 136/037/039 (+135 gate) wait on the owner's combined CIAM session, checklist §14 (the agent does the BFF grants on request). Workforce half PASSED 2026-10-14 (notes/task-136 §12). Then pick the next uac-r2 item with the owner: 036, 099, 090 wrap-up, 013/058 bookkeeping. |
+| **Next Action** | After ontology #1905 merges: update `RouteAuthorizationGuardTests.Ledger.cs` per notes/ledger-followup-1905.md. UAC reviews: #1903 CLEAN (98b5a1ee0), #1905 CLEAN (e5fb90b09), #1907 waits for ontology's CLEAN SHA. #1908 closed (fixed by #1666); filed #1914, #1921. #1909 merged 928a71fa7. Then: 136/037/039 (+135 gate) wait on the owner's combined CIAM session, checklist §14 (the agent does the BFF grants on request). Workforce half PASSED 2026-10-14 (notes/task-136 §12). Then pick the next uac-r2 item with the owner: 036, 099, 090 wrap-up, 013/058 bookkeeping. |
 
 ## Done this session
 - **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
