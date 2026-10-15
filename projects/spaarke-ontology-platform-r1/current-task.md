@@ -19,12 +19,11 @@
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 059 worklist widget | #1964 | `88a4c75ff` | `C:\wts-059` | Review fixes re-checked CLEAN. The first merge attempt failed the client-lint ratchet (3 no-unnecessary-condition); fixed in `88a4c75ff`. merge-when-green running. |
 | 154 worklist route fields + inquiry lookup | — | — | `C:\wts-154` | Opus/high implementer running. Gates 055. |
 | 153 satisfied close writes a Routine DR (D-145b) | #1953 | `4d5f8bbfb` | `C:\wts-153` | Pass 2 fixed: both writer lookups require createdby = the writer (WhoAmI on the writer MI, cached, fail closed); a retry replaces only a writer-created non-resolving link; Warnings on the orphan and abandon paths. 734 filtered tests and 1046 ArchTests pass; 7 seeding proofs. With uac-r2 for re-check, then merge on green. |
 | 146 child-contract live gate | #1933 | `48d846851` → fix | `C:\wts-146` | Review found F1: the record's "no leak" claim contradicts K-2 and item 8. Also K-1 (partition followed the owner, contrary to `SignalSuppressionService.cs:152-156`; possible code defect), item 9 is only PARTIAL (single-BU cast), item 1 is PARTIAL (#1872), and the guide preflight (Codex P1). Sonnet fix round running; it files issues from DI-93. |
 
-Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
+Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`).
 
 ## Dev state (spaarke-bff-dev)
 
@@ -33,7 +32,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Next, in order
 
-1. Merge 153 (needs uac-r2 sign-off) and 059.
+1. Merge 153 (uac-r2 re-check running) and 154; then launch 155 (needs 154).
 2. 146 re-run → merge #1933 → 144/148 report-only pass → uac-r2 → enable writes.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
 4. Docs branch → master merge (tell uac-r2), then the **055** Console deploy, then 049, 064, 105.
