@@ -327,7 +327,13 @@ public class ADR010_DITests
         // FetchXml-reading singleton with a scoped IGenericEntityService behind it. The reader is a singleton that takes a scope per
         // cache-miss load (like IAllowedIndexesProvider above, which is the accepted precedent); a concrete registration would put
         // that Dataverse plumbing into every consumer test. Verified as the only addition on this branch (master measured 159).
-        const int knownOneToOneCeiling = 160;
+        // ───────── Ceiling raised 160 → 161, 2026-10-15 (ebilling-r1 task 016) ─────────
+        // IInvoiceTotalsService -> InvoiceTotalsService. SEAM JUSTIFICATION: it is the one server-side owner of invoice totals (FR-07,
+        // I-1; ADR-002 one owner per invariant) and the module boundary its four named callers fake: the submission job (049) and the
+        // line-decision, adjustment and approval operations (100-102) are each proven by a Moq double that returns a calculation or a
+        // refusal (FR-32), not by standing up the Dataverse read-compute-conditional-write behind it. Same category as
+        // IEbillingSettingsReader above. Falsifiable: if no caller fakes it by 102, register the concrete and drop this back to 160.
+        const int knownOneToOneCeiling = 161;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

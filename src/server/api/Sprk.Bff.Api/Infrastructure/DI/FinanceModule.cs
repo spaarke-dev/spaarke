@@ -53,6 +53,10 @@ public static class FinanceModule
         // scoped IGenericEntityService, so background jobs and requests share one cache. Unconditional (see the flag rule above).
         services.AddSingleton<IEbillingSettingsReader, EbillingSettingsReader>();
 
+        // Invoice totals (ebilling-r1 task 016, FR-07, I-1, D-42): the one server-side owner of an invoice's five totals and its
+        // Adjustment-line amounts. Scoped: stateless, holds only the (singleton) Dataverse clients. Unconditional (flag rule above).
+        services.AddScoped<IInvoiceTotalsService, InvoiceTotalsService>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================

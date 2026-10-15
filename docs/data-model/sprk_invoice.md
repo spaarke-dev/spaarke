@@ -25,6 +25,19 @@ Columns and statuscode values below were added to dev by `scripts/ebilling/Deplo
 
 `sprk_totalamount` (existing, money) stays the **billed total**. Each new money column also gets a system `_base` companion (base-currency value) from Dataverse. `sprk_invoicestatus` is unchanged here (task 015 retires it).
 
+### Totals calculation (FR-07, I-1, D-42; task 016)
+
+The five totals and every Adjustment line's `sprk_amount` are written only by `InvoiceTotalsService.RecalculateAsync(invoiceId)` (`Services/Finance/InvoiceTotalsService.cs`), which applies `InvoiceTotalsCalculator` (`Services/Finance/InvoiceTotalsCalculator.cs`). No API takes a total from a caller. Definitions:
+
+- fees total = sum of `sprk_amount` of Fee lines; expenses total = the same for Expense lines (both as billed);
+- a Fee or Expense line's adjustment = `sprk_amount - sprk_approvedamount` when its status is Reduced, `sprk_amount` when Disallowed, 0 otherwise; line-adjustments total = the sum;
+- a Percent Adjustment line = `value% x (fees total - sum of the Fee lines' adjustments)`, expenses never in the base, every percent line on the same base (they do not compound); a Fixed Adjustment line = its value; invoice-adjustments total = the sum of the Adjustment-line amounts;
+- approved total = `sprk_totalamount` (billed) - line-adjustments total - invoice-adjustments total.
+
+**Rounding.** `decimal` arithmetic; each computed adjustment and each total is rounded to 2 decimals with `MidpointRounding.AwayFromZero` (half a cent rounds up, not to even). USD only in R1; no currency conversion.
+
+**Refusals (FR-32), stable codes, nothing written.** `invoice-totals.approved-total-negative`; and, fail-closed, `invoice-totals.line-cost-type-unknown` (a line with no Fee / Expense / Adjustment cost type), `invoice-totals.line-approved-amount-invalid` (Reduced line with no approved amount, or one outside 0 .. billed amount), `invoice-totals.adjustment-invalid` (Adjustment line with no method / value, a negative value, or a percent above 100).
+
 ### Status (`statecode` / `statuscode`, FR-06, D-41)
 
 | statuscode | Label | statecode | Origin |
