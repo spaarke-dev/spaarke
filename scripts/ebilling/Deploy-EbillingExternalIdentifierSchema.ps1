@@ -288,4 +288,6 @@ Write-Host ("created : {0}  {1}" -f $script:Created.Count, ($script:Created -joi
 Write-Host ("changed : {0}  {1}" -f $script:Changed.Count, ($script:Changed -join ', '))
 Write-Host ("skipped : {0}" -f $script:Skipped.Count)
 if ($DryRun) { Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan }
+# ebilling-r1 task 013: sprk_createdbyperson is created here UNSECURED; only the creator-person script secures it and grants the BFF profiles.
+Write-Host "NEXT: run scripts/Set-ChildRecordCreatorPersonSchema.ps1 (dry run, -Apply, -Verify) so sprk_createdbyperson is field-secured (only the BFF may write it)." -ForegroundColor DarkYellow
 exit 0
