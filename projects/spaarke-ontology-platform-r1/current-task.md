@@ -11,36 +11,41 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 149 F1 fix round (D-144 amended); 146 re-run of blocked items after R3's deploy; 152 ready to launch. |
-| **Blocker** | None. |
-| **Next Action** | (1) 149 fix SHA → uac-r2 re-check → empty CI commit not needed if the fix push itself triggers SDAP CI → merge on green. (2) When R3 reports their deploy done, re-run 146 items 1, 2, 3, 9, 11 (commit-route DRs) on dev, then review + merge #1933. (3) Launch 152 (opus/high) from `origin/docs/ontology-platform-design`. |
+| **Task** | 152 (#1946) uac-r2 F3 fix round; 153 (#1953) adversarial pass 1; 146 blocked on the dev BFF connection's privilege cache. |
+| **Blocker** | 146 items 1, 2, 3, 9, 11 need a dev BFF restart (my restart or R3's #1949 redeploy). Waiting on the owner. |
+| **Next Action** | (1) 152 agent `af490c65f025a85b5` returns the F3 test SHA, then send it to uac-r2 for a re-check, then merge on green, then close #1921. (2) 153 pass-1 reviewer `a97a4b7bbe382f169` returns, then a fix round that keeps uac-r2's anti-spoof property, then pass 2, then uac-r2, then merge. (3) After the BFF restarts, wait about 15 minutes, then resume the 146 agent to re-run its blocked items. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 149 gate DR queue job (D-139, D-144 amended) | #1907 | `b2551050a` → fix | `C:\wts-149` | uac-r2 F1: BU default-team owner exposed subject + privilege flag to the whole BU. Owner ruling ([comment](https://github.com/spaarke-dev/spaarke/pull/1907#issuecomment-6198338714)): owner = the communication's own owner after secure-if-any; missing/unreadable owner → skip; Console User / Ontology Admin Deep-read exposure accepted. Sonnet fix round running (same agent as the K round). |
-| 146 child-contract live gate | #1933 | `02b2da9d8` | `C:\wts-146` | Docs-only PR, not merged. Pass: 5, 6, 7, 10; partial 4, 9; blocked 1, 2, 3, 8, 11. K-c (writer lacked AppendTo on contact) **fixed** 17:38:31Z (security-roles §13). Re-run 1, 2, 3, 9, 11 after R3's deploy. Item 8 gap (out-of-band Make Secure not re-owned in 420 s; uac-r2 reconcile `mode=ReportOnly` on dev) asked of uac-r2. Test data all deleted. |
+| 152 Do-lane suppression per person (D-145a) | #1946 | `06c5dd473` → fix | `C:\wts-152` | uac-r2 F3 is the Do-lane secure wall. Test: Bob's 3 dismissals in secure family S must not stamp or mute his open Do item in M's ordinary partition, with a seeding proof. Agent running. |
+| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `09e2d6432` | `C:\wts-153` | Adversarial pass 1 is running and was given uac-r2's anti-spoof check: `FindGateRecordAsync` matched only `sprk_confirmedby IS NULL`, and the switch to `Plan.IsGate` must not let a human, condition-cleared or crafted-`sprk_steps` DR satisfy or block the gate lookup. Also watch: "a failed record write fails the run" vs the fail-closed rule and the evaluator-stalled alert; the 7-day backfill. |
+| 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | Docs only. Items 5, 6, 7, 10 pass; 4 and 9 are partial; 8 is the UAC known limit. Items 1, 2, 3, 9, 11 are refused because the BFF connection still caches the writer's privileges after the AppendTo-contact grant (`RetrievePrincipalAccess` flipped at 17:51Z). All test data is deleted. |
 
-Merged today into the docs branch: #1926 (master sync, NU1903 pin), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`).
+Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`).
 
 ## Dev state (spaarke-bff-dev)
 
-- R3 is deploying `20b187d07` (R3 + master `f63b57f8d`, contains our `f292ad119`) with our "go"; they report SHA + healthz. Writer setting `Ontology__Writer__ManagedIdentityClientId=69040982-…` must survive (it did last time).
-- **Writes stay OFF** for 144 (`CoreAncestor__StampReconciliation__ReportOnlyTables`) and 148 (`Ontology__TodoAssigneeOwner__WritesEnabled`) until: real Signals exist → one report-only pass of both → uac-r2 CLEAN → set `ReportOnlyTables=","` and `WritesEnabled=true` (BFF restarts: notify word-add-in, R3, uac-r2 before and after).
+- Runs R3's `3115b90f2`, which contains our `f292ad119` and the writer setting `Ontology__Writer__ManagedIdentityClientId=69040982-…`.
+- **Writes stay OFF** for 144 (`CoreAncestor__StampReconciliation__ReportOnlyTables`) and 148 (`Ontology__TodoAssigneeOwner__WritesEnabled`). Order: 146 merged → one report-only pass of both → uac-r2 CLEAN → set `ReportOnlyTables=","` and `WritesEnabled=true`. Notify word-add-in, R3 and uac-r2 before and after each restart.
 
 ## Next, in order
 
-1. 149 merge; mark ✅. Then launch **153** (D-145b, after 149).
-2. **152** (D-145a, Do-lane suppression per person) — deps 150/151 merged; launch now.
-3. 146 re-run → #1933 merge → 144/148 report-only pass → uac-r2 → enable writes.
-4. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882) → close #1882.
-5. **059** worklist widget (render `withheld: true` evidence lines) → **055** Console deploy → 049, 064, 105.
-6. ebilling: their 070 (policy readers filter `sprk_domain` null OR Ontology, admin tab too) comes to us for review; they message base + files first. Their 013/015/026/050/074 also come to us.
+1. Merge 152 and 153 (each needs uac-r2 sign-off).
+2. 146 re-run → merge #1933 → 144/148 report-only pass → uac-r2 → enable writes.
+3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
+4. **059** worklist widget, then the **055** Console deploy, then 049, 064, 105.
+5. ebilling: their 070, 013, 015, 026, 050 and 074 come to us for review.
+
+## Promises to peers
+
+- **uac-r2:** tell them when `docs/ontology-platform-design` merges to master (they then update the route-authorization ledger for #1903/#1905/#1907/#1946). On #1953 they check that the gate lookup still cannot be satisfied or blocked by a human review DR (the `sprk_confirmedby IS NULL` anti-spoof property of #1907).
+- **R3:** message before the two app-setting restarts (144/148 writes).
 
 ## Open owner questions
 
-- None. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
+- Approve R3's redeploy with uac-r2's #1949, and/or a dev BFF restart by us. Either clears the 146 privilege cache. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
 
 ## Peers (current session names)
 
