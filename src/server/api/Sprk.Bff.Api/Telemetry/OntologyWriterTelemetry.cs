@@ -333,6 +333,10 @@ public static class OntologyWriterFailureReason
     /// <c>ReownOrdinaryRowAsync</c> answered Failed, or faulted).</summary>
     public const string SignalReassignFailed = "signal_reassign_failed";
 
+    /// <summary>Ontology task 153 (D-145b): linking a Do-lane Signal closed as ConditionCleared to its Routine Decision Record
+    /// (<c>sprk_decisionrecord</c>, <c>sprk_resolvedby</c>) failed in Dataverse. The record exists; the next pass finds it by its key and links it.</summary>
+    public const string SignalRecordLinkFailed = "signal_record_link_failed";
+
     /// <summary>Task 031 (D-13): a <c>sprk_signal.sprk_dedupekey</c> under a policy is not
     /// <c>{policycode}|{type}|{id}|{episode}</c>, so its episode cannot be read and the subject is not re-raised.</summary>
     public const string DedupeKeyUnparseable = "dedupe_key_unparseable";

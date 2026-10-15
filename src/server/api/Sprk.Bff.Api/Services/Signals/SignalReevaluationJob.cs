@@ -5,6 +5,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -19,7 +21,10 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// the Redis lease gives one run per schedule across instances, the run history is in the admin jobs endpoint, and no timer
 /// <c>BackgroundService</c> is added. Hundreds of rows a night is not a scale problem; fewer moving parts wins.</para>
 /// <para><b>One component decides both directions.</b> A hit with no open Signal is raised; an open Signal whose subject is no
-/// longer a hit is closed as <c>ConditionCleared</c> (no Decision Record, FR-16); a Resolved Signal is never closed again. The
+/// longer a hit is closed as <c>ConditionCleared</c> (FR-16); a Resolved Signal is never closed again. Task 153 (D-145b): a DO-lane
+/// Signal closed that way (its subject no longer a hit, so not a re-file) then gets ONE Routine Decision Record naming, best effort, the
+/// person who changed the subject (<see cref="DecisionRecordWriter.WriteConditionClearedAsync"/>), linked to the Signal; a Decide-lane
+/// ConditionCleared, a re-file and every Superseded or PolicyRetired closure stay record-free. The
 /// Superseded and PolicyRetired closures are task 033's (<see cref="SignalClosureService"/>, run from this job); the planner
 /// re-raises their episodes.</para>
 /// <para><b>Re-raise rule (D-13, D-32, FR-03, FR-17a).</b> See <see cref="SignalEpisodePlanner"/>.</para>
@@ -48,6 +53,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     private readonly SignalWriter _writer;
     private readonly SignalSuppressionService _suppression;
     private readonly SignalClosureService _closure;
+    private readonly DecisionRecordWriter _records;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _timeProvider;
@@ -58,6 +64,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         SignalWriter writer,
         SignalSuppressionService suppression,
         SignalClosureService closure,
+        DecisionRecordWriter records,
         IGenericEntityService entities,
         IDistributedCache cache,
         TimeProvider timeProvider,
@@ -67,6 +74,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _closure = closure ?? throw new ArgumentNullException(nameof(closure));
+        _records = records ?? throw new ArgumentNullException(nameof(records));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -303,9 +311,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     "resolution time is unknown), so they stay un-raised.", policy.Code, plan.NoDatedEvidence);
             }
 
-            await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
+            var closedNow = await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
             await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
+            if (lane == SignalWriter.LaneDo)
+            {
+                // Task 153 (D-145b): after the redaction, whose conditional writes are planned on the versions read; each link below reads
+                // its Signal again first.
+                await RecordConditionClearedAsync(policy, evaluation.Hits, unjudged, existing, closedNow, now, counts, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -369,7 +383,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
     }
 
-    private async Task ApplyAsync(PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
+    /// <returns>Task 153: every Signal this pass closed as ConditionCleared, with the time it was closed.</returns>
+    private async Task<IReadOnlyDictionary<Guid, DateTime>> ApplyAsync(
+        PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
     {
         // Task 145 (D-123, #1747 finding e): a Signal never carries the subject or sender of a witness in another (or an undetermined)
         // secure family. Every write below can create a row (a reconcile creates when its row is gone), so both take the filtered lines.
@@ -380,6 +396,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
         var closedIds = new HashSet<Guid>();
+        var closedAt = new Dictionary<Guid, DateTime>();
         foreach (var signal in plan.Closes)
         {
             await GuardAsync(policy, "close", signal.SubjectId, counts, writerLogged: true, async () =>
@@ -390,6 +407,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 {
                     counts.Closed++;
                     closedIds.Add(signal.Id);
+                    closedAt[signal.Id] = _timeProvider.GetUtcNow().UtcDateTime;
                 }
                 else
                 {
@@ -480,6 +498,137 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 else counts.Written++;
             }).ConfigureAwait(false);
         }
+
+        return closedAt;
+    }
+
+    /// <summary>Task 153: how long after its close a Do-lane ConditionCleared Signal whose record could not be written or linked is still
+    /// retried by a later pass. Past it the closure stays unrecorded (it was logged and metered on every failed attempt).</summary>
+    internal static readonly TimeSpan ConditionClearedRecordRetryWindow = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Task 153 (D-145b, D-139): one Routine Decision Record per Do-lane Signal closed as ConditionCleared, written AFTER the close and never
+    /// instead of it: a failure leaves the Signal closed, is logged and metered (<c>ontology.writer.failures</c>, by the writer) and fails the
+    /// run, and a later pass retries through the record's idempotent key.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which closures.</b> (1) Every Signal this pass closed whose subject is not a hit: the condition cleared. A re-file's close (its
+    /// subject still a hit, a new episode opens under the new core) is not a satisfied item and gets no record. (2) Retries: a Signal of this
+    /// policy that is Resolved as ConditionCleared, links no record, was closed within <see cref="ConditionClearedRecordRetryWindow"/>, is
+    /// the latest episode of its subject, and whose subject is neither a hit nor unjudged this pass. A Signal that already names a record is
+    /// never touched (D-61: a re-run writes nothing).</para>
+    /// <para><b>Per Signal.</b> The core record's table (once per type per pass), D-134's assignee for a no-core To Do, the writer's entry
+    /// point (lookup, attribution read, filing, owner, create), then the link (<see cref="SignalWriter.LinkConditionClearedRecordAsync"/>).</para>
+    /// </remarks>
+    private async Task RecordConditionClearedAsync(
+        PolicyRow policy, IReadOnlyList<SignalHit> hits, IReadOnlySet<(string, Guid)> unjudged, IReadOnlyList<ExistingSignal> existing,
+        IReadOnlyDictionary<Guid, DateTime> closedNow, DateTimeOffset now, RunCounts counts, CancellationToken ct)
+    {
+        var hitSubjects = hits.Select(h => (h.SubjectEntity, h.SubjectId)).ToHashSet();
+        var latestEpisode = existing
+            .GroupBy(s => (s.SubjectEntity, s.SubjectId))
+            .ToDictionary(g => g.Key, g => g.Max(s => s.Episode));
+        var retryFrom = now.UtcDateTime - ConditionClearedRecordRetryWindow;
+
+        var candidates = new List<(ExistingSignal Signal, DateTime ClosedOn)>();
+        foreach (var signal in existing)
+        {
+            var subject = (signal.SubjectEntity, signal.SubjectId);
+            if (hitSubjects.Contains(subject) || unjudged.Contains(subject))
+            {
+                continue; // still a hit (a re-file), or not judged: the condition is not known to have cleared
+            }
+
+            if (closedNow.TryGetValue(signal.Id, out var closedOn))
+            {
+                candidates.Add((signal, closedOn));
+            }
+            else if (signal.IsResolved
+                     && signal.Resolution == SignalWriter.ResolutionConditionCleared
+                     && signal.DecisionRecordId is null
+                     && signal.ResolvedOn is { } resolvedOn
+                     && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= retryFrom
+                     && latestEpisode[subject] == signal.Episode)
+            {
+                candidates.Add((signal, DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc)));
+            }
+        }
+
+        if (candidates.Count == 0) return;
+
+        var coreTables = new Dictionary<Guid, string?>();
+        int recorded = 0, failed = 0;
+        foreach (var (signal, closedOn) in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                DecisionRecordCore? core = null;
+                if (signal.CoreTypeRefId is { } typeRef && signal.CoreRecordId is { } coreId)
+                {
+                    if (!coreTables.TryGetValue(typeRef, out var table))
+                    {
+                        var row = await _entities.RetrieveAsync("sprk_recordtype_ref", typeRef, new[] { "sprk_recordlogicalname" }, ct).ConfigureAwait(false);
+                        table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+                        coreTables[typeRef] = table;
+                    }
+
+                    if (table is null || !CoreAncestorResolver.CoreRecordEntities.Contains(table, StringComparer.Ordinal))
+                    {
+                        // D-34: the record copies its Signal's core; a core type that names no core table cannot be copied. Never written
+                        // without it (that would file the closure as a no-core item's).
+                        failed++;
+                        _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                            "Policy {PolicyCode}: the closure of Signal {SignalId} was not recorded (reason={Reason}): its core record type names no core table. The Signal stays closed.",
+                            policy.Code, signal.Id, OntologyWriterFailureReason.CoreRecordTypeNotCataloged);
+                        OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.CoreRecordTypeNotCataloged);
+                        continue;
+                    }
+
+                    core = new DecisionRecordCore(table, coreId, typeRef);
+                }
+
+                var assignee = core is null && string.Equals(signal.SubjectEntity, PersonalToDoAssignee.Table, StringComparison.Ordinal)
+                    ? await _writer.PersonalToDoAssigneeAsync(signal.SubjectId, ct).ConfigureAwait(false)
+                    : null;
+                var result = await _records.WriteConditionClearedAsync(new ConditionClearedRecordRequest(
+                    signal.Id, signal.Episode, policy.Code, signal.PolicyVersionId ?? Guid.Empty,
+                    new DecisionRecordRef(signal.SubjectEntity, signal.SubjectId), core, closedOn,
+                    signal.LineageRow?.GetAttributeValue<DateTime?>("createdon"),
+                    AssigneeSystemUserId: assignee,
+                    PrivilegeFlagged: signal.LineageRow?.GetAttributeValue<bool?>("sprk_privilegeflagged") ?? false), ct).ConfigureAwait(false);
+                if (!result.AlreadyRecorded) recorded++;
+
+                switch (await _writer.LinkConditionClearedRecordAsync(signal.Id, result.RecordId, result.ConfirmedByUserId, policy.Code, ct).ConfigureAwait(false))
+                {
+                    case SignalRecordLinkOutcome.ChangedSinceRead:
+                        counts.ChangedSinceRead++;
+                        break;
+                    case SignalRecordLinkOutcome.Linked:
+                        counts.ClosureRecordsLinked++;
+                        break;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The Signal stays closed. The writer (a DecisionRecordRefusedException) and SignalWriter (its escalation) have already
+                // logged and metered their own failures; anything else is logged and metered here, once.
+                failed++;
+                if (ex is not DecisionRecordRefusedException && !SignalWriter.IsMeteredByWriter(ex))
+                {
+                    _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                        "Policy {PolicyCode}: the closure of Signal {SignalId} could not be recorded ({ExceptionType}); the Signal stays closed and the next pass retries.",
+                        policy.Code, signal.Id, ex.GetType().Name);
+                    OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.WriteFailed);
+                }
+            }
+        }
+
+        counts.ClosureRecorded += recorded;
+        counts.ClosureRecordFailures += failed;
+        _logger.LogInformation(
+            "Policy {PolicyCode}: {Recorded} condition-cleared closure(s) recorded, {Failed} not recorded this pass (of {Candidates}).",
+            policy.Code, recorded, failed, candidates.Count);
     }
 
     /// <summary>One write. A failure is counted as refused and logged at Error with the job's EventId; it is metered here only
@@ -798,6 +947,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
                 "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord",
+                // Task 153: when the Signal was raised (the attribution window) and its privilege flag (copied to its closure record).
+                "createdon", "sprk_privilegeflagged",
                 // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync).
                 SignalSuppressionService.EvidenceColumn,
             }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
@@ -900,6 +1051,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
 
+        /// <summary>Task 153 (D-145b): condition-cleared Decision Records written this pass, Signals linked to one, and closures whose record
+        /// could not be written or linked (each fails the run; the Signal stays closed and a later pass retries).</summary>
+        public int ClosureRecorded, ClosureRecordsLinked, ClosureRecordFailures;
+
         /// <summary>Task 145 (uac-r2 F1 on #1874): the policies whose stored evidence this run already checked (or tried to), so the
         /// sweeps after the policy loop reach every other policy exactly once.</summary>
         public HashSet<string> EvidenceRedactionAttempted { get; } = new(StringComparer.Ordinal);
@@ -917,7 +1072,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// secure-family partitions are unknown (#1661, counted in <see cref="PolicyFailures"/>), is not a healthy run.</summary>
         public bool IsSuccess =>
             Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0
-            && PartitionSkips.Count == 0;
+            && PartitionSkips.Count == 0 && ClosureRecordFailures == 0;
 
         /// <summary>Task 033: a system closure by the closure service. A failed close is a refusal (the run fails); a Signal a
         /// person resolved after the read is the same benign skip as the job's own closes.</summary>
@@ -945,7 +1100,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         public string FailureSummary() =>
             $"refused={Refused}, invalidPolicies={InvalidPolicies}, policyFailures={PolicyFailures}, unparseableKeys={UnparseableKeys}, " +
-            $"anomalies={Anomalies}, scopedNotEvaluated={ScopedNotEvaluated}, partitionSkippedPolicies={PartitionSkips.Count}";
+            $"anomalies={Anomalies}, scopedNotEvaluated={ScopedNotEvaluated}, partitionSkippedPolicies={PartitionSkips.Count}, " +
+            $"closureRecordFailures={ClosureRecordFailures}";
 
         public IReadOnlyDictionary<string, long> ByAction() => new Dictionary<string, long>(StringComparer.Ordinal)
         {
@@ -985,6 +1141,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             noDatedEvidence = NoDatedEvidence,
             clearedMarked = ClearedMarked,
             evidenceRedacted = EvidenceRedacted,
+            closureRecorded = ClosureRecorded,
+            closureRecordsLinked = ClosureRecordsLinked,
+            closureRecordFailures = ClosureRecordFailures,
             missingInputs = MissingInputs,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
