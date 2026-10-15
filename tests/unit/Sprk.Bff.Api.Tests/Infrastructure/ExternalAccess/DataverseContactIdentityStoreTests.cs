@@ -609,4 +609,116 @@ public class DataverseContactIdentityStoreTests
         using var doc = JsonDocument.Parse(json);
         (DataverseContactIdentityStore.ParseInvitedOn(doc.RootElement) is not null).Should().Be(evidence);
     }
+
+    // ── r3 task 047: the A9 registration's reads and writes ──────────────────────────────────────────
+
+    private static readonly Guid Team = Guid.Parse("7EA70000-0000-4000-8000-7EA700007EA7");
+
+    [Fact]
+    public void TheWorkforceHomeCreate_CarriesTenantOwnerAndDepartment_InLowercaseD_AndNoParentCustomer()
+    {
+        var payload = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome,
+            new NewContactDetails("Mike", "Okafor", "mike@customer.example")
+            {
+                Department = "Legal", ExternalTenantId = HomeTenant, OwningTeamId = Team,
+            });
+
+        payload.Keys.Should().BeEquivalentTo(
+            "lastname", "firstname", "emailaddress1", "department", "sprk_externalobjectid", "sprk_externalobjectidkey",
+            "sprk_identityplane", "sprk_externaltenantid", "ownerid@odata.bind");
+        payload["sprk_identityplane"].Should().Be(100000002);
+        payload["sprk_externalobjectid"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001");
+        payload["sprk_externaltenantid"].Should().Be("bbbbbbbb-0000-4000-8000-000000000002",
+            "the 046 home reads match only lowercase D text");
+        payload["ownerid@odata.bind"].Should().Be("/teams(7ea70000-0000-4000-8000-7ea700007ea7)");
+        payload.Keys.Should().NotContain(k => k.StartsWith("parentcustomerid", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void TheWorkforceHomeCreate_RefusesAMissingTenantOrOwner_AndOtherPlanesRefuseThem()
+    {
+        var noTenant = new NewContactDetails("M", "O", "m@x.example") { OwningTeamId = Team };
+        var noOwner = new NewContactDetails("M", "O", "m@x.example") { ExternalTenantId = HomeTenant };
+        var workforceWithTenant = new NewContactDetails("M", "O", "m@x.example") { ExternalTenantId = HomeTenant };
+
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome, noTenant))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome, noOwner))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce, workforceWithTenant))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void TheHomeBind_WritesBindingMirrorPlaneAndTenant_InOneRequest()
+        => DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid).Should().BeEquivalentTo(
+            new Dictionary<string, object?>
+            {
+                ["sprk_externalobjectid"] = "aaaaaaaa-0000-4000-8000-000000000001",
+                ["sprk_externalobjectidkey"] = "aaaaaaaa-0000-4000-8000-000000000001",
+                ["sprk_identityplane"] = 100000002,
+                ["sprk_externaltenantid"] = "bbbbbbbb-0000-4000-8000-000000000002",
+            });
+
+    [Fact]
+    public void TheWriteRequest_NeverOptsInToDuplicateDetection()
+    {
+        // Owner 2026-10-15: duplicate-detection rules run on API writes only when the caller sends
+        // MSCRM.SuppressDuplicateDetection: false. The registration's create and bind must never send it.
+        var (method, path, payload) = DataverseContactIdentityStore.BuildCreateRequest(Oid, IdentityPlaneMarker.WorkforceHome,
+            new NewContactDetails("M", "O", "m@x.example") { ExternalTenantId = HomeTenant, OwningTeamId = Team });
+        using var create = DataverseContactIdentityStore.BuildWriteRequest(
+            method, new Uri("https://org.example/api/data/v9.2/" + path), payload, "token", null);
+        using var bind = DataverseContactIdentityStore.BuildWriteRequest(HttpMethod.Patch,
+            new Uri("https://org.example/api/data/v9.2/contacts(" + Oid + ")"),
+            DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid), "token", ("If-Match", "W/\"1\""));
+
+        foreach (var request in new[] { create, bind })
+        {
+            request.Headers.Select(h => h.Key).Concat(request.Content!.Headers.Select(h => h.Key))
+                .Should().NotContain(h => h.StartsWith("MSCRM.", StringComparison.OrdinalIgnoreCase));
+        }
+
+        create.Method.Should().Be(HttpMethod.Post);
+        bind.Headers.GetValues("If-Match").Should().Equal("W/\"1\"");
+    }
+
+    [Fact]
+    public void TheLicensedUserRead_IsEnabledUsers_ByEitherEmailColumn_Escaped()
+    {
+        var path = DataverseContactIdentityStore.BuildLicensedUserEmailLookupPath("o'neil@customer.example");
+
+        path.Should().Contain("isdisabled eq false");
+        path.Should().Contain("internalemailaddress eq 'o%27%27neil%40customer.example'")
+            .And.Contain("domainname eq 'o%27%27neil%40customer.example'");
+        path.Should().Contain(" or ").And.Contain("$top=2");
+    }
+
+    [Fact]
+    public void TheOwnerTeamRead_IsTheBusinessUnitsDefaultOwnerTeam()
+        => DataverseContactIdentityStore.BuildDefaultOwnerTeamPath(Team).Should().Be(
+            "teams?$select=teamid&$filter=_businessunitid_value eq 7ea70000-0000-4000-8000-7ea700007ea7"
+            + " and isdefault eq true and teamtype eq 0&$top=2");
+
+    [Fact]
+    public void ClassifyHomeProbe_AMaskedSecuredColumn_OrAFailedRead_IsNeverReadable()
+    {
+        var homeRow = new ContactBindingRow(Guid.NewGuid(), 0, Oid.ToString(), 100000002, RawExternalTenantId: HomeTenant.ToString());
+        var maskedHomeRow = homeRow with { RawExternalTenantId = null };
+        var link = new HomeLinkRow(Guid.NewGuid(), false, HomeTenant.ToString(), Oid.ToString());
+        var maskedLink = new HomeLinkRow(Guid.NewGuid(), false, null, null);
+
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(homeRow), HomeLinkLookup.Of(link))
+            .Should().Be(BindingReadability.Readable);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(), HomeLinkLookup.Of())
+            .Should().Be(BindingReadability.NoMarkedRows);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(maskedHomeRow), HomeLinkLookup.Of(link))
+            .Should().Be(BindingReadability.Masked);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(homeRow), HomeLinkLookup.Of(maskedLink))
+            .Should().Be(BindingReadability.Masked);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Failed, HomeLinkLookup.Of())
+            .Should().Be(BindingReadability.Failed);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(), HomeLinkLookup.ColumnMissing)
+            .Should().Be(BindingReadability.Failed);
+    }
 }

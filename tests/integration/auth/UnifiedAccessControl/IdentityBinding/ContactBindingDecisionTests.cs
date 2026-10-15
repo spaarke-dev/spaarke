@@ -52,6 +52,7 @@ public class ContactBindingDecisionTests
     [InlineData("", null, BindingKind.Unbound)]
     [InlineData("aaaaaaaa-0000-4000-8000-000000000001", 100000000, BindingKind.Bound)]
     [InlineData("AAAAAAAA-0000-4000-8000-000000000001", 100000001, BindingKind.Bound)]
+    [InlineData("aaaaaaaa-0000-4000-8000-000000000001", 100000002, BindingKind.Bound)] // r3 047: WorkforceHome
     [InlineData("aaaaaaaa-0000-4000-8000-000000000001", null, BindingKind.Bound)]   // pre-141 CIAM row
     [InlineData(null, 100000001, BindingKind.Unreadable)]                          // marker, no oid = masked/orphaned
     [InlineData("not-a-guid", 100000000, BindingKind.Unreadable)]
@@ -677,11 +678,13 @@ public class ContactBindingDecisionTests
 
     // ── Invite ───────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Invite_AWorkforceBoundContact_IsRefused()
+    [Theory]
+    [InlineData(IdentityPlaneMarker.Workforce)]
+    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered employee is never re-invited as a partner
+    public void Invite_AWorkforceBoundContact_IsRefused(IdentityPlaneMarker plane)
     {
         var decision = ContactBindingDecision.DecideInvite(
-            ContactLookup.Of(Bound(ContactA, Other, IdentityPlaneMarker.Workforce)));
+            ContactLookup.Of(Bound(ContactA, Other, plane)));
 
         decision.Action.Should().Be(InviteContactAction.Refuse);
         decision.ReasonCode.Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);

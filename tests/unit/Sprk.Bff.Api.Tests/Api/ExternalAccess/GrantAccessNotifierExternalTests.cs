@@ -317,10 +317,12 @@ public class GrantAccessNotifierExternalTests
         _emails.Sent.Should().BeEmpty("a workforce binding is not a CIAM account");
     }
 
-    [Fact]
-    public async Task ContactBoundOnTheExternalPlane_IsEmailed()
+    [Theory]
+    [InlineData(IdentityPlaneMarker.External)]
+    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered contact signs in to the same portal
+    public async Task ContactBoundOnAPortalPlane_IsEmailed(IdentityPlaneMarker plane)
     {
-        var contact = Contact(oid: Guid.NewGuid(), plane: (int)IdentityPlaneMarker.External);
+        var contact = Contact(oid: Guid.NewGuid(), plane: (int)plane);
 
         await Notifier().NotifyContactGrantAsync(
             ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());

@@ -124,6 +124,61 @@ public sealed record InviteMarkResult(StoreWriteResult Write)
     internal string? InviteCode { get; init; }
 }
 
+/// <summary>ADR-028 A9 (r3 task 047): a home-directory caller's registration, as the route validated it.</summary>
+/// <param name="HomeTenantId">The token's <c>tid</c>.</param>
+/// <param name="HomeObjectId">The token's <c>oid</c>.</param>
+/// <param name="Email">The token's <c>email</c> claim only (never <c>preferred_username</c>), trimmed.</param>
+/// <param name="FirstName">The form's first name, trimmed and validated.</param>
+/// <param name="LastName">The form's last name, trimmed and validated.</param>
+/// <param name="Department">The form's optional department.</param>
+/// <param name="ConfirmExistingRecord">True when the person confirmed binding to an existing contact (409 first).</param>
+/// <param name="CustomerBusinessUnitId"><c>ExternalAccess:CustomerBusinessUnitId</c>; null when not configured.</param>
+public sealed record HomeRegistrationRequest(
+    Guid HomeTenantId,
+    Guid HomeObjectId,
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Department,
+    bool ConfirmExistingRecord,
+    Guid? CustomerBusinessUnitId);
+
+/// <summary>What a registration did.</summary>
+public enum HomeRegistrationOutcome
+{
+    /// <summary>One WorkforceHome contact was created.</summary>
+    Created,
+
+    /// <summary>An existing, unbound contact was bound to the home identity on confirmation.</summary>
+    BoundExisting,
+
+    /// <summary>The (tid, oid) already has its WorkforceHome contact (a resubmit, or a concurrent winner): nothing written.</summary>
+    AlreadyRegistered,
+
+    /// <summary>The token email is an enabled systemuser's: refused (<c>licensed_user_link_required</c>).</summary>
+    LicensedUser,
+
+    /// <summary>One bindable existing contact and no confirmation: the form must ask (409).</summary>
+    ExistingRecordFound,
+
+    /// <summary>The email's contacts are ambiguous, bound, linked or unreadable: refused, flagged, nothing bound or created.</summary>
+    Conflict,
+
+    /// <summary>No owner team could be resolved from <c>ExternalAccess:CustomerBusinessUnitId</c>: nothing created.</summary>
+    OwnerUnconfigured,
+
+    /// <summary>Denied with <see cref="HomeRegistrationResult.DenyCode"/> (a read, write, masking or key fault).</summary>
+    Denied,
+}
+
+/// <summary>A registration's result.</summary>
+public sealed record HomeRegistrationResult(
+    HomeRegistrationOutcome Outcome, Guid? ContactId = null, string? DenyCode = null, bool Wrote = false)
+{
+    internal static HomeRegistrationResult Denied(string denyCode, bool wrote = false)
+        => new(HomeRegistrationOutcome.Denied, null, denyCode, wrote);
+}
+
 /// <summary>Runs the binding decision and performs its writes. See the file header.</summary>
 public sealed class ContactIdentityBinder
 {
@@ -490,6 +545,245 @@ public sealed class ContactIdentityBinder
             + "sent; try again. If this environment is still receiving its schema update, try again after it completes.",
         _ => null,
     };
+
+    // ── ADR-028 A9 registration (r3 task 047) ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, design §4 and §6 steps 2–4): registers a home-directory caller whom the 046 resolution
+    /// did NOT resolve (the route runs step 1 first). Only <c>ExternalRegistrationEndpoints</c> calls this (ArchTest
+    /// <c>AuthenticationSchemeCensusTests</c>). In order: probe that the binding and the A9 columns are readable (else
+    /// deny, never create); refuse a licensed user's email; decide over the email's ACTIVE contacts (bind one bindable
+    /// contact only on confirmation; refuse and flag an ambiguous one); else create one WorkforceHome contact owned by the
+    /// customer business unit's default team. A concurrent or repeated submit re-reads by (tid, oid) and writes nothing.
+    /// Logs carry the contact id and HASHED tid/oid only — never the email or the names.
+    /// </summary>
+    public async Task<HomeRegistrationResult> RegisterHomeContactAsync(HomeRegistrationRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.HomeTenantId == Guid.Empty || request.HomeObjectId == Guid.Empty)
+        {
+            throw new ArgumentException("A home registration needs the home tenant and object id.", nameof(request));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Email);
+        var tid = request.HomeTenantId;
+        var oid = request.HomeObjectId;
+        var who = $"tid#{HashForLog(tid)} oid#{HashForLog(oid)}";
+
+        // 046 review (K, carried): a masked secured column makes a registered contact or link look absent — probe first.
+        var binding = await _store.ProbeBindingReadabilityAsync(ct).ConfigureAwait(false);
+        var home = await _store.ProbeHomeReadabilityAsync(ct).ConfigureAwait(false);
+        if (binding is BindingReadability.Masked or BindingReadability.Failed
+            || home is BindingReadability.Masked or BindingReadability.Failed)
+        {
+            _logger.LogError(
+                "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): binding column {Binding}, A9 columns {Home}. Nothing "
+                + "was bound or created. Add the BFF application user to the identity-link write profile (or apply "
+                + "scripts/Set-WorkforceHomeIdentitySchema.ps1).",
+                who, ContactBindingDecision.DenyBindingColumnMasked, binding, home);
+            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
+        }
+
+        // Design §6 step 2: a licensed user's email is refused (a refusal only — never a link or a grant).
+        var licensed = ContactBindingDecision.DecideLicensedUserEmail(
+            await _store.FindEnabledSystemUsersByEmailAsync(request.Email, ct).ConfigureAwait(false), request.Email);
+        if (licensed != LicensedUserEmailOutcome.NotLicensed)
+        {
+            _logger.LogWarning("[ID-BIND] Registration for {Who} refused: licensed-user check {Outcome}", who, licensed);
+            return licensed == LicensedUserEmailOutcome.LicensedUser
+                ? new HomeRegistrationResult(HomeRegistrationOutcome.LicensedUser)
+                : HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+        }
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            // Design §6 step 3: the token email's ACTIVE contacts.
+            var emailLookup = await _store.FindActiveContactsByEmailAsync(request.Email, ct).ConfigureAwait(false);
+            var known = new Dictionary<Guid, ContactBindingRow>();
+            Remember(known, emailLookup);
+            var decision = ContactBindingDecision.DecideRegistrationEmail(emailLookup, oid);
+            if (decision.Action == RegistrationEmailAction.NeedReferenceLookup)
+            {
+                var references = await _store.FindSystemUsersLinkingAsync(new[] { decision.ContactId!.Value }, ct)
+                    .ConfigureAwait(false);
+                decision = ContactBindingDecision.DecideRegistrationEmail(emailLookup, oid, references);
+            }
+
+            switch (decision.Action)
+            {
+                case RegistrationEmailAction.Deny:
+                    _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode})", who, decision.DenyCode);
+                    return HomeRegistrationResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
+
+                case RegistrationEmailAction.Conflict:
+                {
+                    var flagged = decision.FlagContactIds ?? Array.Empty<Guid>();
+                    var wrote = await WriteFlagsAsync(flagged, known, oid, IdentityPlaneMarker.WorkforceHome,
+                        IdentityCollisionReason.EmailAmbiguous, ct).ConfigureAwait(false);
+                    _logger.LogWarning(
+                        "[ID-BIND] Registration for {Who} refused: the email matches contact(s) [{Contacts}] that cannot be "
+                        + "bound (ambiguous, bound, linked or unreadable); flagged EmailAmbiguous (wrote={Wrote})",
+                        who, string.Join(",", flagged), wrote);
+                    return new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, Wrote: wrote);
+                }
+
+                case RegistrationEmailAction.AlreadyBoundToCaller:
+                    return await AlreadyRegisteredAsync(tid, oid, who, wroteNothingElse: true, ct).ConfigureAwait(false);
+
+                case RegistrationEmailAction.BindExisting:
+                {
+                    var target = known[decision.ContactId!.Value];
+                    if (!request.ConfirmExistingRecord)
+                    {
+                        _logger.LogInformation(
+                            "[ID-BIND] Registration for {Who} found existing contact {ContactId}: confirmation required",
+                            who, target.ContactId);
+                        return new HomeRegistrationResult(HomeRegistrationOutcome.ExistingRecordFound, target.ContactId);
+                    }
+
+                    var write = await _store.BindHomeOidAsync(target.ContactId, target.ETag, tid, oid, ct).ConfigureAwait(false);
+                    if (write.Status == StoreWriteStatus.Written)
+                    {
+                        _logger.LogInformation(
+                            "[ID-BIND] Registration bound {Who} (WorkforceHome) to existing contact {ContactId} on confirmation",
+                            who, target.ContactId);
+                        return new HomeRegistrationResult(HomeRegistrationOutcome.BoundExisting, target.ContactId, Wrote: true);
+                    }
+
+                    if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
+                    {
+                        continue; // the row changed under us — re-decide against fresh rows
+                    }
+
+                    if (write.Status is StoreWriteStatus.KeyConflict)
+                    {
+                        return await KeyConflictRegistrationAsync(tid, oid, who, ct).ConfigureAwait(false);
+                    }
+
+                    _logger.LogWarning("[ID-BIND] Registration bind for {Who} on contact {ContactId} failed ({Status})",
+                        who, target.ContactId, write.Status);
+                    return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+                }
+
+                case RegistrationEmailAction.Create:
+                    return await CreateHomeContactAsync(request, who, ct).ConfigureAwait(false);
+            }
+        }
+
+        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+    }
+
+    private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
+    {
+        // Design §6 create: owned by the default team of ExternalAccess:CustomerBusinessUnitId. Absent → nothing created.
+        if (request.CustomerBusinessUnitId is not { } bu || bu == Guid.Empty)
+        {
+            _logger.LogError(
+                "[ID-BIND] Registration for {Who} refused: ExternalAccess:CustomerBusinessUnitId is not configured, so the "
+                + "new contact would have no owner. Nothing was created.", who);
+            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+        }
+
+        var teams = await _store.FindDefaultOwnerTeamsAsync(bu, ct).ConfigureAwait(false);
+        if (teams.Status != LookupStatus.Read)
+        {
+            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+        }
+
+        if (teams.TeamIds.Count != 1)
+        {
+            _logger.LogError(
+                "[ID-BIND] Registration for {Who} refused: business unit {BusinessUnitId} has {Count} default owner teams "
+                + "(exactly one expected). Nothing was created.", who, bu, teams.TeamIds.Count);
+            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+        }
+
+        var details = new NewContactDetails(request.FirstName, request.LastName, request.Email)
+        {
+            Department = request.Department,
+            ExternalTenantId = request.HomeTenantId,
+            OwningTeamId = teams.TeamIds[0],
+        };
+        var create = await _store.CreateContactForOidAsync(request.HomeObjectId, IdentityPlaneMarker.WorkforceHome, details, ct)
+            .ConfigureAwait(false);
+        switch (create.Status)
+        {
+            case StoreWriteStatus.Written when create.ContactId is { } created:
+                _logger.LogInformation("[ID-BIND] Registration created contact {ContactId} for {Who} (WorkforceHome)",
+                    created, who);
+                return new HomeRegistrationResult(HomeRegistrationOutcome.Created, created, Wrote: true);
+
+            case StoreWriteStatus.Written:
+            {
+                // Created, but the response named no id: the (tid, oid) read finds it.
+                var reread = await AlreadyRegisteredAsync(request.HomeTenantId, request.HomeObjectId, who, false, ct)
+                    .ConfigureAwait(false);
+                return reread.Outcome == HomeRegistrationOutcome.AlreadyRegistered
+                    ? new HomeRegistrationResult(HomeRegistrationOutcome.Created, reread.ContactId, Wrote: true)
+                    : HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
+            }
+
+            case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
+                // A concurrent submit won the race (the mirror key's 412): it is the contact for this (tid, oid).
+                return await KeyConflictRegistrationAsync(request.HomeTenantId, request.HomeObjectId, who, ct)
+                    .ConfigureAwait(false);
+
+            case StoreWriteStatus.KeyMissing:
+                _logger.LogError(
+                    "[ID-BIND] Registration for {Who} refused ({DenyCode}): the alternate key on {Mirror} is not defined. "
+                    + "Apply scripts/Set-ContactIdentityBindingSchema.ps1.",
+                    who, ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
+                return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+
+            default:
+                _logger.LogWarning("[ID-BIND] Registration create for {Who} failed ({Status})", who, create.Status);
+                return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
+        }
+    }
+
+    /// <summary>
+    /// The unique index refused this oid: a concurrent registration holds it (re-read by (tid, oid) → the same contact),
+    /// else another contact squats the mirror (flag the holder, deny).
+    /// </summary>
+    private async Task<HomeRegistrationResult> KeyConflictRegistrationAsync(Guid tid, Guid oid, string who, CancellationToken ct)
+    {
+        var reread = await AlreadyRegisteredAsync(tid, oid, who, wroteNothingElse: true, ct).ConfigureAwait(false);
+        if (reread.Outcome == HomeRegistrationOutcome.AlreadyRegistered)
+        {
+            return reread;
+        }
+
+        var (_, _, wrote) = await FlagKeyMirrorHoldersAsync(oid, IdentityPlaneMarker.WorkforceHome, ct).ConfigureAwait(false);
+        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactKeyConflict, wrote);
+    }
+
+    /// <summary>The 046 home contact read and decision: the caller's own WorkforceHome contact, or a conflict.</summary>
+    private async Task<HomeRegistrationResult> AlreadyRegisteredAsync(
+        Guid tid, Guid oid, string who, bool wroteNothingElse, CancellationToken ct)
+    {
+        var lookup = await _store.FindHomeContactsAsync(tid, oid, ct).ConfigureAwait(false);
+        var decision = ContactBindingDecision.DecideHomeContact(lookup, tid, oid);
+        if (decision is { Action: BindingAction.ResolveByOid, ContactId: { } contactId })
+        {
+            if (wroteNothingElse)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] Registration for {Who} is already registered as contact {ContactId}: nothing written", who, contactId);
+            }
+
+            return new HomeRegistrationResult(HomeRegistrationOutcome.AlreadyRegistered, contactId);
+        }
+
+        // A read that failed is a fault (retryable); anything else (none found, ambiguous, inactive) is a conflict.
+        return lookup.Status != LookupStatus.Read && decision?.DenyCode is { } fault
+            ? HomeRegistrationResult.Denied(fault)
+            : new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, DenyCode: decision?.DenyCode);
+    }
+
+    /// <summary>First 8 hex characters of SHA-256 (as <c>ServiceBusProvisioningEnqueuer.HashForLog</c>): correlates, never identifies.</summary>
+    private static string HashForLog(Guid value)
+        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(value.ToString("D"))))[..8];
 
     // ── Core ──────────────────────────────────────────────────────────────────────────────────────────
 

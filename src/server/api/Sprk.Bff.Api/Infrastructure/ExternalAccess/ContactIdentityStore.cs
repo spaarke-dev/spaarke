@@ -40,7 +40,30 @@ public sealed record SystemUserLookup(LookupStatus Status, SystemUserIdentityRow
 }
 
 /// <summary>Contact details for a contact created keyed by an oid.</summary>
-public sealed record NewContactDetails(string? FirstName, string LastName, string? Email);
+public sealed record NewContactDetails(string? FirstName, string LastName, string? Email)
+{
+    /// <summary>ADR-028 A9 (r3 task 047): the registration form's optional department.</summary>
+    public string? Department { get; init; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the home directory (<c>tid</c>), written as <c>sprk_externaltenantid</c>. Required on plane
+    /// WorkforceHome and refused on every other plane (<see cref="DataverseContactIdentityStore.CreatePayload"/>).
+    /// </summary>
+    public Guid? ExternalTenantId { get; init; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the owning team (the default team of <c>ExternalAccess:CustomerBusinessUnitId</c>).
+    /// Required on plane WorkforceHome and refused on every other plane (the A8 create sets no owner).
+    /// </summary>
+    public Guid? OwningTeamId { get; init; }
+}
+
+/// <summary>ADR-028 A9 (r3 task 047): a business unit's default owner teams (two rows, so ambiguity is visible).</summary>
+public sealed record OwnerTeamLookup(LookupStatus Status, IReadOnlyList<Guid> TeamIds)
+{
+    /// <summary>A team read that could not be read.</summary>
+    public static OwnerTeamLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
+}
 
 /// <summary>How a store write ended.</summary>
 public enum StoreWriteStatus
@@ -145,6 +168,29 @@ public interface IContactIdentityStore
     /// <paramref name="homeTenantId"/> and whose binding is <paramref name="homeObjectId"/>. Any state, two rows. Read-only.
     /// </summary>
     Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): ENABLED systemusers whose <c>internalemailaddress</c> OR <c>domainname</c> equals
+    /// <paramref name="email"/> (owner 2026-10-15), two rows. Read-only; the registration route's licensed-user refusal.
+    /// </summary>
+    Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct);
+
+    /// <summary>ADR-028 A9 (r3 task 047): the default (owner) team of <paramref name="businessUnitId"/>, two rows. Read-only.</summary>
+    Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): can this identity READ the A9 field-secured columns (<c>contact.sprk_externaltenantid</c>,
+    /// <c>systemuser.sprk_hometenantid</c> / <c>sprk_homeobjectid</c>)? A masked column reads as "no match" in the 046
+    /// reads, so the registration route probes this before any create or bind and denies unless it is readable.
+    /// </summary>
+    Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): binds an existing, unbound contact to a home identity — the binding, the uniqueness mirror,
+    /// plane WorkforceHome and <c>sprk_externaltenantid</c>, in ONE request, conditional on <paramref name="etag"/> (no
+    /// version → no write).
+    /// </summary>
+    Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct);
 
     /// <summary>
     /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for the CIAM plane's E11: its
@@ -416,6 +462,102 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            + $"&$filter={ContactBindingDecision.HomeTenantIdColumn} eq '{homeTenantId:D}'"
            + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2&$orderby=isdisabled asc";
 
+    /// <summary>The systemuser home-link uniqueness mirror (unsecured): the home probe's row filter (task 044).</summary>
+    public const string HomeObjectIdKeyColumn = "sprk_homeobjectidkey";
+
+    /// <summary>The owner lookup bind key on a create.</summary>
+    public const string OwnerBindKey = "ownerid@odata.bind";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the licensed-user read — ENABLED systemusers whose <c>internalemailaddress</c> OR
+    /// <c>domainname</c> equals the email (owner 2026-10-15: in dev 2 of 11 enabled users differ between the two), two rows.
+    /// Dataverse compares text case-insensitively; <see cref="ContactBindingDecision.DecideLicensedUserEmail"/> re-checks.
+    /// </summary>
+    public static string BuildLicensedUserEmailLookupPath(string email)
+        => "systemusers?$select=systemuserid,isdisabled,internalemailaddress,domainname"
+           + $"&$filter=isdisabled eq false and (internalemailaddress eq '{Literal(email)}' or domainname eq '{Literal(email)}')"
+           + "&$top=2";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the business unit's default team (<c>isdefault</c>, owner team type 0), two rows — the
+    /// same filter as <c>RecordOwnershipResolver</c>'s default-team read.
+    /// </summary>
+    public static string BuildDefaultOwnerTeamPath(Guid businessUnitId)
+        => $"teams?$select=teamid&$filter=_businessunitid_value eq {businessUnitId:D} and isdefault eq true and teamtype eq 0&$top=2";
+
+    /// <summary>The A9 contact probe: WorkforceHome rows with their binding and home directory.</summary>
+    public static string BuildHomeContactProbePath()
+        => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn},"
+           + ContactBindingDecision.ExternalTenantIdColumn
+           + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}&$top=50";
+
+    /// <summary>The A9 systemuser probe: rows whose UNSECURED key mirror is set, with the secured pair they mirror.</summary>
+    public static string BuildHomeLinkProbePath()
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + ContactBindingDecision.HomeObjectIdColumn
+           + $"&$filter={HomeObjectIdKeyColumn} ne null&$top=50";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the A9 masking verdict. Pure. Every A9 write sets the secured column with its mirror or
+    /// plane in one request, so when EVERY marked row comes back without the secured value the column is masked from this
+    /// identity. A read that failed (or a missing column) → <see cref="BindingReadability.Failed"/>.
+    /// </summary>
+    public static BindingReadability ClassifyHomeProbe(ContactLookup contacts, HomeLinkLookup links)
+    {
+        ArgumentNullException.ThrowIfNull(contacts);
+        ArgumentNullException.ThrowIfNull(links);
+        if (contacts.Status != LookupStatus.Read || links.Status != LookupStatus.Read) return BindingReadability.Failed;
+
+        if (contacts.Rows.Count > 0 && contacts.Rows.All(r => string.IsNullOrWhiteSpace(r.RawExternalTenantId)))
+        {
+            return BindingReadability.Masked;
+        }
+
+        if (links.Rows.Count > 0
+            && links.Rows.All(r => string.IsNullOrWhiteSpace(r.RawHomeTenantId) || string.IsNullOrWhiteSpace(r.RawHomeObjectId)))
+        {
+            return BindingReadability.Masked;
+        }
+
+        return contacts.Rows.Count == 0 && links.Rows.Count == 0 ? BindingReadability.NoMarkedRows : BindingReadability.Readable;
+    }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the home bind payload — <see cref="BindPayload"/> on plane WorkforceHome plus the home
+    /// directory, lowercase "D" text (the 046 reads match only that form).
+    /// </summary>
+    public static Dictionary<string, object?> HomeBindPayload(Guid homeTenantId, Guid oid)
+    {
+        if (homeTenantId == Guid.Empty) throw new ArgumentException("A home bind needs the home tenant.", nameof(homeTenantId));
+        var payload = BindPayload(oid, IdentityPlaneMarker.WorkforceHome);
+        payload[ContactBindingDecision.ExternalTenantIdColumn] = homeTenantId.ToString("D");
+        return payload;
+    }
+
+    /// <summary>
+    /// The one write request every store write sends. Pure, so its headers are pinned directly: OData versions, the
+    /// optional precondition, JSON — and never <c>MSCRM.SuppressDuplicateDetection</c> (r3 task 047, owner 2026-10-15:
+    /// API writes do not opt in to duplicate-detection rules; email is the canonical duplicate check).
+    /// </summary>
+    public static HttpRequestMessage BuildWriteRequest(
+        HttpMethod method, Uri uri, Dictionary<string, object?> payload, string token, (string Name, string Value)? precondition)
+    {
+        var request = new HttpRequestMessage(method, uri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        if (precondition is { } header)
+        {
+            request.Headers.TryAddWithoutValidation(header.Name, header.Value);
+        }
+
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return request;
+    }
+
     /// <summary>The home contact read's columns: every binding column, plus the home directory.</summary>
     public static readonly string HomeContactSelect = $"{ContactSelect},{ContactBindingDecision.ExternalTenantIdColumn}";
 
@@ -523,6 +665,27 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         };
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
         if (!string.IsNullOrWhiteSpace(details.Email)) payload["emailaddress1"] = details.Email;
+
+        // ADR-028 A9 (r3 task 047): a WorkforceHome create carries its home directory and its owner; no other plane may.
+        var home = plane == IdentityPlaneMarker.WorkforceHome;
+        if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty
+                     || details.OwningTeamId is not { } team || team == Guid.Empty))
+        {
+            throw new ArgumentException("A WorkforceHome create needs the home tenant and the owning team.", nameof(details));
+        }
+
+        if (!home && (details.ExternalTenantId is not null || details.OwningTeamId is not null))
+        {
+            throw new ArgumentException("Only a WorkforceHome create carries a home tenant or an owner.", nameof(details));
+        }
+
+        if (home)
+        {
+            payload[ContactBindingDecision.ExternalTenantIdColumn] = details.ExternalTenantId!.Value.ToString("D");
+            payload[OwnerBindKey] = $"/teams({details.OwningTeamId!.Value:D})";
+            if (!string.IsNullOrWhiteSpace(details.Department)) payload["department"] = details.Department;
+        }
+
         return payload;
     }
 
@@ -836,6 +999,72 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         return new ContactLookup(LookupStatus.Read, rows);
     }
 
+    /// <inheritdoc />
+    public async Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildLicensedUserEmailLookupPath(email), ct).ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return SystemUserEmailLookup.Failed;
+        }
+
+        var rows = new List<SystemUserEmailRow>();
+        foreach (var row in Values(doc.RootElement))
+        {
+            if (row.ValueKind != JsonValueKind.Object || GuidOf(row, "systemuserid") is not { } id) continue;
+            bool? disabled = row.TryGetProperty("isdisabled", out var d) && d.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? d.GetBoolean()
+                : null;
+            rows.Add(new SystemUserEmailRow(id, disabled, StringOf(row, "internalemailaddress"), StringOf(row, "domainname")));
+        }
+
+        return new SystemUserEmailLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public async Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildDefaultOwnerTeamPath(businessUnitId), ct).ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return OwnerTeamLookup.Failed;
+        }
+
+        var ids = Values(doc.RootElement).Select(r => GuidOf(r, "teamid")).Where(g => g is not null).Select(g => g!.Value).ToList();
+        return new OwnerTeamLookup(LookupStatus.Read, ids);
+    }
+
+    /// <inheritdoc />
+    public async Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct)
+    {
+        var (cStatus, _, cBody, _) = await GetAsync(BuildHomeContactProbePath(), ct).ConfigureAwait(false);
+        var (lStatus, _, lBody, _) = await GetAsync(BuildHomeLinkProbePath(), ct).ConfigureAwait(false);
+        if (cStatus == LookupStatus.ColumnMissing || lStatus == LookupStatus.ColumnMissing)
+        {
+            LogHomeSchemaMissing("home masking probe");
+        }
+
+        using var cDoc = cStatus == LookupStatus.Read && cBody is not null ? TryParseJson(cBody) : null;
+        using var lDoc = lStatus == LookupStatus.Read && lBody is not null ? TryParseJson(lBody) : null;
+        var contacts = cDoc is null
+            ? ContactLookup.Failed
+            : new ContactLookup(LookupStatus.Read,
+                Values(cDoc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList());
+        var links = lDoc is null
+            ? HomeLinkLookup.Failed
+            : new HomeLinkLookup(LookupStatus.Read,
+                Values(lDoc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList());
+        return ClassifyHomeProbe(contacts, links);
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", HomeBindPayload(homeTenantId, oid), ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("bind", contactId));
+
     private void LogHomeSchemaMissing(string what)
         => _logger.LogError(
             "[ID-BIND] {What} failed: an A9 home-identity column is not provisioned in this environment. Every home sign-in is "
@@ -1031,18 +1260,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         try
         {
             var token = await _getToken(ct).ConfigureAwait(false);
-            using var request = new HttpRequestMessage(method, Absolute(path))
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add("OData-MaxVersion", "4.0");
-            request.Headers.Add("OData-Version", "4.0");
-            if (precondition is { } header)
-            {
-                request.Headers.TryAddWithoutValidation(header.Name, header.Value);
-            }
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var request = BuildWriteRequest(method, new Uri(Absolute(path)), payload, token, precondition);
 
             using var client = _httpClientFactory.CreateClient(HttpClientName);
             using var response = await client.SendAsync(request, ct).ConfigureAwait(false);

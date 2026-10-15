@@ -60,6 +60,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// <summary>A9 (r3 task 046): <c>sprk_externaltenantid</c> — the home directory of a WorkforceHome contact.</summary>
         public string? ExternalTenantId { get; set; }
 
+        /// <summary>A9 (r3 task 047): the registration form's department.</summary>
+        public string? Department { get; set; }
+
+        /// <summary>A9 (r3 task 047): <c>ownerid</c> when a team owns the row (the registration create).</summary>
+        public Guid? OwnerTeamId { get; set; }
+
         public int Version { get; set; }
     }
 
@@ -171,6 +177,24 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public bool ScanFlaggedWithoutETags { get; set; }
 
     /// <summary>
+    /// A9 (r3 task 047): field-level-security masking of the A9 SECURED columns (<c>contact.sprk_externaltenantid</c>,
+    /// <c>systemuser.sprk_hometenantid</c> / <c>sprk_homeobjectid</c>): they come back null in rows. The mirrors are not masked.
+    /// </summary>
+    public bool MaskHomeColumns { get; set; }
+
+    /// <summary>A9 (r3 task 047): the home masking probe cannot be read.</summary>
+    public bool FailHomeProbe { get; set; }
+
+    /// <summary>A9 (r3 task 047): the licensed-user email read fails.</summary>
+    public bool FailLicensedUserLookup { get; set; }
+
+    /// <summary>A9 (r3 task 047): the default-team read fails.</summary>
+    public bool FailTeamLookup { get; set; }
+
+    /// <summary>A9 (r3 task 047): each business unit's default owner team(s) (<c>isdefault</c>, <c>teamtype = 0</c>).</summary>
+    public Dictionary<Guid, List<Guid>> DefaultTeams { get; } = new();
+
+    /// <summary>
     /// Runs after EVERY read is recorded, with the read's name (the <see cref="Reads"/> entry) — to stage a
     /// concurrent writer at a precise point, e.g. between the job's flag scan and its clear.
     /// </summary>
@@ -196,6 +220,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             HomeContactLookupStatus = LookupStatus.Read;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
+            MaskHomeColumns = FailHomeProbe = FailLicensedUserLookup = FailTeamLookup = false;
+            DefaultTeams.Clear();
             Grants.Clear();
             InviteMarkerStatus = LookupStatus.Read;
             InviteCodeHashColumnMissing = false;
@@ -406,6 +432,61 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <summary>
+    /// A9 (r3 task 047). Deliberately a SUPERSET of the Dataverse filter: every systemuser, of ANY state, whose
+    /// internalemailaddress or domainname equals the email (case-insensitive). The enabled-only and either-field rules are
+    /// then the production decision's (<see cref="ContactBindingDecision.DecideLicensedUserEmail"/>).
+    /// </summary>
+    public Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("licensed-email");
+            AfterRead?.Invoke("licensed-email");
+            if (FailLicensedUserLookup) return Task.FromResult(SystemUserEmailLookup.Failed);
+            var rows = SystemUsers.Values
+                .Where(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(u.DomainName, email, StringComparison.OrdinalIgnoreCase))
+                .Select(u => new SystemUserEmailRow(u.Id, u.IsDisabled, u.Email, u.DomainName))
+                .ToArray();
+            return Task.FromResult(SystemUserEmailLookup.Of(rows));
+        }
+    }
+
+    public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("owner-team");
+            AfterRead?.Invoke("owner-team");
+            if (FailTeamLookup) return Task.FromResult(OwnerTeamLookup.Failed);
+            var ids = DefaultTeams.TryGetValue(businessUnitId, out var teams) ? teams.Take(2).ToArray() : Array.Empty<Guid>();
+            return Task.FromResult(new OwnerTeamLookup(LookupStatus.Read, ids));
+        }
+    }
+
+    public Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("home-probe");
+            AfterRead?.Invoke("home-probe");
+            if (FailHomeProbe) return Task.FromResult(BindingReadability.Failed);
+            var contacts = Contacts.Values
+                .Where(c => c.Plane == ContactBindingDecision.WorkforceHomePlaneValue).Take(50).Select(Row).ToArray();
+            var links = SystemUsers.Values
+                .Where(u => u.HomeObjectIdKey is not null).Take(50)
+                .Select(u => new HomeLinkRow(u.Id, u.IsDisabled,
+                    MaskHomeColumns ? null : u.HomeTenantId, MaskHomeColumns ? null : u.HomeObjectId))
+                .ToArray();
+            return Task.FromResult(DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(contacts), HomeLinkLookup.Of(links)));
+        }
+    }
+
+    /// <summary>A9 (r3 task 047): the home bind — the plain bind on plane WorkforceHome plus the home directory, one write.</summary>
+    public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
+        => Task.FromResult(Bind(contactId, etag, oid, IdentityPlaneMarker.WorkforceHome, consumeInvite: false, homeTenantId));
+
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct)
     {
         lock (_gate)
@@ -468,7 +549,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
         => Task.FromResult(Bind(contactId, etag, oid, plane, consumeInvite: true));
 
-    private StoreWriteResult Bind(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, bool consumeInvite)
+    private StoreWriteResult Bind(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, bool consumeInvite,
+        Guid? homeTenantId = null)
     {
         lock (_gate)
         {
@@ -513,8 +595,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 c.InviteCodeHash = null;
             }
 
+            if (homeTenantId is { } tenant)
+            {
+                c.ExternalTenantId = tenant.ToString("D");
+            }
+
             c.Version = NextVersion();
-            Writes.Add(("bind", contactId, consumeInvite ? $"{c.Oid}|{plane}|invite-code-hash=null" : $"{c.Oid}|{plane}"));
+            Writes.Add(("bind", contactId,
+                consumeInvite ? $"{c.Oid}|{plane}|invite-code-hash=null"
+                : homeTenantId is { } t ? $"{c.Oid}|{plane}|tenant={t:D}" : $"{c.Oid}|{plane}"));
             return StoreWriteResult.Written;
         }
     }
@@ -524,6 +613,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     public async Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
+        // The production payload's own argument checks (a WorkforceHome create needs tenant + owner; no other plane may).
+        _ = DataverseContactIdentityStore.CreatePayload(oid, plane, details);
+
         lock (_gate)
         {
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
@@ -547,6 +639,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             {
                 Id = id, Oid = oid.ToString("D"), KeyMirror = oid.ToString("D"), Plane = (int)plane, Email = details.Email,
                 FirstName = details.FirstName, LastName = details.LastName, StateCode = 0, Version = NextVersion(),
+                ExternalTenantId = details.ExternalTenantId?.ToString("D"), Department = details.Department,
+                OwnerTeamId = details.OwningTeamId,
             };
             Writes.Add(("create", id, $"{oid:D}|{plane}|{details.Email}|{details.LastName}"));
             return new StoreWriteResult(StoreWriteStatus.Written, id);
@@ -659,7 +753,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     private ContactBindingRow Row(Contact c)
         => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag,
-            c.KeyMirror, c.ExternalTenantId);
+            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId);
 
     private SystemUserIdentityRow UserRow(SystemUser u)
         => new(u.Id, u.Oid, u.Email, u.DomainName, u.PrimaryContactId, $"W/\"{u.Version}\"",
