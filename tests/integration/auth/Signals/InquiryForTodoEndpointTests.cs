@@ -186,12 +186,15 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         (await response.Content.ReadAsStringAsync()).Should().NotContain(Inquiry.ToString("D"));
     }
 
-    [Fact]
-    public async Task ACallerWhoCannotReadTheHintedInquiry_Is404_NeverItsIdOrReplies()
+    [Theory]
+    [InlineData(false)] // Dataverse answers 404
+    [InlineData(true)]  // Dataverse answers 403, its usual answer for a row the caller cannot read (uac-r2 #1982 test nit)
+    public async Task ACallerWhoCannotReadTheHintedInquiry_Is404_NeverItsIdOrReplies(bool forbidden)
     {
         // The hint names a real inquiry, but every returned value must be admitted by the caller's own read.
         TheInquiryWorld(Hint(Inquiry));
         W.CallerCannotRead.Add(Inquiry);
+        W.CannotReadIsForbidden = forbidden;
 
         var response = await GetAsync(InquiryTodo);
 
@@ -237,11 +240,14 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         W.Requests.Should().NotContain(r => r.StartsWith("sprk_servicerequests?", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task ACallerWhoCannotReadTheInquiry_OnTheFallback_Is404()
+    [Theory]
+    [InlineData(false)] // the list leaves the row out
+    [InlineData(true)]  // the list is refused with 403 (no read on the table; uac-r2 #1982 test nit)
+    public async Task ACallerWhoCannotReadTheInquiry_OnTheFallback_Is404(bool forbidden)
     {
         TheInquiryWorld(null);
         W.CallerCannotRead.Add(Inquiry);
+        W.CannotReadIsForbidden = forbidden;
 
         (await GetAsync(InquiryTodo)).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -315,6 +321,9 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         public HashSet<Guid> CallerCannotRead { get; } = new();
         public string? FailReadsStartingWith { get; set; }
 
+        /// <summary>An unreadable service request answers 403 (single read, or the whole matter list) instead of 404 / a missing row.</summary>
+        public bool CannotReadIsForbidden { get; set; }
+
         /// <summary>Reads starting with this THROW (adversarial pass 1 F3: DataverseUserClient lets a timeout through).</summary>
         public string? ThrowReadsStartingWith { get; set; }
         public bool RepliesHaveAnotherPage { get; set; }
@@ -343,6 +352,8 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
             if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
             {
                 var id = IdIn(path);
+                if (CannotReadIsForbidden && CallerCannotRead.Contains(id))
+                    return Forbidden();
                 return ServiceRequests.TryGetValue(id, out var request) && !CallerCannotRead.Contains(id)
                     ? Ok(new Dictionary<string, object?> { ["statecode"] = request.State, ["sprk_direction"] = request.Direction })
                     : NotFound();
@@ -353,6 +364,8 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
                 var matter = Guid.Parse(Match(path, @"_sprk_regardingmatter_value eq ([0-9a-f-]{36})"));
                 var direction = int.Parse(Match(path, @"sprk_direction eq (\d+)"));
                 var state = int.Parse(Match(path, @"statecode eq (\d+)"));
+                if (CannotReadIsForbidden && ServiceRequests.Keys.Any(CallerCannotRead.Contains))
+                    return Forbidden();
                 var rows = ServiceRequests
                     .Where(kv => kv.Value.Matter == matter && kv.Value.Direction == direction && kv.Value.State == state && !CallerCannotRead.Contains(kv.Key))
                     .Select(kv => new Dictionary<string, object?> { ["sprk_servicerequestid"] = kv.Key.ToString("D") });
@@ -383,6 +396,8 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         private static Guid IdIn(string path) => Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
 
         private static string Match(string path, string pattern) => Regex.Match(Uri.UnescapeDataString(path), pattern).Groups[1].Value;
+
+        private static DataverseUserResponse Forbidden() => DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no");
 
         private static DataverseUserResponse NotFound() => DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
 

@@ -89,8 +89,10 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
 /// than absent. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
-/// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored: FR-48/D-23 bind what it may
-/// assert when it is written (the rule's literal text, no witness value). Null when empty. Task 154 (#1959 item 1).</param>
+/// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored. FR-48/D-23 bind what it may
+/// assert when it is written: the rule's literal text, with its tokens filled from the subject's own tested fields
+/// (<c>SignalWriter.RenderSentence</c>), never a witness value. It adds nothing beyond the caller's own read of the Signal row (the
+/// column is not field-secured); a non-core subject the caller cannot read is DI-89 (#1913). Null when empty. Task 154 (#1959 item 1).</param>
 /// <param name="SubjectRecordType">Do lane only (task 154, #1958): the subject's table (logical name), the table whose caller-scoped
 /// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
 /// a Decide-lane row.</param>
