@@ -277,6 +277,13 @@ public partial class RouteAuthorizationGuardTests
             + "404; an unresolved caller: the single 403); then every action's preflight checks the caller's own rights before any "
             + "write (a missing right is 403). Core record and item subject are derived server-side from the Signal, never the body; "
             + "the Decision Record's owning team is the ownership resolver's answer for the core and every resolved Signal's subject (D-129)."),
+        new GovernedFile("Api/Signals/SignalReadEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/v1/signals/worklist (ontology platform R1 task 038, D-15, FR-54) -- the worklist's only Signal reader. The "
+            + "record-level decision is SignalReadService.ReadAsync, every row-visibility read AS THE CALLER through IDataverseUserClient: "
+            + "the Signals (Dataverse trims by the Signal's BU and shares), then one batched read per core type of the catalog-named core "
+            + "table (a row whose core record the caller cannot read, a half pair or a non-core type is dropped without trace), then for "
+            + "the Do lane the subject filtered to the caller's own work (task 097 decision B, D-44, D-129; a no-core row is Do-only, "
+            + "D-35). An unresolved caller is the single 403 (D-29); a fault is 503, never a shorter list."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -772,7 +779,10 @@ public partial class RouteAuthorizationGuardTests
     //
     // 121 + 121 -> 124 (2026-10-14, merge of master into docs/ontology-platform-design): the union of the two
     // 118 -> 121 sequences above (ontology 036/071/043 + external-access-r3 033/035/037). No route added or removed here.
-    private const int ExpectedEndpointFileCount = 124;
+    //
+    // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
+    // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
+    private const int ExpectedEndpointFileCount = 125;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1794,6 +1804,15 @@ public partial class RouteAuthorizationGuardTests
             + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
             + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
             + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
+        new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
+            new[] { "SignalReadService.ReadAsync" },
+            "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:59). It resolves the caller "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:240; unresolved: the single 403 at SignalReadEndpoints.cs:63), runs the "
+            + "worklist FetchXML as the caller (:510), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:671; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:726). Nothing app-only is "
+            + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
+            + "D-123); a fault is 503 (SignalReadEndpoints.cs:72), never a shorter list."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

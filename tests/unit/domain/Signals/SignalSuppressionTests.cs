@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// schema already pinned by <c>SignalWriter</c> / <c>DecisionRecordWriter</c>; the real-schema pairing for these columns is the
 /// existing <c>SignalWriterSeamTests</c> and the 031/040 live proofs (this task adds no column).
 /// </remarks>
-public class SignalSuppressionTests
+public partial class SignalSuppressionTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 12, 9, 0, 0, TimeSpan.Zero);
     private static readonly Guid PolicyId = Guid.Parse("4d204810-61bf-f111-aaaf-0022482913fc");
@@ -1946,8 +1946,22 @@ public class SignalSuppressionTests
                 _ => throw new NotSupportedException(q.EntityName),
             };
             var result = new EntityCollection();
-            foreach (var row in source.Where(r => Matches(r, q.Criteria))) result.Entities.Add(row);
+            foreach (var row in source.Where(r => Matches(r, q.Criteria))) result.Entities.Add(Projected(row, q.ColumnSet));
             return result;
+        }
+
+        /// <summary>The row as Dataverse returns it for <paramref name="columns"/>: only the asked columns (all only for AllColumns), so
+        /// code that reads a column it did not ask for sees null, as it would live.</summary>
+        private static Entity Projected(Entity row, ColumnSet columns)
+        {
+            if (columns.AllColumns) return row;
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Columns)
+            {
+                if (row.Contains(column)) copy[column] = row[column];
+            }
+
+            return copy;
         }
 
         private static bool Matches(Entity row, FilterExpression filter)

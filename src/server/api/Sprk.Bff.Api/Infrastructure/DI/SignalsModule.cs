@@ -73,6 +73,10 @@ public static class SignalsModule
         services.AddScoped<SignalCoreRecordAccess>();
         services.AddScoped<DecisionPlanService>();
 
+        // Signal read route (task 038, FR-54): the worklist's only Signal reader. Scoped (every read is the request caller's
+        // through the caller-identity client); unconditional, like the route that uses it (bff-extensions.md F.1).
+        services.AddScoped<SignalReadService>();
+
         // Decision action executors (task 044, FR-52): one per catalog action the commit route (task 043) calls, except the
         // inquiry (070) and Assign Work (046). Internal services, not routes; scoped because every write is the request
         // caller's. DecisionRouteCores adapts the shipped event, child-record and communications cores. Unconditional:

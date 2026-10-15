@@ -232,6 +232,8 @@ public static class EndpointMappingExtensions
         app.MapDecisionPlanEndpoints();
         // Ontology platform R1 task 043: the decision commit route (one review, record last, idempotent per review id).
         app.MapDecisionCommitEndpoints();
+        // Ontology platform R1 task 038: the worklist's Signal read route (core-record check and Do-lane scope as the caller).
+        app.MapSignalReadEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
         // owner round 10 item 1). Api/WorkAssignmentEndpoints.cs is DELETED. Its one route, POST
         // /api/v1/work-assignments, created a sprk_workassignment APP-ONLY with ownerid = a caller-chosen user (records
