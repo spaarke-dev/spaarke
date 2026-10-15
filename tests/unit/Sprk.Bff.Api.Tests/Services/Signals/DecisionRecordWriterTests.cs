@@ -91,7 +91,10 @@ public sealed partial class DecisionRecordWriterTests
         /// <summary>The query's conditions, evaluated on a row: an equality on a lookup or a value, a null test, and a LIKE with a leading and trailing %.</summary>
         private static bool Satisfies(QueryExpression query, Entity row) => query.Criteria.Conditions.All(condition =>
         {
-            var actual = row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+            // The primary key is the row's Id, not an attribute (task 149 D-144: the writer reads the communication's ownerid by key).
+            object? actual = condition.AttributeName == row.LogicalName + "id"
+                ? row.Id
+                : row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
             if (condition.Operator == ConditionOperator.Null)
             {
                 return actual is null;
@@ -140,6 +143,7 @@ public sealed partial class DecisionRecordWriterTests
                     var stored = Created
                         .Select(c => c.Id == Guid.Empty ? Clone(c, NewId) : c)
                         .Concat(Seeded)
+                        .Concat(Rows.Values)
                         .Where(row => row.LogicalName == query.EntityName && Satisfies(query, row))
                         .Take(query.TopCount ?? int.MaxValue)
                         .ToList();

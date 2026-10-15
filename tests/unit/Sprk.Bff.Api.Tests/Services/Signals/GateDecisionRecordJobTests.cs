@@ -27,6 +27,7 @@ namespace Sprk.Bff.Api.Tests.Services.Signals;
 public sealed class GateDecisionRecordJobTests
 {
     private static readonly Guid CommunicationId = Guid.NewGuid();
+    private static readonly Guid CommunicationOwner = Guid.NewGuid();
     private static readonly Guid MatterId = Guid.NewGuid();
     private static readonly Guid RuleId = Guid.NewGuid();
     private static readonly DateTimeOffset GateTime = new(2026, 10, 15, 9, 30, 0, TimeSpan.Zero);
@@ -256,17 +257,22 @@ public sealed class GateDecisionRecordJobTests
     }
 
     [Fact]
-    public async Task AnUnfiledCommunication_GetsOneRecord_OwnedByItsBusinessUnitsDefaultTeam_D144()
+    public async Task AnUnfiledCommunication_GetsOneRecord_OwnedByTheCommunicationsOwner_D144Amended()
     {
-        // D-144 (owner decision; uac-r2 reviews it). REAL RecordOwnershipResolver over an in-memory directory.
+        // D-144 as amended (owner ruling on uac-r2 F1). REAL RecordOwnershipResolver over an in-memory directory.
         var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
         var rig = new Rig(filedUnderMatter: false, realResolver: directory.Resolver());
+        rig.Writer.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["ownerid"] = new EntityReference("systemuser", CommunicationOwner),
+        };
 
         var outcome = await rig.RunAsync(Payload());
 
         outcome.Status.Should().Be(JobStatus.Completed);
         var record = rig.Writer.Row;
-        record.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", ChildTeam));
+        record.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", CommunicationOwner),
+            "the communication's own owner, never the business unit's default team");
         record.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
         // Idempotent for the unfiled path too.
         (await rig.RunAsync(Payload())).Status.Should().Be(JobStatus.Completed);
@@ -275,8 +281,8 @@ public sealed class GateDecisionRecordJobTests
 
     [Theory]
     [InlineData("noBusinessUnit")]
-    [InlineData("noDefaultTeam")]
-    public async Task AnUnfiledCommunicationWithNoUnitOrNoDefaultTeam_WritesNothing_TheJobCompletes_CountedAsASkipNeverAFailure_D144(string shape)
+    [InlineData("noOwner")]
+    public async Task AnUnfiledCommunicationWithAMissingOrUnreadableOwner_WritesNothing_TheJobCompletes_CountedAsASkipNeverAFailure_D144Amended(string shape)
     {
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
@@ -284,10 +290,13 @@ public sealed class GateDecisionRecordJobTests
         var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
         using var _ = failureListener;
         using var __ = skipListener;
-        var directory = shape == "noDefaultTeam"
-            ? Standard(withDefaultTeams: false).WithRecord("sprk_communication", CommunicationId, ChildBu)
+        var directory = shape == "noOwner"
+            ? Standard().WithRecord("sprk_communication", CommunicationId, ChildBu)
             : Standard().WithRecord("sprk_communication", CommunicationId, owningBusinessUnit: null);
         var rig = new Rig(filedUnderMatter: false, realResolver: directory.Resolver());
+        rig.Writer.Rows[("sprk_communication", CommunicationId)] = shape == "noOwner"
+            ? new Entity("sprk_communication", CommunicationId)
+            : new Entity("sprk_communication", CommunicationId) { ["ownerid"] = new EntityReference("systemuser", CommunicationOwner) };
 
         var outcome = await rig.RunAsync(Payload());
 

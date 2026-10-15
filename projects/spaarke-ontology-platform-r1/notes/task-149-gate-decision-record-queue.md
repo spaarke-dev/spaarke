@@ -2,7 +2,7 @@
 
 > Branch `task/ontology-149-gate-dr-queue` (worktree `C:\wts-149`), cut from `origin/docs/ontology-platform-design` at `492d00bd1`.
 > POML: `tasks/149-gate-decision-record-queue-idempotent.poml`. Builds on task 042 (the gate entry point) and 142 (the writer contract).
-> uac-r2 must review the D-144 ownership choice (section "D-144") before merge.
+> uac-r2 must review the D-144 ownership choice (section "D-144 as amended") before merge.
 
 ## What was built
 
@@ -13,7 +13,7 @@
 | Payload | `GateDecisionRecordPayload` | Ids, the gate's reason code and numbers, the matched rule id, the privilege flag, the direct-filed-under id and the decision time. No subject, sender or body (D-123); a test serialises it and asserts so. |
 | Job | `GateDecisionRecordJobHandler : IJobHandler` (scoped, `SignalsModule`) | Lock under the decision key, build the request (reads the matched rule's priority), call `DecisionRecordWriter.WriteGateDecisionAsync`. Outcomes: written / already recorded / skipped by design (D-144) / another copy in flight = `Success`; unreadable payload or a refusal a retry cannot change = `Poisoned`; a fault or a retryable refusal = `Failure` (the processor abandons, redelivers, dead-letters after the last delivery). |
 | Idempotency | `GateDecisionKey` and `FindGateRecordAsync` (`DecisionRecordWriter.cs`) | The key is a SHA-256 of `gate-dr-{communication}-{authorized|denied}`, rendered as a GUID, and stored in `sprk_steps.reviewId` (the column every record already carries its review id in: NO schema change, so the POML's first escalation trigger did not fire). The writer looks it up before its one create (Equal on `sprk_regardingcommunication`, Like on `sprk_steps`, `sprk_confirmedby` null so a human review cannot masquerade as the gate record, through the shared reader so any team's record is visible). A found record is returned as `AlreadyRecorded`. |
-| D-144 | `ResolveOwnerCoreAsync` / `AskOwnerAsync` | See below. |
+| D-144 (as amended) | `ResolveOwnerCoreAsync` / `ReadCommunicationOwnerAsync` | See below. |
 | uac-r2 K3 | `SignalReadService.cs` | The no-Read refusal logs at Warning. One commit, one assertion in `SignalReadRouteTests`. |
 
 ## Placement (bff-extensions)
@@ -44,19 +44,38 @@ all three from short-path worktrees, measured in this session with one script.
 
 Delta vs fresh master: +0.0029 MB zip (37.1052 vs 37.1023), +0.0194 MB raw, +0 files. Far below the +5 MB / 55 MB / 60 MB thresholds.
 
-## D-144 (uac-r2 to review)
+## D-144 as amended (owner ruling on uac-r2 F1, PR #1907 comment 6198338714; `notes/decisions.md`)
 
-An unfiled communication (no matter or project, so the resolver keeps its creator) is no longer refused. The writer asks `RecordOwnershipResolver` a
-second time as a plain parent (the same ask the resolver already makes for a non-core parent), which resolves the communication's owning business unit
-and its default team (`isdefault = true`, `teamtype = 0`) - uac-r2's rule, not a copy of it. The record is owned by that team.
+**Amended.** The first version of D-144 owned an unfiled communication's gate record by the communication's owning business unit's default team. uac-r2
+(F1) showed that exposes the communication's subject (through the regarding lookup's display name), `sprk_privilegeflagged` and the fact snapshot to
+every Basic colleague in that unit, contrary to D-142. The owner ruled:
 
-- No owning business unit, or no default team: nothing is written, the writer logs `gate_dr_skipped_no_unit_team` at Warning
-  (`DecisionRecordEvents.GateDecisionSkippedNoUnitTeam`, 50313) and counts it on `ontology.writer.skips`, never on `ontology.writer.failures`. The job
-  completes (`Success`): a retry meets the same condition.
-- Scoped on purpose: only the resolver refusals `ParentUnresolved` and `NoDefaultOwnerTeam`, and only after the plain-parent ask (or when the
-  communication is the only parent). A FILED communication keeps its prior behaviour; a core record whose BU cannot be read stays a fail-closed
-  `OwnerRefused` failure, not a skip.
+- An unfiled communication (no matter or project, so the resolver keeps its creator) is no longer refused. Its gate record is owned by the
+  communication's **own owning user**, as read from the row (`ownerid`, through the shared sysadmin reader) on the resolver's `Unchanged` path. It is not
+  owned by the unit's default team, and nobody else is given a share.
+- **Secure-if-any still comes first.** The writer asks `RecordOwnershipResolver` once more as a plain parent, but only for that check (uac-r2's
+  predicate, not a copy of it). A secure answer (the communication is owned in the Secure Record BU) is used as returned: the NAMED Secure team. An
+  ordinary team answer is discarded, never applied. `NoDefaultOwnerTeam` on that ask means "ordinary, and the unit has no default team": the team is not
+  needed any more, so it no longer skips.
+- **A missing or unreadable owner refuses and counts as a skip** (`gate_dr_skipped_no_unit_team`, Warning `DecisionRecordEvents.GateDecisionSkippedNoUnitTeam`
+  50313, `ontology.writer.skips`, never `ontology.writer.failures`; the job completes). Missing = no row, no `ownerid`, an empty id, or an owner that is
+  not a `systemuser` (a team here would contradict the first ask). The communication's business unit unreadable (`ParentUnresolved` on the secure check)
+  is the same skip. It never falls through to any team. A fault in the owner read is a failure (`OwnerResolutionFailed`), not a skip. The reason and
+  event names are kept (stable for the alert rules already on dev); only their text changed.
+- Scoped on purpose: only `ParentUnresolved` / `NoDefaultOwnerTeam` on a communication that stands alone. A FILED communication keeps its prior
+  behaviour; a core record whose BU cannot be read stays a fail-closed `OwnerRefused` failure, not a skip.
+- One create site: the writer still creates through the one private `CreateAsync`. The owner is applied in `FiledAndOwnedAsync` (`ownerid` = the
+  principal), so the D-34 ArchTest stays green.
+- **Re-file.** A later secure filing of the communication still moves a user-owned gate record: the secure-child walk reaches the record through
+  `sprk_regardingcommunication` (`SecureChildLineage`). Proved with the real `SecureChildReconciler` and restamper over the share world
+  (`OntologyRestamp_AUserOwnedGateDecisionRecord_FollowsItsCommunicationIntoIsolation_...`, both routes), not only at resolver level.
+- **Accepted exposure (owner, no code).** Spaarke Console User and Spaarke Ontology Administrator hold Deep read on `sprk_decisionrecord` but only Basic
+  read on `sprk_communication`, so holders of those roles in the owner's business unit or a parent unit can read the record, including the subject and
+  `sprk_privilegeflagged`. Plain Basic colleagues cannot. No role changes.
+- **To verify live at deploy (not provable here):** creating a record with `ownerid` set to another user needs the writer identity to hold Assign on
+  `sprk_decisionrecord`. The unit tests prove the payload; the live seam test (`DecisionRecordWriterSeamTests`) is where the create is proved.
 - The task 042 reason `gate_dr_skipped_unfiled` and its event are replaced by the new ones (they were never shipped to a dashboard; only comments name the old one).
+- Size: writer change plus log/comment text in the job; no new type, package or DI registration, so the publish-size delta above stands.
 
 ## Acceptance criteria, closed
 
@@ -67,8 +86,8 @@ and its default team (`isdefault = true`, `teamtype = 0`) - uac-r2's rule, not a
 | Different outcome, second record | writer and job tests |
 | Enqueue failure: gate and RI action unchanged, logged and metered | consumer test; enqueuer tests (exception, timeout) with `GateEnqueueFailed` counted |
 | Payload has no subject or sender | payload serialisation test |
-| Unfiled: one record owned by the BU default team (D-144) | writer + job tests with the real ownership directory |
-| No BU / no default team: nothing written, skips counter, never failures | writer tests with both metrics listened to |
+| Unfiled: one record owned by the communication's own owner, never the BU default team; Secure BU still gets the named team (D-144 as amended) | writer + job tests with the real ownership directory |
+| Missing or unreadable owner (no row, no owner, a team, no BU): nothing written, skips counter, never failures, never a team (D-144 as amended) | writer tests with both metrics listened to |
 | Empty-worklist refusal at Warning | `SignalReadRouteTests.CallerWithNoSignalRead_GetsAnEmptyList_NotAnError` |
 | Single-create-site ArchTests stay green | `DecisionRecordContextImmutabilityTests`, `RecordOwnerAssignmentCensusTests`, `SecureFamilyConsistencyTests`: 44/44 |
 
@@ -142,3 +161,9 @@ recorded in detail because it is observable.
   runs the real `RecordOwnershipResolver`: an unfiled communication held in the Secure Record BU is owned by the NAMED Secure team (a secure child), never
   the BU's default team. Seeding proof: with the writer's plain-parent ask replaced by the Secure default team, the case fails (expected the named team).
 - **K5 - the non-core-parent unreadable / too-deep case is counted as a skip, not a failure.** Already listed above as "skip classification edge".
+
+## Fix round on uac-r2 F1 (D-144 amended): seeding proof
+
+With the writer's ordinary-team answer put back as the owner (the first version of D-144), 8 of 186 filtered unit tests fail: the owner assertions, the
+Basic-colleague case, the discard case and the missing-owner skips. Restored: 186/186. The re-file test is about the reconciler, not the writer, so the
+seeding does not apply to it; it passes against the unchanged reconciler because the walk already reaches the record through `sprk_regardingcommunication`.

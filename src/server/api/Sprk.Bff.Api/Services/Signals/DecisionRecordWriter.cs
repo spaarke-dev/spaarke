@@ -184,7 +184,8 @@ public static class DecisionRecordRefusalReason
     public const string GateRecordFailed = "decision_gate_record_failed";
 
     /// <summary>Task 149 (D-144, replacing task 042's <c>gate_dr_skipped_unfiled</c>): a gate decision about a communication that stands alone
-    /// (filed under no core record) is owned by its owning business unit's DEFAULT team; when that unit or its default team cannot be found,
+    /// (filed under no core record) is owned by the communication's own owning user (D-144 as amended; the Secure Record business unit's
+    /// named team when the communication sits there); when that owner, or the unit needed to rule out the Secure Record unit, cannot be read,
     /// nothing is written. Not a failure: logged at Warning (<see cref="DecisionRecordEvents.GateDecisionSkippedNoUnitTeam"/>) and counted on the
     /// SKIP counter (<c>ontology.writer.skips</c>, never <c>ontology.writer.failures</c>) under this tag.</summary>
     public const string GateSkippedNoUnitTeam = "gate_dr_skipped_no_unit_team";
@@ -235,8 +236,10 @@ public static class DecisionRecordRefusalReason
 public sealed class DecisionRecordOwner
 {
     internal DecisionRecordOwner(
-        RecordOwnerResolution resolution, IReadOnlyList<RecordOwnershipParent> parents, Guid? assignee, DecisionRecordFiling? filing = null)
+        RecordOwnerResolution resolution, IReadOnlyList<RecordOwnershipParent> parents, Guid? assignee, DecisionRecordFiling? filing = null,
+        EntityReference? principal = null)
     {
+        Principal = principal;
         Resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
         Parents = parents ?? throw new ArgumentNullException(nameof(parents));
         Assignee = assignee;
@@ -245,6 +248,10 @@ public sealed class DecisionRecordOwner
 
     /// <summary>The filing the answer was given for (null when none was computed with it).</summary>
     internal DecisionRecordFiling? Filing { get; }
+
+    /// <summary>Task 149 / D-144 as amended: the owning USER of an unfiled gate communication, applied as the record's owner in place of a
+    /// team (null for every other record, whose owner is the resolver's team).</summary>
+    internal EntityReference? Principal { get; }
 
     /// <summary>The resolver's answer, as returned.</summary>
     public RecordOwnerResolution Resolution { get; }
@@ -282,7 +289,7 @@ public static class DecisionRecordEvents
     public static readonly EventId GateDecisionNotRecorded = new(50312, nameof(GateDecisionNotRecorded));
 
     /// <summary>Warning (task 149, D-144; replaces task 042's Information event of the same id): a gate decision about a communication that
-    /// stands alone is not recorded because its owning business unit, or that unit's default team, cannot be found
+    /// stands alone is not recorded because its owner, or its owning business unit (needed to rule out the Secure Record unit), cannot be read
     /// (<see cref="DecisionRecordRefusalReason.GateSkippedNoUnitTeam"/>). Ids and the resolver's refusal code only.</summary>
     public static readonly EventId GateDecisionSkippedNoUnitTeam = new(50313, nameof(GateDecisionSkippedNoUnitTeam));
 }
@@ -709,11 +716,11 @@ public sealed class DecisionRecordWriter
     {
         if (ex.Reason == DecisionRecordRefusalReason.GateSkippedNoUnitTeam)
         {
-            // D-144: the communication's business unit or that unit's default team cannot be found. Not a failure (counted on the SKIP
+            // D-144: the communication's owner or its owning business unit cannot be read. Not a failure (counted on the SKIP
             // counter, never ontology.writer.failures), but Warning, not Information: a decision went unrecorded and an operator can
             // act on it (uac-r2 K3: a visible, dimensioned skip). Ids and the resolver's refusal code only (D-123).
             _logger.LogWarning(DecisionRecordEvents.GateDecisionSkippedNoUnitTeam,
-                "Gate decision {EvaluationId} not recorded: its communication's business unit or that unit's default team cannot be found "
+                "Gate decision {EvaluationId} not recorded: its communication's owner or owning business unit cannot be read "
                 + "(ownerRefusal={OwnerRefusalCode}).", reviewId, ex.OwnerRefusalCode);
             OntologyWriterTelemetry.RecordSkip(ex.Reason);
             return;
@@ -816,14 +823,14 @@ public sealed class DecisionRecordWriter
     private async Task<DecisionRecordOwner> ResolveRequestOwnerAsync(
         DecisionRecordRequest request, RecordOwnershipContext context, DecisionRecordFiling filing, CancellationToken ct)
     {
-        var owner = await ResolveOwnerCoreAsync(context, requireTeam: true, ct).ConfigureAwait(false);
-        if (!owner.IsSecureOwner && request.Core is null && request.AssigneeSystemUserId is { } assignee && assignee != Guid.Empty)
+        var (owner, principal) = await ResolveOwnerCoreAsync(context, requireTeam: true, ct).ConfigureAwait(false);
+        if (!owner.IsSecureOwner && principal is null && request.Core is null && request.AssigneeSystemUserId is { } assignee && assignee != Guid.Empty)
         {
-            owner = await ResolveOwnerCoreAsync(
+            (owner, _) = await ResolveOwnerCoreAsync(
                 RecordOwnershipContext.ForUserTeam(assignee) with { RequestedBy = context.RequestedBy }, requireTeam: true, ct).ConfigureAwait(false);
         }
 
-        return new DecisionRecordOwner(owner, context.Parents, request.AssigneeSystemUserId, filing);
+        return new DecisionRecordOwner(owner, context.Parents, request.AssigneeSystemUserId, filing, principal);
     }
 
     /// <summary>
@@ -948,9 +955,11 @@ public sealed class DecisionRecordWriter
             // not against the communication. With no core the first parent is the communication itself: if it is not team-owned the resolver
             // reads ITS OWN filing (filed -> secure-if-any over what it is filed under; UNFILED -> E1, owner round 10 item 8: it keeps its
             // creator and its privacy rests on per-participant shares -> Unchanged). Task 149 / D-144 (owner decision): that Unchanged is
-            // no longer a refusal. A decision about an unfiled communication is owned by its owning business unit's DEFAULT team, which
-            // the owner accepted reveals the communication's existence to that unit; ResolveOwnerCoreAsync asks the resolver once more,
-            // as a plain parent, and a missing unit or default team is the by-design skip. The review route never sets this.
+            // no longer a refusal. D-144 as amended (owner ruling on uac-r2 F1): a decision about an unfiled communication is owned by the
+            // communication's own owning user, never by its business unit's default team (that would show its subject, privilege flag and
+            // snapshot to every colleague in the unit). ResolveOwnerCoreAsync asks the resolver once more, as a plain parent, only for
+            // secure-if-any (the Secure Record unit's named team still wins); a missing or unreadable owner is the by-design skip. The
+            // review route never sets this.
             context = context with { KeepCreatorUnlessTargetIsTeamOwned = true };
         }
 
@@ -978,7 +987,7 @@ public sealed class DecisionRecordWriter
             owner = await ResolveRequestOwnerAsync(request, context, filing, ct).ConfigureAwait(false);
         }
 
-        if (!owner.Resolution.IsOwned)
+        if (!owner.Resolution.IsOwned && owner.Principal is null)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.OwnerRefused,
@@ -987,6 +996,11 @@ public sealed class DecisionRecordWriter
         }
 
         owner.Resolution.ApplyTo(entity);
+        if (owner.Principal is { } principal)
+        {
+            entity["ownerid"] = principal; // D-144 as amended: the communication's own owning user; no team, no share
+        }
+
         return (entity, owner);
     }
 
@@ -1046,39 +1060,59 @@ public sealed class DecisionRecordWriter
             innerException: inner);
 
     /// <param name="context">The ownership question.</param>
-    /// <param name="requireTeam">True for every Decision Record, whose owner is always the resolver's team: any answer that names no
-    /// team (a refusal, or an Unchanged the context never asked for) refuses HERE, before the route's first write.</param>
+    /// <param name="requireTeam">True for every Decision Record whose owner is the resolver's team: any answer that names no team (a
+    /// refusal, or an Unchanged the context never asked for) refuses HERE, before the route's first write. The one exception is the gate
+    /// decision about an unfiled communication, whose owner is the communication's own owning user (D-144 as amended).</param>
     /// <param name="ct">Cancellation.</param>
-    private async Task<RecordOwnerResolution> ResolveOwnerCoreAsync(RecordOwnershipContext context, bool requireTeam, CancellationToken ct)
+    /// <returns>The resolver's answer and, only for an unfiled gate communication, the owning principal to apply instead of a team.</returns>
+    private async Task<(RecordOwnerResolution Resolution, EntityReference? Principal)> ResolveOwnerCoreAsync(
+        RecordOwnershipContext context, bool requireTeam, CancellationToken ct)
     {
         var owner = await AskOwnerAsync(context, ct).ConfigureAwait(false);
 
-        // Task 149 / D-144 (owner decision; uac-r2 reviews it). Only the gate path asks as the content of a communication
+        // Task 149 / D-144 AS AMENDED (owner ruling on uac-r2 F1). Only the gate path asks as the content of a communication
         // (KeepCreatorUnlessTargetIsTeamOwned), and its Unchanged answer means the communication is not team-owned and filed under
-        // nothing (E1: it keeps its creator). Task 042 refused that; the owner has since decided that such a decision is owned by the
-        // communication's OWNING BUSINESS UNIT's DEFAULT team. That is exactly the resolver's own plain-parent answer, so the same
-        // parents are asked once more without the keep-creator opt-in rather than this writer reading the unit and its team itself
-        // (one owner of the ownership rule: secure-if-any and the default-team predicates stay uac-r2's).
+        // nothing (E1: it keeps its creator). The decision is then owned by the communication's OWN owning principal, never by its
+        // business unit's default team (a default-team owner would show the communication's subject, privilege flag and snapshot to every
+        // colleague in the unit). Secure-if-any still comes first, and it is uac-r2's predicate, not this writer's: the same parents are
+        // asked once more as a plain parent ONLY to learn whether the communication sits in the Secure Record business unit. A secure
+        // answer is used as returned (the named Secure team); an ordinary team answer is DISCARDED, never applied.
         var gate = context.KeepCreatorUnlessTargetIsTeamOwned;
         var askedAsPlainParent = false;
+        EntityReference? principal = null;
         if (gate && owner.Outcome == RecordOwnerOutcome.Unchanged)
         {
-            owner = await AskOwnerAsync(context with { KeepCreatorUnlessTargetIsTeamOwned = false }, ct).ConfigureAwait(false);
             askedAsPlainParent = true;
+            var secureCheck = await AskOwnerAsync(context with { KeepCreatorUnlessTargetIsTeamOwned = false }, ct).ConfigureAwait(false);
+            if (secureCheck.IsOwned && !secureCheck.IsSecureOwner)
+            {
+                principal = await ReadCommunicationOwnerAsync(context, ct).ConfigureAwait(false);
+            }
+            else if (secureCheck.IsRefused && secureCheck.RefusalCode == RecordOwnerRefusal.NoDefaultOwnerTeam)
+            {
+                // The resolver decides "secure" before it looks for a default team, so this answer is "ordinary, and the unit has no
+                // default team": the team is not needed any more, the communication's owner is.
+                principal = await ReadCommunicationOwnerAsync(context, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                owner = secureCheck; // secure (the named team), or a refusal handled below
+            }
         }
 
         if (owner.IsRefused)
         {
-            // D-144: no owning business unit, or no (single) default team: by design nothing is written, and it is a SKIP, not a failure.
-            // Limited to what D-144 names: the answer for a communication that stands alone (the plain-parent ask above, or a first ask
-            // whose only parent is the communication). A core record whose unit cannot be read stays a real, fail-closed refusal.
+            // D-144: the communication's business unit (or, for a filing the first ask could not read, a parent) cannot be read: by design
+            // nothing is written, and it is a SKIP, not a failure. Limited to what D-144 names: the answer for a communication that stands
+            // alone (the secure check above, or a first ask whose only parent is the communication). A core record whose unit cannot be
+            // read stays a real, fail-closed refusal.
             var skip = gate
                 && owner.RefusalCode is RecordOwnerRefusal.ParentUnresolved or RecordOwnerRefusal.NoDefaultOwnerTeam
                 && (askedAsPlainParent || context.Parents.All(p => p.EntityLogicalName == GateSubjectEntity));
             throw new DecisionRecordRefusedException(
                 skip ? DecisionRecordRefusalReason.GateSkippedNoUnitTeam : DecisionRecordRefusalReason.OwnerRefused,
                 skip
-                    ? "The communication's owning business unit or that unit's default team cannot be found, so no team can own a Decision Record about it; nothing was written."
+                    ? "The communication's owner, or its owning business unit (needed to rule out the Secure Record unit), cannot be read, so nobody can own a Decision Record about it; nothing was written."
                     : "The ownership resolver refused an owner for the Decision Record; nothing was written.",
                 owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
         }
@@ -1092,7 +1126,7 @@ public sealed class DecisionRecordWriter
                 RecordOwnerRefusal.NoOwnerSource);
         }
 
-        if (requireTeam && !owner.IsOwned)
+        if (requireTeam && !owner.IsOwned && principal is null)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.OwnerRefused,
@@ -1100,7 +1134,50 @@ public sealed class DecisionRecordWriter
                 owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
         }
 
-        return owner;
+        return (owner, principal);
+    }
+
+    /// <summary>
+    /// Task 149 / D-144 as amended: the owning principal of the unfiled communication a gate decision is about, as READ from the row (the
+    /// shared sysadmin reader, which sees any owner; the writer identity cannot be assumed to). Only a user owner is accepted: a
+    /// communication that is not team-owned kept a user (or application) owner, which Dataverse reports as a <c>systemuser</c>. Anything
+    /// else (no row, no owner, a team, an empty id) is "missing or unreadable": the by-design skip, never a fall-through to any team.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.GateSkippedNoUnitTeam"/> when there is no
+    /// readable user owner; <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/> when the read faulted.</exception>
+    private async Task<EntityReference> ReadCommunicationOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
+    {
+        var communicationId = context.Parents.First(p => p.EntityLogicalName == GateSubjectEntity).RecordId;
+        EntityReference? owner;
+        try
+        {
+            var query = new QueryExpression(GateSubjectEntity)
+            {
+                ColumnSet = new ColumnSet("ownerid"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition($"{GateSubjectEntity}id", ConditionOperator.Equal, communicationId);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            owner = rows?.Entities?.FirstOrDefault()?.GetAttributeValue<EntityReference>("ownerid");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerResolutionFailed,
+                "The communication's owner could not be read, so the Decision Record owner is unknown; nothing was written.",
+                innerException: ex);
+        }
+
+        if (owner is { Id: var id, LogicalName: "systemuser" } && id != Guid.Empty)
+        {
+            return owner;
+        }
+
+        throw new DecisionRecordRefusedException(
+            DecisionRecordRefusalReason.GateSkippedNoUnitTeam,
+            "The communication has no readable user owner, so nobody can own a Decision Record about it; nothing was written.",
+            RecordOwnerRefusal.ParentUnresolved);
     }
 
     /// <summary>One question to the ownership resolver; a fault in it is not an answer, so it becomes the writer's one exception type.</summary>

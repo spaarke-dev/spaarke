@@ -152,7 +152,7 @@ public class GateDecisionRecordEnqueuer
 /// creates (durable, so it survives a cache eviction and a timed-out create whose row exists). The lock narrows the window in which two
 /// copies could both find nothing; it cannot close it (the idempotency cache is check-then-set and fails open), which is why (3) is
 /// the writer's and not a cache entry.</para>
-/// <para><b>Outcomes.</b> Written, already recorded, skipped by design (D-144: no business unit or default team) and a duplicate in
+/// <para><b>Outcomes.</b> Written, already recorded, skipped by design (D-144: no readable owner or owning business unit) and a duplicate in
 /// flight are all <c>Success</c>. A payload that cannot be read, or a refusal a retry cannot change (invalid request, no fact snapshot,
 /// no subject, unfileable subject), is <c>Poisoned</c>: dead-lettered and visible. Everything else (a Dataverse fault, an owner the
 /// resolver refused, a privilege fault, a lookup that could not be made) is <c>Failure</c>: abandoned and redelivered, then
@@ -239,7 +239,7 @@ public sealed class GateDecisionRecordJobHandler : IJobHandler
             // counted it on ontology.writer.skips; completing the message is the honest outcome.
             _logger.LogInformation(GateDecisionRecordEvents.HandlerCompleted,
                 "[GATE-DR] job {JobId} done without a record: communication {CommunicationId} authorized {Authorize} was skipped by design " +
-                "(its business unit or that unit's default team cannot be found, D-144).",
+                "(its owner or owning business unit cannot be read, D-144).",
                 job.JobId, payload.CommunicationId, payload.Authorize);
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }
