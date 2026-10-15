@@ -53,7 +53,13 @@ All Signals readers of `sprk_policy` select **by enabled/active state and lane o
 
 ## 4. ontology-r1 review (step 3)
 
-Pending. See "Message for ontology-r1" below.
+Received 2026-10-15 from the ontology-r1 session:
+1. No collisions; nothing planned under these names (`sprk_domain` on `account` / `sprk_organization` is a different table and type).
+2. Agreed: `sprk_consequence` is a new typed column; do not reuse `sprk_proposedaction` (still required; billing rows fill it) or `sprk_lane`.
+3. Agreed with a change: ontology readers filter on an allowlist (`sprk_domain` null OR Ontology 100000001), not `!= Billing`. Four readers named (SignalReevaluationJob enabled query and retrieve-by-id, PolicyScopeResolver.LoadEnabledPoliciesAsync, SignalClosureService not-in-force query). Two tests. ontology-r1 reviews the 070 PR and wants the target branch named before it opens. Carried into task 070.
+4. Agreed: no backfill; null means Ontology.
+5. `BILL-` prefix OK.
+Additions: (a) the schema sits in our solution (`SpaarkeMaster`, unmanaged), not OntologyPlatformSolution; (b) the Ontology admin tab lists all `sprk_policy` rows, so 070 filters it to the same allowlist; (c) Ontology Administrator holds write on `sprk_policy` and so could change `sprk_domain`. Handled by (b) (billing rows are not shown there) and by the billing write path never changing a policy's domain; a direct Dataverse edit by a privileged user remains possible, which is the same residual as any other column on that table.
 
 ## 5. Schema applied (step 5)
 
