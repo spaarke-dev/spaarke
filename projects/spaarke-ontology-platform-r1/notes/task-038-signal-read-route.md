@@ -51,6 +51,7 @@ The event rule matches `EventOwnershipScope` (097 decision B) exactly; a test pi
   - `SecureChildShareSynchronizer.SecureRootsAboveAsync` / `ResolveSecureOwnerTeamAsync`
 - uac-r2's PR #1861 does not overlap.
 - **For uac-r2 to review:** `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` (their file). It sets `ExpectedEndpointFileCount` 121 → 122, adds a GovernedFile `Api/Signals/SignalReadEndpoints.cs`, and adds a HandlerDecision `GET /api/v1/signals/worklist`.
+- **Also for uac-r2 to review:** `Services/Access/SecureChildShareSynchronizer.cs` gains an additive `SecureRootsAboveEachAsync`. It is `SecureRootsAboveAsync`'s walk, one answer per group, all groups in one run (one read cache), and it takes a Secure team the caller already identified with `ResolveSecureOwnerTeamAsync`. `SignalSuppressionService.PartitionsAsync` now uses it.
 - The census was mutation-proven: with the original ledger 3 tests fail; with the new entry all 86 pass.
 
 ## Read-time witness rule (task 145 review F1, option B; main session 2026-10-14)
@@ -59,16 +60,22 @@ The event rule matches `EventOwnershipScope` (097 decision B) exactly; a test pi
 - **Otherwise:** both are removed and the line carries `"withheld": true`. `kind`, `ref`, `tier`, `asOf` and `clause` stay.
 - **A fault** in the family read withholds every detail. This is fail closed: the list itself is unchanged and the result is logged at Warning.
 - **Evidence that is not a JSON array of objects** is returned as null.
-- **Implementation:** `SignalSuppressionService.WitnessDetailShownOnReadAsync` places the returned Signals with `PartitionsAsync`, reading app-only the rows the caller's reads already admitted. Its three private helpers mirror task 145's (unmerged) helpers:
+- **Implementation:** `SignalSuppressionService.WitnessDetailShownOnReadAsync` places the returned Signals with `PartitionsAsync`, reading app-only the rows the caller's reads already admitted. Its two private helpers mirror task 145's (unmerged) helpers, and its witness placement follows 145's `WitnessFamiliesAsync` (no owner override):
 
   | This branch | Task 145 |
   |---|---|
-  | `ReadWitnessFamiliesOnReadAsync` | `WitnessFamiliesAsync` |
   | `WitnessDetailWithinFamily` | `KeepsDetail` |
   | `WitnessOnRead` | `WitnessOf` |
 
-- **When 145 merges:** fold these three into 145's helpers (one rule, one helper). The names differ on purpose so the merge does not collide.
+- **When 145 merges** (#1874, still OPEN at push time): replace `WitnessDetailWithinFamily` / `WitnessOnRead` with direct calls to 145's `KeepsDetail` / `WitnessOf`. Then only one rule exists. The names differ on purpose so the merge does not collide. Tracked as DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890).
 - **DTO:** `WorklistItemRow.EvidenceRefs` carries the `withheld` flag per line.
+- Pass 2 (`b677b4760`):
+  - The witness family comes from its ROOTS (`PartitionsAsync`), never an owner override. A row filed under secure X but not yet re-owned is X's family (task 145's re-own window).
+  - The Secure team is identified once per request. Signals and witnesses are placed in ONE `PartitionsAsync` call, which now walks every distinct lineage in ONE run of uac-r2's walker (`SecureChildShareSynchronizer.SecureRootsAboveEachAsync`, additive), so each parent is read once.
+  - Measured on the unit fake: 4 → 24 Signals costs 14 → 54 queries. The old per-lineage walk cost 52 → 272.
+  - The `PartitionsAsync` change applies to every caller (count, stamps, planner, decision commit); their unit suites pass unchanged.
+  - Evidence property names are matched case-insensitively. A line whose names collide withholds that Signal's evidence (null), not a 503.
+  - The read-path fault has its own EventId: `WitnessReadFailed` 50353.
 - **UI** (`ConsoleKit/EvidenceLine.tsx:82-87` renders a line with no `text` as "No value recorded") is **outside 038**. Route it to 059: render `withheld: true` as "Details withheld (restricted record)".
 - **For 145:** its job-side redaction (`StoredEvidenceToRedactAsync`) removes `text` / `source` without writing a marker. After that pass, the route can no longer tell withheld from absent. Suggest 145 also writes `"withheld": true` when it clears a line.
 - **Live:** dev has the Secure Record BU, but no `sprk_signal` row carries evidence detail yet (read-only check 2026-10-14). The rule is proven in-process only:
@@ -98,18 +105,19 @@ The event rule matches `EventOwnershipScope` (097 decision B) exactly; a test pi
 - **K4:**
   - The primary key is assumed to be `{logical}id` (custom tables). An activity-type core would 400, then 503.
   - Ordering on a lookup relies on Dataverse returning a paging cookie; if one is missing, the result is a loud 503.
-- **Witness rule cost:** one partition walk per distinct lineage, only for returned rows that still carry detail.
-  - One unreadable lineage (a walk that does not complete) withholds detail on every line of that call. This fails closed; it is not a shorter list.
+- **Witness rule cost:** one walker run per request, only for returned rows that still carry detail. Reads are bounded by the distinct Signals, witnesses and parents.
+  - One unreadable lineage (a walk that does not complete) withholds detail on every line of that request. This fails closed; it is not a shorter list.
+  - A closed-set item whose assignee's day cannot be read falls back to the UTC date with a Warning.
 
 ## Evidence
 
-**In-process route tests** (`SignalReadRouteTests`, filter `SignalReadRoute`): 34 pass, plus 2 opt-in live legs.
+**In-process route tests** (`SignalReadRouteTests`, filter `SignalReadRoute`): 38 pass, plus 2 opt-in live legs.
 
 **Live read-only legs** (`SignalReadRouteLiveTests`, spaarkedev1): 2/2 pass.
 - Reader: Jessica Broyles `7c35232f-…`.
 - Other BU: `d6f8f439-…`.
 
-**Unit tests:** `SignalSuppressionTests` 88/88, including 6 new `T038_*`. The filter `Signal` passes 1522/1522.
+**Unit tests:** `SignalSuppressionTests` 96/96, including 9 `T038_*`. The filters Signal, SecureChild, Decision and Access pass 6570/6570.
 
 **ArchTests:** 974/974, including `RouteAuthorizationGuard` 86/86.
 
@@ -139,9 +147,11 @@ The delta is well under +5 MB. The `8024c9b92` additions are source only, with n
 
 ## Issues filed (D-106)
 
+- **DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890):** fold the read-time witness helpers into 145's when #1874 merges.
+
 - **DI-82 [#1881](https://github.com/spaarke-dev/spaarke/issues/1881):** the evaluator's work-assignment assignee column.
 - **DI-83 [#1882](https://github.com/spaarke-dev/spaarke/issues/1882):** the outer link to `sprk_policy` empties the worklist for users without policy Read. Task 050's note #8 assumption is wrong.
-- **DI-84 [#1883](https://github.com/spaarke-dev/spaarke/issues/1883):** the per-Signal access check (036) and the worklist rule (038) disagree.
+- **DI-86 [#1883](https://github.com/spaarke-dev/spaarke/issues/1883):** the per-Signal access check (036) and the worklist rule (038) disagree.
 
 ## Review record
 
@@ -154,4 +164,14 @@ The delta is well under +5 MB. The `8024c9b92` additions are source only, with n
   - F3: scale is recorded as a known limit.
 
   Known-limit findings (K1–K4) are recorded above. The page-2 refusal (K2) was fixed: it is now 503.
-- **Pass 2 (opus):** see the commit that follows this note.
+- **Pass 2 (opus), on `9e61305ae..8024c9b92`.** All fixed in `b677b4760`, as the main session directed:
+  - F1: the owner override.
+  - F2: the app-only fault test was missing.
+  - F2: the fakes ignored the ColumnSet.
+  - F3: the per-lineage walk.
+  - K1: casing and duplicate names.
+  - K2: the EventId.
+  - Outside the diff: `RecipientDay.Error` was not logged.
+
+  Mutation checks on the fix, each failing at least one new test: fail-open on fault, dropping `ownerid`, the owner override, a case-sensitive parse, no warning, and the old per-lineage walk.
+- **Scoped re-check (sonnet) of `b677b4760`:** clean (result relayed by the main session).

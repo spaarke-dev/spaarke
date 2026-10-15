@@ -1045,7 +1045,7 @@ public sealed class SignalSuppressionService
     /// <see cref="ReadSubjectRowsAsync"/>; task 145's <c>EvidenceWithinPartitionAsync</c> / <c>StoredEvidenceToRedactAsync</c> apply
     /// the same rule to hits and stored rows but are not on this branch's base. Extension: <see cref="WitnessDetailWithinFamily"/> and
     /// <see cref="WitnessOnRead"/> mirror 145's <c>KeepsDetail</c> / <c>WitnessOf</c> line for line and are replaced by them when 145
-    /// merges (one rule, one helper). Cost of doing nothing: until the job's next pass, a matter's readers see the subject and sender
+    /// merges (one rule, one helper; DI-87, #1890). Cost of doing nothing: until the job's next pass, a matter's readers see the subject and sender
     /// of a communication that has since been filed under another secure family (D-123).</remarks>
     internal async Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> WitnessDetailShownOnReadAsync(
         IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals, CancellationToken ct)
