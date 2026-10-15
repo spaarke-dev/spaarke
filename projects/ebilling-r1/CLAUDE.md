@@ -100,7 +100,7 @@ No ADR tensions are declared (spec "ADR Tensions"). If one emerges, use root §6
 Full rationale for each decision is in `notes/decisions-log.md`.
 
 - 2026-10-14 — D-18: extend `sprk_billingevent` as the Invoice Line; retire `sprk_invoicelineitem`.
-- 2026-10-14 — D-23 / D-30: one rules *system*, two strategies. Ontology merges its Signals code (#1111) before eBilling's first evaluator task. Design against the branch until then; never copy its code.
+- 2026-10-14 — D-23 / D-30: one rules *system*, two strategies. Ontology's Signals code (#1111) merged to master 2026-10-15 at `f292ad119` and is in this branch; build on it, never fork it.
 - 2026-10-14 — D-24 / D-39: internal submission runs the same checks. Override needs a reason and the "eBilling Override" privilege; one person.
 - 2026-10-14 — D-33 / D-40 / D-54: approvers are resolved from `sprk_billingapproverrole` on the core record. Any one eligible approver approves. An empty role means the settings default, seeded as Assigned Attorney 1 + Assigned To Internal.
 - 2026-10-14 — D-37 / D-43: resubmission keeps the firm invoice number and gets a new `.n`. Return to Firm closes the invoice; the accepted resubmission is a new invoice linked as superseding it.
@@ -123,7 +123,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-14 — D-59: one audited eBilling settings record holds approver defaults, the threshold, confidence weights, chunk size, related-work window and AP mapping.
 - 2026-10-14 — D-60: firm notices are drafted by `INVOICE-FIRM-NOTICE@v1`. Amounts, line references, clause quotes and the findings table are inserted by code. A template is used when the AI is unavailable.
 - 2026-10-15 — D-66 (confirmed): firms see guideline *content* — clause quotes on findings plus the SPA Billing Guidelines view — never the documents.
-- 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. No other task edits `src/dataverse/solutions/SpaarkeMaster/**`.
+- 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. After 029, `src/dataverse/solutions/SpaarkeMaster/**` is edited only by serial tasks: 015 and 026 (their entities), 070 (billing values on the `sprk_policyversion.sprk_ruletype` option set) and the deploy tasks 053, 079, 112, 136 and 153 (sitemap / navigation entries for the pages they deploy, plus any columns or tables their phase added after 029, using 029's export-to-temp procedure). No parallel task edits it.
 
 ### Open owner questions
 
@@ -137,7 +137,7 @@ Carried into the tasks:
 ## 4. Coordination
 
 - **spaarke-ontology-platform-r1** owns the Signals, rules and Decision Record code: `Services/Signals/**`, `FinanceBaseValues.cs`, `PolicyVersionValidator`, `RuleBodyDescriber`, `DecisionActionCatalog`.
-  - **#1111 must be on master** before 015, 026 and 070 onward. As of 2026-10-15 it is on auto-merge; ontology-r1 will send the SHA.
+  - **#1111 merged to master 2026-10-15 (`f292ad119`)** and was merged into `work/ebilling-r1` the same day. It provides the Signal writer, rule grammar and evaluator, the Decision Record writer (`WriteAsync` for humans, `WriteGateDecisionAsync` for the gate) and `GET /api/v1/signals/worklist`. ontology-r1 reviews eBilling PRs into master.
   - ontology-r1 reviews FR-09, FR-15, FR-24 and FR-30, plus the `CountedInvoiceStatuses` change in 015.
   - Notify ontology-r1 when the `sprk_invoicestatus` retirement PR and the schema PRs open.
 - **unified-access-control-r2** reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
@@ -169,12 +169,14 @@ Carried into the tasks:
   - `FinanceJsonSchemas` is at `Services/Finance/Models/FinanceJsonSchemas.cs`.
   - The tier resolver is `Services/Ai/LinearConsumers/ModelTierDeploymentResolver.cs`.
 - 2026-10-15 — `sprk_timekeeper` **already exists as a stub** (name, contact, invoice and invoice-line-item lookups). Extend it, review its lookups and drop the obsolete ones. Do not create a new table.
-- 2026-10-15 — As of 2026-10-15, `Services/Signals/**` and `FinanceBaseValues.cs` exist only on `docs/ontology-platform-design`. Before 015, 026 or 070, `git fetch` and confirm they are on `origin/master`. If they are not, the task is **blocked**: do not copy files across branches.
+- 2026-10-15 — `Services/Signals/**` and `FinanceBaseValues.cs` reached master only with #1111 (`f292ad119`). Before 015, 026 or 070+, check `git merge-base --is-ancestor f292ad119 HEAD`; if it fails, merge origin/master first. Never copy files across branches.
 - 2026-10-15 — The prototype's `DocumentView` bounding-box contract is `{page, x, y, w, h}`, normalised 0–1, with a row box and a multiply tint. The page stays light in dark mode (F-4).
 - 2026-10-15 — ConsoleKit StatusBar needs a label override (F-3).
 - 2026-10-15 — Style a wrapper div, not the FluentProvider (F-10).
-- 2026-10-15 — `src/server/api/CLAUDE.md` does not exist. Do not cite it.
-- 2026-10-15 — Matter, Project and Work Assignment all carry `sprk_mattertype_ref` / `sprk_practicearea_ref` lookups. Code-set mapping keys off those.
+- 2026-10-15 — `src/server/api/CLAUDE.md` does not exist; do not cite it. Tests: `docs/standards/TEST-ARCHITECTURE.md`, `docs/adr/ADR-038-testing-strategy.md`, `.claude/patterns/testing/`.
+- 2026-10-15 — A consumer-type constant goes into `ConsumerTypes.All` only in the same change that seeds its Binding row. `RoutingConsumerTypeHealthCheck` turns /healthz Unhealthy otherwise. Action codes are lowercase kebab without a version suffix (e.g. `invoice-line-code`); the spec's `INVOICE-…@v1` names map to these.
+- 2026-10-15 — Action seeding: `Seed-JpsActions.ps1` is retired. Use `scripts/Deploy-ActionMirrors.ps1` (`infra/dataverse/actions/`) plus `scripts/dataverse/Seed-PlaybookConsumers.ps1`.
+- 2026-10-15 — Matter, Project and Work Assignment carry lookup columns `sprk_mattertype` / `sprk_practicearea` (target tables `sprk_mattertype_ref` / `sprk_practicearea_ref`). Code-set mapping keys off those.
 
 ## 7. Key documents
 

@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="ebilling-r1">
+  <metadata>
+    <title>Invoice decision wizard and Context / Related work / History panes</title>
+    <phase>4 Review and approval (WP4) — wave W4-4</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend over server-enforced routes (102–107); eligibility, privilege, I-2 and Decision Records are enforced in the BFF; the page only reflects server signals.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composition of WizardShell, FormModal and the panes into 110's slots, following the prototype's behaviour.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>110, 103, 104, 105, 106, 107</deps>
+    <tags>frontend, code-page, fluent-ui</tags>
+    <estimated-effort>3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Complete the Invoice Review page: the invoice decision wizard (Approve with an optional invoice-level adjustment step, Reject, Return to firm — each with a mandatory reason where the server requires one), the header "Awaiting" approvers line, the Context, Related work and History tabs, and the blocked-submission view (Override for privileged callers, Return) — showing only the actions the server says the caller may take.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in React code pages, Fluent UI v9, WizardShell and SprkModal.</role>
+
+  <goal>110's page gains the decision wizard and the three tabs, using WizardShell and FormModal, with server signals (canApprove, canOverride, canReturn) deciding what is shown; ui-tests below pass including dark mode; no new npm package.</goal>
+
+  <context>
+    <background>Spec FR-32 (invoice-level adjustment at approval), FR-33, FR-34, FR-35, FR-36, FR-37, D-58. Prototype reference (copy, never import), c:\code_files\spaarke-prototype\projects\ebilling.r1\: src\review\InvoiceDecisionWizard.tsx (Decision → AdjustStep → ConfirmStep for approve; Decision → ReasonStep → NotifyStep → ConfirmStep for reject / return; read-only reuse once decided), SideTabs.tsx (ContextTab, RelatedWorkTab, HistoryTab, Unavailable), Dialogs.tsx (OverrideModal), README answers and F-2, F-7. Routes: 103 GET approval (eligible names, canApprove, open-line counts) and POST approve; 102 POST / DELETE adjustments and GET adjustment-rules; 104 reject and return; 105 GET blocked (canOverride, canReturn), POST override, POST return; 106 GET context (sections with unavailable messages); 107 GET related-work per fee line (results or empty reason); 100's read model (Decision Record history); 101 GET corrections. Shared: components/Wizard/WizardShell.tsx with wizardShellTypes.ts (isSkippable steps, statusBar, stayOpenOnFinish); components/SprkModal/presets/FormModal.tsx; ConsoleKit RecordRow (history rows, with 109's label override), StatusBadge.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/InvoiceReview/src/ (110's tab, header and action-bar slots)</file>
+      <file role="new">src/solutions/InvoiceReview/src/components/decision/ (wizard steps)</file>
+      <file role="new">src/solutions/InvoiceReview/src/components/tabs/ (Context, RelatedWork, History)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="110" status="pending">The page and its slots</dependency>
+      <dependency task="103" status="pending">Approval state and approve</dependency>
+      <dependency task="104" status="pending">Reject and return</dependency>
+      <dependency task="105" status="pending">Blocked submission, override, return</dependency>
+      <dependency task="106" status="pending">Context</dependency>
+      <dependency task="107" status="pending">Related work</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050, MODAL-DECISION-CRITERIA">The invoice decision is a multi-step flow: WizardShell (in a modal or as an in-page panel — follow the modal criteria and record which). Single-field reasons (override reason, adjustment remove confirm) use FormModal. No hand-rolled dialog.</constraint>
+    <constraint source="FR-35, FR-37, root CLAUDE.md section 6">Actions render only from server signals: Approve when canApprove; Reject / Return when the caller is eligible (103's state); Override only when canOverride (105). The server stays authoritative: a 403 or 409 is shown with its code and nothing changes client-side.</constraint>
+    <constraint source="F-2, I-2">While any line is Pending or Flagged, Approve is disabled with the open counts; behaviour for undecided Clean lines follows 103's recorded F-2 answer (show what the server will do on the confirm step).</constraint>
+    <constraint source="FR-33, FR-34">Context sections show each section's unavailable message, never an error page; Related work loads on demand for the selected fee line and shows the server's empty reason.</constraint>
+    <constraint source="WP5 boundary">The prototype NotifyStep (AI-drafted firm notice) belongs to 131 / 132; leave a skippable step slot, do not build it.</constraint>
+    <constraint source="ADR-021, F-10, ADR-012">Fluent v9 tokens; wrapper-div styling; shared components only; no file imported from the prototype repository.</constraint>
+    <constraint source="NFR-12">No new npm package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\InvoiceDecisionWizard.tsx</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\SideTabs.tsx</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wizard usage" location="src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes.ts">Step config, skippable steps, finish handling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 102–107 notes for final route names, signals and the recorded F-2 / F-7 answers; read 052's notes for any override dialog it built (reuse rather than duplicate if it is in a shared location).</step>
+    <step order="1">Header: "Awaiting" eligible approver names and status from 103 GET approval; zero-approver state flagged.</step>
+    <step order="2">Decision wizard: Approve → Invoice adjustment (skippable; add / remove via 102, totals from the server) → Confirm (approved total, Decision Record notice) → POST approve; Reject / Return → Reason → (notify slot, skipped) → Confirm → 104. After a decision the page reloads read-only and the wizard opens read-only on the recorded decision.</step>
+    <step order="3">Tabs in 110's slot: Context (106 sections, Unavailable message per section), Related work (107 for the selected fee line, on demand, empty reason), History (100's Decision Record history and 101's corrections as RecordRow items, newest first).</step>
+    <step order="4">Blocked-submission view: when opened with a submission id, load 105 GET blocked; show blocking findings; Override… (FormModal, mandatory reason, only with canOverride) and Return (per canReturn).</step>
+    <step order="5">States: approve disabled with open counts; non-eligible viewer (no decision actions); decided invoice; context section unavailable; related work empty; override hidden without privilege; 403 from override shown.</step>
+    <step order="6">npm run build; run the ui-tests below locally against a mocked API, then in dev after 112; record results.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (modal vs panel choice, notify slot, anything from the prototype not reproduced) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 103's F-2 answer, 104 / 105's F-7 answer or 105's privilege mechanism is still open, build the default the server implements and record it; if the server and the default disagree, STOP and report.</trigger>
+    <trigger>If WizardShell cannot host a read-only reuse or a skippable step without a shared-library change, STOP and propose the change with a section 11 justification.</trigger>
+    <trigger>If the blocked-submission view needs its own navigation entry or form command, it is a solution change: do not edit src/dataverse/solutions/SpaarkeMaster/**; record the need for 112.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>110's page (slots), WizardShell, FormModal, RecordRow; 052 shows override in the create wizard for internal submissions.</existing>
+    <extension>Extends 110's page through its slots and reuses the shared wizard and modal; the blocked view reuses 052's dialog if 052 put it in a shared location, otherwise composes FormModal directly.</extension>
+    <cost-of-doing-nothing>Reviewers cannot approve, reject, return or override from the review page and see no context, related work or history, so FR-33 to FR-37 and success criterion 4 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Approve with adjustment">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_invoicereviewpage&amp;data=invoiceId%3D{id}</url>
+      <steps>
+        <step>As an eligible approver with all lines decided, open Decide invoice, choose Approve</step>
+        <step>Add an invoice-level discount from a rule; verify server totals; confirm</step>
+        <step>Verify the invoice shows Approved, the wizard reopens read-only, History shows one decision</step>
+      </steps>
+      <expected>Matches prototype approve flow</expected>
+    </test>
+    <test name="Approve blocked and non-eligible">
+      <steps>
+        <step>With a Flagged line, verify Approve is disabled with counts</step>
+        <step>As a non-eligible user with read access, verify no decision actions</step>
+      </steps>
+      <expected>I-2 and FR-35 reflected</expected>
+    </test>
+    <test name="Reject and return">
+      <steps>
+        <step>Return to firm without a reason: blocked; with a reason: invoice becomes Returned to Firm, read-only</step>
+        <step>Reject another invoice with a reason: Rejected, read-only</step>
+      </steps>
+      <expected>One decision each in History</expected>
+    </test>
+    <test name="Panes">
+      <steps>
+        <step>Context: all sections load; on a Work Assignment invoice the budget section says not tracked</step>
+        <step>Related work for a fee line: results or the empty reason</step>
+      </steps>
+      <expected>No error pages; degrade messages per section</expected>
+    </test>
+    <test name="Override">
+      <steps>
+        <step>Open a blocked internal submission without the privilege: no Override; Return available per F-7</step>
+        <step>With the privilege: Override with empty reason is blocked; with a reason the invoice is created and opens for review</step>
+      </steps>
+      <expected>FR-37 per server signals</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, F-4)">
+      <steps>
+        <step>Switch the theme to dark</step>
+        <step>Verify the wizard, modals and the three tabs have no white backgrounds or black text</step>
+        <step>Verify the PDF page stays light</step>
+      </steps>
+      <expected>Tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">build</tool>
+    <tool name="ui-test">browser checks via the ui-test skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/InvoiceReview/src/components/decision/; src/solutions/InvoiceReview/src/components/tabs/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Approve, Reject and Return run through WizardShell; reasons are mandatory where the server requires them; the adjustment step is skippable and uses 102.</criterion>
+    <criterion testable="true">Negative: without canApprove / eligibility / canOverride the corresponding action is not rendered; a 403 or 409 from the server is shown and nothing changes client-side.</criterion>
+    <criterion testable="true">Context shows each unavailable section's message while the others render; Related work shows the server's empty reason when there are no results.</criterion>
+    <criterion testable="true">History lists Decision Records and corrections newest first.</criterion>
+    <criterion testable="true">No notify step is built (slot only); no prototype import; no new npm package; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
+    <criterion testable="true">npm run build green; ui-tests pass including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Runs alone in W4-4; only this task edits src/solutions/InvoiceReview/ after 110. Deployment, navigation entries and dev ui-test evidence are 112's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first, then the fluent-v9-component skill. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -104,10 +104,10 @@ Wrap-up                                     190
 
 ### Critical Path
 
-`003 → 004 → 005 (go/no-go) → 043 → 049 → 100 → 110 → 111 → 160 → 162 → 163 → 190`, with `#1111 merge → 070 → 071 → 072 → 049` joining at 049, and WP1 `029` gating all server work.
+`003 → 004 → 005 (go/no-go) → 043 → 049 → 100 → 110 → 111 → 160 → 162 → 163 → 190`, with `070 → 071 → 072 → 049` joining at 049, and WP1 `029` gating all server work.
 
 **Blocking dependencies**:
-- **Ontology PR #1111 on master** blocks 015, 026, 070 (and everything after 070). As of 2026-10-15 it is set to auto-merge; ontology-r1 will send the SHA.
+- **Ontology PR #1111** — merged to master 2026-10-15 (`f292ad119`) and into this branch; 015, 026 and 070+ are startable.
 - **005 go / no-go** (owner) blocks 043; a no-go switches 043 to the DI-layout + extraction-Action fallback (same facade method).
 - **029** (schema applied to dev + exported) blocks all server tasks that read or write new columns.
 
@@ -251,7 +251,7 @@ Task-level detail (deps, groups, tier, effort) is in [tasks/TASK-INDEX.md](tasks
 
 | Dependency | Status | Risk | Mitigation |
 |---|---|---|---|
-| Ontology PR #1111 (Signals code) on master | Auto-merge pending (2026-10-15) | Medium | Design against `docs/ontology-platform-design`; never copy; WP1 schema and WP2 AI work proceed meanwhile |
+| Ontology PR #1111 (Signals code) on master | Merged 2026-10-15 (`f292ad119`) | Low | Build on it; ontology-r1 reviews changes to its files |
 | Azure OpenAI gpt-5.2 / gpt-5.4-mini / gpt-5.6-luna in dev | Not deployed | Medium (quota) | Task 003; cross-region deployments allowed by CU |
 | Content Understanding GA `2025-11-01` on `spaarke-docintel-invoices-dev` (West US) | Resource exists | Low | Region supported; analyzer as code |
 | Graph PDF conversion | Existing | Low | Reuse |
@@ -300,7 +300,7 @@ Graduation criteria = spec "Success Criteria" 1 – 12 (mirrored in README). Pha
 | ID | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|---|
 | R1 | Content Understanding misses accuracy targets on law-firm invoices | Medium | High | FR-03 three-arm spike + preview arm; fallback DI layout + extraction Action behind the same facade method |
-| R2 | Ontology #1111 merge slips | Low–Medium | High (blocks WP3) | Order WP1/WP2 first; design against the branch; message ontology-r1 |
+| R2 | Ontology rule / Decision Record contracts change under us after #1111 | Low | Medium | ontology-r1 reviews FR-09, FR-15, FR-24, FR-30 PRs; message before changing shared files |
 | R3 | Model quota / region for gpt-5.x in dev | Medium | Medium | Task 003 early; CU allows cross-region deployments |
 | R4 | UTBMS coding below 80% top-1 | Medium | Medium | Code guidance text; firm-supplied codes; low-confidence codes flagged, never silently used; tuning platform later |
 | R5 | Confidence miscalibration causes a wrongful rejection | Low | High | Combined confidence (D-47), 0.90 threshold, reject-eligible types only, calibration report (161), NFR-06 test |
@@ -314,7 +314,7 @@ Graduation criteria = spec "Success Criteria" 1 – 12 (mirrored in README). Pha
 ## 9. Next Steps
 
 1. Owner compacts the session, then starts with `work on task 001` (Wave 0-1: 001, 002, 003 can run in parallel; 040 and 041 can start alongside — see TASK-INDEX).
-2. Watch for the ontology #1111 master SHA (ontology-r1 will message) before 015, 026 and 070.
+2. Ontology #1111 is merged (`f292ad119`); notify ontology-r1 when the `sprk_invoicestatus` and schema PRs open.
 3. Owner go / no-go at the end of 005.
 
 ---

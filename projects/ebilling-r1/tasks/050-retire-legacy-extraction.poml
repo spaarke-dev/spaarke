@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ebilling-r1">
+  <metadata>
+    <title>Retire the legacy extraction path</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deletion of superseded AI members and their callers; tagged deletion, so code-review and adr-check run regardless (root CLAUDE.md §8).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical removal guided by grep, with one owner decision (retire vs redirect) taken before coding.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>042, 049</deps>
+    <tags>bff, ai, deletion, finance</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove the legacy Finance extraction path now that 049 extracts through ReadInvoiceAsync and 042 classifies through ClassifyAsync: delete ExtractInvoiceFactsAsync and the extraction schema, deployment name and playbook id options, remove GetPlaybookByNameAsync and GetStructuredCompletionAsync from IInvoiceAi, and route InvoiceExtractionJobHandler per the owner's retire-or-redirect decision (FR-21, FR-46, D-19, D-52).</prompt>
+
+  <role>SPAARKE platform developer. Expert in safe deletion with grep proof and ArchTest ratchets. Follow ADRs strictly.</role>
+
+  <goal>grep finds no caller or declaration of ExtractInvoiceFactsAsync, GetPlaybookByNameAsync (on IInvoiceAi), IInvoiceAi.GetStructuredCompletionAsync, ExtractionResultSchema, ExtractionDeploymentName or InvoiceExtractionPlaybookId; IInvoiceAi keeps GenerateEmbeddingAsync and the Action-backed methods; the review-confirm flow follows the decided route; ratchets shrink; tests green.</goal>
+
+  <context>
+    <background>Today: InvoiceExtractionJobHandler.cs:221 calls IInvoiceAnalysisService.ExtractInvoiceFactsAsync (IInvoiceAnalysisService.cs:33, InvoiceAnalysisService.cs:118, playbook "FinanceExtraction" :41, FinanceJsonSchemas.ExtractionResultSchema :40, FinanceOptions.ExtractionDeploymentName :42) and reads FinanceOptions.InvoiceExtractionPlaybookId (:328; option :55; appsettings.template.json:454-455). The handler is enqueued by InvoiceReviewService's confirm path (InvoiceReviewService.cs:342 JobTypeInvoiceExtraction, :1263) behind POST /api/finance/invoice-review/confirm — the email-attachment flow (classification → review → confirm → extraction). uac-r2 last touched InvoiceReviewService.cs. A separate legacy tool handler, Services/Ai/Handlers/InvoiceExtractionToolHandler.cs, does not call the removed members. Ratchets naming the handler: AsymmetricRegistrationTests.cs:57-58, GateCombinationConstructibilityTests.cs:62, ADR013_LinearConsumerBoundaryTests.cs:74 (playbook-lookup baseline). Docs: finance-intelligence-architecture.md (:45, :72, :76, :174, :184) and AI-ARCHITECTURE.md:374.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs, InvoiceAi.cs, NullInvoiceAi.cs (remove GetPlaybookByNameAsync, GetStructuredCompletionAsync; drop IPlaybookService / IOpenAiClient if unused except for embeddings)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs and InvoiceAnalysisService.cs (remove; delete both files if empty, with their FinanceModule registration :41-45)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Models/FinanceJsonSchemas.cs (remove ExtractionResultSchema; delete the file if empty) and the ExtractionResult model if no reader remains</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs (remove ExtractionDeploymentName, InvoiceExtractionPlaybookId) and appsettings.template.json:454-455 (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs (retire or redirect per decision)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (only if the decision changes the confirm path)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point; comment :23)</file>
+      <file role="modify">tests/Spaarke.ArchTests/Adr032/AsymmetricRegistrationTests.cs:57-58, Adr032/GateCombinationConstructibilityTests.cs:62, ADR013_LinearConsumerBoundaryTests.cs:74 (remove entries that no longer apply)</file>
+      <file role="modify">docs/architecture/finance-intelligence-architecture.md, docs/architecture/AI-ARCHITECTURE.md:374</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="required">Classification no longer uses the legacy members.</dependency>
+      <dependency task="049" status="required">Extraction runs through ReadInvoiceAsync in the submission job.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
+    <constraint source="D-52 / FR-21">After this task no Finance or eBilling code uses by-name playbook lookup, a C# output schema or a FinanceOptions deployment name. Keep IInvoiceAi.GenerateEmbeddingAsync, InvoiceHints (classification hints) and FinanceOptions.ClassificationConfidenceThreshold.</constraint>
+    <constraint source="ADR-002 / D-19">Whatever the decision, no path may create sprk_invoice except the submission job (049). If the confirm flow is redirected, it calls the internal submission operation (044) with the attachment's document; it does not keep a second extraction.</constraint>
+    <constraint source="ArchTest ratchets">Ratchet baselines only shrink: remove entries for deleted types; never add an entry.</constraint>
+    <constraint source="live data">Deactivating the FinanceExtraction / PB-013 playbook rows in Dataverse needs explicit owner OK; this task records them, it does not delete them.</constraint>
+    <constraint source="tests">This task deletes tests of removed members: follow docs/adr/ADR-038-testing-strategy.md and docs/standards/TEST-ARCHITECTURE.md; list every deleted test and why in notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deletion and AI boundary</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD (deletion tag: code-review and adr-check run). Grep every member listed in the goal across src/, tests/, docs/ and scripts/; save the list in notes.</step>
+    <step order="1">Present the InvoiceExtractionJobHandler decision to the owner (escalation) and wait for it.</step>
+    <step order="2">Apply the decision: retire (remove handler, registration and the confirm path's enqueue, and document what confirm now does) or redirect (confirm calls 044's internal submission service with the existing document; remove the handler).</step>
+    <step order="3">Remove the members and options listed; delete InvoiceAnalysisService / IInvoiceAnalysisService and FinanceJsonSchemas if empty; update registrations, comments and appsettings.template.json.</step>
+    <step order="4">Shrink the three ArchTest baselines; update the two architecture docs.</step>
+    <step order="5">Re-run grep: no remaining reference outside notes and history docs; build, full test, publish-size delta (expected negative).</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations, the decision, deleted tests and the Dataverse rows left for owner action in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before coding, STOP and ask the owner: retire or redirect InvoiceExtractionJobHandler. It changes what POST /api/finance/invoice-review/confirm does for email-attachment invoices (InvoiceReviewService.cs, last changed by uac-r2). Recommendation: redirect confirm into the internal submission operation (044) so email-derived invoices get the same checks (D-24), and notify uac-r2.</trigger>
+    <trigger>If any caller outside Finance (for example a playbook node or the tool handler) still needs a removed member, STOP and report instead of keeping the member.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">IInvoiceAi.cs, InvoiceAi.cs, NullInvoiceAi.cs, FinanceOptions.cs, FinanceModule.cs, InvoiceExtractionJobHandler.cs (removed or redirected), deleted InvoiceAnalysisService / FinanceJsonSchemas if empty</output>
+    <output type="test">Updated ArchTest baselines; updated or deleted Finance tests</output>
+    <output type="docs">finance-intelligence-architecture.md, AI-ARCHITECTURE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep over src/ and tests/ finds no ExtractInvoiceFactsAsync, ExtractionResultSchema, ExtractionDeploymentName, InvoiceExtractionPlaybookId, and no GetPlaybookByNameAsync or GetStructuredCompletionAsync on IInvoiceAi / InvoiceAi / NullInvoiceAi (FR-21 acceptance).</criterion>
+    <criterion testable="true">IInvoiceAi still exposes GenerateEmbeddingAsync and every Action-backed method; NullInvoiceAi covers each remaining method.</criterion>
+    <criterion testable="true">The confirm route behaves as decided, with a test: redirect → a confirm produces a submission (channel Internal) and enqueues InvoiceSubmissionProcessing; retire → confirm no longer enqueues InvoiceExtraction.</criterion>
+    <criterion testable="true">Negative: no code path except 049 creates sprk_invoice (grep for creates of sprk_invoice in src/server).</criterion>
+    <criterion testable="true">The three ArchTest baselines contain no entry for a deleted type and the ArchTests pass.</criterion>
+    <criterion testable="true">Deleted tests are listed in notes with the removed member each covered.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21, FR-46, D-19, D-52. FR-46 assigns removal of GetPlaybookByNameAsync / GetStructuredCompletionAsync to the classification migration; they move here because extraction used them until 049. Shared append points: FinanceModule.cs, appsettings.template.json. Out of scope, recorded only: InvoiceExtractionToolHandler (legacy tool handler, no removed-member calls) and the Dataverse playbook rows.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

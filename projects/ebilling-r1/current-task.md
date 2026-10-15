@@ -20,7 +20,7 @@
 - Pipeline output only (README, plan, CLAUDE.md, tasks/). See the pipeline commit.
 
 ### Critical Context
-Pipeline completed 2026-10-15; execution deliberately NOT auto-started (owner instruction). Ontology PR #1111 is not yet on master — 015, 026 and 070+ are blocked until it is (CLAUDE.md §6). Task 005 ends with an owner go / no-go on Content Understanding.
+Pipeline completed 2026-10-15; execution deliberately NOT auto-started (owner instruction). Ontology PR #1111 merged to master 2026-10-15 (`f292ad119`) and into this branch, so 015, 026 and 070+ are startable. Task 005 ends with an owner go / no-go on Content Understanding.
 
 ---
 

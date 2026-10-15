@@ -41,7 +41,7 @@ The project builds on the existing Finance Intelligence pipeline and migrates it
 | 0 Baseline and AI foundations (WP0) | 001–005 | 🔲 |
 | 1 Data model (WP1) | 010–029 | 🔲 |
 | 2 Submission and extraction (WP2) | 040–053 | 🔲 |
-| 3 Rules (WP3) | 070–079 | 🔲 (needs ontology #1111 on master) |
+| 3 Rules (WP3) | 070–079 | 🔲 |
 | 4 Review and approval (WP4) | 100–112 | 🔲 |
 | 5 Firm feedback (WP5) | 130–136 | 🔲 |
 | 6 Export and index (WP6) | 150–153 | 🔲 |

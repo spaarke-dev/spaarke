@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP3 to dev</title>
+    <phase>3 Rules (WP3) — wave W3-5</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and smoke verification of already-reviewed tasks; no new code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy procedure using existing scripts and skills.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to the shared dev environment (BFF app service, Dataverse rows and web resources).</parallel-reason>
+    <deps>070, 071, 072, 073, 074, 075, 076, 077, 078, 053</deps>
+    <tags>deploy, bff, code-page</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP3 to dev — the BFF with the rules system, the BILLING-RULE-DRAFT@v1 Action and Binding, the rule-type option values and the Rule Review code page — then smoke-test every new route and publish a real outside-counsel-guideline rule set in dev whose rules all cite their clauses.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the bff-deploy, code-page-deploy and dataverse-deploy procedures and dev smoke verification.</role>
+
+  <goal>Dev runs WP3: new routes answer 401 unauthenticated and the expected status authenticated; one real OCG rule set is drafted, reviewed and published with clause citations; a sample rate card is imported and published; evidence recorded in task notes.</goal>
+
+  <context>
+    <background>Spec WP3 (FR-24 – FR-30), success criterion 3 (an admin uploads an OCG and publishes a rule set where every rule cites its clause), project CLAUDE.md section 5 (dev only; deploys only inside named deploy tasks; scripts/Deploy-BffApi.ps1 for the BFF; scripts/Import-SolutionScoped.ps1 is the only solution import path). Evaluation-set OCGs come from task 002 (projects/ebilling-r1/notes/evaluation-set/manifest.md). WP2 (053) is deployed first. Web resources deploy with scripts/Deploy-WebResourceInline.ps1 (parameters DataverseUrl, WebResourceName, FilePath). Action mirrors deploy with scripts/Deploy-ActionMirrors.ps1; Bindings with scripts/dataverse/Seed-PlaybookConsumers.ps1. Rule-type options: 070's scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1.</background>
+    <relevant-files>
+      <file role="read">scripts/Deploy-BffApi.ps1</file>
+      <file role="read">scripts/Deploy-WebResourceInline.ps1</file>
+      <file role="read">scripts/Deploy-ActionMirrors.ps1</file>
+      <file role="read">scripts/dataverse/Seed-PlaybookConsumers.ps1</file>
+      <file role="read">scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1</file>
+      <file role="read">src/solutions/RuleReview/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="070-078" status="pending">All WP3 tasks complete and merged to the branch</dependency>
+      <dependency task="053" status="pending">WP2 deployed to dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Dev only. No production or customer environment. No secrets in the repo or notes.</constraint>
+    <constraint source=".claude/skills/bff-deploy/SKILL.md">Deploy the BFF only with scripts/Deploy-BffApi.ps1 and its hash verification; never trust a success message alone.</constraint>
+    <constraint source="project">No destructive Dataverse change. Option values and rows are additive; -WhatIf first where the script supports it.</constraint>
+    <constraint source="project">This serial deploy task may edit SpaarkeMaster solution source (project CLAUDE.md §3): additive sitemap / navigation entries for the Rule Review page and any WP3 columns or tables added after 029 (e.g. 070's rule-type option values, 019 / 076 additions), using 029's export-to-temp procedure, verified with Import-SolutionScoped.ps1 -PlanOnly. Anything non-additive follows the escalation.</constraint>
+    <constraint source="project">Never delete the owner-created containers or evaluation-set documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md (section 5)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; git merge-base --is-ancestor f292ad119 HEAD succeeds; dotnet build and dotnet test green on the branch; record the commit SHA.</step>
+    <step order="2">Rule-type options: run Deploy-EbillingRuleTypeOptions.ps1 with -WhatIf, then for real if anything is missing; verify the 11 billing values by metadata read.</step>
+    <step order="3">Action and Binding: run Deploy-ActionMirrors.ps1 for billing-rule-draft and Seed-PlaybookConsumers.ps1; verify both rows with a Dataverse read query (actioncode, consumer type, environment).</step>
+    <step order="4">BFF: run scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; confirm hash verification passed and /healthz is healthy; confirm the eBilling flag is on in dev.</step>
+    <step order="5">Code page: in src/solutions/RuleReview run npm install --legacy-peer-deps --no-audit --no-fund and npm run build; deploy the single HTML file with Deploy-WebResourceInline.ps1 (web resource name from 077's notes); publish customizations.</step>
+    <step order="6">Route smoke: for every route added by 075, 076 and 078 call once unauthenticated (expect 401) and once as a billing admin (expect 200 or 202); call one write route as a non-admin (expect 403). Record status codes.</step>
+    <step order="7">End-to-end: create a rule set from a real OCG in the evaluation set (Guideline, client default); trigger drafting; when the job completes open the Rule Review page, accept at least three proposals and edit one, publish with an effective date. Verify each published version has clause quote and location, the rule set flag is on, and editing a published rule creates a new version.</step>
+    <step order="8">Rate card: download the template, import a sample card (one deliberately bad row first: expect per-row error and nothing written), import the corrected workbook, publish; verify the workbook is in the Procedure Library container.</step>
+    <step order="9">Run the 077 ui-tests against dev (including dark mode) and record the results.</step>
+    <step order="10">Record evidence (commit SHA, script outputs summarised, status codes, record ids, screenshots paths) in projects/ebilling-r1/notes/079-wp3-deploy.md.</step>
+    <step order="11">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="12">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any deploy script fails or hash verification fails, STOP; do not retry blindly or deploy by another route. Report the output.</trigger>
+    <trigger>If any smoke route returns 500, or a non-admin call succeeds, STOP and report — do not continue to the end-to-end step.</trigger>
+    <trigger>If a needed SpaarkeMaster change is not additive (it would alter or remove an existing component, or touch another project's components), STOP and ask the owner.</trigger>
+    <trigger>If a published rule lacks a clause citation, STOP: success criterion 3 is not met; report which proposal and rule set.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">deploy scripts</tool>
+    <tool name="npm">build</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/079-wp3-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-BffApi.ps1 completed with hash verification passed; /healthz healthy after deploy.</criterion>
+    <criterion testable="true">The 11 billing rule-type option values, the BILLING-RULE-DRAFT@v1 Action and its Binding exist in dev (read-query evidence).</criterion>
+    <criterion testable="true">Every new WP3 route returns 401 unauthenticated and 200 or 202 for an admin; a non-admin write returns 403 (recorded per route).</criterion>
+    <criterion testable="true">One real OCG rule set is published in dev with every published rule carrying a clause quote and location; editing a published rule created a new version.</criterion>
+    <criterion testable="true">A rate card import with a bad row returned per-row errors and wrote nothing; the corrected import and publish succeeded with the workbook stored in the Procedure Library container.</criterion>
+    <criterion testable="true">077 ui-tests pass in dev, including dark mode.</criterion>
+    <criterion testable="true">Evidence recorded in notes/079-wp3-deploy.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev. Publish-size was measured per task; record the deployed package size here for the cumulative NFR-12 view.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
