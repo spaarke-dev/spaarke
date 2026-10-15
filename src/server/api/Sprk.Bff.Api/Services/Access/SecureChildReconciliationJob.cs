@@ -44,10 +44,12 @@ namespace Sprk.Bff.Api.Services.Access;
 /// record. A record made secure by a direct write (Web API, script) changes no child row, so the pass also reconciles
 /// every secure record whose OWN <c>modifiedon</c> is in the same window, read by the sweep's listing of the secure records
 /// (#1943). One with no <c>modifiedon</c> counts as changed. These are counted in <c>recentChanges.rootsChanged</c>, and
-/// one left incomplete is carried like any other. The watermark is the run's start time minus
-/// <see cref="RecentChangesOverlap"/>. It lives in this singleton, per instance, like the cursor. It moves only past a listing that completed. A changed row the walk cannot place (under a
-/// record flagged secure but not isolated, or under a missing ancestor) is listed in <c>recentChanges.undetermined</c>, and
-/// the run is not a success.</para>
+/// one left incomplete is carried like any other. At most <see cref="MaxRootsPerRunConfigKey"/> of them a run, oldest
+/// change first; the rest re-open the catch-up (below) and are counted in <c>recentChanges.rootsChangedOverflow</c>
+/// (#1943). The watermark is the run's start time, taken before the secure records are listed, minus
+/// <see cref="RecentChangesOverlap"/>. It lives in this singleton, per instance, like the cursor. It moves only past a
+/// listing that completed. A changed row the walk cannot place (under a record flagged secure but not isolated, or under a
+/// missing ancestor) is listed in <c>recentChanges.undetermined</c>, and the run is not a success.</para>
 /// <para><b>Standing schedule (task 147, round 28 item 2, decided 2026-10-04).</b> Every 2 minutes, writes on for the
 /// recent-changes pass, in every environment where task 148 is deployed: the interval is the window in which a child
 /// written OUTSIDE the product under a secure record sits in its creator's business unit. In-product creates no longer
@@ -197,7 +199,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     public string Description =>
         "Brings every existing child of every secure project, matter and work assignment into the state the ownership rule " +
         "gives it: owned by the Secure Record owner team, shared with exactly its record's sharees (task 148). Records " +
-        "whose related records changed since the last run are reconciled first (task 147). Report-only unless " +
+        "whose related records changed since the last run are reconciled first (task 147), with the records that " +
+        "themselves changed (#1943). Report-only unless " +
         "SecureChild:Reconciliation:WritesEnabled is true. Also keeps the Access Permission of To Do, Event, " +
         "Communication and Document equal to their parents' (task 173).";
 
@@ -231,15 +234,19 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var reconciler = scope.ServiceProvider.GetRequiredService<SecureChildReconciler>();
         var synchronizer = scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>();
 
+        // #1943 (review F1): the run's start time is taken BEFORE the secure records are listed. The watermark derives from
+        // it, so a record made secure while a slow listing ran (paging, throttling) is still inside the next run's window.
+        var startedAt = _timeProvider.GetUtcNow();
+
         // The secure records, in a fixed order. A listing that cannot complete decides nothing: ADR-036 A1 rule 4.
         var listing = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
         var roots = listing.Roots;
 
-        // Task 147, the RECENT-CHANGES pass: the secure records whose children changed since the last run (the watermark).
-        // This catches children written outside the product (out-of-the-box forms, quick create, grid edits, imports,
-        // flows) and by the client writers still on Xrm.WebApi within one run, rather than only when the capped sweep
-        // window next reaches their record. They are reconciled first, by the same pass.
-        var startedAt = _timeProvider.GetUtcNow();
+        // Task 147, the RECENT-CHANGES pass: the secure records whose children changed since the last run (the watermark),
+        // and those that themselves changed (#1943). This catches children written outside the product (out-of-the-box
+        // forms, quick create, grid edits, imports, flows) and by the client writers still on Xrm.WebApi within one run,
+        // rather than only when the capped sweep window next reaches their record. They are reconciled first, by the same
+        // pass.
         DateTimeOffset since;
         IReadOnlyList<(string Table, Guid Id)> retryRoots;
         IReadOnlyList<(string Table, Guid Id)> retryRows;
@@ -311,12 +318,31 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // reconciled with them, in the same mode and by the same Sweep trigger, which only moves a child INTO isolation.
         // Left incomplete, it is carried like any other record of this group.
         var rootsChanged = listing.ChangedSince(since);
+
+        // #1943 (review F1): at most `cap` of them a run, oldest change first (a burst, or a watermark held back, must not
+        // make one run unbounded); one already found through a changed child or carried costs nothing. The rest re-open
+        // the catch-up, as an instance start does (saved below): it walks every secure record, `cap` a run, so the ones
+        // left out are reconciled although the watermark moves on.
+        var alreadyFirst = recent.Roots.Concat(retriedRoots).ToHashSet();
+        var rootsChangedTaken = rootsChanged.Where(alreadyFirst.Contains)
+            .Concat(rootsChanged.Where(r => !alreadyFirst.Contains(r)).Take(cap))
+            .ToList();
+        var rootsChangedOverflow = rootsChanged.Count - rootsChangedTaken.Count;
+        if (rootsChangedOverflow > 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] recent-changes run={RunId}: {Overflow} of {RootsChanged} secure records changed " +
+                "since {Since:o} are past the per-run cap of {Cap}; the catch-up is re-opened, so it reconciles them in " +
+                "later runs.",
+                context.RunId, rootsChangedOverflow, rootsChanged.Count, since, cap);
+        }
+
         var firstRoots = recent.Roots
-            .Concat(rootsChanged)
+            .Concat(rootsChangedTaken)
             .Concat(retriedRoots)
             .Distinct()
             .ToList();
-        var rootsChangedKeys = rootsChanged.ToHashSet();
+        var rootsChangedKeys = rootsChangedTaken.ToHashSet();
         var recentKeys = firstRoots.ToHashSet();
         var catchUpKeys = catchUpBatch.Select(c => (c.Table, c.Id)).Where(k => !recentKeys.Contains(k)).ToHashSet();
         var work = firstRoots
@@ -453,6 +479,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 }
             }
 
+            // #1943 (review F1): changed records past the cap re-open the catch-up the way an instance start does — from the
+            // first secure record — so every one left out of this run is reconciled within ceil(records / cap) runs.
+            if (rootsChangedOverflow > 0)
+            {
+                _catchUpComplete = false;
+                _catchUpCursor = null;
+            }
+
             // Task 147 r1 (verifier item 4): carry forward, to be looked at first in the NEXT run, every record whose pass
             // came back incomplete in THIS run (a refused or failed re-own, a record that cannot be decided) and every
             // changed row the walk could not place. Each is reported again in every run until it is finished, so a refused
@@ -560,7 +594,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 changesListed = sampled.Count,
                 changes = sampled,
                 // Task 147: the recent-changes pass. These are the secure records whose related records changed since
-                // `since`. They were reconciled before the sweep window, and their changes are in the totals above.
+                // `since`, or that themselves changed (#1943). They were reconciled before the sweep window, and their
+                // changes are in the totals above.
                 recentChanges = new
                 {
                     mode = recentWrites ? ModeWrite : ModeReportOnly,
@@ -574,6 +609,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     // #1943: secure records whose OWN modifiedon is in the window (none counts as changed) — a record made
                     // secure by a direct write changes no child, so it is not among the roots found above.
                     rootsChanged = rootsChanged.Count,
+                    // #1943 (review F1): those past the per-run cap, left to the re-opened catch-up (catchUp.complete false).
+                    rootsChangedOverflow,
                     undetermined = recent.Undetermined.Take(50).ToArray(),
                     failure = recent.Failure,
                     // Task 147 r1: what earlier runs left unfinished and this run looked at again — records whose pass was
@@ -1065,13 +1102,20 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         List<(string Table, Guid Id, string Key)> Roots, IReadOnlyDictionary<(string Table, Guid Id), DateTime?> ModifiedOn)
     {
         /// <summary>
-        /// The secure records whose own <c>modifiedon</c> is at or after <paramref name="since"/>, in sweep order. A record
-        /// with no <c>modifiedon</c> counts as changed: it is included, never silently left out (fail closed).
+        /// The secure records whose own <c>modifiedon</c> is at or after <paramref name="since"/>, oldest change first, then
+        /// table (ordinal), then id. A record with no <c>modifiedon</c> counts as changed: it is included, first, never
+        /// silently left out (fail closed). The order decides which ones a capped run takes (#1943).
         /// </summary>
         public List<(string Table, Guid Id)> ChangedSince(DateTimeOffset since) =>
             Roots
-                .Where(r => !ModifiedOn.TryGetValue((r.Table, r.Id), out var at) || at is not { } value
-                            || AsUtc(value) >= since.UtcDateTime)
+                .Select(r => (r.Table, r.Id, At: ModifiedOn.TryGetValue((r.Table, r.Id), out var at) && at is { } value
+                    ? AsUtc(value)
+                    : (DateTime?)null))
+                .Where(r => r.At is not { } at || at >= since.UtcDateTime)
+                .OrderBy(r => r.At.HasValue)
+                .ThenBy(r => r.At)
+                .ThenBy(r => r.Table, StringComparer.Ordinal)
+                .ThenBy(r => r.Id)
                 .Select(r => (r.Table, r.Id))
                 .ToList();
 
