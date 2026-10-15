@@ -1802,7 +1802,7 @@ pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaa
 
 ### `ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1`
 
-Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, optional matter / project / work assignment scope, source document, effective dates, Draft / Published / Inactive) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. The `sprk_classification` columns (global choice `sprk_timekeeperrole`) are held until the owner decides reuse versus a new choice; `-ApplyClassification` creates them afterwards. Supports `-WhatIf`; never deletes or renames by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
+Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, optional matter / project / work assignment scope, source document, effective dates, Draft / Published / Inactive) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. It revises and extends the shared global choice `sprk_timekeeperrole` to the 20 LEDES timekeeper classifications (label = LEDES name, ExternalValue = LEDES code; existing values kept, non-LEDES options kept and reported with their row usage) and creates `sprk_classification` on `sprk_timekeeper` and `sprk_ratecardrate` bound to it. `-RemoveStubInvoiceLookup` deletes the obsolete `sprk_timekeeper.sprk_invoice` lookup (owner-approved; refuses if any row or component uses it). Supports `-WhatIf`; deletes nothing else and renames nothing by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
 
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -WhatIf
@@ -1861,6 +1861,15 @@ Additive Dataverse metadata script (FR-12 / FR-05 / D-12 / D-68, `ebilling-r1` t
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingCorrectionSchema.ps1`
+
+Additive Dataverse metadata script (D-64 / FR-31 / D-47, `ebilling-r1` task 027) that creates the user-owned child table `sprk_invoicecorrection`: one structured record per reviewer confirmation or correction (field name, AI value, final value, AI confidence 0-1, the four-value local choice `sprk_outcometype` Corrected / Confirmed individually / Accepted in bulk / Unreviewed, stored `sprk_islabel`, separate `sprk_sourcecode` / `sprk_sourceversion`, reviewer and role, reviewed on), the SystemRequired `sprk_invoice` parent lookup (cascade delete), optional `sprk_invoiceline`, `sprk_reviewedby` -> systemuser, and the ADR-024 `sprk_regarding*` lookups with resolver fields. Queryable per Action version. A second run reports no change. Supports `-WhatIf`; exit 2 on a conflicting existing item.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1
 ```
 
 ### `content-understanding/Deploy-Analyzers.ps1`
@@ -2046,3 +2055,4 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingApprovalSchema.ps1 (sprk_invoiceapproval table, ADR-024 regarding lookups, SystemRequired invoice lookup, eligible-approver N:N to contact; `ebilling-r1` task 021).
 - **2026-10-15:** Added ebilling/Deploy-EbillingExportSchema.ps1 (sprk_billingexport AP batch table, CSV / JSON document lookups, single-valued sprk_invoice.sprk_billingexport batch lookup; `ebilling-r1` task 023).
 - **2026-10-15:** Added ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 (sprk_externalidentifier table, ADR-024 regarding lookups, D-68 alternate key on firm, type, normalized value and core record id; `ebilling-r1` task 022).
+- **2026-10-15:** Added ebilling/Deploy-EbillingCorrectionSchema.ps1 (sprk_invoicecorrection structured correction record table, four-value outcome type, SystemRequired invoice lookup, ADR-024 regarding lookups; `ebilling-r1` task 027).

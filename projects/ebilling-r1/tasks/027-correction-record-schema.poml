@@ -4,7 +4,7 @@
     <title>Correction record schema</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New table (or columns) and a new script file; includes one recorded design decision; no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,6 +101,8 @@
   <notes>
     sprk_islabel is stored rather than derived so the calibration query (161) and the later platform filter labels without re-implementing the rule; writers set it from the outcome type.
     Open for 013 / uac-r2 (not this task): secure-record family membership of the correction table (it holds values from secure invoices).
+    COMPLETED 2026-10-15. Child table sprk_invoicecorrection chosen (D-82 proposed in notes/decisions-log.md); created in spaarkedev1 by scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 (second run: created 0, changed 0, skipped 27). Line lookup is RemoveLink, not Cascade: Dataverse allows one cascade-delete (parental) relationship per table and the invoice is the parent. Added the ADR-024 sprk_regarding* trio + resolver fields (invoice-family shape, as 021) and SystemRequired on sprk_invoice, sprk_fieldname, sprk_outcometype. Live test: row without invoice refused; header row (no line) accepted; FetchXML on source code + version + outcome returned the matching row; test rows deleted. Details: notes/027-correction-record-schema.md; docs/data-model/sprk_invoicecorrection.md.
+    rework: fix-round-1 task 027
   </notes>
 
   <execution>

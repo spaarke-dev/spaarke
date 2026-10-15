@@ -31,17 +31,17 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 014 | 🔲 [open] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
 | 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
 | 016 | 🔲 [open] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
-| 017 | ⏸ [wip] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
+| 017 | ✅ [done] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
 | 018 | ✅ [done] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
 | 019 | ✅ [done] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
 | 020 | ✅ [done] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
 | 021 | ✅ [done] | `sprk_invoiceapproval` schema | STANDARD | sonnet / high | P1-A | none |
 | 022 | ✅ [done] | `sprk_externalidentifier` schema and firm-scoped key | STANDARD | sonnet / high | P1-A | none |
 | 023 | ✅ [done] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |
-| 024 | 🔲 [open] | `sprk_billingapproverrole` into source; firm billing contact | STANDARD | sonnet / high | P1-A | none |
-| 025 | 🔲 [open] | eBilling settings table and BFF settings reader | STANDARD | sonnet / high | P1-A | none |
+| 024 | ✅ [done] | `sprk_billingapproverrole` into source; firm billing contact | STANDARD | sonnet / high | P1-A | none |
+| 025 | 🟡 [wip] | eBilling settings table and BFF settings reader | STANDARD | sonnet / high | P1-A | none |
 | 026 | 🔲 [open] | Signal / Decision Record invoice-line subject and derivation | FULL | opus / high | none (p-safe false) | 010, 013, 029 |
-| 027 | 🔲 [open] | Correction record schema | STANDARD | sonnet / high | P1-A | none |
+| 027 | ✅ [done] | Correction record schema | STANDARD | sonnet / high | P1-A | none |
 | 028 | 🔲 [open] | Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off | STANDARD | sonnet / high | P1-A | none |
 | 029 | 🔲 [open] | Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views | STANDARD | sonnet / high | none (deploy) | 010, 011, 012, 017, 018, 019, 020, 021, 022, 023, 024, 025, 027, 028 |
 
@@ -52,7 +52,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 040 | ✅ [done] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
 | 041 | ✅ [done] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
 | 042 | 🔲 [open] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
-| 043 | 🔲 [open] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
+| 043 | 🟡 [wip] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
 | 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |
 | 045 | 🔲 [open] | Concurrency-safe tracking numbers `{invoice}.{n}` | FULL | sonnet / xhigh | P2-B | 029 |
 | 046 | 🔲 [open] | Resolution and combined confidence | STANDARD | sonnet / xhigh | P2-B | 025, 029 |
