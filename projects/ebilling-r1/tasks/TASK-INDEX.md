@@ -36,8 +36,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 019 | ✅ [done] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
 | 020 | ✅ [done] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
 | 021 | ✅ [done] | `sprk_invoiceapproval` schema | STANDARD | sonnet / high | P1-A | none |
-| 022 | 🟡 [wip] | `sprk_externalidentifier` schema and firm-scoped key | STANDARD | sonnet / high | P1-A | none |
-| 023 | 🔲 [open] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |
+| 022 | ✅ [done] | `sprk_externalidentifier` schema and firm-scoped key | STANDARD | sonnet / high | P1-A | none |
+| 023 | ✅ [done] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |
 | 024 | 🔲 [open] | `sprk_billingapproverrole` into source; firm billing contact | STANDARD | sonnet / high | P1-A | none |
 | 025 | 🔲 [open] | eBilling settings table and BFF settings reader | STANDARD | sonnet / high | P1-A | none |
 | 026 | 🔲 [open] | Signal / Decision Record invoice-line subject and derivation | FULL | opus / high | none (p-safe false) | 010, 013, 029 |

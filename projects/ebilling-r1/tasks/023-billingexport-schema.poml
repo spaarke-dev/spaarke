@@ -4,7 +4,7 @@
     <title>sprk_billingexport schema and invoice batch lookup</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new table, a lookup on an existing table and a new script file; no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,6 +97,8 @@
   </acceptance-criteria>
 
   <notes>
+    Completed 2026-10-15. Script scripts/ebilling/Deploy-EbillingExportSchema.ps1 run against spaarkedev1 (second run: no change). Full evidence, live schema changes and deviations: projects/ebilling-r1/notes/023-billingexport-schema.md. Escalation trigger did not fire. Defect filed: DEF-012 (#1942).
+    rework: fix-round-1 task 023
     The brief named the invoice lookup sprk_billingexportid; that is the primary key name of sprk_billingexport itself, so the lookup is named sprk_billingexport.
     FR-13 says "file document" (one); FR-41 produces a CSV and a JSON file, so there is one document lookup per format (sprk_csvdocument, sprk_jsondocument), and "format" records which files a batch produced.
     sprk_failurereason supports a Failed status; the batch writer is task 150.

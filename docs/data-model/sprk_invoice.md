@@ -21,6 +21,7 @@ Columns and statuscode values below were added to dev by `scripts/ebilling/Deplo
 | `sprk_supersedesinvoice` | Lookup -> `sprk_invoice` (self; relationship `sprk_sprk_invoice_sprk_invoice_sprk_supersedesinvoice`, delete RemoveLink) | Supersedes Invoice | D-43: the resubmission points at the invoice that was returned to the firm. |
 | `sprk_billingperiodstart` | Date only | Billing Period Start | FR-21 header. |
 | `sprk_billingperiodend` | Date only | Billing Period End | FR-21 header. |
+| `sprk_billingexport` | Lookup -> `sprk_billingexport` (relationship `sprk_invoice_billingexport_billingexport`, delete RemoveLink, no other cascade; not required) | Export Batch | FR-13 / FR-41 (task 023). The AP export batch the invoice was sent in. Single-valued, so an invoice is in at most one batch; the batch writer (task 150) sets it and moves the invoice to Sent to AP. Columns of the batch: `docs/data-model/sprk_billingexport.md`. |
 
 `sprk_totalamount` (existing, money) stays the **billed total**. Each new money column also gets a system `_base` companion (base-currency value) from Dataverse. `sprk_invoicestatus` is unchanged here (task 015 retires it).
 
