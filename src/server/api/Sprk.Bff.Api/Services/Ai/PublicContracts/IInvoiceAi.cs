@@ -27,6 +27,13 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// with an SDAP-DTO would require duplicating model-specific assemblies callers already
 /// reference.
 /// </para>
+/// <para>
+/// ebilling-r1 task 041 (D-52) added four Action-backed capability methods (<see cref="ClassifyAsync"/>,
+/// <see cref="CodeLinesAsync"/>, <see cref="DraftRulesAsync"/>, <see cref="DraftFirmNoticeAsync"/>) with
+/// SDAP-domain DTOs (<c>InvoiceAiContracts.cs</c>). <see cref="GetPlaybookByNameAsync"/> and
+/// <see cref="GetStructuredCompletionAsync{T}"/> are legacy members kept only until their Finance callers
+/// move (ebilling-r1 tasks 042 and 050); do not add new callers.
+/// </para>
 /// </remarks>
 public interface IInvoiceAi
 {
@@ -82,5 +89,55 @@ public interface IInvoiceAi
         string text,
         string? model = null,
         int? dimensions = null,
+        CancellationToken cancellationToken = default);
+
+    // ── Action-backed capability methods (ebilling-r1 task 041, D-52 / ADR-039 / ADR-043) ──────────
+    //
+    // Each resolves its Action ONLY through the Binding for its ConsumerTypes key and runs it ONLY through
+    // IActionRunner: the prompt, output schema and model tier live in the Action / Binding rows, never in
+    // C#. All four FAIL CLOSED (FR-46) — they never return a default or fall back to a hard-coded prompt:
+    //   - InvoiceAiException(ai.invoice.binding_missing)   — no Binding / Action for the consumer type
+    //   - InvoiceAiException(ai.invoice.completion_failed) — the run failed
+    //   - InvoiceAiException(ai.invoice.output_invalid)    — the output does not parse into the result
+    //   - FeatureDisabledException(ai.invoice.disabled or ai.linear-consumers.disabled) — AI kill switch (ADR-032)
+    //   - OperationCanceledException — the caller cancelled
+
+    /// <summary>
+    /// Classify a Finance attachment as invoice / not invoice, with best-effort header hints
+    /// (consumer type <see cref="ConsumerTypes.InvoiceClassify"/>, FR-46).
+    /// </summary>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    Task<InvoiceClassifyResult> ClassifyAsync(
+        InvoiceClassifyRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Assign UTBMS codes and observations to one chunk of invoice lines from the allowed code lists
+    /// (consumer type <see cref="ConsumerTypes.InvoiceLineCode"/>, FR-22). The caller refuses any returned
+    /// code outside the line's code set.
+    /// </summary>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    Task<InvoiceCodeLinesResult> CodeLinesAsync(
+        InvoiceCodeLinesRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Propose billing rules from a guideline / rate / procedure document, only from the supplied rule-type
+    /// catalogue, listing text that could not be converted (consumer type
+    /// <see cref="ConsumerTypes.BillingRuleDraft"/>, FR-27).
+    /// </summary>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    Task<BillingRuleDraftResult> DraftRulesAsync(
+        BillingRuleDraftRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Draft the subject and explanatory prose of a firm notice from the outcome and findings summary
+    /// (consumer type <see cref="ConsumerTypes.InvoiceFirmNotice"/>, FR-50). Prose only: amounts, line
+    /// references and clause quotes are inserted by the caller's template.
+    /// </summary>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    Task<InvoiceFirmNoticeDraft> DraftFirmNoticeAsync(
+        InvoiceFirmNoticeRequest request,
         CancellationToken cancellationToken = default);
 }

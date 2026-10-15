@@ -197,7 +197,7 @@ Task 042 migrates classification to an Action + Binding with its own trigger; co
 | **Urgency** | before 047 / 075 tune their tier |
 | **Filed** | 2026-10-15 |
 | **Source** | Task 041 (found in passing; platform code, not changed) |
-| **GitHub Issue** | _to file (main session — sub-agent did not create it)_ |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1934 |
 
 **Description**
 
@@ -229,7 +229,7 @@ Platform (ADR-043 engine owner): have the linear resolver return the Action with
 | **Urgency** | low (cost, not correctness) |
 | **Filed** | 2026-10-15 |
 | **Source** | Task 041 code review (found in passing; frozen platform format, not changed) |
-| **GitHub Issue** | _to file (main session — sub-agent did not create it)_ |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1935 |
 
 **Description**
 

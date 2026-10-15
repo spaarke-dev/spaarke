@@ -31,10 +31,10 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 014 | 🔲 [open] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
 | 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
 | 016 | 🔲 [open] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
-| 017 | 🔲 [open] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
+| 017 | ⏸ [blocked: owner classification + stub delete] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
 | 018 | ✅ [completed] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
-| 019 | 🔲 [open] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
-| 020 | 🔲 [open] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
+| 019 | 🟡 [in-progress] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
+| 020 | 🟡 [in-progress] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
 | 021 | 🔲 [open] | `sprk_invoiceapproval` schema | STANDARD | sonnet / high | P1-A | none |
 | 022 | 🔲 [open] | `sprk_externalidentifier` schema and firm-scoped key | STANDARD | sonnet / high | P1-A | none |
 | 023 | 🔲 [open] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |
@@ -50,7 +50,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 040 | ✅ [completed] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
-| 041 | 🟡 [in-progress] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
+| 041 | 🟡 [review: adversarial pass] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
 | 042 | 🔲 [open] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
 | 043 | 🔲 [open] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
 | 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |

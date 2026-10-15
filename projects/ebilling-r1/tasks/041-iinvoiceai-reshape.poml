@@ -4,7 +4,7 @@
     <title>Reshape IInvoiceAi to capability methods; consumer-type keys</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a PublicContracts facade (ADR-013) that four later tasks build on; adds Action-backed dispatch consumers (ADR-043 seam test required).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -127,6 +127,17 @@
   </acceptance-criteria>
 
   <notes>Spec FR-21, FR-22, FR-27, FR-46, FR-50; Processing Pipeline "Rules for the AI steps". Registration lines in AnalysisServicesModule (:588, :1402) need no change unless the constructor change requires it. The DTO shapes are a starting contract: 047, 075 and 131 may refine their own DTO when authoring the Action and must keep facade, Action schema and parser in step. ActionRunner $choices enrichment (ActionRunner.cs:379 ResolveLookupChoicesAsync, :426 EnrichOutputSchemaWithResolvedChoices — the spec cites :424) applies automatically to JPS Actions; nothing to add here.</notes>
+  <completion-notes date="2026-10-15">
+    Completed 2026-10-15, FULL rigor. Contract for 042/047/075/131: notes/041-iinvoiceai-capability-contract.md.
+    Code: IInvoiceAi + InvoiceAi (linear path: IActionResolver -> IActionRunner, Input-channel PreResolved operand; strict InvoiceAiOutputParser) + NullInvoiceAi + InvoiceAiContracts.cs (DTOs + InvoiceAiException) + ConsumerTypes (4 constants; All unchanged). No DI change (InvoiceAi registration already sits in the branch that registers IActionResolver/IActionRunner).
+    Publish size (framework-dependent linux-x64 Release, Compress-Archive Optimal, PDBs included, 192 files each side): master f63b57f8d 37.1024 MB; branch 37.1211 MB; delta +0.0187 MB. No package added; no vulnerable package.
+    Gates: build 0 errors; ArchTests 1045/1045 (ADR013_AiBoundaryTests, ADR013_LinearConsumerBoundaryTests, GateCombinationConstructibilityTests 17/17); dotnet format verify clean on the 7 files; code-review: no F-class finding (4 K4 notes); adr-check: no violation.
+    Deviation: tests placed at KEEP paths (tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs real ActionResolver+ActionRunner; tests/unit/domain/Ai/PublicContracts/InvoiceAiContractTests.cs) instead of the POML path, per tests/CLAUDE.md (owner decision 2026-10-12).
+    Extra tests (one line each): out-of-range confidence / bad enum names (FR-26 threshold safety); transient resolver failure -> completion_failed (retry semantics); kill-switch pass-through (ADR-032 503 contract); no-numeric request + finding types (131 escalation trigger).
+    Found in passing, filed in notes/defer-issues.md: ISS-005 (Binding sprk_modeltieroverride ignored on linear path), ISS-006 (## Input renderer escapes non-ASCII). GitHub issues to be filed by main session.
+    Full Sprk.Bff.Api.Tests run not clean on this shared machine: WebApplicationFactory tests time out (3-5 min each) under contention from parallel agents; every failing class re-run in isolation passed (54 + 228 + 269 tests, incl. all InvoiceAi/Finance). Integration, Spe.Integration, Nightly, Core, ControlPlane, Scheduling suites pass. CI must confirm the full suite.
+    rework: none task 041
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

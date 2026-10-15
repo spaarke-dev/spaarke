@@ -362,6 +362,39 @@ public static class ConsumerTypes
     /// </summary>
     public const string AssistantSuggest = "assistant-suggest";
 
+    // ── eBilling (ebilling-r1 task 041, D-52) ─────────────────────────────────────────────────────
+    // Linear AI Consumers invoked only through the IInvoiceAi facade (never chat/loop-projected).
+    // Deliberately NOT in All yet: RoutingConsumerTypeHealthCheck turns /healthz Unhealthy for an All
+    // entry with no Binding row, so each constant joins All in the same change that seeds its Binding.
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.ClassifyAsync"/> — Finance attachment classification (spec
+    /// <c>INVOICE-CLASSIFY@v1</c>, FR-46). Binding + Action seeded by ebilling-r1 task 042, which also adds
+    /// this constant to <see cref="All"/>.
+    /// </summary>
+    public const string InvoiceClassify = "invoice-classify";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.CodeLinesAsync"/> — UTBMS line coding and observations (spec
+    /// <c>INVOICE-LINE-CODE@v1</c>, FR-22). Binding + Action seeded by ebilling-r1 task 047, which also adds
+    /// this constant to <see cref="All"/>.
+    /// </summary>
+    public const string InvoiceLineCode = "invoice-line-code";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.DraftRulesAsync"/> — billing-rule drafting from a guideline document (spec
+    /// <c>BILLING-RULE-DRAFT@v1</c>, FR-27). Binding + Action seeded by ebilling-r1 task 075, which also adds
+    /// this constant to <see cref="All"/>.
+    /// </summary>
+    public const string BillingRuleDraft = "billing-rule-draft";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.DraftFirmNoticeAsync"/> — firm-notice prose drafting (spec
+    /// <c>INVOICE-FIRM-NOTICE@v1</c>, FR-50). Binding + Action seeded by ebilling-r1 task 131, which also adds
+    /// this constant to <see cref="All"/>.
+    /// </summary>
+    public const string InvoiceFirmNotice = "invoice-firm-notice";
+
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
