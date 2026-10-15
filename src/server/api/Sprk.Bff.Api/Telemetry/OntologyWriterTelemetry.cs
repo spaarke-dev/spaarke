@@ -30,7 +30,8 @@ public static class OntologyWriterTelemetry
 
     /// <summary>
     /// <c>customMetrics/ontology.writer.skips</c> (task 042, K1): a write that was deliberately NOT made, by design (today only
-    /// <c>gate_dr_skipped_unfiled</c>), kept off <see cref="FailuresCounter"/> so an alert on <c>ontology.writer.failures</c> counts real
+    /// <c>gate_dr_skipped_no_unit_team</c>, which task 149 / D-144 put in place of task 042's <c>gate_dr_skipped_unfiled</c>), kept off
+    /// <see cref="FailuresCounter"/> so an alert on <c>ontology.writer.failures</c> counts real
     /// failures only and stays unfiltered. Same <see cref="MeterName"/>.
     /// </summary>
     private static readonly Counter<long> SkipsCounter = Meter.CreateCounter<long>(

@@ -71,6 +71,46 @@ public sealed partial class DecisionRecordWriterTests
         /// <summary>Every ownership question the mock resolver was asked, in order.</summary>
         public List<RecordOwnershipContext> OwnerAsks { get; } = [];
 
+        /// <summary>Task 149: Decision Records that already exist in Dataverse (found by the gate's "already recorded" lookup).</summary>
+        public List<Entity> Seeded { get; } = [];
+
+        /// <summary>Task 149: every "already recorded" lookup the writer made, as queried.</summary>
+        public List<QueryExpression> Lookups { get; } = [];
+
+        /// <summary>Task 149: when set, the lookup throws it (a Dataverse fault on the read).</summary>
+        public Exception? LookupFault { get; set; }
+
+        private static Entity Clone(Entity source, Guid id)
+        {
+            var copy = new Entity(source.LogicalName, id);
+            foreach (var attribute in source.Attributes)
+                copy[attribute.Key] = attribute.Value;
+            return copy;
+        }
+
+        /// <summary>The query's conditions, evaluated on a row: an equality on a lookup or a value, a null test, and a LIKE with a leading and trailing %.</summary>
+        private static bool Satisfies(QueryExpression query, Entity row) => query.Criteria.Conditions.All(condition =>
+        {
+            // The primary key is the row's Id, not an attribute (task 149 D-144: the writer reads the communication's ownerid by key).
+            object? actual = condition.AttributeName == row.LogicalName + "id"
+                ? row.Id
+                : row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+            if (condition.Operator == ConditionOperator.Null)
+            {
+                return actual is null;
+            }
+
+            var expected = condition.Values.Single();
+            return condition.Operator switch
+            {
+                ConditionOperator.Equal => actual is EntityReference reference ? reference.Id.Equals(expected) : Equals(actual, expected),
+                ConditionOperator.Like => actual is string text && expected is string pattern
+                    && pattern.StartsWith('%') && pattern.EndsWith('%')
+                    && text.Contains(pattern.Trim('%'), StringComparison.Ordinal),
+                _ => throw new NotSupportedException($"Test harness: {condition.Operator} is not evaluated."),
+            };
+        });
+
         public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null)
         {
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
@@ -88,6 +128,27 @@ public sealed partial class DecisionRecordWriterTests
                 .Returns((string table, Guid id, string[] _, CancellationToken _) => RowReadFault is { } fault
                     ? Task.FromException<Entity>(fault)
                     : Task.FromResult(Rows.TryGetValue((table, id), out var row) ? row : new Entity(table, id)));
+            // Task 149: the gate decision's "is it already recorded" lookup, answered from what this harness has stored. The query's
+            // conditions are EVALUATED (an equality on a lookup, a LIKE on a memo), so a lookup that asks the wrong question finds nothing
+            // (or everything) instead of passing. A record this harness created is found by a later lookup, as Dataverse would.
+            Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns((QueryExpression query, CancellationToken _) =>
+                {
+                    Lookups.Add(query);
+                    if (LookupFault is { } lookupFault)
+                    {
+                        return Task.FromException<EntityCollection>(lookupFault);
+                    }
+
+                    var stored = Created
+                        .Select(c => c.Id == Guid.Empty ? Clone(c, NewId) : c)
+                        .Concat(Seeded)
+                        .Concat(Rows.Values)
+                        .Where(row => row.LogicalName == query.EntityName && Satisfies(query, row))
+                        .Take(query.TopCount ?? int.MaxValue)
+                        .ToList();
+                    return Task.FromResult(new EntityCollection(stored));
+                });
 
             var client = new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
             // The probe says every stamp column and every intermediate's root column exists (a document subject's links included).
@@ -102,7 +163,7 @@ public sealed partial class DecisionRecordWriterTests
                         StringComparer.OrdinalIgnoreCase));
                 },
                 NullLogger<CoreAncestorResolver>.Instance);
-            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, RecordTypes, new FakeTimeProvider(Now), Log);
+            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log);
         }
 
         public Entity Row => Created.Single();
@@ -837,14 +898,14 @@ public sealed partial class DecisionRecordWriterTests
     private static readonly AsyncLocal<Guid> MetricScope = new();
 
     /// <summary>Failure reasons metered on this async flow only (the Meter is process-global; same pattern as SignalWriterTests).</summary>
-    private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope)
+    private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope, string instrumentName = "ontology.writer.failures")
     {
         var reasons = new List<string?>();
         var listener = new MeterListener
         {
             InstrumentPublished = (instrument, l) =>
             {
-                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.writer.failures")
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == instrumentName)
                     l.EnableMeasurementEvents(instrument);
             },
         };
@@ -1328,7 +1389,7 @@ public sealed partial class DecisionRecordWriterTests
         var h = new Harness();
         var writer = new DecisionRecordWriter(
             new OntologyWriterDataverseClient(() => h.Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
-            h.Ownership.Object, StampColumnsResolver(h.Entities.Object),
+            h.Ownership.Object, StampColumnsResolver(h.Entities.Object), h.Entities.Object,
             new Tests.TestInfrastructure.RecordTypeCatalogStub((_, _) => throw new TimeoutException("catalog down")),
             new FakeTimeProvider(Now), h.Log);
 

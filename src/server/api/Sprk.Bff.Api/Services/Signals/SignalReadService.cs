@@ -506,7 +506,9 @@ public sealed class SignalReadService
                 if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
                 {
                     // No Read on sprk_signal at all: the caller reads nothing, which is an empty list, not an error (FR-54).
-                    _logger.LogInformation("Signal read: the caller has no read on sprk_signal; nothing to return.");
+                    // Warning (task 149, uac-r2 K3 on #1891): an empty worklist from a refused read looks exactly like "no work", so the
+                    // refusal must be visible at the level an operator filters on. No behaviour change.
+                    _logger.LogWarning("Signal read: the caller has no read on sprk_signal; nothing to return.");
                     return new FetchPages([], null);
                 }
 

@@ -1581,6 +1581,7 @@ public class SignalWriterTests
             new OntologyWriterDataverseClient(() => new FakeOrganizationService(), NullLogger<OntologyWriterDataverseClient>.Instance),
             resolver,
             new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
+            sysadmin,
             new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance);
         var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
