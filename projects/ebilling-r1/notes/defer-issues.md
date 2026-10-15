@@ -188,3 +188,96 @@ Task 042 migrates classification to an Action + Binding with its own trigger; co
 **Related**: ebilling-r1 tasks 001, 042; rollup evidence is on existing issue #1663 (comment 2026-10-15)
 
 ---
+
+### ISS-005 — Linear AI path ignores the Binding's sprk_modeltieroverride
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before 047 / 075 tune their tier |
+| **Filed** | 2026-10-15 |
+| **Source** | Task 041 (found in passing; platform code, not changed) |
+| **GitHub Issue** | _to file (main session — sub-agent did not create it)_ |
+
+**Description**
+
+Spec "Rules for the AI steps" says the model is the Action's tier *with* the Binding's `sprk_modeltieroverride`. On the linear path (`IActionResolver` → `IActionRunner`, which every `IInvoiceAi` capability method uses) the override is never applied: `ActionResolver.ResolveAsync` returns the Action row, and `ActionRunner` resolves `action.ModelTier` only. Only `SessionDispatchOrchestrator` (chat dispatch) applies `binding.ModelTierOverride`. A maker who sets the override on an eBilling Binding sees no effect.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionResolver.cs:44-72`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs:144` (`ModelTierDeploymentResolver.Resolve(action.ModelTier, …)`)
+- Contrast `Services/Ai/Chat/SessionDispatchOrchestrator.cs:630`
+
+**Suggested fix**
+
+Platform (ADR-043 engine owner): have the linear resolver return the Action with the Binding's override folded into its tier. Not in 041 scope (its escalation trigger forbids ActionRunner changes). Workaround for R1: set the tier on the Action row (D-51).
+
+**Estimated effort**: 1–2 hours plus a seam test
+
+**Blockers**: platform owner decision
+
+**Related**: ebilling-r1 tasks 041, 042, 047, 075, 131; ADR-016, ADR-043
+
+---
+
+### ISS-006 — `## Input` operand escapes every non-ASCII character as \uXXXX
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | low (cost, not correctness) |
+| **Filed** | 2026-10-15 |
+| **Source** | Task 041 code review (found in passing; frozen platform format, not changed) |
+| **GitHub Issue** | _to file (main session — sub-agent did not create it)_ |
+
+**Description**
+
+`PromptInputSection.Render` serializes the operand with `new JsonSerializerOptions { WriteIndented = true }`, whose default `JavaScriptEncoder` escapes every non-ASCII and HTML-sensitive character (`€` → `€`, `§` → `§`, `'` → `'`). Document text sent through `## Input` (`ClassifyAsync`, `DraftRulesAsync`) therefore costs several tokens per such character and is harder for the model to quote back verbatim — relevant to `clauseQuote` in rule drafting. The format is golden-pinned (ADR-043 frozen contract), so a fix is a platform decision.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PromptInputSection.cs:37`
+- Golden test `tests/integration/seam/Ai/ContextBinderActionRunnerSeamTests.cs` (`PromptInputSection_Render_ProducesTheFrozenGoldenFormat`)
+
+**Suggested fix**
+
+Use `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` (prompt text is not HTML) and re-pin the golden test, coordinated with the ADR-043 engine owner. Measure in 075's evaluation whether clause quotes are affected first.
+
+**Estimated effort**: 1 hour plus re-pinning
+
+**Blockers**: platform owner decision
+
+**Related**: ebilling-r1 tasks 041, 075; ADR-043
+
+---
+
+### DEF-004 — SpendSnapshotService ignores sprk_costtype and approved amounts: new Adjustment lines would be summed as spend
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the first Adjustment line is stored as Invoiced (tasks 014 / 016 / 100) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 010 (reader of a column task 010 extended; not changed) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1923 |
+
+**Description**
+
+`SpendSnapshotService` reads `sprk_costtype` into `BillingEventData.CostType` but never uses it. Spend is `billingEvents.Sum(e => e.Amount)` over every line of the matter / project with `sprk_visibilitystate = Invoiced`, summing the billed `sprk_amount`. Task 010 added the option Adjustment (100000002) to `sprk_costtype`, plus `sprk_approvedamount` and `sprk_linestatus`. Once Adjustment lines are stored as Invoiced, their `sprk_amount` (never negative: the column is 0 .. 1,000,000,000) is added to spend instead of reducing it, and Disallowed / Reduced lines still count at the billed amount. Not reachable today: nothing writes those lines yet.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs:185, 235, 253, 268, 286, 402, 455-459`
+
+**Suggested fix**
+
+Settle the spend definition with the line writers (exclude or sign Adjustment lines; sum `sprk_approvedamount`, falling back to `sprk_amount` when unreviewed) and add a unit test.
+
+**Estimated effort**: 1-2 hours plus test
+
+**Blockers**: owner decision on the spend definition for adjusted lines
+
+**Related**: ebilling-r1 tasks 010, 014, 016, 100; evidence `notes/010-invoice-line-columns.md`
+
+---

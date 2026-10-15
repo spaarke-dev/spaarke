@@ -4,7 +4,7 @@
     <title>Invoice Line columns on sprk_billingevent</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script and additive dev schema change; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,7 +98,11 @@
     <criterion testable="true">docs/data-model/sprk_billingevent.md lists every added or relabelled column with logical name, type and option values; option values are also in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append point: docs/data-model/sprk_billingevent.md (edit only this entity's rows). SpendSnapshotService reads sprk_costtype — record in notes how it treats the new Adjustment value (it is a reader, not changed here; file an issue if adjustments would be double-counted in spend). The D-64 correction record shape (columns on the line vs child table) is task 027's; do not pre-empt it here. Signals' sprk_regardinginvoiceline is 026's.</notes>
+  <notes>Shared append point: docs/data-model/sprk_billingevent.md (edit only this entity's rows). SpendSnapshotService reads sprk_costtype — record in notes how it treats the new Adjustment value (it is a reader, not changed here; file an issue if adjustments would be double-counted in spend). The D-64 correction record shape (columns on the line vs child table) is task 027's; do not pre-empt it here. Signals' sprk_regardinginvoiceline is 026's. 
+
+COMPLETION 2026-10-15 (dev): script scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 applied; 21 columns + option sprk_costtype.Adjustment (100000002) created, entity and sprk_timekeeper relabelled; 3 code lookups deferred (sprk_billingcode absent, task 018); re-run reports 0 created / 24 skipped. Option values: sprk_linestatus 100000000-100000005 (Pending, Clean, Flagged, Accepted, Reduced, Disallowed); sprk_adjustmentmethod Percent 100000000, Fixed 100000001; sprk_costtype Fee 100000000, Expense 100000001, Adjustment 100000002. ApplyStamps analysis (mixed scheme maps cleanly; billingevent is never stamped) and follow-ups for 012 / 013 / 026: notes/010-invoice-line-columns.md section 3. SpendSnapshotService reads sprk_costtype but never uses it: DEF-004 / #1923. TASK-INDEX.md not edited by this agent (main session).
+rework: fix-round-1 task 010
+</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

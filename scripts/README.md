@@ -1758,6 +1758,23 @@ These scripts were used during initial SPE Container Type registration and are k
 
 ---
 
+## eBilling Scripts
+
+Owned by `ebilling-r1` (`projects/ebilling-r1/`). All are idempotent: a second run reports no change.
+
+### `ebilling/Deploy-EbillingInvoiceLineSchema.ps1`
+
+Additive Dataverse metadata script that turns `sprk_billingevent` into the Invoice Line (FR-04 / FR-05): review, coding, adjustment and extraction columns, `sprk_linestatus`, the work-assignment lookup and the ADR-024 resolver fields. The UTBMS code lookups are deferred until `sprk_billingcode` exists (task 018), and are created on the next run after that. Supports `-WhatIf`; never deletes or renames. Columns: `docs/data-model/sprk_billingevent.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `content-understanding/Deploy-Analyzers.ps1`
+
+Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
+
 ## Script Maintenance
 
 ### Adding New Scripts
@@ -1928,3 +1945,4 @@ Most scripts require:
 - **2026-10-01:** Added Migrate-SecureRecordsToNamedOwnerTeam.ps1. It moves secure roots off the Secure Record business unit's default team onto its named, memberless owner team, with a dry run by default, read-back, share-count comparison and a `-Verify` gate (`unified-access-control-r2` task 144, #967).
 - **2026-10-02:** Added Set-RecordNumberingSchema.ps1 — interim `MAT-`/`PRJ-` platform autonumber on the matter/project primary-name columns, data-derived seed, blank-row backfill, alternate keys, `-Verify` (`spaarkeai-word-add-in-r1` task 076, write-path invariant I-11).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).
+- **2026-10-15:** Added the eBilling Scripts section: Deploy-EbillingInvoiceLineSchema.ps1 (task 010) and content-understanding/Deploy-Analyzers.ps1 (task 004), `ebilling-r1`.
