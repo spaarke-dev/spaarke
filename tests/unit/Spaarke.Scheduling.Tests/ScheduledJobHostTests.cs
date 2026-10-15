@@ -269,9 +269,16 @@ public class ScheduledJobHostTests
         // assertions below: base.StopAsync cancels the stopping token, so a job that observed it
         // records Success=false + "Cancelled", while one that sat out the 3s ShutdownDrainTimeout
         // would not. The behaviour is the assertion; elapsed wall-clock never was.
-        var slowRun = store.RunRecords.FirstOrDefault(r => r.JobId == "slow");
-        slowRun.Should().NotBeNull();
-        slowRun!.Result.Should().NotBeNull();
+        //
+        // The dispatched run, not just any 'slow' record: a later every-second occurrence that fires while 'slow'
+        // still holds the lease is recorded as Skipped (Success=true, ADR-036 A1 rule 1), and RunRecords is a
+        // ConcurrentDictionary snapshot with no order — so FirstOrDefault picked the Skipped record at random
+        // (master 2026-10-15, quality alert #1898).
+        var slowRun = store.RunRecords.Should()
+            .ContainSingle(r => r.JobId == "slow" && (r.Result == null || !r.Result.Skipped),
+                "the lease admits exactly one dispatch of 'slow'; later occurrences are recorded as Skipped")
+            .Subject;
+        slowRun.Result.Should().NotBeNull();
         slowRun.Result!.Success.Should().BeFalse();
         slowRun.Result.ErrorMessage.Should().Contain("Cancelled");
     }
