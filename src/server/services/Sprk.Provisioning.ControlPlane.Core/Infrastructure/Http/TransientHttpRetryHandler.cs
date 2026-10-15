@@ -10,9 +10,16 @@
 //   - 429 on any method (the request was rejected, not executed);
 //   - 408/502/503/504 and transport failures on GET/HEAD only (a POST/PATCH that
 //     timed out at a gateway may have landed, so it is never replayed).
-// It honours Retry-After (delta or date), capped at MaxDelay; otherwise it backs
-// off exponentially from BaseDelay. Request content is buffered before the first
-// send so a replay sends the same bytes.
+// It honours Retry-After (delta or date); otherwise it backs off exponentially
+// from BaseDelay. Request content is buffered before the first send so a replay
+// sends the same bytes.
+//
+// Budget (T186 review): HttpClient.Timeout spans this whole handler chain, and the
+// Worker's Dataverse/Graph clients use 30 s. The total sleep must stay well under it,
+// or the client's timeout fires inside the wait and the caller sees an unclassified
+// cancellation instead of the 429. So: 4 attempts, 1 s base, 5 s cap (≤ 7 s of sleep),
+// and a Retry-After longer than the cap is NOT slept — the 429 is returned at once for
+// the caller's own failure mapping.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -25,9 +32,9 @@ public sealed class TransientHttpRetryHandler : DelegatingHandler
 {
     private readonly ILogger<TransientHttpRetryHandler> _logger;
 
-    /// <summary>Production defaults: 5 attempts, 2 s exponential base, 30 s cap.</summary>
+    /// <summary>Production defaults: 4 attempts, 1 s exponential base, 5 s cap — at most 7 s of sleep, well under the 30 s client timeout.</summary>
     public TransientHttpRetryHandler(ILogger<TransientHttpRetryHandler> logger)
-        : this(logger, maxAttempts: 5, baseDelay: TimeSpan.FromSeconds(2), maxDelay: TimeSpan.FromSeconds(30))
+        : this(logger, maxAttempts: 4, baseDelay: TimeSpan.FromSeconds(1), maxDelay: TimeSpan.FromSeconds(5))
     {
     }
 
@@ -82,7 +89,9 @@ public sealed class TransientHttpRetryHandler : DelegatingHandler
             var delay = RetryAfter(response) ?? Backoff(attempt);
             if (delay > MaxDelay)
             {
-                delay = MaxDelay;
+                // The server asks for a longer wait than this handler's budget allows inside the client timeout —
+                // hand the response back rather than sleep into a cancellation.
+                return response;
             }
 
             _logger.LogInformation(

@@ -159,8 +159,10 @@ public sealed class H8GraphReplicationRetryTests
         var outcome = await Bind(graph, retryCount: 3);
 
         graph.Count("PATCH").Should().Be(3, "bounded by SpeContainerOptions.ReplicationRetryCount");
-        outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Which.Removed.Should().BeTrue(
-            "after the retries the existing path runs: the delete finds the container gone");
+        graph.Count("DELETE").Should().Be(3, "the removal waits out the same lag, also bounded");
+        outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Which.Removed.Should().BeFalse(
+            "a container this run just created that still answers 404 stays on the record (T186 review) — a resume " +
+            "binds or removes it instead of creating a second one");
     }
 
     // ── 2. Activate ────────────────────────────────────────────────────────────

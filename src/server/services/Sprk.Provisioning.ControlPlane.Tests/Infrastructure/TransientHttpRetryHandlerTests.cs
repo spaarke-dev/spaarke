@@ -57,7 +57,7 @@ public sealed class TransientHttpRetryHandlerTests
     public async Task Throttled429OnAPost_IsReplayedWithTheSameBody_UntilAccepted()
     {
         var (client, inner) = Build(5,
-            Status(HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(30)),
+            Status(HttpStatusCode.TooManyRequests, TimeSpan.FromMilliseconds(2)),
             Status(HttpStatusCode.TooManyRequests),
             Status(HttpStatusCode.NoContent));
 
@@ -138,4 +138,30 @@ public sealed class TransientHttpRetryHandlerTests
     [InlineData(HttpStatusCode.InternalServerError, true, false)]
     public void IsRetryable_RetriesOnlyWhatTheServiceDidNotProcess(HttpStatusCode status, bool idempotent, bool expected)
         => TransientHttpRetryHandler.IsRetryable(status, idempotent).Should().Be(expected);
+
+    [Fact]
+    public async Task RetryAfterLongerThanTheBudget_ReturnsThe429AtOnce_InsteadOfSleepingIntoTheClientTimeout()
+    {
+        var (client, inner) = Build(5, Status(HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(45)), Status(HttpStatusCode.OK));
+
+        using var response = await client.GetAsync("api/data/v9.2/sprk_skills");
+
+        response.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "the caller's own failure mapping sees the throttle");
+        inner.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void ProductionBudget_StaysWellUnderTheWorkersThirtySecondClientTimeout()
+    {
+        var handler = new TransientHttpRetryHandler(NullLogger<TransientHttpRetryHandler>.Instance);
+
+        var worstSleep = TimeSpan.Zero;
+        for (var attempt = 1; attempt < handler.MaxAttempts; attempt++)
+        {
+            var backoff = TimeSpan.FromTicks(handler.BaseDelay.Ticks * (1L << (attempt - 1)));
+            worstSleep += backoff > handler.MaxDelay ? handler.MaxDelay : backoff;
+        }
+
+        worstSleep.Should().BeLessThan(TimeSpan.FromSeconds(15));
+    }
 }

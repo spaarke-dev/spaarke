@@ -390,16 +390,31 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 
         try
         {
-            using var deleteTimeout = LinkedTimeout(CancellationToken.None);
-            await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
-                .ConfigureAwait(false);
+            // T186 review: this container was created by this run moments ago, so a 404 here is most likely the same
+            // replication lag the bind just ran into — not proof it is gone. The DELETE is retried while Graph says
+            // not-found (a DELETE is idempotent); if it still says not-found, the container stays on the run's record
+            // (Removed: false) so a resume binds or removes it instead of creating a second one and orphaning this one.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var deleteTimeout = LinkedTimeout(attemptCt);
+                    await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
+                        .ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "unbound-container removal", CancellationToken.None).ConfigureAwait(false);
             return new SpeContainerBindOutcome.NotBound(failure + " The container was removed.", Removed: true);
         }
         catch (ODataError deleteEx) when (deleteEx.ResponseStatusCode == 404)
         {
-            // Already gone (an earlier removal, or an operator's) — nothing unbound remains, and a resume must not keep
-            // trying to bind a container that no longer exists.
-            return new SpeContainerBindOutcome.NotBound(failure + " The container no longer exists.", Removed: true);
+            _logger.LogWarning(
+                "H8 container {ContainerId}: removal kept answering 404. It was created by this run moments ago, so it is " +
+                "kept on the run's record rather than assumed gone.", containerId);
+            return new SpeContainerBindOutcome.NotBound(
+                failure + $" Removing it answered 404 on every attempt; container '{containerId}' is kept on the run's " +
+                "record (it may not have replicated yet) so a resume binds or removes it rather than creating another.",
+                Removed: false);
         }
         catch (Exception deleteEx)
         {

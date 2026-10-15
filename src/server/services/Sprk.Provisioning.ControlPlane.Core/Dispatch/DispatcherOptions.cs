@@ -85,8 +85,12 @@ public sealed class DispatcherOptions
     /// execution. Also serves as the Level-2 Redis lock TTL
     /// (<see cref="IDispatchIdempotencyService.TryAcquireLockAsync"/>) so
     /// the two guards expire at the same wall-clock horizon.
+    /// T186 review: 90 minutes. H6 can first wait out Entra FIC propagation
+    /// (10 min) and the new app user's Dataverse propagation (10 min) before its
+    /// 60-minute import, so 65 minutes could expire the lock mid-import and let a
+    /// redelivery start a second import. Guarded by DispatcherOptionsBudgetTests.
     /// </summary>
-    public TimeSpan MaxHandlerDuration { get; set; } = TimeSpan.FromMinutes(65);
+    public TimeSpan MaxHandlerDuration { get; set; } = TimeSpan.FromMinutes(90);
 
     /// <summary>
     /// Bound to <c>ServiceBusSessionProcessorOptions.SessionIdleTimeout</c>.
