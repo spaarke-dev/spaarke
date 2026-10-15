@@ -1798,6 +1798,15 @@ pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaa
 pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
+### `ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1`
+
+Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, optional matter / project / work assignment scope, source document, effective dates, Draft / Published / Inactive) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. The `sprk_classification` columns (global choice `sprk_timekeeperrole`) are held until the owner decides reuse versus a new choice; `-ApplyClassification` creates them afterwards. Supports `-WhatIf`; never deletes or renames by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1
+```
+
 ### `ebilling/Deploy-EbillingPolicyStoreSchema.ps1`
 
 Additive Dataverse metadata script that extends the ontology-owned policy store for billing rules (FR-09, D-26, D-66): the global option set `sprk_policydomain` (Billing, Ontology, Docketing), `sprk_domain` and the `sprk_ruleset` lookup on `sprk_policy`, `sprk_clausereference` / `sprk_clauselocation` / `sprk_consequence` / `sprk_proposalstatus` on `sprk_policyversion`, and the new user-owned table `sprk_ruleset` (domain, source document, scope, firm, `sprk_visibletofirms` defaulting to No, effective dates, not-converted JSON, statuscode Draft / Published / Retired). Never relabels, deletes or renumbers an existing policy column or option and writes no policy row; stops with exit 2 if a planned name exists with another type, target or option list. Supports `-WhatIf`; retries on customization / publish locks, a new table still propagating and stale option reads; ends with a metadata read-back. Columns and values: `docs/data-model/sprk_ruleset.md`.
@@ -1985,3 +1994,4 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (sprk_invoice header columns and lifecycle statuscode values, `ebilling-r1` task 012).
 - **2026-10-15:** Added ebilling/Deploy-EbillingBillingCodeSchema.ps1 and ebilling/Seed-EbillingBillingCodes.ps1 (UTBMS code set tables, alternate key, default-code-set lookups, eight seeded sets; `ebilling-r1` task 018).
 - **2026-10-15:** Added ebilling/Deploy-EbillingPolicyStoreSchema.ps1 (policy store domain / rule set / clause / consequence columns, `sprk_policydomain`, `sprk_ruleset` table; `ebilling-r1` task 019).
+- **2026-10-15:** Added ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 (sprk_timekeeper roster columns and statuscode, sprk_ratecard, sprk_ratecardrate; classification held pending an owner decision; `ebilling-r1` task 017).

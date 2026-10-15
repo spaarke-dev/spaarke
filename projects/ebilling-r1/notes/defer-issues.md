@@ -312,3 +312,34 @@ Owner decides the product standard (original ABA, LOC 2013 revised, or ABA plus 
 **Related**: ebilling-r1 tasks 018, 047; evidence `notes/018-utbms-code-sets.md`
 
 ---
+
+### DEF-006 — Billing code / code set primary names are not application-required in dev
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before admins edit code sets by hand |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 017 (found while fixing the same defect in its own script) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1931 |
+
+**Description**
+
+`Deploy-EbillingBillingCodeSchema.ps1` (task 018) asks for `ApplicationRequired` on the primary names `sprk_billingcode.sprk_code` and `sprk_billingcodeset.sprk_name` in the entity-create body. Dataverse ignores that property (like the primary-name `MaxLength`); dev reads back `RequiredLevel = None` on both. A form or API write can create a code or code set with an empty name, which the alternate key (`sprk_codeset`, `sprk_code`) cannot address.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1` (`Add-Table`, then `Set-PrimaryNameLength`)
+- `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (`Set-PrimaryNameRequired`, the model fix)
+
+**Suggested fix**
+
+Add the `Set-PrimaryNameRequired` step to the 018 script after table creation and re-run it in dev (existing rows are unaffected).
+
+**Estimated effort**: 30 minutes
+
+**Blockers**: none
+
+**Related**: ebilling-r1 tasks 017, 018; `notes/017-timekeeper-ratecard-schema.md` sections 6 and 7
+
+---
