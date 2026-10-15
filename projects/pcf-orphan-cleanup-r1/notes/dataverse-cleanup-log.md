@@ -109,6 +109,14 @@ Deviations from §3.2: step 3 (unpublish canvas) was skipped because a custom pa
   - Restore: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ZipPath projects/pcf-orphan-cleanup-r1/backups-2026-06-22/baseline-AnalysisWorkspaceSolution-pre-cleanup-2026-06-22.zip -SolutionUniqueName AnalysisWorkspaceSolution`
   - Left behind: `AnalysisWorkspaceSolution` is now empty (unmanaged). The old `sprk_analysisworkspace` code-page web resource belongs to `ai-advanced-capabilities-analysis-hub-r1` task 071.
 
+- 2026-10-15 20:45 — `sprk_Spaarke.Controls.FieldMappingAdmin` v1.1.0 (owner approved retirement 2026-10-15; was held under DEV-004)
+  - §1.2 results: `RetrieveDependenciesForDelete` = 0. No form, view, dashboard, sitemap or web-resource placement among 1,456 forms, 4,304 views and 235 `sprk_*` web resources. Profiles and rules are authored on native forms (6 profiles, 25 rules, untouched after deletion).
+  - Solutions touched: FieldMappingAdminSolution (RemoveSolutionComponent), then DELETE
+  - Deletion confirmed: GUID `d8aac645-3e55-4300-8510-4c4504c46d5e`; 404 / 0 by name / 0 solutioncomponents / 0 resources; shared `fluent_9_4_0` intact; `sprk_` customcontrols 26 → 25
+  - Backup: fresh export `backups-2026-10-14/baseline-FieldMappingAdminSolution-unmanaged-pre-cleanup-2026-10-15.zip` (contains the control's bundle, CSS and manifest) plus `metadata-FieldMappingAdmin-customcontrol-2026-10-15.json`
+  - Repo: removed from `infrastructure/dataverse/solutions/FieldMappingAdminSolution` (root component and `Controls/`), so a redeploy of that solution does not bring it back
+  - Restore: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ZipPath projects/pcf-orphan-cleanup-r1/backups-2026-10-14/baseline-FieldMappingAdminSolution-unmanaged-pre-cleanup-2026-10-15.zip -SolutionUniqueName FieldMappingAdminSolution`
+
 ### Resurrection drill (NFR-07): PASS
 
 | Step | UTC | Result |

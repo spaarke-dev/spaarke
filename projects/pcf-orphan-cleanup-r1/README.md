@@ -2,7 +2,7 @@
 
 > **Portfolio**: [Project #1172](https://github.com/spaarke-dev/spaarke/issues/1172) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
 
-> **Status**: Phase 0 — Project Setup (created 2026-06-22)
+> **Status**: ✅ Closed 2026-10-15. spaarkedev1 cleaned (6 PCFs + 3 canvas pages deleted); tasks 004–007 dropped by the owner (see `tasks/TASK-INDEX.md`). The graduation criteria below are the original plan; the outcome is in `current-task.md`.
 > **Type**: Quality / hygiene — source-tree cleanup + Dataverse cleanup + type-system alignment
 > **Predecessor research**: chat-routing-redesign-r1 TypeScript drift audit → triggered the inventory pass
 > **Estimated effort**: 3–5 days end-to-end (1 source PR, 1 Dataverse session, 2 React-types PRs, 1 replay session)
