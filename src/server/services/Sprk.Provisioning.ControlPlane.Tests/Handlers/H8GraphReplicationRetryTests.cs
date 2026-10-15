@@ -70,6 +70,56 @@ public sealed class H8GraphReplicationRetryTests
         graph.Count("DELETE").Should().Be(0);
     }
 
+    private const string StaleReadBack = "{\"id\":\"" + ContainerId + "\",\"customProperties\":{}}";
+
+    [Fact]
+    public async Task Bind_ReadBack200WithoutTheStamp_IsStaleReplica_ReReadUntilVisible_AndTheContainerIsKept()
+    {
+        var graph = new SequencedGraph()
+            .Queue("PATCH", Resp(HttpStatusCode.OK, "{}"))
+            .Queue("GET", Resp(HttpStatusCode.OK, StaleReadBack), Resp(HttpStatusCode.OK, StaleReadBack),
+                Resp(HttpStatusCode.OK, ContainerJson(Unit.ToString("D"))));
+
+        var outcome = await Bind(graph);
+
+        outcome.Should().BeOfType<SpeContainerBindOutcome.Bound>("a missing stamp seconds after a successful PATCH is replication lag");
+        graph.Count("GET").Should().Be(3);
+        graph.Count("PATCH").Should().Be(1);
+        graph.Count("DELETE").Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Bind_StampThatNeverBecomesVisible_IsBounded_ThenTakesTheExistingFailedBindPath()
+    {
+        var graph = new SequencedGraph()
+            .Queue("PATCH", Resp(HttpStatusCode.OK, "{}"))
+            .Queue("GET", Resp(HttpStatusCode.OK, StaleReadBack))
+            .Queue("DELETE", Resp(HttpStatusCode.NoContent, ""));
+
+        var outcome = await Bind(graph, retryCount: 3);
+
+        graph.Count("GET").Should().Be(3, "bounded by SpeContainerOptions.ReplicationRetryCount");
+        var notBound = outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Subject;
+        notBound.Removed.Should().BeTrue();
+        notBound.Diagnostic.Should().Contain("did not read back").And.Contain("none");
+        graph.Count("DELETE").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Bind_ReadBackShowingADifferentStamp_IsARealConflict_NotRetried_AndKeepsItsOldOutcome()
+    {
+        var graph = new SequencedGraph()
+            .Queue("PATCH", Resp(HttpStatusCode.OK, "{}"))
+            .Queue("GET", Resp(HttpStatusCode.OK, ContainerJson("1b1b1b1b-0000-0000-0000-000000000000")))
+            .Queue("DELETE", Resp(HttpStatusCode.NoContent, ""));
+
+        var outcome = await Bind(graph);
+
+        outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Which.Removed.Should().BeTrue();
+        graph.Count("GET").Should().Be(1, "another unit's stamp is visible — retrying cannot change that");
+        graph.Count("DELETE").Should().Be(1);
+    }
+
     [Fact]
     public async Task Bind_StampPatchThatIsRefused_IsNotRetried_AndKeepsItsOldOutcome()
     {

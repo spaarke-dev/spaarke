@@ -329,16 +329,30 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
                 SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
                 _logger, "business-unit stamp write", cancellationToken).ConfigureAwait(false);
 
-            var container = await SpeGraphRetry.RetryWhileAsync(
-                async attemptCt =>
-                {
-                    using var readTimeout = LinkedTimeout(attemptCt);
-                    return await graph.Storage.FileStorage.Containers[containerId]
-                        .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
-                        .ConfigureAwait(false);
-                },
-                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
-                _logger, "business-unit stamp read-back", cancellationToken).ConfigureAwait(false);
+            // A 200 with NO stamp seconds after a successful PATCH is a stale replica, not a verdict: re-read (same
+            // bounded attempts) until the stamp is visible. A stamp that IS visible but names another unit (or is
+            // malformed) is a real conflict and is never retried.
+            FileStorageContainer? container;
+            try
+            {
+                container = await SpeGraphRetry.RetryWhileAsync(
+                    async attemptCt =>
+                    {
+                        using var readTimeout = LinkedTimeout(attemptCt);
+                        var read = await graph.Storage.FileStorage.Containers[containerId]
+                            .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
+                            .ConfigureAwait(false);
+                        return IsStampVisible(read) ? read : throw new StampNotVisibleException(read);
+                    },
+                    ex => SpeGraphRetry.IsNotYetReplicated(ex) || ex is StampNotVisibleException,
+                    _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                    _logger, "business-unit stamp read-back", cancellationToken).ConfigureAwait(false);
+            }
+            catch (StampNotVisibleException notVisible)
+            {
+                // Attempts ran out with the stamp still absent: the existing failed-bind path.
+                container = notVisible.Container;
+            }
 
             var stamped = ReadStamp(container);
             if (stamped == businessUnitId)
@@ -431,6 +445,41 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 
         using var timeout = LinkedTimeout(cancellationToken);
         await graph.RequestAdapter.SendNoContentAsync(requestInfo, errorMapping, timeout.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>The read-back carried no stamp value yet (stale replica); thrown inside the retry, never escapes the bind.</summary>
+    private sealed class StampNotVisibleException(FileStorageContainer? container) : Exception("The stamp is not visible yet.")
+    {
+        public FileStorageContainer? Container { get; } = container;
+    }
+
+    /// <summary>
+    /// True when the read-back shows a non-empty stamp value (right or wrong); false when the property is missing or blank
+    /// — the only state worth re-reading. A present value in an unfamiliar shape counts as visible (not retried).
+    /// </summary>
+    private static bool IsStampVisible(FileStorageContainer? container)
+    {
+        var properties = container?.CustomProperties?.AdditionalData;
+        if (properties is null)
+        {
+            return false;
+        }
+
+        foreach (var (name, raw) in properties)
+        {
+            if (!string.Equals(name?.Trim(), Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return !(raw is Microsoft.Kiota.Abstractions.Serialization.UntypedObject node
+                && node.GetValue().TryGetValue("value", out var valueNode)
+                && valueNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString text
+                && string.IsNullOrWhiteSpace(text.GetValue()));
+        }
+
+        return false;
     }
 
     /// <summary>The business unit the container's stamp names, or null when it carries none (or not one GUID).</summary>
