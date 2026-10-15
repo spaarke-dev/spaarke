@@ -19,7 +19,7 @@
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 154 worklist route fields + inquiry lookup | — | — | `C:\wts-154` | Opus/high implementer running. Gates 055. |
+| 154 worklist route fields + inquiry lookup | #1982 | `954faa8b3` | `C:\wts-154` | Built. Adds the sentence, the Do subject reference, Not filed last, `GET /api/v1/inquiries/for-todo/{todoId}`, and the mark-complete guard (409 `inquiry.disposition_required`). Publish size +28 KB. Opus pass 1 running (security: two passes, then uac-r2). **Live step at the 055 deploy:** `scripts/Apply-WorklistGridConfiguration.ps1` (WhatIf, apply, then Verify) so the dev grid row selects `sprk_sentence`. Conflicts with #1953 in `DecisionCommitService.cs`; whichever lands second rebases. |
 | 153 satisfied close writes a Routine DR (D-145b) | #1953 | `4d5f8bbfb` | `C:\wts-153` | Pass 2 fixed: both writer lookups require createdby = the writer (WhoAmI on the writer MI, cached, fail closed); a retry replaces only a writer-created non-resolving link; Warnings on the orphan and abandon paths. 734 filtered tests and 1046 ArchTests pass; 7 seeding proofs. With uac-r2 for re-check, then merge on green. |
 | 146 child-contract live gate | #1933 | `48d846851` → fix | `C:\wts-146` | Review found F1: the record's "no leak" claim contradicts K-2 and item 8. Also K-1 (partition followed the owner, contrary to `SignalSuppressionService.cs:152-156`; possible code defect), item 9 is only PARTIAL (single-BU cast), item 1 is PARTIAL (#1872), and the guide preflight (Codex P1). Sonnet fix round running; it files issues from DI-93. |
 
