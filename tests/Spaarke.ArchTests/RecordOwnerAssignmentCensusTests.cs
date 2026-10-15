@@ -250,7 +250,9 @@ public class RecordOwnerAssignmentCensusTests
             + "and every resolved Signal's subject) onto the row with ApplyTo, with the deciding user as RequestedBy; a "
             + "refusal or a fault writes nothing. A personal no-core To Do's record goes to its Assigned To's business-unit "
             + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
-            + "families (#1778) before any write."),
+            + "families (#1778) before any write. Ontology task 042: WriteGateDecisionAsync (the communications gate's decision, "
+            + "authorize and deny) reaches the SAME single create (CreateAsync, pinned by DecisionRecordContextImmutabilityTests) "
+            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester."),
         new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Routed,
             "Ontology task 143 (contract C3, audit F2/F3, D-130): BuildEntity writes RecordOwnershipResolver's answer over the "
             + "Signal's parents (its core record, its subject and every core-ancestor stamp) onto the row with ApplyTo, with "
@@ -2126,7 +2128,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
-        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783)"),
+        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person)"),
         new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),

@@ -547,7 +547,16 @@ public sealed class CoreAncestorResolver
     public async Task<CoreAncestorResult> ResolveStampsAsync(
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        // Ontology task 042 (uac-r2 re-check F1): the result records the target it was derived for, so a caller that hands it back to
+        // StampAsync can only have it reused for the SAME target. Set here, in the one public derivation, and nowhere else.
+        (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false))
+            with { For = (targetEntityLogicalName, targetRecordId) };
+
+    private async Task<CoreAncestorResult> DeriveStampsAsync(
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetEntityLogicalName))
         {
@@ -809,12 +818,13 @@ public sealed class CoreAncestorResolver
         Entity child,
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        CoreAncestorResult? alreadyDerived = null)
     {
         ArgumentNullException.ThrowIfNull(child);
 
         var (result, hostColumns, failure) =
-            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct)
+            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct, alreadyDerived)
                 .ConfigureAwait(false);
         if (failure is not null)
         {
@@ -1128,9 +1138,18 @@ public sealed class CoreAncestorResolver
             string hostEntityLogicalName,
             string targetEntityLogicalName,
             Guid targetRecordId,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAncestorResult? alreadyDerived = null)
     {
-        var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        // Ontology task 042 (K2): a caller that has ALREADY derived this target's stamps (a writer that needed the core before it could
+        // build its payload) hands the successful result in, so the derivation is not paid for twice. A failed or absent result derives here.
+        // Reused only when it SUCCEEDED and was derived for THIS target (case-insensitive entity, same id): a result built with the public
+        // constructor, or derived for another record, can carry no target and is never reused (uac-r2 re-check F1). Everything else derives here.
+        var result = alreadyDerived is { Succeeded: true, For: { } derivedFor }
+            && string.Equals(derivedFor.Entity, targetEntityLogicalName, StringComparison.OrdinalIgnoreCase)
+            && derivedFor.Id == targetRecordId
+            ? alreadyDerived
+            : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
             return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
@@ -1246,6 +1265,10 @@ public sealed record CoreAncestorResult(
     /// caller that checks <see cref="Succeeded"/> is unchanged.
     /// </summary>
     public bool IsPermanent { get; init; }
+
+    /// <summary>The target this result was derived for, set only by <see cref="CoreAncestorResolver.ResolveStampsAsync"/>. A result with
+    /// no target (built with the public constructor) is never reused by <c>StampAsync(..., alreadyDerived)</c> (ontology task 042).</summary>
+    internal (string Entity, Guid Id)? For { get; init; }
 
     internal static CoreAncestorResult Failed(string error) =>
         new(CoreAncestorStatus.Error, [], error);

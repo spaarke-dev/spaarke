@@ -20,6 +20,12 @@ namespace Spaarke.ArchTests;
 /// <para><b>Crude by design</b>, like every <see cref="SourceScan"/> rule: it reads comment-stripped text, not a compilation. Each
 /// rule has a must-fire control (a seeded violation is reported) and a must-not-fire control (the sanctioned shape and the reads
 /// that name the same columns are not).</para>
+/// <para><b>One create site, every entry point (task 042).</b> The writer has two public entry points that create a record,
+/// <c>WriteAsync</c> (a human review) and <c>WriteGateDecisionAsync</c> (an automated communications-gate decision). Both must reach
+/// the SAME private <c>CreateAsync</c> (the only <c>_writerClient.CreateAsync</c> call, which builds the payload from
+/// <c>Content</c> and files and owns it through <c>FiledAndOwnedAsync</c>), so a new entry point cannot grow a second create that
+/// skips the filing, the owner answer or the D-34 context rule. <see cref="OneCreateSiteReachedByEveryEntryPoint"/> pins it, with
+/// must-fire and must-not-fire controls.</para>
 /// <para><b>MAINTENANCE.</b> A new create builder of a table that carries these columns joins <see cref="SanctionedWriters"/> with
 /// its reason. A path that needs to change a recorded decision's context does not exist by design (D-34): raise it with the owner,
 /// never add it here.</para>
@@ -99,6 +105,116 @@ public class DecisionRecordContextImmutabilityTests
         var others = calls.Where(c => !AllowedWriterClientCalls.Contains(c)).Distinct().ToList();
         Assert.True(others.Count == 0,
             "D-34: DecisionRecordWriter is create-only (a Decision Record is append-only except the live stamp columns, task 144 C2); it calls its Dataverse client for: " + string.Join(", ", others));
+    }
+
+    /// <summary>The entry points that create a Decision Record (public members of the writer), each of which must reach <see cref="SharedCreate"/>.</summary>
+    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync"];
+
+    private const string SharedCreate = "CreateAsync";
+
+    private static readonly Regex WriterClientCreate = new(@"\b_writerClient\s*\.\s*CreateAsync\s*\(", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Task 042 / D-34: the writer has ONE create site and every entry point reaches it")]
+    public void OneCreateSiteReachedByEveryEntryPoint()
+    {
+        var problems = CreateSiteProblems(ServerFiles()["DecisionRecordWriter.cs"]);
+
+        Assert.True(problems.Count == 0,
+            "The Decision Record writer must create through one private CreateAsync that every entry point calls (task 042):\n  "
+            + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "Task 042 / D-34: create-site detector controls — a second create, a missing entry point and a bypassing entry point fire")]
+    public void OneCreateSite_Controls()
+    {
+        static string Writer(string gateBody, string extra = "") => SourceScan.CodeText(new[]
+        {
+            "public sealed class DecisionRecordWriter",
+            "{",
+            "    public async Task<R> WriteAsync(A request, DecisionRecordOwner? o, CancellationToken ct)",
+            "    {",
+            "        return await CreateAsync(request, Validate(request), o, ct);",
+            "    }",
+            "",
+            "    public async Task<R> WriteGateDecisionAsync(G request, CancellationToken ct = default)",
+            "    {",
+            gateBody,
+            "    }",
+            "",
+            "    private async Task<R> CreateAsync(A request, Plan plan, DecisionRecordOwner? o, CancellationToken ct)",
+            "    {",
+            "        return await _writerClient.CreateAsync(entity, ct);",
+            "    }",
+            extra,
+            "}",
+        });
+
+        // Must NOT fire: the sanctioned shape.
+        Assert.Empty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);")));
+
+        // Must fire: the gate entry builds and creates its own record (a second create site that skips filing and owner).
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await _writerClient.CreateAsync(new Entity(\"sprk_decisionrecord\"), ct);")));
+
+        // Must fire: the gate entry never reaches the shared create.
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return new R();")));
+
+        // Must fire: a third member creates on its own.
+        Assert.NotEmpty(CreateSiteProblems(Writer(
+            "        return await CreateAsync(review, plan, null, ct);",
+            "    private async Task Other(Entity e) { await _writerClient.CreateAsync(e, CancellationToken.None); }")));
+
+        // Must fire: an entry point is renamed away (the list must move with it, not silently empty).
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);").Replace("WriteGateDecisionAsync", "WriteGateAsync")));
+    }
+
+    /// <summary>Problems with the writer's create shape: not exactly one <c>_writerClient.CreateAsync</c> call, that call outside
+    /// <see cref="SharedCreate"/>, or an entry point in <see cref="CreateEntryPoints"/> that is missing or does not call <see cref="SharedCreate"/>.</summary>
+    private static List<string> CreateSiteProblems(string code)
+    {
+        var problems = new List<string>();
+        var members = MemberDeclaration.Matches(code).ToList();
+        string NameOf(Match declaration) =>
+            Regex.Match(code[declaration.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value;
+
+        var creates = WriterClientCreate.Matches(code).ToList();
+        if (creates.Count != 1)
+        {
+            problems.Add($"{creates.Count} _writerClient.CreateAsync call sites (expected exactly 1)");
+        }
+
+        foreach (var create in creates)
+        {
+            var owner = members.LastOrDefault(d => d.Index <= create.Index);
+            var name = owner is null ? "(file)" : NameOf(owner);
+            if (name != SharedCreate)
+            {
+                problems.Add($"_writerClient.CreateAsync is called from {name} (line {SourceScan.LineOf(code, create.Index)}), not from {SharedCreate}");
+            }
+        }
+
+        foreach (var entry in CreateEntryPoints)
+        {
+            var declarations = members.Where(d => NameOf(d) == entry).ToList();
+            if (declarations.Count == 0)
+            {
+                problems.Add($"entry point {entry} not found: update {nameof(CreateEntryPoints)}");
+                continue;
+            }
+
+            // An entry point may have forwarding overloads (WriteAsync(request, ct) forwards to the 3-argument one): at least one
+            // declaration must reach the shared create itself.
+            var reaches = declarations.Any(declaration =>
+            {
+                var next = members.FirstOrDefault(d => d.Index > declaration.Index);
+                return Regex.IsMatch(code[declaration.Index..(next?.Index ?? code.Length)], $@"\b{SharedCreate}\s*\(");
+            });
+            if (!reaches)
+            {
+                problems.Add($"entry point {entry} does not call {SharedCreate}");
+            }
+        }
+
+        return problems;
     }
 
     [Fact(DisplayName = "Task 142 / D-34: no server code addresses a Decision Record row for an update through a string literal")]

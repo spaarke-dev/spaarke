@@ -117,9 +117,50 @@ public sealed record DecisionRecordWriteResult(
     public Guid? SecureOwnerTeamId { get; init; }
 }
 
+/// <summary>
+/// Task 042 (FR-23; main-session decision "A+C"): ONE automated gate decision of the communications policy gate
+/// (<c>CommunicationRuleGate</c>), for <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/>. The review-shaped
+/// <see cref="DecisionRecordRequest"/> cannot carry it: the gate has no confirming human, no <c>sprk_policyversion</c> (its rules are
+/// <c>sprk_communicationrule</c> rows), no Signal it resolves and no action in <see cref="DecisionActionCatalog"/>.
+/// </summary>
+/// <param name="CommunicationId">The assessed <c>sprk_communication</c>: the record the Decision Record is FILED under (its subject).
+/// The core record (matter or project, D-34) is derived from it by <see cref="CoreAncestorResolver"/>, never read off the row.</param>
+/// <param name="EvaluationId">This gate evaluation's own id, stored in <c>sprk_steps</c> as the review id and in the fact snapshot as
+/// the correlation id. Unique per evaluation (a re-assessed communication is a new decision).</param>
+/// <param name="Authorize">The gate's outcome: Authorized (true) or Denied (false). Maps to <c>sprk_decisionoutcome</c>.</param>
+/// <param name="Reason">The gate's reason code (<c>CommunicationRuleDecision.Reason</c>); required, stored in <c>sprk_reason</c>.</param>
+/// <param name="ProposedActionCode">The action the gate proposes, as free text (NOT a catalog code): stored in <c>sprk_actioncode</c> on
+/// an authorize only, null on a deny (FR-01). At most 100 characters.</param>
+/// <param name="ProposedActionLabel">The same action in words, listed in <c>sprk_proposedaction</c> and <c>sprk_steps</c> on both paths.</param>
+/// <param name="Facts">What the gate saw (ids, confidence, threshold, matched rule, priority): MANDATORY and non-empty. Never message content.</param>
+/// <param name="PrivilegeFlagged">Copied forward from the gate decision (ADR-015: flagged, never decided).</param>
+/// <param name="DirectFiledUnderId">The record the communication is DIRECTLY filed under (its regarding pair id, ADR-024); D-37's first
+/// tie-break between the matter and the project it is stamped with. Null when unknown.</param>
+/// <param name="DecidedOn">When decided; the writer's clock when null.</param>
+public sealed record GateDecisionRecordRequest(
+    Guid CommunicationId,
+    Guid EvaluationId,
+    bool Authorize,
+    string Reason,
+    string ProposedActionCode,
+    string ProposedActionLabel,
+    IReadOnlyDictionary<string, object?> Facts,
+    bool PrivilegeFlagged = false,
+    Guid? DirectFiledUnderId = null,
+    DateTimeOffset? DecidedOn = null);
+
 /// <summary>Bounded-cardinality refusal reasons for the Decision Record writer (log and metric dimension).</summary>
 public static class DecisionRecordRefusalReason
 {
+    /// <summary>Task 042: the consumer's gate-decision write failed for a reason the writer did not classify (an unexpected exception
+    /// out of <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/>). The writer's own refusals keep their reasons.</summary>
+    public const string GateRecordFailed = "decision_gate_record_failed";
+
+    /// <summary>Task 042 (K1a): a gate decision about an UNFILED communication is not recorded BY DESIGN (E1: it keeps its creator and its
+    /// privacy rests on per-participant shares, so no team may own a record about it; DI-84). Not a failure: logged at Information
+    /// (<see cref="DecisionRecordEvents.GateDecisionSkippedUnfiled"/>) and counted on the SKIP counter (<c>ontology.writer.skips</c>, never <c>ontology.writer.failures</c>) under this tag.</summary>
+    public const string GateSkippedUnfiled = "gate_dr_skipped_unfiled";
+
     public const string ReviewInvalid = "decision_review_invalid";
     public const string FactSnapshotMissing = "decision_fact_snapshot_missing";
     public const string RecordClassUnderivable = "decision_record_class_underivable";
@@ -199,6 +240,14 @@ public static class DecisionRecordEvents
 
     /// <summary>Error: a Secure-team create read back with another owner. The row exists (append-only except the live stamp columns, task 144 C2); uac-r2's reconcile corrects the owner.</summary>
     public static readonly EventId SecureOwnerMismatch = new(50311, nameof(SecureOwnerMismatch));
+
+    /// <summary>Error (task 042): the communications gate decided but its Decision Record was NOT written (a refusal or a fault). The
+    /// gate's outcome and the consumer's behaviour are unchanged. Properties: ids and the refusal reason only, never fact values.</summary>
+    public static readonly EventId GateDecisionNotRecorded = new(50312, nameof(GateDecisionNotRecorded));
+
+    /// <summary>Information (task 042, K1a): a gate decision about an unfiled communication is not recorded by design
+    /// (<see cref="DecisionRecordRefusalReason.GateSkippedUnfiled"/>). Ids only.</summary>
+    public static readonly EventId GateDecisionSkippedUnfiled = new(50313, nameof(GateDecisionSkippedUnfiled));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -317,7 +366,9 @@ public sealed class DecisionRecordWriter
     private readonly OntologyWriterDataverseClient _writerClient;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly CoreAncestorResolver _coreAncestors;
-    private readonly ICommunicationDataverseService _recordTypes;
+    /// <summary>The shared regarding builder (D-133), ONE for the writer's life so its <c>sprk_recordtype_ref</c> cache (answers only; a faulting
+    /// read is never cached) is paid once per type across every record (ontology task 042, K2).</summary>
+    private readonly TodoRegardingBuilder _regarding;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DecisionRecordWriter> _logger;
 
@@ -338,7 +389,8 @@ public sealed class DecisionRecordWriter
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
-        _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
+        _regarding = new TodoRegardingBuilder(
+            recordTypes ?? throw new ArgumentNullException(nameof(recordTypes)), _coreAncestors, logger ?? throw new ArgumentNullException(nameof(logger)));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -362,59 +414,270 @@ public sealed class DecisionRecordWriter
 
         try
         {
-            var plan = Validate(request);
-            var content = Content(request, plan);
-            // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
-            var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct).ConfigureAwait(false);
-            var owner = recordOwner.Resolution;
-            foreach (var (column, value) in content)
-            {
-                entity[column] = value;
-            }
-
-            Guid? secureTeamId = owner.IsSecureOwner ? owner.OwningTeamId : null;
-
-            Guid recordId;
-            try
-            {
-                recordId = await _writerClient.CreateAsync(entity, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Wrapped, not leaked: the commit route handles ONE exception type from this writer. The inner exception is kept.
-                // A timeout can leave the row created; the route must not assume "failed" means "absent" without a check.
-                var denied = IsDataverseAccessDenied(ex);
-                throw new DecisionRecordRefusedException(
-                    denied ? DecisionRecordRefusalReason.DataverseAccessDenied : DecisionRecordRefusalReason.CreateFailed,
-                    denied
-                        ? "Dataverse refused the Decision Record create for lack of a privilege; no record was written."
-                        : "The Decision Record create failed; the record may not have been written.",
-                    innerException: ex);
-            }
-
-            if (secureTeamId is { } expectedTeam)
-            {
-                await VerifySecureOwnerAsync(recordId, expectedTeam, ct).ConfigureAwait(false);
-            }
-
-            _logger.LogInformation(
-                "Decision Record {RecordId} written for review {ReviewId}: class {RecordClass}, {SignalCount} Signal(s).",
-                recordId, request.ReviewId, plan.Class, request.ResolvedSignalIds.Count);
-
-            return new DecisionRecordWriteResult(recordId, plan.Class, request.ResolvedSignalIds)
-            {
-                SecureOwnerTeamId = secureTeamId,
-            };
+            return await CreateAsync(request, Validate(request), resolvedOwner, ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex)
         {
-            // One logging/metering point for every refusal: reason only, never fact values, values or reasons text.
-            _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
-                "Decision Record writer refused review {ReviewId} (reason={Reason}, ownerRefusal={OwnerRefusalCode}).",
-                request.ReviewId, ex.Reason, ex.OwnerRefusalCode);
-            OntologyWriterTelemetry.RecordFailure(ex.Reason);
+            LogRefusal(request.ReviewId, ex);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Task 042 (FR-23; main-session decision "A+C"): writes the ONE Decision Record of an automated communications-gate decision, on
+    /// the authorize path AND the deny path. It is an additive entry point: <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>
+    /// and the review shape are unchanged, and everything below the request is the SAME code: <see cref="Content"/> (so the D-34
+    /// context columns still have one writer), <see cref="FiledAndOwnedAsync"/> (the communication filed through the shared regarding
+    /// builder, the core-ancestor stamp, uac-r2's owner answer over EVERY parent, secure-if-any) and the one <see cref="CreateAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Closed field semantics.</b> Class: always Judgement, set here (owner, D-17 amendment), not derived from the catalog.
+    /// Outcome: Authorized or Denied from <see cref="GateDecisionRecordRequest.Authorize"/>. <c>sprk_action</c> is never set and
+    /// <c>sprk_actioncode</c> is null on a deny (FR-01); on an authorize it is the gate's proposed action as free text (never added to
+    /// <see cref="DecisionActionCatalog"/>). <c>sprk_confirmedby</c>, <c>sprk_policyversion</c>, <c>sprk_gatetier</c>, <c>sprk_gatesessionid</c>
+    /// and <c>sprk_assignedtointernal</c> are null: no human decided (D-129: never the BFF identity or an owner), the gate's rules are
+    /// <c>sprk_communicationrule</c> rows (the matched rule id and priority are in the fact snapshot), and no SessionGate exists in
+    /// enrichment (the correlation id is in the fact snapshot). No Signal is resolved, and none is linked.</para>
+    /// <para><b>The core record (D-34, D-37).</b> Derived from the communication by <see cref="CoreAncestorResolver"/>, never read off its
+    /// row: one stamp is the core; several are decided by the record it is DIRECTLY filed under, then matter over project. A tie that
+    /// neither decides is NOT a reason to lose the decision: the record is written without the core pair and typed lineage lookup, and
+    /// the filing stamps (which name every matter and project) still make it queryable per matter and per project; every one is an owner
+    /// parent. The communication is also an owner parent, so a secure matter, project or work assignment above it makes the record a
+    /// secure child (D-33, D-123).</para>
+    /// </remarks>
+    /// <exception cref="DecisionRecordRefusedException">The same single exception type as <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>:
+    /// the request is invalid, the communication cannot be filed, the owner was refused, or the create failed. Nothing was written (after
+    /// a timeout the row may exist).</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
+    public async Task<DecisionRecordWriteResult> WriteGateDecisionAsync(GateDecisionRecordRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        try
+        {
+            var plan = ValidateGate(request);
+            var (core, derived) = await ResolveGateCoreAsync(request, ct).ConfigureAwait(false);
+            // The review shape the shared builders read: no confirmer, no policy version, no Signal (Guid.Empty and [] mean "none").
+            var review = new DecisionRecordRequest(
+                ReviewId: request.EvaluationId,
+                PolicyVersionId: Guid.Empty,
+                Core: core,
+                ItemSubject: new DecisionRecordRef(GateSubjectEntity, request.CommunicationId),
+                ConfirmedByUserId: Guid.Empty,
+                DecidedOn: request.DecidedOn,
+                Steps: plan.Steps.Select(s => s.Step).ToList(),
+                FollowOns: [],
+                GateTier: null,
+                ResolvedSignalIds: [],
+                FactValues: request.Facts,
+                DeciderRole: GateDeciderRole,
+                Because: request.Reason,
+                Reason: request.Reason,
+                Denied: !request.Authorize,
+                PrivilegeFlagged: request.PrivilegeFlagged);
+            return await CreateAsync(review, plan with { AlreadyDerived = derived }, resolvedOwner: null, ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            LogRefusal(request.EvaluationId, ex);
+            throw;
+        }
+    }
+
+    /// <summary>The table a gate decision's Decision Record is filed under.</summary>
+    private const string GateSubjectEntity = "sprk_communication";
+
+    /// <summary>The decider recorded in the fact snapshot for a gate decision: a system, not a person.</summary>
+    private const string GateDeciderRole = "automated: communications policy gate";
+
+    private const int AuthorizedOutcome = 100000000;
+    private const int DeniedOutcome = 100000001;
+
+    /// <summary>
+    /// The gate request's checks, with no I/O, and the plan its record is built from. The one step is the gate's proposed action
+    /// (free text, an ad-hoc definition that is NOT in the catalog): taken with outcome Authorized on an authorize; not taken on a deny,
+    /// where <c>sprk_steps</c> shows it with outcome Denied.
+    /// </summary>
+    private static Plan ValidateGate(GateDecisionRecordRequest g)
+    {
+        static DecisionRecordRefusedException Invalid(string message) => new(DecisionRecordRefusalReason.ReviewInvalid, message);
+
+        if (g.Facts is null || g.Facts.Count == 0)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.FactSnapshotMissing,
+                "sprk_factsnapshot is mandatory: the gate decision carries no fact values, so no Decision Record was written.");
+        }
+
+        if (g.CommunicationId == Guid.Empty) throw Invalid("CommunicationId is required.");
+        if (g.EvaluationId == Guid.Empty) throw Invalid("EvaluationId is required.");
+        if (string.IsNullOrWhiteSpace(g.Reason)) throw Invalid("Reason is required (the gate's reason code).");
+        if (g.Reason.Length > ReasonMaxLength) throw Invalid("Reason is too long for sprk_reason.");
+        if (string.IsNullOrWhiteSpace(g.ProposedActionCode)) throw Invalid("ProposedActionCode is required.");
+        if (g.ProposedActionCode.Length > ActionCodeMaxLength) throw Invalid("ProposedActionCode is too long for sprk_actioncode.");
+        if (string.IsNullOrWhiteSpace(g.ProposedActionLabel)) throw Invalid("ProposedActionLabel is required.");
+
+        var definition = new DecisionActionDefinition(
+            g.ProposedActionCode, g.ProposedActionLabel, PlanLane: null, IsNextStep: false, WorkType: null,
+            Parameters: [], EffectLines: [], Excludes: [], DecisionRecordClass.Judgement);
+        var step = new DecisionRecordStep(
+            g.ProposedActionCode, Taken: g.Authorize, Values: null, Outcome: g.Authorize ? "Authorized" : null);
+        var steps = new List<(DecisionRecordStep Step, DecisionActionDefinition Def)> { (step, definition) };
+
+        return new Plan(
+            RecordedDecisionClass.Judgement,
+            g.Authorize ? AuthorizedOutcome : DeniedOutcome,
+            steps,
+            g.Authorize ? steps : [],
+            Name: g.Authorize ? null : $"{RecordedDecisionClass.Judgement}: denied ({g.Reason})",
+            SkippedOutcome: "Denied");
+    }
+
+    /// <summary>
+    /// D-34 / D-37: the core record of the communication, from <see cref="CoreAncestorResolver"/> (never the row's own matter lookup),
+    /// or null when it has none, cannot be decided, or the <c>sprk_recordtype_ref</c> catalog has no row for it. A derivation that
+    /// FAILS returns null here: the filing step (<see cref="FileUnderSubjectAsync"/>) derives it again and gives the classified refusal.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the catalog read faulted.</exception>
+    private async Task<(DecisionRecordCore? Core, CoreAncestorResult? Derived)> ResolveGateCoreAsync(GateDecisionRecordRequest g, CancellationToken ct)
+    {
+        var derived = await _coreAncestors.ResolveStampsAsync(GateSubjectEntity, g.CommunicationId, ct).ConfigureAwait(false);
+        if (!derived.Succeeded)
+        {
+            return (null, null); // the filing step derives again and classifies the failure
+        }
+
+        if (derived.Stamps.Count == 0)
+        {
+            return (null, derived);
+        }
+
+        var stamps = derived.Stamps;
+        CoreAncestorStamp? pick = null;
+        if (stamps.Count == 1)
+        {
+            pick = stamps[0];
+        }
+        else if (g.DirectFiledUnderId is { } direct && stamps.Where(s => s.RecordId == direct).ToList() is [var filedUnder])
+        {
+            pick = filedUnder; // D-37: the record it is directly filed under wins
+        }
+        else
+        {
+            var remaining = stamps.ToList();
+            if (remaining.Any(s => s.EntityType == "sprk_matter"))
+            {
+                remaining.RemoveAll(s => s.EntityType == "sprk_project"); // D-37: matter over project
+            }
+
+            if (remaining.Count == 1)
+            {
+                pick = remaining[0];
+            }
+        }
+
+        if (pick is not { } core)
+        {
+            _logger.LogWarning(
+                "Gate decision {EvaluationId}: the communication names {Count} core records and neither its direct filed-under record nor " +
+                "matter-over-project decides between them (D-37); the Decision Record is written without a core pair and stays queryable " +
+                "by every stamp.", g.EvaluationId, stamps.Count);
+            return (null, derived);
+        }
+
+        // The shared regarding builder's record-type cache (one builder for the writer's life): the catalog is read once per type,
+        // not once per decision. A read that FAULTS is not cached (the builder's contract) and is a refusal here.
+        (Guid Id, string DisplayName)? typeRow;
+        try
+        {
+            typeRow = await _regarding.ResolveRecordTypeRefAsync(core.EntityType, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw FilingFailed(new DecisionRecordRef(GateSubjectEntity, g.CommunicationId),
+                $"the record-type catalog could not be read ({ex.GetType().Name})", ex);
+        }
+
+        if (typeRow is not { } type || type.Id == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "Gate decision {EvaluationId}: the record-type catalog has no row for {CoreEntity}; the Decision Record is written " +
+                "without a core pair.", g.EvaluationId, core.EntityType);
+            return (null, derived);
+        }
+
+        return (new DecisionRecordCore(core.EntityType, core.RecordId, type.Id), derived);
+    }
+
+    /// <summary>One logging/metering point for every refusal: reason only, never fact values, values or reasons text.</summary>
+    private void LogRefusal(Guid reviewId, DecisionRecordRefusedException ex)
+    {
+        if (ex.Reason == DecisionRecordRefusalReason.GateSkippedUnfiled)
+        {
+            // By design, not a failure (K1a): Information, ids only, and counted on the SKIP counter (never ontology.writer.failures).
+            _logger.LogInformation(DecisionRecordEvents.GateDecisionSkippedUnfiled,
+                "Gate decision {EvaluationId} not recorded: its communication is unfiled (E1), so no team may own a record about it.", reviewId);
+            OntologyWriterTelemetry.RecordSkip(ex.Reason);
+            return;
+        }
+
+        _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
+            "Decision Record writer refused review {ReviewId} (reason={Reason}, ownerRefusal={OwnerRefusalCode}).",
+            reviewId, ex.Reason, ex.OwnerRefusalCode);
+        OntologyWriterTelemetry.RecordFailure(ex.Reason);
+    }
+
+    /// <summary>
+    /// THE record's one create, for every entry point (<see cref="WriteAsync(DecisionRecordRequest, DecisionRecordOwner?, CancellationToken)"/>
+    /// and <see cref="WriteGateDecisionAsync"/>): the content (<see cref="Content"/>), the filing and owner (<see cref="FiledAndOwnedAsync"/>),
+    /// the one <c>CreateAsync</c>, and the secure-owner read-back. A second create site is pinned out by
+    /// <c>DecisionRecordContextImmutabilityTests</c>.
+    /// </summary>
+    private async Task<DecisionRecordWriteResult> CreateAsync(
+        DecisionRecordRequest request, Plan plan, DecisionRecordOwner? resolvedOwner, CancellationToken ct)
+    {
+        var content = Content(request, plan);
+        // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
+        var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct, plan.AlreadyDerived).ConfigureAwait(false);
+        var owner = recordOwner.Resolution;
+        foreach (var (column, value) in content)
+        {
+            entity[column] = value;
+        }
+
+        Guid? secureTeamId = owner.IsSecureOwner ? owner.OwningTeamId : null;
+
+        Guid recordId;
+        try
+        {
+            recordId = await _writerClient.CreateAsync(entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Wrapped, not leaked: the commit route handles ONE exception type from this writer. The inner exception is kept.
+            // A timeout can leave the row created; the route must not assume "failed" means "absent" without a check.
+            var denied = IsDataverseAccessDenied(ex);
+            throw new DecisionRecordRefusedException(
+                denied ? DecisionRecordRefusalReason.DataverseAccessDenied : DecisionRecordRefusalReason.CreateFailed,
+                denied
+                    ? "Dataverse refused the Decision Record create for lack of a privilege; no record was written."
+                    : "The Decision Record create failed; the record may not have been written.",
+                innerException: ex);
+        }
+
+        if (secureTeamId is { } expectedTeam)
+        {
+            await VerifySecureOwnerAsync(recordId, expectedTeam, ct).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "Decision Record {RecordId} written for review {ReviewId}: class {RecordClass}, {SignalCount} Signal(s).",
+            recordId, request.ReviewId, plan.Class, request.ResolvedSignalIds.Count);
+
+        return new DecisionRecordWriteResult(recordId, plan.Class, request.ResolvedSignalIds)
+        {
+            SecureOwnerTeamId = secureTeamId,
+        };
     }
 
     /// <summary>
@@ -503,6 +766,10 @@ public sealed class DecisionRecordWriter
         return RecordOwnershipContext.ForParents(parents) with { RequestedBy = RecordRequester.Of(request.ConfirmedByUserId) };
     }
 
+    /// <summary>A gate decision (<see cref="WriteGateDecisionAsync"/>) is the only request with no deciding person: a review always has one
+    /// (<see cref="Validate"/> refuses an empty <see cref="DecisionRecordRequest.ConfirmedByUserId"/>).</summary>
+    private static bool IsGateDecision(DecisionRecordRequest request) => request.ConfirmedByUserId == Guid.Empty;
+
     /// <summary>
     /// Task 142 (contract C1): the record the Decision Record is filed under: <see cref="DecisionRecordRequest.ItemSubject"/>, else the
     /// core record. No I/O.
@@ -542,7 +809,7 @@ public sealed class DecisionRecordWriter
     /// assignee; otherwise it is asked again.
     /// </summary>
     private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
-        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct)
+        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null)
     {
         var subject = SubjectOf(request);
         var entity = new Entity(Table);
@@ -566,7 +833,7 @@ public sealed class DecisionRecordWriter
         }
         else
         {
-            var derivedCores = await FileUnderSubjectAsync(entity, subject, ct).ConfigureAwait(false);
+            var derivedCores = await FileUnderSubjectAsync(entity, subject, alreadyDerived, ct).ConfigureAwait(false);
             filing = new DecisionRecordFiling(
                 subject, entity.Attributes.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), derivedCores);
         }
@@ -575,6 +842,19 @@ public sealed class DecisionRecordWriter
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
         var context = OwnershipContextOf(request, filing.DerivedCores);
+        if (IsGateDecision(request))
+        {
+            // Task 042 (security fails closed): the gate asks as the CONTENT of a communication (uac-r2's ContentOf shape). The resolver
+            // applies KeepCreatorUnlessTargetIsTeamOwned to the FIRST parent it is asked about, which is the core when the communication has
+            // one: then the check is made against the CORE (team-owned, so the record resolves record-first over every parent, secure-if-any),
+            // not against the communication. With no core the first parent is the communication itself: if it is not team-owned the resolver
+            // reads ITS OWN filing (filed -> secure-if-any over what it is filed under; UNFILED -> E1, owner round 10 item 8: it keeps its
+            // creator and its privacy rests on per-participant shares -> Unchanged, which this writer refuses as GateSkippedUnfiled). A
+            // business-unit default team must never be handed a decision about a communication private to its participants. The review
+            // route never sets this.
+            context = context with { KeepCreatorUnlessTargetIsTeamOwned = true };
+        }
+
         DecisionRecordOwner owner;
         if (handed is not null && handed.Answers(context.Parents, request.AssigneeSystemUserId))
         {
@@ -620,11 +900,12 @@ public sealed class DecisionRecordWriter
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the catalog read or the
     /// stamp derivation failed (fail closed, nothing written).</exception>
-    private async Task<IReadOnlyList<CoreAncestorStamp>> FileUnderSubjectAsync(Entity entity, DecisionRecordRef subject, CancellationToken ct)
+    private async Task<IReadOnlyList<CoreAncestorStamp>> FileUnderSubjectAsync(
+        Entity entity, DecisionRecordRef subject, CoreAncestorResult? alreadyDerived, CancellationToken ct)
     {
         try
         {
-            await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+            await _regarding
                 .ApplySubjectLookupAndPairAsync(entity, subject.Entity, subject.Id, regardingDisplayName: null, ct)
                 .ConfigureAwait(false);
         }
@@ -633,7 +914,7 @@ public sealed class DecisionRecordWriter
             throw FilingFailed(subject, $"the subject lookup and pair could not be built ({ex.GetType().Name})", ex);
         }
 
-        var stamp = await _coreAncestors.StampAsync(entity, subject.Entity, subject.Id, ct).ConfigureAwait(false);
+        var stamp = await _coreAncestors.StampAsync(entity, subject.Entity, subject.Id, ct, alreadyDerived).ConfigureAwait(false);
         if (!stamp.Succeeded)
         {
             // A data condition (two different roots of one table, or a subject that no longer exists) is a refusal a retry does not
@@ -705,6 +986,16 @@ public sealed class DecisionRecordWriter
 
         if (requireTeam && !owner.IsOwned)
         {
+            // Only the gate path asks as the content of a communication (KeepCreatorUnlessTargetIsTeamOwned): its Unchanged answer is an
+            // UNFILED communication (E1), a by-design skip with its own reason, not a refusal that needs attention (task 042, K1a).
+            if (context.KeepCreatorUnlessTargetIsTeamOwned && owner.Outcome == RecordOwnerOutcome.Unchanged)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.GateSkippedUnfiled,
+                    "The communication is not filed under any record, so it keeps its creator and no team may own a record about it; nothing was written.",
+                    owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
+            }
+
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.OwnerRefused,
                 "The ownership resolver named no owner team for the Decision Record; nothing was written.",
@@ -789,11 +1080,19 @@ public sealed class DecisionRecordWriter
 
     // ── Validation and typing ───────────────────────────────────────────────────────────────────────────────────
 
+    /// <param name="Name">Task 042: the record's name when the gate path sets it; null derives it from the class and the taken labels.</param>
+    /// <param name="SkippedOutcome">Task 042: the outcome <c>sprk_steps</c> shows for a step that was not taken ("Skipped" for a review;
+    /// "Denied" for a gate deny).</param>
+    /// <param name="AlreadyDerived">Task 042 (K2): the subject's stamps the gate path already derived to find the core, handed to the filing
+    /// step so the derivation is not paid for twice; null derives there.</param>
     private sealed record Plan(
         RecordedDecisionClass Class,
         int Outcome,
         IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Steps,
-        IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Taken);
+        IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Taken,
+        string? Name = null,
+        string SkippedOutcome = "Skipped",
+        CoreAncestorResult? AlreadyDerived = null);
 
     private static Plan Validate(DecisionRecordRequest r)
     {
@@ -937,15 +1236,25 @@ public sealed class DecisionRecordWriter
         e["sprk_proposedaction"] = proposed;
 
         var takenLabels = string.Join(", ", plan.Taken.Select(t => t.Def.Label));
-        var name = plan.Class == RecordedDecisionClass.Dismissal
-            ? "Dismissal"
-            : takenLabels.Length > 0 ? $"{plan.Class}: {takenLabels}" : $"{plan.Class}: next steps";
+        var name = plan.Name
+            ?? (plan.Class == RecordedDecisionClass.Dismissal
+                ? "Dismissal"
+                : takenLabels.Length > 0 ? $"{plan.Class}: {takenLabels}" : $"{plan.Class}: next steps");
         e["sprk_name"] = name.Length > NameMaxLength ? name[..(NameMaxLength - 3)] + "..." : name;
 
-        e["sprk_policyversion"] = new EntityReference("sprk_policyversion", r.PolicyVersionId);
+        // A review always has both (Validate refuses an empty id); the gate path (task 042) has neither -- no policy version (its rules
+        // are sprk_communicationrule rows) and no confirming human (D-129) -- and leaves the columns null (live: both nullable).
+        if (r.PolicyVersionId != Guid.Empty)
+        {
+            e["sprk_policyversion"] = new EntityReference("sprk_policyversion", r.PolicyVersionId);
+        }
+
         e["sprk_recordclass"] = new OptionSetValue((int)plan.Class);
         e["sprk_decisionoutcome"] = new OptionSetValue(plan.Outcome);
-        e["sprk_confirmedby"] = new EntityReference("systemuser", r.ConfirmedByUserId);
+        if (r.ConfirmedByUserId != Guid.Empty)
+        {
+            e["sprk_confirmedby"] = new EntityReference("systemuser", r.ConfirmedByUserId);
+        }
         e["sprk_decidedon"] = (r.DecidedOn ?? _timeProvider.GetUtcNow()).UtcDateTime;
         e["sprk_privilegeflagged"] = r.PrivilegeFlagged; // copied forward, never branched on (ADR-015)
 
@@ -977,7 +1286,7 @@ public sealed class DecisionRecordWriter
                 label = s.Def.Label,
                 taken = s.Step.Taken,
                 values = s.Step.Taken ? s.Step.Values : null,
-                outcome = s.Step.Taken ? s.Step.Outcome : "Skipped",
+                outcome = s.Step.Taken ? s.Step.Outcome : plan.SkippedOutcome,
                 written = (s.Step.Written ?? Array.Empty<DecisionRecordRef>()).Select(w => new { entity = w.Entity, id = w.Id }),
             }),
         };

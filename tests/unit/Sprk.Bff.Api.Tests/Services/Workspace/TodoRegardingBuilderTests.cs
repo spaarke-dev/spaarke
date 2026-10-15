@@ -303,17 +303,30 @@ public class TodoRegardingBuilderTests
     }
 
     [Fact]
-    public async Task ApplyResolverFieldsAsync_CatalogReadFindsNoRow_IsCached_AsUntyped()
+    public async Task ApplyResolverFieldsAsync_CatalogReadFindsNoRow_IsAnsweredUntyped_ButNotRemembered_AFoundRowIs()
     {
-        // A read that SUCCEEDS and finds no row is an answer (D-133) and may be cached.
-        var builder = CreateBuilder();
+        // Task 042 (uac-r2 re-check K2): a read that SUCCEEDS and finds no row is answered untyped (D-133) but NOT cached, so a catalog row
+        // added later types the next pair without a restart (the Decision Record writer keeps one builder for its life); a FOUND row is cached.
+        var recordTypeId = Guid.NewGuid();
+        _commServiceMock
+            .SetupSequence(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null)
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", recordTypeId) { ["sprk_recorddisplayname"] = "Communication" });
+        var builder = new TodoRegardingBuilder(
+            _commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
 
-        await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        var first = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(first, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
         var second = new Entity("sprk_todo");
         await builder.ApplyResolverFieldsAsync(second, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        var third = new Entity("sprk_todo");
+        await builder.ApplyResolverFieldsAsync(third, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
 
-        second.Attributes.Should().NotContainKey("sprk_regardingrecordtype");
-        _commServiceMock.Verify(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
+        first.Attributes.Should().NotContainKey("sprk_regardingrecordtype", "no row: untyped");
+        second["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId, "the row appeared: the miss was not remembered");
+        third["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId);
+        _commServiceMock.Verify(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2),
+            "the miss is read again; the found row is cached");
     }
 
     [Fact]
