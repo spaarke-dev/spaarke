@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// The invoice lifecycle states (ebilling-r1 FR-06, D-41). Business names; the Dataverse numbers live in
 /// <see cref="InvoiceStatusCodes"/> and nowhere else.
 /// </summary>
-public enum InvoiceStatus
+public enum InvoiceLifecycleStatus
 {
     /// <summary>Active (statecode 0). Every new invoice starts here.</summary>
     InReview,
@@ -69,38 +69,38 @@ public static class InvoiceStatusCodes
     public const int Cancelled = 2;
 
     /// <summary>The statuscode Dataverse stores for <paramref name="status"/>.</summary>
-    public static int StatusCodeOf(InvoiceStatus status) => status switch
+    public static int StatusCodeOf(InvoiceLifecycleStatus status) => status switch
     {
-        InvoiceStatus.InReview => InReview,
-        InvoiceStatus.Approved => Approved,
-        InvoiceStatus.SentToAp => SentToAp,
-        InvoiceStatus.Paid => Paid,
-        InvoiceStatus.Rejected => Rejected,
-        InvoiceStatus.ReturnedToFirm => ReturnedToFirm,
-        InvoiceStatus.Cancelled => Cancelled,
+        InvoiceLifecycleStatus.InReview => InReview,
+        InvoiceLifecycleStatus.Approved => Approved,
+        InvoiceLifecycleStatus.SentToAp => SentToAp,
+        InvoiceLifecycleStatus.Paid => Paid,
+        InvoiceLifecycleStatus.Rejected => Rejected,
+        InvoiceLifecycleStatus.ReturnedToFirm => ReturnedToFirm,
+        InvoiceLifecycleStatus.Cancelled => Cancelled,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown invoice status."),
     };
 
     /// <summary>The statecode that owns <paramref name="status"/>'s statuscode.</summary>
-    public static int StateCodeOf(InvoiceStatus status) => status switch
+    public static int StateCodeOf(InvoiceLifecycleStatus status) => status switch
     {
-        InvoiceStatus.InReview or InvoiceStatus.Approved or InvoiceStatus.SentToAp => StateActive,
-        InvoiceStatus.Paid or InvoiceStatus.Rejected or InvoiceStatus.ReturnedToFirm or InvoiceStatus.Cancelled => StateInactive,
+        InvoiceLifecycleStatus.InReview or InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp => StateActive,
+        InvoiceLifecycleStatus.Paid or InvoiceLifecycleStatus.Rejected or InvoiceLifecycleStatus.ReturnedToFirm or InvoiceLifecycleStatus.Cancelled => StateInactive,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown invoice status."),
     };
 
     /// <summary>Maps a stored statuscode to its status; false for a value this lifecycle does not know (fail closed).</summary>
-    public static bool TryFromStatusCode(long statusCode, out InvoiceStatus status)
+    public static bool TryFromStatusCode(long statusCode, out InvoiceLifecycleStatus status)
     {
         switch (statusCode)
         {
-            case InReview: status = InvoiceStatus.InReview; return true;
-            case Approved: status = InvoiceStatus.Approved; return true;
-            case SentToAp: status = InvoiceStatus.SentToAp; return true;
-            case Paid: status = InvoiceStatus.Paid; return true;
-            case Rejected: status = InvoiceStatus.Rejected; return true;
-            case ReturnedToFirm: status = InvoiceStatus.ReturnedToFirm; return true;
-            case Cancelled: status = InvoiceStatus.Cancelled; return true;
+            case InReview: status = InvoiceLifecycleStatus.InReview; return true;
+            case Approved: status = InvoiceLifecycleStatus.Approved; return true;
+            case SentToAp: status = InvoiceLifecycleStatus.SentToAp; return true;
+            case Paid: status = InvoiceLifecycleStatus.Paid; return true;
+            case Rejected: status = InvoiceLifecycleStatus.Rejected; return true;
+            case ReturnedToFirm: status = InvoiceLifecycleStatus.ReturnedToFirm; return true;
+            case Cancelled: status = InvoiceLifecycleStatus.Cancelled; return true;
             default: status = default; return false;
         }
     }
@@ -143,20 +143,20 @@ public static class InvoiceTransitionReasons
 /// <param name="Reason">Set only for <see cref="InvoiceTransitionOutcome.Refused"/>; one of <see cref="InvoiceTransitionReasons"/>.</param>
 public sealed record InvoiceTransitionResult(
     InvoiceTransitionOutcome Outcome,
-    InvoiceStatus Requested,
-    InvoiceStatus? Current,
+    InvoiceLifecycleStatus Requested,
+    InvoiceLifecycleStatus? Current,
     string? Reason)
 {
     /// <summary>True for <see cref="InvoiceTransitionOutcome.Transitioned"/> and <see cref="InvoiceTransitionOutcome.AlreadyInTarget"/>.</summary>
     public bool Succeeded => Outcome != InvoiceTransitionOutcome.Refused;
 
-    internal static InvoiceTransitionResult Moved(InvoiceStatus from, InvoiceStatus to) =>
+    internal static InvoiceTransitionResult Moved(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to) =>
         new(InvoiceTransitionOutcome.Transitioned, to, from, null);
 
-    internal static InvoiceTransitionResult Already(InvoiceStatus status) =>
+    internal static InvoiceTransitionResult Already(InvoiceLifecycleStatus status) =>
         new(InvoiceTransitionOutcome.AlreadyInTarget, status, status, null);
 
-    internal static InvoiceTransitionResult Refuse(InvoiceStatus requested, InvoiceStatus? current, string reason) =>
+    internal static InvoiceTransitionResult Refuse(InvoiceLifecycleStatus requested, InvoiceLifecycleStatus? current, string reason) =>
         new(InvoiceTransitionOutcome.Refused, requested, current, reason);
 }
 
@@ -172,7 +172,7 @@ public interface IInvoiceLifecycleService
     /// then writes statecode + statuscode conditionally on that version; on a concurrency conflict it re-reads and re-validates, so a
     /// concurrent writer's move is never overwritten.
     /// </summary>
-    Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceStatus target, CancellationToken ct = default);
+    Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -199,25 +199,25 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     }
 
     /// <summary>True when FR-06 allows moving from <paramref name="from"/> to <paramref name="to"/> (never for from == to).</summary>
-    internal static bool IsAllowed(InvoiceStatus from, InvoiceStatus to) => (from, to) switch
+    internal static bool IsAllowed(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to) => (from, to) switch
     {
-        (InvoiceStatus.InReview, InvoiceStatus.Approved) => true,
-        (InvoiceStatus.InReview, InvoiceStatus.Rejected) => true,
-        (InvoiceStatus.InReview, InvoiceStatus.ReturnedToFirm) => true,
-        (InvoiceStatus.InReview, InvoiceStatus.Cancelled) => true,
-        (InvoiceStatus.Approved, InvoiceStatus.SentToAp) => true,
-        (InvoiceStatus.Approved, InvoiceStatus.Cancelled) => true,
-        (InvoiceStatus.SentToAp, InvoiceStatus.Paid) => true,
+        (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Approved) => true,
+        (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Rejected) => true,
+        (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.ReturnedToFirm) => true,
+        (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Cancelled) => true,
+        (InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.SentToAp) => true,
+        (InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.Cancelled) => true,
+        (InvoiceLifecycleStatus.SentToAp, InvoiceLifecycleStatus.Paid) => true,
         _ => false,
     };
 
     /// <inheritdoc />
-    public async Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceStatus target, CancellationToken ct = default)
+    public async Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default)
     {
         // Validates the target is a defined status before any read.
         var targetStatusCode = InvoiceStatusCodes.StatusCodeOf(target);
         var targetStateCode = InvoiceStatusCodes.StateCodeOf(target);
-        InvoiceStatus? lastSeen = null;
+        InvoiceLifecycleStatus? lastSeen = null;
 
         for (var attempt = 1; attempt <= InvoiceReviewService.MaxConditionalWriteAttempts; attempt++)
         {

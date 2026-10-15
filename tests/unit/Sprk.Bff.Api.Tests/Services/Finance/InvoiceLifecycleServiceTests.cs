@@ -28,7 +28,7 @@ public sealed class InvoiceLifecycleServiceTests
     private InvoiceLifecycleService CreateService() =>
         new(_records.Object, new Mock<ILogger<InvoiceLifecycleService>>().Object);
 
-    private static Dictionary<string, object?> Row(InvoiceStatus status, long version) => new()
+    private static Dictionary<string, object?> Row(InvoiceLifecycleStatus status, long version) => new()
     {
         ["statuscode"] = (long)InvoiceStatusCodes.StatusCodeOf(status),
         ["versionnumber"] = version,
@@ -51,19 +51,19 @@ public sealed class InvoiceLifecycleServiceTests
 
     public static IEnumerable<object[]> AllowedTransitions() =>
     [
-        [InvoiceStatus.InReview, InvoiceStatus.Approved, 0],
-        [InvoiceStatus.InReview, InvoiceStatus.Rejected, 1],
-        [InvoiceStatus.InReview, InvoiceStatus.ReturnedToFirm, 1],
-        [InvoiceStatus.InReview, InvoiceStatus.Cancelled, 1],
-        [InvoiceStatus.Approved, InvoiceStatus.SentToAp, 0],
-        [InvoiceStatus.Approved, InvoiceStatus.Cancelled, 1],
-        [InvoiceStatus.SentToAp, InvoiceStatus.Paid, 1],
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Approved, 0],
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Rejected, 1],
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.ReturnedToFirm, 1],
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Cancelled, 1],
+        [InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.SentToAp, 0],
+        [InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.Cancelled, 1],
+        [InvoiceLifecycleStatus.SentToAp, InvoiceLifecycleStatus.Paid, 1],
     ];
 
     [Theory]
     [MemberData(nameof(AllowedTransitions))]
     public async Task AllowedTransition_WritesTargetStatusAndItsPairedState_ConditionalOnTheReadVersion(
-        InvoiceStatus from, InvoiceStatus to, int expectedStateCode)
+        InvoiceLifecycleStatus from, InvoiceLifecycleStatus to, int expectedStateCode)
     {
         ReadsReturn(Row(from, version: 42));
         Dictionary<string, object?>? written = null;
@@ -88,15 +88,15 @@ public sealed class InvoiceLifecycleServiceTests
 
     public static IEnumerable<object[]> DisallowedTransitions() =>
     [
-        [InvoiceStatus.Paid, InvoiceStatus.InReview],
-        [InvoiceStatus.Rejected, InvoiceStatus.Approved],
-        [InvoiceStatus.InReview, InvoiceStatus.Paid],
-        [InvoiceStatus.SentToAp, InvoiceStatus.Approved],
+        [InvoiceLifecycleStatus.Paid, InvoiceLifecycleStatus.InReview],
+        [InvoiceLifecycleStatus.Rejected, InvoiceLifecycleStatus.Approved],
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Paid],
+        [InvoiceLifecycleStatus.SentToAp, InvoiceLifecycleStatus.Approved],
     ];
 
     [Theory]
     [MemberData(nameof(DisallowedTransitions))]
-    public async Task DisallowedTransition_IsRefusedWithStableReason_AndNothingIsWritten(InvoiceStatus from, InvoiceStatus to)
+    public async Task DisallowedTransition_IsRefusedWithStableReason_AndNothingIsWritten(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to)
     {
         ReadsReturn(Row(from, version: 7));
 
@@ -116,8 +116,8 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public async Task EveryPair_BehavesPerTheFr06Matrix()
     {
-        var allowed = AllowedTransitions().Select(a => ((InvoiceStatus)a[0], (InvoiceStatus)a[1])).ToHashSet();
-        var all = Enum.GetValues<InvoiceStatus>();
+        var allowed = AllowedTransitions().Select(a => ((InvoiceLifecycleStatus)a[0], (InvoiceLifecycleStatus)a[1])).ToHashSet();
+        var all = Enum.GetValues<InvoiceLifecycleStatus>();
         var wrote = 0; var noops = 0; var refused = 0;
 
         foreach (var from in all)
@@ -159,11 +159,11 @@ public sealed class InvoiceLifecycleServiceTests
     }
 
     [Theory]
-    [InlineData(InvoiceStatus.InReview)]
-    [InlineData(InvoiceStatus.Approved)]
-    [InlineData(InvoiceStatus.Paid)]
-    [InlineData(InvoiceStatus.Cancelled)]
-    public async Task TargetEqualsCurrent_IsAlreadyInTarget_AndNothingIsWritten(InvoiceStatus status)
+    [InlineData(InvoiceLifecycleStatus.InReview)]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.Paid)]
+    [InlineData(InvoiceLifecycleStatus.Cancelled)]
+    public async Task TargetEqualsCurrent_IsAlreadyInTarget_AndNothingIsWritten(InvoiceLifecycleStatus status)
     {
         ReadsReturn(Row(status, version: 3));
 
@@ -179,17 +179,17 @@ public sealed class InvoiceLifecycleServiceTests
     public async Task ConcurrencyConflict_ThatMovedInvoiceToDisallowedStatus_RefusesOnRetryInsteadOfOverwriting()
     {
         // Reader A sees In Review v1 and asks for Approved; reader B rejects the invoice first (v2), so A's write is a 412.
-        ReadsReturn(Row(InvoiceStatus.InReview, 1), Row(InvoiceStatus.Rejected, 2));
+        ReadsReturn(Row(InvoiceLifecycleStatus.InReview, 1), Row(InvoiceLifecycleStatus.Rejected, 2));
         _records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 "sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 1, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DBConcurrencyException("changed"));
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Refused);
         result.Reason.Should().Be(InvoiceTransitionReasons.NotAllowed);
-        result.Current.Should().Be(InvoiceStatus.Rejected);
+        result.Current.Should().Be(InvoiceLifecycleStatus.Rejected);
         _records.Verify(
             r => r.UpdateRecordFieldsIfUnchangedAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()),
@@ -204,13 +204,13 @@ public sealed class InvoiceLifecycleServiceTests
     public async Task ConcurrencyConflict_ThatMovedInvoiceToTheTarget_ReturnsAlreadyInTarget()
     {
         // The other writer made the same approval: the retry sees Approved and the second approval is a no-op.
-        ReadsReturn(Row(InvoiceStatus.InReview, 1), Row(InvoiceStatus.Approved, 2));
+        ReadsReturn(Row(InvoiceLifecycleStatus.InReview, 1), Row(InvoiceLifecycleStatus.Approved, 2));
         _records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 "sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 1, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DBConcurrencyException("changed"));
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.AlreadyInTarget);
     }
@@ -218,7 +218,7 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public async Task ConcurrencyConflict_ThatLeavesTheMoveAllowed_RetriesOnTheFreshVersion()
     {
-        ReadsReturn(Row(InvoiceStatus.InReview, 1), Row(InvoiceStatus.InReview, 2));
+        ReadsReturn(Row(InvoiceLifecycleStatus.InReview, 1), Row(InvoiceLifecycleStatus.InReview, 2));
         _records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 "sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 1, It.IsAny<CancellationToken>()))
@@ -228,7 +228,7 @@ public sealed class InvoiceLifecycleServiceTests
                 "sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 2, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Transitioned);
         _records.Verify(
@@ -240,13 +240,13 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public async Task ConflictOnEveryAttempt_StopsAtTheAttemptLimit_RefusesAndNeverBlindWrites()
     {
-        ReadsReturn(Row(InvoiceStatus.InReview, 1));
+        ReadsReturn(Row(InvoiceLifecycleStatus.InReview, 1));
         _records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DBConcurrencyException("changed"));
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Refused);
         result.Reason.Should().Be("invoice.concurrent_change");
@@ -266,7 +266,7 @@ public sealed class InvoiceLifecycleServiceTests
     {
         ReadsReturn(new Dictionary<string, object?>());
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Refused);
         result.Reason.Should().Be("invoice.not_found");
@@ -277,13 +277,13 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public async Task InvoiceDeletedBetweenReadAndWrite_IsRefusedNotFound()
     {
-        ReadsReturn(Row(InvoiceStatus.InReview, 1));
+        ReadsReturn(Row(InvoiceLifecycleStatus.InReview, 1));
         _records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("gone"));
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Refused);
         result.Reason.Should().Be("invoice.not_found");
@@ -297,7 +297,7 @@ public sealed class InvoiceLifecycleServiceTests
     {
         ReadsReturn(new Dictionary<string, object?> { ["statuscode"] = storedStatus, ["versionnumber"] = 1L });
 
-        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var result = await CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         result.Outcome.Should().Be(InvoiceTransitionOutcome.Refused);
         result.Reason.Should().Be("invoice.status_unknown");
@@ -310,7 +310,7 @@ public sealed class InvoiceLifecycleServiceTests
     {
         ReadsReturn(new Dictionary<string, object?> { ["statuscode"] = 1L, ["versionnumber"] = null });
 
-        var act = () => CreateService().TransitionAsync(InvoiceId, InvoiceStatus.Approved);
+        var act = () => CreateService().TransitionAsync(InvoiceId, InvoiceLifecycleStatus.Approved);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         VerifyNoWrite();
@@ -323,18 +323,18 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public void StatusCodes_MatchTheLiveOptionValues_AndPairWithTheirStateCode()
     {
-        var expected = new (InvoiceStatus Status, int StatusCode, int StateCode)[]
+        var expected = new (InvoiceLifecycleStatus Status, int StatusCode, int StateCode)[]
         {
-            (InvoiceStatus.InReview, 1, 0),
-            (InvoiceStatus.Approved, 659490000, 0),
-            (InvoiceStatus.SentToAp, 659490001, 0),
-            (InvoiceStatus.Paid, 659490002, 1),
-            (InvoiceStatus.Rejected, 659490003, 1),
-            (InvoiceStatus.ReturnedToFirm, 659490004, 1),
-            (InvoiceStatus.Cancelled, 2, 1),
+            (InvoiceLifecycleStatus.InReview, 1, 0),
+            (InvoiceLifecycleStatus.Approved, 659490000, 0),
+            (InvoiceLifecycleStatus.SentToAp, 659490001, 0),
+            (InvoiceLifecycleStatus.Paid, 659490002, 1),
+            (InvoiceLifecycleStatus.Rejected, 659490003, 1),
+            (InvoiceLifecycleStatus.ReturnedToFirm, 659490004, 1),
+            (InvoiceLifecycleStatus.Cancelled, 2, 1),
         };
 
-        Enum.GetValues<InvoiceStatus>().Should().HaveCount(expected.Length);
+        Enum.GetValues<InvoiceLifecycleStatus>().Should().HaveCount(expected.Length);
         foreach (var (status, statusCode, stateCode) in expected)
         {
             InvoiceStatusCodes.StatusCodeOf(status).Should().Be(statusCode, status.ToString());
