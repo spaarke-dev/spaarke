@@ -321,7 +321,14 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
   schema script all pass. Sent to UAC, all fixed in scope in #1827's fix round: F1 (the inviter learned ExistingAccount;
   owner round 98c: the inviter always gets `Sent`), F3 (no CIAM host gives 503 `ciam_not_configured` on `/invite` and
   `/invite-and-grant`, not a 500), K1 (the code moves to `#invite=`, with `?invite=` accepted as a fallback; both are
-  stripped before MSAL). We re-check the fix diff when UAC sends the head SHA. #1827 adds no
+  stripped before MSAL). Our re-check of the fix diff (`df4ce6825..cff0fca9b`): F3, K1, the first-sign-in race fix
+  and the materializer pass. F1 was fixed for a single call; a **two-call oracle** remained (a second invite or grant
+  answers differently for a new versus an existing CIAM account). **Owner round 98d (2026-10-14): accepted as K.** It
+  reveals only that the email has a Spaarke external account somewhere. Every internal user can already read the
+  binding (`sprk_externalobjectid` through "Spaarke Identity Link Readers" on each business unit's default team; the
+  mirror `sprk_externalobjectidkey` is unsecured). The only full fix, deferring the new-account bind to first sign-in,
+  was rejected. The marker-column 503 split cannot occur on a stamp, because H7b S22 refuses a stamp without
+  `sprk_externalinvitedon`. The `CiamGraphClientFactory` comment now points to T240d's change (`c87ca1fcb`). #1827 adds no
   config key, secret or Graph permission: H4b stays §6, H3c stays `User.Create` only.
 - **T240d build item: keyless `CiamGraphClientFactory`.** After #1827, `IsConfigured` and `EnsureConfigured()` require
   `Ciam:GraphProvisioner:CertificateName`. Stamps set none (§5), so with H4b's `Ciam:*` alone every invite fails

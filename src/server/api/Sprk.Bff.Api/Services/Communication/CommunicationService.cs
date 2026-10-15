@@ -1245,6 +1245,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             request.CommunicationType,
             request.SendMode);
 
+        // Task 185 (owner round 98 Q4): system mail is defined for the shared-mailbox EMAIL path only. Any other path would
+        // ignore the option, and so store or archive the secret it exists to keep out of storage. Refused before anything
+        // is sent or written.
+        if (request.SystemMail is not null
+            && (request.CommunicationType != CommunicationType.Email
+                || request.SendMode != SendMode.SharedMailbox
+                || request.ArchiveToSpe))
+        {
+            throw new InvalidOperationException(
+                "A system-mail send must be a shared-mailbox email that is not archived to SharePoint Embedded.");
+        }
+
         // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).
         // Dispatch still flows through the SAME CommunicationChannelDispatcher (ADR-045 — no second send path);
         // this branch only supplies the messaging-specific sender-identity + persistence shape (participant, not
@@ -1529,7 +1541,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
             // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
-            if (communicationId.HasValue)
+            // Task 185: a system-mail send is never enriched — its body carries a secret (an invite link) that must not
+            // reach AI indexing, triage summaries or proposals.
+            if (communicationId.HasValue && request.SystemMail is null)
             {
                 try
                 {
@@ -2143,7 +2157,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_to"] = string.Join("; ", request.To),
             ["sprk_from"] = sender.Email,
             ["sprk_subject"] = request.Subject,
-            ["sprk_body"] = request.Body,
+            ["sprk_body"] = request.SystemMail?.StoredBody ?? request.Body, // task 185: system mail stores the caller's redacted body
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId

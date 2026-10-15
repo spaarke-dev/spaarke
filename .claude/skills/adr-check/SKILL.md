@@ -301,16 +301,12 @@ This skill performs **local** ADR validation. The same checks run in CI via GitH
 
 ### CI Pipeline ADR Checks
 
-The `sdap-ci.yml` workflow runs ADR tests in the `code-quality` job:
+The CI Router runs the ADR tests twice:
 
-```yaml
-- name: ADR architecture tests (NetArchTest)
-  run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj
-```
+- **Tier 1 `arch-tests`** (`ci-tier1-blocking.yml`, blocking): the full `tests/Spaarke.ArchTests` suite. A failure fails the required `Router` check.
+- **Tier 2 `adr-compliance`** (`ci-tier2-advisory.yml`, advisory): reported in the single "Tier 2 Advisory Report" PR comment.
 
-**Results appear in two places:**
-1. **PR Comments**: `adr-pr-comment` job posts violations as PR comments
-2. **Test Results**: Uploaded as workflow artifact `adr-test-results`
+(The legacy `sdap-ci.yml` `code-quality` job and its `adr-pr-comment` were retired 2026-10-14.)
 
 ### Weekly ADR Audit
 

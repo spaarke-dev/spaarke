@@ -651,6 +651,13 @@ CREATE: projects/{project-name}/tasks/TASK-INDEX.md
     | A | 020, 021, 022 | 010 complete | Independent API endpoints |
     | B | 031, 032 | 030 complete | Separate UI components |
     ```
+
+SET the board field "Tasks Planned" (number) to the number of task files just created, once, when the tasks are first created.
+  Never on later runs or syncs, and never overwrite a non-empty value. The Task Count field keeps tracking the current number.
+  Field id: gh project field-list 2 --owner spaarke-dev --format json  (name "Tasks Planned")
+  The board item usually does not exist yet at this step (it is created by devops-project-register, later in this skill).
+  In that case skip here, and after registration and the commit of TASK-INDEX.md run
+  `python scripts/ai-cost/backfill-tasks-planned.py <slug> --apply`, which sets it from the first committed TASK-INDEX.md.
 ```
 
 **Output to User:**
@@ -1158,6 +1165,8 @@ Pipeline successful when:
 - **If pointer block PRESENT**: silently invoke `/devops-project-sync`.
 
 Hook is silent on success (single ✅ line). Failures degrade to ⚠️ warn; do NOT block pipeline progression (NFR-03).
+
+After a registration here, and once `tasks/TASK-INDEX.md` is committed, set "Tasks Planned" (it was skipped in Step 3 because the board item did not exist yet): `python scripts/ai-cost/backfill-tasks-planned.py <slug> --apply`. It never overwrites a value that is already set.
 
 Register prompt fires at most ONCE per project — subsequent runs always sync silently.
 

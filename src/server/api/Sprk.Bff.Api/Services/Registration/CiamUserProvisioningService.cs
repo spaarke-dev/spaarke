@@ -30,9 +30,10 @@ public class CiamUserProvisioningService
 
     /// <summary>
     /// The CIAM tenant's initial domain (e.g. <c>spaarkeextid.onmicrosoft.com</c>), used as the
-    /// local-account identity <c>issuer</c> (NOT a social IdP). Sourced from <c>Ciam:Domain</c>.
+    /// local-account identity <c>issuer</c> (NOT a social IdP). Sourced from <c>Ciam:Domain</c>; <c>null</c> on a host
+    /// without CIAM, validated at first use (<see cref="EnsureConfigured"/>).
     /// </summary>
-    private readonly string _issuerDomain;
+    private readonly string? _issuerDomain;
 
     public CiamUserProvisioningService(
         CiamGraphClientFactory ciamGraphClientFactory,
@@ -45,8 +46,26 @@ public class CiamUserProvisioningService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(configuration);
 
-        _issuerDomain = configuration.GetSection("Ciam")["Domain"]
-            ?? throw new InvalidOperationException("Ciam:Domain is not configured (CIAM tenant initial domain).");
+        // Task 185 slice F (ADR-010 path C — lazy validation, not a service locator): read here, validated at first use, so
+        // a host without Ciam:* can construct this service (and the invite service that injects it). Only a CIAM call there
+        // throws InvalidOperationException; configured hosts behave as before.
+        _issuerDomain = configuration.GetSection("Ciam")["Domain"];
+    }
+
+    /// <summary>
+    /// Task 185 slice F: whether this host carries every <c>Ciam:*</c> value an account create needs (this service's
+    /// <c>Ciam:Domain</c> and the CIAM Graph client's). Pure; never throws.
+    /// </summary>
+    internal bool IsConfigured => _issuerDomain is not null && _ciamGraphClientFactory.IsConfigured;
+
+    /// <summary>
+    /// Task 185 slice F: throws <see cref="InvalidOperationException"/> naming the first <c>Ciam:*</c> value that is not
+    /// configured — the checks the constructors used to run, with the same messages. A no-op on a configured host.
+    /// </summary>
+    internal void EnsureConfigured()
+    {
+        _ = _issuerDomain ?? throw new InvalidOperationException("Ciam:Domain is not configured (CIAM tenant initial domain).");
+        _ciamGraphClientFactory.EnsureConfigured();
     }
 
     /// <summary>
@@ -63,9 +82,10 @@ public class CiamUserProvisioningService
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        EnsureConfigured();
 
         var temporaryPassword = _passwordGenerator.Generate();
-        var user = BuildCiamUser(email, firstName, lastName, temporaryPassword, _issuerDomain);
+        var user = BuildCiamUser(email, firstName, lastName, temporaryPassword, _issuerDomain!);
 
         var graphClient = await _ciamGraphClientFactory.CreateClientForAppAsync(ct);
         User? created;

@@ -501,8 +501,8 @@ app permissions, consuming apps, registration). Those routes serve only a root-u
 the BFF setting `SpeAdmin__PlatformOperatorEnvironment=true` — a DEPLOYMENT setting (Bicep
 `speAdminPlatformOperatorEnvironment`, `config/environments.json` → `scripts/Deploy-BffApi.ps1`), never a Dataverse column
 a customer admin could clear. It is set only for Spaarke-operated environments, and **today only `dev` carries it** (owner
-round 57 item 1): Spaarke's production operator environment does not exist yet (the stopped `spaarke-bff-demo`, `demo` in
-`config/environments.json`, which declares `false`), and the change that stands it up adds the marker — its registry key,
+round 57 item 1): Spaarke's production operator environment does not exist yet (the old `demo` entry, `spaarke-bff-demo`, was retired and removed from
+`config/environments.json` on 2026-10-14), and the change that stands it up adds the marker — its registry key,
 its name in `SpeAdminOperatorEnvironmentMarkerGuardTests`, and the App Service setting (no Bicep template names it since
 task 249 removed the Model 2 stack). Until then
 every other environment refuses those routes. The registry declaration must be a JSON boolean: `Deploy-BffApi.ps1` fails on

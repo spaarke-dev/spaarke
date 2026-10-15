@@ -1243,7 +1243,7 @@ public static class InternalShareEndpoints
     }
 
     /// <summary>The user's row, or <c>null</c> when no system user has the id. Exceptions propagate.</summary>
-    private static async Task<SystemUserRow?> ReadSystemUserAsync(
+    internal static async Task<SystemUserRow?> ReadSystemUserAsync(
         DataverseWebApiClient dataverseClient, Guid systemUserId, CancellationToken ct)
     {
         var rows = await dataverseClient.QueryAsync<SystemUserRow>(

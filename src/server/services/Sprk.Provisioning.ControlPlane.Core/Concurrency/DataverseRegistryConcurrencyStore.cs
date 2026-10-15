@@ -243,7 +243,7 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         try
         {
             using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
-            request.Headers.IfMatch.Add(new EntityTagHeaderValue(ifMatchEtag, isWeak: false));
+            request.Headers.IfMatch.Add(ParseIfMatch(ifMatchEtag));
             request.Headers.Add("Prefer", "return=minimal");
             request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
             using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -360,6 +360,15 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         return request;
     }
 
+    /// <summary>
+    /// The If-Match header for an ETag exactly as Dataverse returned it in <c>@odata.etag</c> — weak
+    /// (<c>W/"27691597"</c>, what Dataverse sends) or strong (<c>"abc"</c>). <see cref="EntityTagHeaderValue.Parse"/>
+    /// reads both forms. The constructor <c>new EntityTagHeaderValue(tag, isWeak)</c> takes only the quoted tag and
+    /// threw <see cref="FormatException"/> on the weak form, so every run against a real registry row failed with
+    /// HTTP 500 before it was created (T186, 2026-10-14 — the guard's unit tests use an in-memory store).
+    /// </summary>
+    internal static EntityTagHeaderValue ParseIfMatch(string etag) => EntityTagHeaderValue.Parse(etag);
+
     private static string? ExtractEtag(JsonElement row)
     {
         // Dataverse's OData v4 embeds the row's ETag inline as `@odata.etag`.
@@ -369,9 +378,8 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
             var raw = etagProp.GetString();
             if (!string.IsNullOrWhiteSpace(raw))
             {
-                // Dataverse formats as `W/"12345"` for weak ETags. We PATCH
-                // with the exact string Dataverse returned; EntityTagHeaderValue
-                // parses the weak-prefix form as well.
+                // Dataverse formats as `W/"12345"` (weak). We PATCH with the exact
+                // string Dataverse returned; ParseIfMatch turns it into the header.
                 return raw;
             }
         }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -26,10 +27,15 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <c>sprk_issecure</c> takes effect on the next request.</para>
 /// <para><b>One implementation.</b> Every path calls <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
 /// with flags from <see cref="ReadFlagsAsync"/>: the event, to-do and document lists, the single-document download and
-/// versions routes, the message threads, the notification feed and the module grid's documents module.</para>
+/// versions routes, the message threads, the notification feed and the module grid's documents and invoices modules.</para>
+/// <para><b>Invoices</b> (unified-access-control-r2 task 187, fix round 1, owner round 100). An invoice is still reached
+/// through ANY accessible parent (owner 2026-10-11, option A), but one whose live roots include a SECURE root the caller
+/// cannot read is withheld from the invoices list (D2) and its thread and documents are refused (D4); an invoice thread's
+/// messages are decided like any thread's, over their other parents (D1).</para>
 /// <para><b>Not covered.</b> The delete-own paths (task 032, <c>AuthorizeDeleteOwnAsync</c>) keep Read on EVERY parent
-/// (FR-26); the invoice message thread stays any-parent (owner 2026-10-11). <c>sprk_regardingservicerequest</c> is not
-/// consulted: a service request is reached through its requester and carries no secure flag.</para>
+/// (FR-26), and add the live-parent check of this rule for to-dos, events and documents (task 187, D3).
+/// <c>sprk_regardingservicerequest</c> is not consulted: a service request is reached through its requester and carries no
+/// secure flag.</para>
 /// </remarks>
 internal static class ExternalMultiRootRule
 {
@@ -165,6 +171,352 @@ internal static class ExternalMultiRootRule
             return SecureRootFlags.ReadFailed;
         }
     }
+
+    // ── Task 187 (owner round 99, D-123; #1857): the LIVE parents of a child row ──────────────────────────────────────
+    //
+    // A child row's stamp (sprk_regardingproject / matter / workassignment) is a COPY. It goes stale when a parent is re-filed
+    // outside the BFF, and a "carrier" row (its own pair names ordinary M; another lookup puts it under secure X) is never
+    // restamped at all, while SecureChildReconciler has already moved it behind X (secure-if-any over every parent). So every
+    // external child-row read also reads the row's parent lookups, resolves those parents' LIVE roots in one bounded batch
+    // (ParentLineageWalk.TopsOfManyAsync over the ONE lineage map, ParentLineage.ChildFiling), and the rule above evaluates
+    // {stamped roots} ∪ {live roots of every parent}: listed only when the caller holds Read on every SECURE root of that
+    // union. A parent that cannot be resolved withholds the row (fail closed).
+
+    /// <summary>
+    /// The most distinct non-root parent records one request walks (task 187): the hard upper bound. Past it nothing more is
+    /// read, and only a row whose filing needs an unread record is withheld (fail closed, logged, <c>Truncated</c> where the
+    /// list has it).
+    /// </summary>
+    /// <remarks>
+    /// Fix round 1 (R1): sized against the external list cap (<see cref="ExternalDataService.MaxCollectionRows"/>, 5,000 rows),
+    /// four records per row, so a busy matter's full page (each to-do under its own communication, and that communication under
+    /// its own thread: two records per row) never reaches it. The old bound of 500 emptied a page of 251 such to-dos. Cost at
+    /// the bound: 20,000 / 200 ids per query = 100 filing queries, split further by table and level.
+    /// </remarks>
+    internal const int MaxLiveParentReads = 4 * ExternalDataService.MaxCollectionRows;
+
+    /// <summary>
+    /// The rule input standing for a parent whose live roots could not be resolved (a read fault, a parent that did not come
+    /// back, the walk bound). Not a GUID, so <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
+    /// withholds the row exactly as it withholds a malformed lookup: the secure state behind it cannot be known.
+    /// </summary>
+    internal const string UnresolvedParent = "unresolved-parent";
+
+    /// <summary>
+    /// The parent lookups of a child table whose live roots the rule takes in (task 187): every lineage lookup
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling"/>, the map <c>SecureChildReconciler</c>'s
+    /// secure-if-any follows) that targets a NON-root table. The root lookups are the row's own stamps or typed links, which
+    /// every read already passes to the rule. Empty for a table with no lineage entry. Ordered by column.
+    /// </summary>
+    internal static IReadOnlyList<(string Column, string Table)> LiveParentLookupsOf(string childTable) =>
+        Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling.TryGetValue(childTable, out var lookups)
+            ? lookups
+                .Where(l => !Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot(l.Value))
+                .OrderBy(l => l.Key, StringComparer.Ordinal)
+                .Select(l => (l.Key.ToLowerInvariant(), l.Value.ToLowerInvariant()))
+                .ToArray()
+            : Array.Empty<(string, string)>();
+
+    /// <summary>The Web API <c>$select</c> columns (<c>_..._value</c>) of <see cref="LiveParentLookupsOf"/>.</summary>
+    internal static IReadOnlyList<string> LiveParentSelect(string childTable) =>
+        LiveParentLookupsOf(childTable).Select(l => $"_{l.Column}_value").ToArray();
+
+    /// <summary>
+    /// A Web API row's parent lookups (<see cref="LiveParentLookupsOf"/>), as raw values: absent or JSON null is "not filed
+    /// there", a string is the lookup, and any other JSON value is malformed (withheld by the rule, fail closed).
+    /// </summary>
+    internal static LiveParentLookup[] LiveParentsOf(string childTable, IReadOnlyDictionary<string, JsonElement>? row) =>
+        LiveParentsOf(childTable, column =>
+        {
+            if (row is null || !row.TryGetValue($"_{column}_value", out var value)
+                || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            {
+                return null;
+            }
+
+            return value.ValueKind == JsonValueKind.String ? value.GetString() : UnresolvedParent;
+        });
+
+    /// <summary>
+    /// A FetchXML (module) row's parent lookups (<see cref="LiveParentLookupsOf"/>), keyed by LOGICAL name as the SDK projects
+    /// them: absent or null is "not filed there" (the SDK omits a null attribute), a GUID, an entity reference or a GUID string
+    /// is the lookup, and anything else is malformed (withheld by the rule, fail closed).
+    /// </summary>
+    internal static LiveParentLookup[] LiveParentsOf(string childTable, IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return LiveParentsOf(childTable, attribute =>
+        {
+            if (!row.TryGetValue(attribute, out var raw) || raw is null)
+                return null; // not filed there
+            return ExternalModuleDescriptor.TryGetAttributeId(row, attribute, out var id) ? id.ToString() : UnresolvedParent;
+        });
+    }
+
+    /// <summary>A row's parent lookups, each value read by <paramref name="valueOf"/> (by lookup LOGICAL name).</summary>
+    private static LiveParentLookup[] LiveParentsOf(string childTable, Func<string, string?> valueOf)
+    {
+        ArgumentNullException.ThrowIfNull(valueOf);
+        return LiveParentLookupsOf(childTable)
+            .Select(l => new LiveParentLookup(l.Table, valueOf(l.Column)))
+            .Where(p => !string.IsNullOrWhiteSpace(p.LookupValue))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// <paramref name="parents"/> without <paramref name="authorized"/>: the one parent a route has already decided for the
+    /// caller (an invoice thread's own invoice, owner round 100), which is not walked again. <c>null</c> removes nothing.
+    /// </summary>
+    internal static LiveParentLookup[] Except(LiveParentLookup[] parents, (string Table, Guid Id)? authorized) =>
+        authorized is not { } skip
+            ? parents
+            : parents
+                .Where(p => !(string.Equals(p.Table, skip.Table, StringComparison.OrdinalIgnoreCase)
+                              && Guid.TryParse(p.LookupValue, out var id) && id == skip.Id))
+                .ToArray();
+
+    /// <summary>
+    /// Resolves, ONCE for a whole page or row set, the live roots of the distinct parents its rows carry (task 187). No
+    /// parent means no read at all.
+    /// </summary>
+    /// <remarks>
+    /// Fail closed: no reader, a reader that throws (other than the caller's own cancellation), a fault inside the walk, and
+    /// parents past <see cref="MaxLiveParentReads"/> leave those parents unresolved, so every row naming one is withheld
+    /// (<see cref="ChildRowRoots.Of"/>). Logs carry counts only.
+    /// </remarks>
+    public static async Task<LiveParentRoots> ReadLiveParentsAsync(
+        LiveParentRootReader? read,
+        IEnumerable<IEnumerable<LiveParentLookup>> rowParents,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rowParents);
+        var distinct = rowParents
+            .SelectMany(parents => parents)
+            .Select(p => Guid.TryParse(p.LookupValue, out var id) && id != Guid.Empty ? (Table: p.Table.ToLowerInvariant(), Id: id) : default)
+            .Where(p => p.Id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (distinct.Count == 0)
+            return LiveParentRoots.Empty;
+
+        if (read is null)
+        {
+            logger.LogError(
+                "[EXT-LIVEPARENT] No live-parent reader is configured; {Count} parent(s) cannot be resolved. Failing CLOSED: "
+                + "every row filed under one is withheld.", distinct.Count);
+            return LiveParentRoots.Unread;
+        }
+
+        var complete = true;
+        if (distinct.Count > MaxLiveParentReads)
+        {
+            logger.LogWarning(
+                "[EXT-LIVEPARENT] {Count} distinct parents; resolving the first {Max}. Rows filed under the rest are withheld "
+                + "(fail closed).", distinct.Count, MaxLiveParentReads);
+            distinct = distinct.Take(MaxLiveParentReads).ToList();
+            complete = false;
+        }
+
+        try
+        {
+            var answer = await read(distinct, ct).ConfigureAwait(false);
+            var asked = distinct.ToHashSet();
+            // Only what was asked can be resolved: an answer the reader made up for another parent is ignored.
+            var resolved = answer.Resolved
+                .Where(kv => asked.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (resolved.Count < asked.Count)
+            {
+                complete = false;
+                logger.LogWarning(
+                    "[EXT-LIVEPARENT] {Unresolved} of {Count} parent(s) could not be resolved (faulted={Faulted}); rows filed "
+                    + "under them are withheld (fail closed).", asked.Count - resolved.Count, asked.Count, answer.Faulted);
+            }
+
+            return new LiveParentRoots(resolved, complete && !answer.Faulted, answer.Faulted);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-LIVEPARENT] The live-parent read for {Count} parent(s) failed. Failing CLOSED: every row filed under one "
+                + "is withheld.", distinct.Count);
+            return LiveParentRoots.Unread;
+        }
+    }
+
+    /// <summary>
+    /// THE decision for an external CHILD row (task 187): <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
+    /// over <see cref="ChildRowRoots"/>, which carries the stamped roots AND the live roots of every parent. Child-row reads
+    /// call this, never the stamp overloads (<c>ExternalChildRowLiveParentGuardTests</c>). A default (unbuilt) value is
+    /// withheld.
+    /// </summary>
+    public static bool ChildRowReadable(CallerPrincipal caller, SecureRootFlags flags, ChildRowRoots row) =>
+        row.IsBuilt && SecureRootsReadable(caller, flags, row.Links);
+}
+
+/// <summary>
+/// Task 187: one parent lookup of a child row whose LIVE roots the multi-root rule takes in: the parent's table and the raw
+/// <c>_..._value</c> (null or blank: not filed there; not a GUID: withheld).
+/// </summary>
+public readonly record struct LiveParentLookup(string Table, string? LookupValue);
+
+/// <summary>
+/// Task 187: the app-only live-parent read (<see cref="ExternalDataService.GetLiveParentRootsAsync"/>): for each asked parent
+/// it could resolve, the roots at the top of its filing. A parent left out is unresolved (fail closed).
+/// </summary>
+public delegate Task<LiveParentRootsRead> LiveParentRootReader(
+    IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct);
+
+/// <summary>What <see cref="LiveParentRootReader"/> answers.</summary>
+/// <param name="Resolved">Each resolved parent's live roots (possibly none: a parent filed under no root).</param>
+/// <param name="Faulted"><c>true</c> when a read failed (as opposed to a parent that does not exist or the bound).</param>
+public sealed record LiveParentRootsRead(
+    IReadOnlyDictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>> Resolved,
+    bool Faulted = false);
+
+/// <summary>
+/// Task 187: the live roots one request resolved for the parents of its rows (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/>).
+/// A parent not resolved counts as unknowable, and a row filed under it is withheld.
+/// </summary>
+public sealed class LiveParentRoots
+{
+    private readonly IReadOnlyDictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>> _resolved;
+
+    internal LiveParentRoots(
+        IReadOnlyDictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>> resolved,
+        bool isComplete, bool faulted)
+    {
+        _resolved = resolved;
+        IsComplete = isComplete;
+        Faulted = faulted;
+    }
+
+    /// <summary>No parent was needed: nothing to resolve, and nothing missing.</summary>
+    public static LiveParentRoots Empty { get; } = new(
+        new Dictionary<(string, Guid), IReadOnlyList<(ExternalGrantRootType, Guid)>>(), isComplete: true, faulted: false);
+
+    /// <summary>Nothing could be read (no reader, or the read failed): every parent is unresolved.</summary>
+    internal static LiveParentRoots Unread { get; } = new(
+        new Dictionary<(string, Guid), IReadOnlyList<(ExternalGrantRootType, Guid)>>(), isComplete: false, faulted: true);
+
+    /// <summary><c>true</c> when every parent asked for was resolved (a withheld row was withheld for its roots, not for a
+    /// read that could not decide). <c>false</c>: a list that withheld a row says <c>Truncated</c>.</summary>
+    public bool IsComplete { get; }
+
+    /// <summary><c>true</c> when a read failed (a single-row write route answers "unavailable" rather than "refused").</summary>
+    public bool Faulted { get; }
+
+    internal bool TryGetRoots((string Table, Guid Id) parent, out IReadOnlyList<(ExternalGrantRootType Root, Guid Id)> roots)
+    {
+        if (_resolved.TryGetValue((parent.Table.ToLowerInvariant(), parent.Id), out var found))
+        {
+            roots = found;
+            return true;
+        }
+
+        roots = Array.Empty<(ExternalGrantRootType, Guid)>();
+        return false;
+    }
+}
+
+/// <summary>
+/// Task 187: the multi-root rule's input for ONE external child row, built only by an <c>Of</c> overload: its stamped (or
+/// typed) root lookups ∪ the live roots of every parent lookup it carries, with an unresolvable parent entered as
+/// <see cref="ExternalMultiRootRule.UnresolvedParent"/> (withheld). Enumerates as the rule input, so the one secure-flag read
+/// (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/>) covers the live roots too.
+/// </summary>
+/// <remarks>
+/// <b>The parents cannot be supplied</b> (fix round 1, R3). <c>Of</c> takes the child TABLE and the ROW as read, and derives
+/// the parents itself through the one lineage map (<see cref="ExternalMultiRootRule.LiveParentsOf(string, IReadOnlyDictionary{string, JsonElement})"/>),
+/// so a caller cannot hand it "no parents" (the stamps-only decision #1857 found). A table outside the lineage map throws.
+/// Enforced by: the type (no overload takes a parent list; <c>ExternalChildRowLiveParentGuardTests</c> checks it by
+/// reflection) and the source guard (no literal empty row).
+/// </remarks>
+public readonly struct ChildRowRoots : IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>
+{
+    private readonly (ExternalGrantRootType Root, string? LookupValue)[]? _links;
+
+    private ChildRowRoots((ExternalGrantRootType Root, string? LookupValue)[] links) => _links = links;
+
+    /// <summary>Whether this value was built by <see cref="Of"/> (a default value is withheld).</summary>
+    internal bool IsBuilt => _links is not null;
+
+    /// <summary>The rule input: stamped roots, then the live roots.</summary>
+    internal (ExternalGrantRootType Root, string? LookupValue)[] Links => _links ?? Array.Empty<(ExternalGrantRootType, string?)>();
+
+    /// <summary>
+    /// For a Web API row (raw <c>_..._value</c> columns): {<paramref name="stamped"/>} ∪ {live roots of every parent lookup of
+    /// <paramref name="childTable"/> that <paramref name="row"/> carries}. A parent whose value is not a GUID, or that
+    /// <paramref name="live"/> did not resolve, enters as <see cref="ExternalMultiRootRule.UnresolvedParent"/>. A
+    /// <c>null</c> row is one that came back with no column outside the typed ones: it names no parent.
+    /// </summary>
+    /// <param name="childTable">The row's table; must have an entry in the lineage map.</param>
+    /// <param name="row">The row as read (its <c>$select</c> must carry <see cref="ExternalMultiRootRule.LiveParentSelect"/>).</param>
+    /// <param name="stamped">The row's stamped (or typed) root lookups.</param>
+    /// <param name="live">The live roots the request resolved for its rows' parents.</param>
+    /// <param name="authorizedParent">The one parent the route has already decided for the caller (an invoice thread's own
+    /// invoice, owner round 100): not walked again. Every other parent is.</param>
+    public static ChildRowRoots Of(
+        string childTable,
+        IReadOnlyDictionary<string, JsonElement>? row,
+        IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
+        LiveParentRoots live,
+        (string Table, Guid Id)? authorizedParent = null) =>
+        Build(stamped, ExternalMultiRootRule.Except(
+            ExternalMultiRootRule.LiveParentsOf(LineageChild(childTable), row), authorizedParent), live);
+
+    /// <summary>
+    /// For a FetchXML (module) row, keyed by logical name: {<paramref name="stamped"/>} ∪ {live roots of every parent lookup of
+    /// <paramref name="childTable"/> that <paramref name="row"/> carries}. See the Web API overload.
+    /// </summary>
+    public static ChildRowRoots Of(
+        string childTable,
+        IReadOnlyDictionary<string, object?> row,
+        IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
+        LiveParentRoots live) =>
+        Build(stamped, ExternalMultiRootRule.LiveParentsOf(LineageChild(childTable), row), live);
+
+    /// <summary>The table, when it has an entry in the lineage map; a table without one is a programming error.</summary>
+    private static string LineageChild(string childTable) =>
+        !string.IsNullOrWhiteSpace(childTable) && Sprk.Bff.Api.Services.Dataverse.ParentLineage.ChildFiling.ContainsKey(childTable)
+            ? childTable
+            : throw new ArgumentException(
+                $"'{childTable}' is not a child table of the lineage map, so its parents cannot be derived.", nameof(childTable));
+
+    private static ChildRowRoots Build(
+        IEnumerable<(ExternalGrantRootType Root, string? LookupValue)> stamped,
+        IEnumerable<LiveParentLookup> parents,
+        LiveParentRoots live)
+    {
+        ArgumentNullException.ThrowIfNull(stamped);
+        ArgumentNullException.ThrowIfNull(live);
+        var links = stamped.ToList();
+        foreach (var parent in parents)
+        {
+            if (string.IsNullOrWhiteSpace(parent.LookupValue))
+                continue; // not filed there
+            if (!Guid.TryParse(parent.LookupValue, out var id) || id == Guid.Empty
+                || !live.TryGetRoots((parent.Table, id), out var roots))
+            {
+                links.Add((ExternalGrantRootType.Project, ExternalMultiRootRule.UnresolvedParent));
+                continue;
+            }
+
+            links.AddRange(roots.Select(r => (r.Root, (string?)r.Id.ToString("D"))));
+        }
+
+        return new ChildRowRoots(links.ToArray());
+    }
+
+    public IEnumerator<(ExternalGrantRootType Root, string? LookupValue)> GetEnumerator() =>
+        ((IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>)Links).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 /// <summary>

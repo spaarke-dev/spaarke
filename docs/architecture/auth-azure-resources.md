@@ -292,7 +292,7 @@ AiSafety__PromptShield__ChatPipelineEnabled=true
 |----------|-------|
 | **Type** | **User-assigned (UAMI)** — the App Service has **no** system-assigned identity (corrected 2026-08-14, code-quality-and-assurance-r3 task 060 / BFF Auth Surface Map §C) |
 | **Principal (dev)** | `mi-bff-api-dev` — clientId `5967251e-171c-46fe-a6c2-ef843c90309d`, principalId `9fd47efb-7962-492b-ac44-e5ccd0268ebb` |
-| **Principal (demo)** | `mi-bff-api-demo` — clientId `b0ce4ca4-…` |
+| **Principal (demo)** | _None — the old demo BFF identity `mi-bff-api-demo` was deleted on 2026-10-14 with the old demo environment; the demo is now the ACME stamp built by provisioning (T186), which gets its own stamp identity._ |
 | **Purpose** | App-only Graph, `Services/Ai` Dataverse, Cosmos DB data plane, Key Vault secrets, Content Safety, AI Search, Service Bus (partial) |
 
 > **Note**: The App Service pins the UAMI via the `AZURE_CLIENT_ID` app setting. The

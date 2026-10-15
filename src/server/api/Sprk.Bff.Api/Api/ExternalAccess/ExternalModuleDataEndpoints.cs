@@ -197,7 +197,7 @@ public static class ExternalModuleDataEndpoints
 
         return ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            logger, ct);
+            logger, ct, dataService.GetLiveParentRootsAsync);
     }
 
     /// <summary>
@@ -215,7 +215,8 @@ public static class ExternalModuleDataEndpoints
         Func<FetchRequestDto, CancellationToken, Task<FetchResponseDto>> executeFetch,
         NonSecureRootReader readNonSecureRoots,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        LiveParentRootReader? readLiveParents = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (request is null || string.IsNullOrWhiteSpace(request.EntityName) ||
@@ -293,11 +294,19 @@ public static class ExternalModuleDataEndpoints
             var result = await executeFetch(scopedRequest, ct).ConfigureAwait(false);
             // Owner decision 2026-10-12 (option B): ScopeRows is synchronous, so the secure flags of the linked roots the
             // caller cannot read are read here first, once for the whole page (ExternalMultiRootRule.ReadFlagsAsync).
+            // Task 187 (owner round 99, D-123): the live roots of each row's other parents (a document's related event,
+            // communication, to-do, invoice ...) are resolved in one bounded batch first, and join the rule.
+            var liveParents = module.RequireReadOnSecureRoots
+                ? await ExternalMultiRootRule.ReadLiveParentsAsync(
+                    readLiveParents, result.Entities.Select(module.LiveParents), logger, ct).ConfigureAwait(false)
+                : LiveParentRoots.Empty;
             var secureRootFlags = module.RequireReadOnSecureRoots
                 ? await ExternalMultiRootRule.ReadFlagsAsync(
-                    readNonSecureRoots, principal, result.Entities.Select(module.RootLinks), logger, ct).ConfigureAwait(false)
+                    readNonSecureRoots, principal,
+                    result.Entities.Select(row => (IEnumerable<(ExternalGrantRootType, string?)>)module.RuleInput(row, liveParents)),
+                    logger, ct).ConfigureAwait(false)
                 : SecureRootFlags.None;
-            var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags);
+            var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags, liveParents);
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
             // the rule (serverProjected) is not one of them, even when it is on the module's readable list.
             var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);

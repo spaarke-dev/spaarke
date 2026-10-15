@@ -75,9 +75,22 @@
 # -----------------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0-azurelinux3.0 AS pwsh-tool
 
-ARG PWSH_VERSION=7.6.5
+ARG PWSH_VERSION=7.6.7
 
 RUN dotnet tool install --tool-path /opt/powershell PowerShell --version ${PWSH_VERSION}
+
+# BUNDLED-PACKAGE PATCH (2026-10-14). PowerShell 7.6.7, the newest tool package, still bundles
+# System.Security.Cryptography.Xml and .Pkcs 10.0.10: four fixed HIGH CVEs (CVE-2026-84008, -96958, -96959,
+# -96960; fixed in 10.0.13) that fail the image Trivy gate. Update-PwshBundledPackages.ps1 swaps in the signed
+# 10.0.13 NuGet builds and rewrites pwsh.deps.json to match; the contract check below proves pwsh loads them.
+# When a PowerShell release bundles >= the patch version, the script prints SKIP: then drop the package here.
+ARG PATCHED_CRYPTO_VERSION=10.0.13
+COPY Update-PwshBundledPackages.ps1 /tmp/Update-PwshBundledPackages.ps1
+RUN /opt/powershell/pwsh -NoProfile -NonInteractive -File /tmp/Update-PwshBundledPackages.ps1 \
+        -ToolRoot /opt/powershell \
+        -Version ${PATCHED_CRYPTO_VERSION} \
+        -Packages System.Security.Cryptography.Xml,System.Security.Cryptography.Pkcs \
+    && rm /tmp/Update-PwshBundledPackages.ps1
 
 # -----------------------------------------------------------------------------
 # Stage 2 — runtime image.
@@ -107,6 +120,8 @@ ENV PSModulePath="/opt/spaarke/psmodules"
 # Pin: 3.5.1 (2024-05 release; -AccessToken supported).
 # -----------------------------------------------------------------------------
 ARG EXO_MODULE_VERSION=3.5.1
+# Re-declared for this stage: the contract check below asserts the stage-1 patch version.
+ARG PATCHED_CRYPTO_VERSION=10.0.13
 
 RUN mkdir -p /opt/spaarke/psmodules \
     && pwsh -NoProfile -NonInteractive -Command \
@@ -125,6 +140,9 @@ RUN mkdir -p /opt/spaarke/psmodules \
 # runtime, inside a sitecontainer, during a real provisioning run — the worst
 # place to discover them.
 #
+# Since 2026-10-14 it also asserts that pwsh loads the PATCHED crypto assemblies (stage 1), from the tool
+# install and at >= the patch version — a deps.json edit the scanner accepts but the host ignores would fail here.
+#
 # Asserting here turns both into a red CI build instead. This does NOT replace
 # the task-162 live verification, which is the only thing that can prove
 # Connect-ExchangeOnline actually authenticates against real Exchange; it just
@@ -140,7 +158,14 @@ RUN pwsh -NoProfile -NonInteractive -Command \
          if (-not \$p.ContainsKey('AccessToken')) { \
              throw '-AccessToken parameter absent; the sidecar sign-in depends on it'; \
          } \
-         Write-Host \"OK: pwsh \$(\$PSVersionTable.PSVersion), EXO module resolved, -AccessToken present\""
+         foreach (\$t in [System.Security.Cryptography.Xml.SignedXml], [System.Security.Cryptography.Pkcs.SignedCms]) { \
+             \$loc = \$t.Assembly.Location; \
+             \$ver = [version]([Diagnostics.FileVersionInfo]::GetVersionInfo(\$loc).ProductVersion.Split('+')[0]); \
+             if (-not \$loc.StartsWith('/opt/powershell/') -or \$ver -lt [version]'${PATCHED_CRYPTO_VERSION}') { \
+                 throw \"\$(\$t.Assembly.GetName().Name) loaded from \$loc at \$ver; expected the patched ${PATCHED_CRYPTO_VERSION} copy\"; \
+             } \
+         } \
+         Write-Host \"OK: pwsh \$(\$PSVersionTable.PSVersion), EXO module resolved, -AccessToken present, crypto packages >= ${PATCHED_CRYPTO_VERSION}\""
 
 # -----------------------------------------------------------------------------
 # Application layout

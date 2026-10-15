@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Tests.Eval.AgreementClassify;
 /// <remarks>
 /// <para>
 /// <b>Merge-gate wiring</b>: <c>[Trait("Category", "GoldenUtteranceEval")]</c> joins this class to the
-/// dedicated eval-gate job in <c>.github/workflows/sdap-ci.yml</c> with ZERO CI-YAML change (a net-new
+/// dedicated eval-gate job in <c>.github/workflows/ci-tier1-blocking.yml</c> with ZERO CI-YAML change (a net-new
 /// family is the established way a project adds gate coverage). It does not touch the shared
 /// <c>golden-utterances.json</c>.
 /// </para>

@@ -75,18 +75,20 @@ All are documented at https://code.claude.com/docs/en/sub-agents, `/model-config
 
 | Setting | Where | Value | Effect |
 |---|---|---|---|
-| `PreToolUse` hook `scripts/quality/require-agent-model.py` (matcher `Agent\|Task\|Workflow`) | `hooks` | — | Denies a sub-agent launch with no `model` (and no definition `model:`), and a workflow script with an `agent()` call naming no model. Claude re-issues the call with a model; the user is never asked. Tests: `scripts/quality/tests/test_require_agent_model.py` |
+| `PreToolUse` hook `scripts/quality/require-agent-model.py` (matcher `Agent\|Task\|Workflow`) | `hooks` | — | Denies a sub-agent launch with no `model` (and no definition `model:`), and a workflow script with an `agent()` call naming no model. Claude re-issues the call with a model; the user is never asked. Logs each allowed launch to `~/.claude/spend-archive/agent-launches.csv` for `spend-report.py --model-fit`. Tests: `scripts/quality/tests/test_require_agent_model.py` |
 | `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `env` | `4` | Concurrent Agent-tool sub-agents per session (default 20) |
 | `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` | `env` | `4` | Concurrent workflow agents per run (default up to 16) |
 | `workflowSizeGuideline` | top level | `small` | Advice to Claude: fewer than 5 workflow agents. Not a cap. |
 | `autoCompactWindow` | top level | `400000` | Auto-compact threshold in tokens (100000–1000000 or `"auto"`) |
+| `promptCacheTtl` | top level | `"1h"` | Main-conversation prompt cache lives 1 hour instead of 5 minutes. The default is 1 hour only within plan usage; with extra usage enabled, sessions fall back to 5 minutes, so a pause of more than 5 minutes rewrites the whole context. Owner-approved 2026-10-14 |
 
 Not changed:
-- **Prompt-cache TTL** (`subagentPromptCacheTtl`) stays at the 5-minute default. Rule 4 removes most rewrites without paying the 1-hour write premium on every agent.
+- **Sub-agent prompt-cache TTL** (`subagentPromptCacheTtl`) stays at the 5-minute default. Rule 4 removes most rewrites without paying the 1-hour write premium on every agent.
 - **Skill listing:** project skills are about 8.6k characters of the roughly 32k listing. The rest is built-in and plugin skills, about 3% of a request. Hiding skills that other skills invoke is a risk, so `skillOverrides` is not used.
 
 ## Measuring
 
 - `python scripts/ai-cost/get-project-cost.py <slug>` gives a project's all-time total.
 - `/project-spend-update` refreshes the board fields.
-- For a per-day split by project, model, or main vs sub-agent, group the transcript `usage` records by `timestamp[:10]`; see the 2026-10-09 PR description for the script.
+- `python scripts/ai-cost/spend-report.py --days 14` splits spend by day, project, model, and main vs sub-agent.
+- `python scripts/ai-cost/spend-report.py --days 7 --model-fit` joins each sub-agent run to the launch the hook logged (agent type, description, task number) and to the task's rework line, to show whether the chosen model fit the work (`scripts/ai-cost/README.md`).

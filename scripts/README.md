@@ -223,20 +223,20 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Command:**
 ```powershell
+# -EnvironmentUrl is required: the old demo environment was retired 2026-10-14 and the demo is now the
+# ACME stamp built by the provisioning control plane (no static default URL).
+
 # Preview what would be created (recommended first)
-.\Load-DemoSampleData.ps1 -DryRun
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
 
 # Load all sample data
-.\Load-DemoSampleData.ps1
-
-# Load into a different environment
 .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
 
 # Skip optional steps
-.\Load-DemoSampleData.ps1 -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
 
 # Force recreate existing records
-.\Load-DemoSampleData.ps1 -Force
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Force
 ```
 
 **Data Sources:**
@@ -1176,7 +1176,17 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind '<containerId>=<buId>' -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify   # must exit 0
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <Customer__Id>          # issue #1889: also mark pre-marker containers (dry run; then -Apply -MaxWritesPerRun 1, -Apply, -Verify)
 ```
+
+`-CustomerId` (issue #1889) adds the customer-marker pass. It takes the BFF's `Customer__Id` (or, when that is unset, the id
+the BFF derives from `rg-spaarke-{customerId}-{env}`) and must match `^[a-z][a-z0-9]{2,7}$` (otherwise exit 2, nothing read).
+A container is marked only if it already carried a stamp naming one of this environment's units and its records derive it, or
+an explicit `-Bind` names it; one the run stamps from records alone is listed `MARK-NEXT-RUN` and marked by the NEXT run
+(review the dry-run list first: the record claim is customer-writable); a stamped container no record claims is
+`UNMARKED-NO-CLAIM`. A marker is never overwritten (`MARKER-FOREIGN` / `MARKER-MALFORMED` are listed), underivable and
+stamp-disputed containers are never marked; `-Verify` also fails on any unmarked one. The guard caches a missing marker for up
+to 10 minutes. Tests: `tests/scripts/Backfill-SpeContainerMarker.Tests.ps1`.
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
 `Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,

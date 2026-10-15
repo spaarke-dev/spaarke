@@ -1,0 +1,324 @@
+# ============================================================================
+# Mutation Nightly (Advisory) — Stryker.NET on changed security-critical code
+# ============================================================================
+# WHY THIS EXISTS
+# ---------------
+# Line coverage says a security filter was executed; it does not say a test would
+# notice if the filter were broken. A mutation run answers that second question: it
+# makes small deliberate breakages ("mutants": flip a comparison, drop a statement,
+# invert a boolean) in the code under test and checks that some test fails. A mutant
+# that SURVIVES on a changed line is a line of authorization / error-contract logic
+# that could be wrong without any test failing.
+#
+# Whole-repo mutation is far too slow (the 2026-06-01 pilot measured 75,619 mutants
+# in the BFF alone) and mostly noise. So this workflow mutates only:
+#   - the security / contract-critical paths in the allowlist below, and
+#   - only the lines that changed on the branch in the last 24 hours (Stryker
+#     `since` mode), so each night's cost is proportional to the day's change.
+# A night on which nothing in the allowlist changed finishes in about a minute.
+#
+# ADVISORY: nothing gates on this. The outcome is ONE quality alert (check name
+# `mutation-nightly`), assigned to the owner: open while changed lines have surviving
+# or uncovered mutants (or the run itself errors / times out), closed by the first
+# clean run. See .github/actions/quality-alert and docs/procedures/ci-cd-workflow.md
+# "Quality alerts". Do not add this workflow to ci-router / tier1 / tier2.
+#
+# SCOPE ALLOWLIST (edit here to widen; paths verified to exist 2026-10-13)
+#   src/server/api/Sprk.Bff.Api/Api/Filters/**                     endpoint authorization filters
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Errors/**           ProblemDetails contract
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/**   auth handlers / policies
+#   src/server/api/Sprk.Bff.Api/Services/Access/**                 record-share / secure-child access
+#   src/server/shared/Spaarke.Dataverse/**AccessRights*            Dataverse access-rights mapping
+# The last one lives in a different project, so it needs its own Stryker run
+# (`project=Spaarke.Dataverse.csproj`).
+#
+# STRYKER 5.0.0 FINDINGS APPLIED (from the 2026-06-01 pilot,
+# projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-b-stryker-pilot-2026-06-01.md):
+#   - `coverage-analysis` and `test-case-filter` are accepted ONLY in a config file,
+#     so the config (stryker-<label>.json) is generated in the job;
+#   - `output-path` is rejected in the file: the output directory is the CLI `--output`;
+#   - `--skip-version-check` so a newer-version probe cannot slow or break the night.
+# ============================================================================
+
+name: mutation-nightly
+
+on:
+  # schedule re-enabled after a dispatch run completes end to end within its cap, see issue #1870.
+  # When re-adding (cron '0 5 * * *'): 05:00 UTC is an hour before nightly-health (06:00) so the
+  # two do not contend for runners, and early enough that the 24h window ends just before it.
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Optional git ref: mutate allowlisted files changed since this ref (default: commits from the last 24h)'
+        required: false
+        type: string
+      dry_run_alert:
+        description: 'Print the quality-alert decision instead of opening/updating/closing the issue'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write   # quality alert
+
+concurrency:
+  # A mutation run is expensive; never cancel one mid-flight for a newer trigger. Keyed by
+  # ref so proof runs on a throwaway branch do not queue behind the default branch.
+  group: mutation-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  STRYKER_VERSION: '5.0.0'
+
+jobs:
+  mutate:
+    name: Mutate changed security code
+    runs-on: ubuntu-latest
+    # ~1.5x the one complete proof run (run 38601727169, issue #1870): 2 changed files,
+    # 1,390 mutants, 1,259 tests, 124 min (21 min build + instrumentation, ~79 min of
+    # mutation testing at ~3.4 s per mutant). A window with many more mutants (14 files:
+    # 3,448; 52 files: far more) does not finish in 240 min; the alert then says cancelled.
+    timeout-minutes: 190
+    outputs:
+      verdict: ${{ steps.summarize.outputs.verdict }}
+      alert_summary: ${{ steps.summarize.outputs.alert_summary }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # `since` needs history, and so does the changed-file diff
+
+      - name: Resolve scope (allowlisted files changed in the window)
+        id: scope
+        shell: bash
+        env:
+          SINCE_INPUT: ${{ inputs.since }}
+        run: |
+          set -euo pipefail
+
+          since="${SINCE_INPUT:-}"
+          if [ -z "$since" ]; then
+            since="$(git rev-list -1 --first-parent --before='24 hours ago' HEAD)"
+            echo "No 'since' input: using the last commit older than 24h."
+          fi
+          case "$since" in
+            -*) echo "::error::'since' must be a git ref, not an option"; exit 1 ;;
+          esac
+          if ! since_sha="$(git rev-parse --verify --quiet "${since}^{commit}")"; then
+            echo "::error::'since' is not a commit reachable in this checkout: ${since}"
+            exit 1
+          fi
+          echo "since=${since_sha}" >> "$GITHUB_OUTPUT"
+          echo "Window: ${since_sha}..HEAD ($(git rev-parse HEAD))"
+
+          bff_prefix='src/server/api/Sprk.Bff.Api/'
+          dv_prefix='src/server/shared/Spaarke.Dataverse/'
+
+          # Pathspecs: in git's default (non-glob) pathspec syntax `*` also crosses `/`.
+          git diff --name-only --diff-filter=AMR "$since_sha" HEAD -- \
+            "${bff_prefix}Api/Filters/*.cs" \
+            "${bff_prefix}Infrastructure/Errors/*.cs" \
+            "${bff_prefix}Infrastructure/Authentication/*.cs" \
+            "${bff_prefix}Services/Access/*.cs" \
+            "${dv_prefix}*AccessRights*.cs" > "$RUNNER_TEMP/changed.txt"
+
+          { grep "^${bff_prefix}" "$RUNNER_TEMP/changed.txt" || true; } | sort -u > "$RUNNER_TEMP/changed-bff.txt"
+          { grep "^${dv_prefix}"  "$RUNNER_TEMP/changed.txt" || true; } | sort -u > "$RUNNER_TEMP/changed-dataverse.txt"
+
+          bff_count="$(wc -l < "$RUNNER_TEMP/changed-bff.txt" | tr -d ' ')"
+          dv_count="$(wc -l < "$RUNNER_TEMP/changed-dataverse.txt" | tr -d ' ')"
+          echo "bff_count=${bff_count}" >> "$GITHUB_OUTPUT"
+          echo "dataverse_count=${dv_count}" >> "$GITHUB_OUTPUT"
+
+          echo "Allowlisted files changed since ${since_sha}: BFF=${bff_count}, Spaarke.Dataverse=${dv_count}"
+          cat "$RUNNER_TEMP/changed.txt"
+
+          if [ "$bff_count" = "0" ] && [ "$dv_count" = "0" ]; then
+            {
+              echo "# Nightly mutation testing"
+              echo
+              echo "Nothing to mutate: no allowlisted security/contract file changed since \`${since_sha}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "# Nightly mutation testing: scope"
+              echo
+              echo "Changed since \`${since_sha}\`:"
+              echo
+              sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/changed.txt"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Setup .NET
+        if: steps.scope.outputs.bff_count != '0' || steps.scope.outputs.dataverse_count != '0'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Stryker.NET
+        if: steps.scope.outputs.bff_count != '0' || steps.scope.outputs.dataverse_count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet tool install dotnet-stryker --version "$STRYKER_VERSION" --tool-path "$RUNNER_TEMP/stryker"
+          "$RUNNER_TEMP/stryker/dotnet-stryker" --version || true
+
+      # Which tests may kill a mutant. Stryker's initial run executes exactly this set and
+      # must be green, so the set is derived per run by scripts/ci/run-stryker.sh from the
+      # files being mutated: the dedicated suites of the allowlisted folders (Filters,
+      # Services.Access, Infrastructure.Authentication / Errors) plus every test class in
+      # tests/** that names a type declared in a mutated file. Compose tests are left out
+      # (they parse Git-LFS .docx fixtures, which this job does not fetch; an LFS pointer
+      # would fail the initial run). The earlier design (the broad ADR-038 KEEP set) did
+      # not finish: proof run 38509398853 spent 71 min in the initial run of 9,667 tests,
+      # and it also missed the direct suites, so mutants were reported NoCoverage falsely.
+      - name: Mutate (Sprk.Bff.Api)
+        id: bff
+        if: steps.scope.outputs.bff_count != '0'
+        continue-on-error: true
+        shell: bash
+        env:
+          SINCE_SHA: ${{ steps.scope.outputs.since }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/run-stryker.sh bff \
+            "Sprk.Bff.Api.csproj" "src/server/api/Sprk.Bff.Api/" \
+            "$RUNNER_TEMP/changed-bff.txt" "$SINCE_SHA"
+
+      - name: Mutate (Spaarke.Dataverse)
+        id: dataverse
+        if: steps.scope.outputs.dataverse_count != '0'
+        continue-on-error: true
+        shell: bash
+        env:
+          SINCE_SHA: ${{ steps.scope.outputs.since }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/run-stryker.sh dataverse \
+            "Spaarke.Dataverse.csproj" "src/server/shared/Spaarke.Dataverse/" \
+            "$RUNNER_TEMP/changed-dataverse.txt" "$SINCE_SHA"
+
+      - name: Summarize
+        id: summarize
+        if: always()
+        shell: bash
+        env:
+          BFF_COUNT: ${{ steps.scope.outputs.bff_count }}
+          DATAVERSE_COUNT: ${{ steps.scope.outputs.dataverse_count }}
+        run: |
+          set -euo pipefail
+          verdict=ok
+          alert_summary=""
+
+          if [ "$BFF_COUNT" = "0" ] && [ "$DATAVERSE_COUNT" = "0" ]; then
+            echo "Nothing to mutate."
+          else
+            args=()
+            [ -f "$RUNNER_TEMP/stryker-out-bff/report.path" ] \
+              && args+=(--report "bff=$(cat "$RUNNER_TEMP/stryker-out-bff/report.path")=src/server/api/Sprk.Bff.Api")
+            [ -f "$RUNNER_TEMP/stryker-out-dataverse/report.path" ] \
+              && args+=(--report "dataverse=$(cat "$RUNNER_TEMP/stryker-out-dataverse/report.path")=src/server/shared/Spaarke.Dataverse")
+
+            if [ ${#args[@]} -gt 0 ]; then
+              python3 scripts/ci/summarize-mutation-report.py "${args[@]}" \
+                --out-md "$RUNNER_TEMP/mutation-summary.md" \
+                --out-alert "$RUNNER_TEMP/mutation-alert.md" \
+                --out-verdict "$RUNNER_TEMP/mutation-verdict.txt"
+              cat "$RUNNER_TEMP/mutation-summary.md" >> "$GITHUB_STEP_SUMMARY"
+              verdict="$(cat "$RUNNER_TEMP/mutation-verdict.txt")"
+              alert_summary="$(head -c 20000 "$RUNNER_TEMP/mutation-alert.md")"
+            else
+              echo "No Stryker report was produced for a stage that had files to mutate." | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          delimiter="MUTATION_ALERT_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "alert_summary<<${delimiter}"
+            printf '%s\n' "$alert_summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload mutation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: |
+            ${{ runner.temp }}/stryker-out-bff
+            ${{ runner.temp }}/stryker-out-dataverse
+            ${{ runner.temp }}/mutation-summary.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # A stage that errored (build break, Stryker crash, initial test run unusable) is
+      # a broken measurement, not a clean one: fail the job so the alert says so.
+      - name: Fail if a Stryker stage errored
+        if: always() && (steps.bff.outcome == 'failure' || steps.dataverse.outcome == 'failure')
+        env:
+          BFF_OUTCOME: ${{ steps.bff.outcome }}
+          DATAVERSE_OUTCOME: ${{ steps.dataverse.outcome }}
+        run: |
+          echo "::error::A Stryker stage failed (bff=${BFF_OUTCOME}, dataverse=${DATAVERSE_OUTCOME}). See the step logs."
+          exit 1
+
+  alert:
+    name: Quality alert (mutation-nightly)
+    needs: mutate
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout (local action only)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Decide status
+        id: decide
+        shell: bash
+        env:
+          MUTATE_RESULT: ${{ needs.mutate.result }}
+          VERDICT: ${{ needs.mutate.outputs.verdict }}
+          ALERT_SUMMARY: ${{ needs.mutate.outputs.alert_summary }}
+        run: |
+          set -euo pipefail
+          status=ok
+          summary="The last mutation run completed with no surviving or uncovered mutants on changed lines."
+
+          if [ "$MUTATE_RESULT" != "success" ]; then
+            status=failing
+            case "$MUTATE_RESULT" in
+              cancelled) why="was **cancelled**, which is what a job that reaches its \`timeout-minutes\` cap reports" ;;
+              *)         why="finished **${MUTATE_RESULT}** (a Stryker stage errored: build break, crash, or an unusable initial test run)" ;;
+            esac
+            summary="The mutation job ${why}. A mutation run that did not complete is a failing check, not a pass."
+            if [ -n "$ALERT_SUMMARY" ]; then summary+=$'\n\n'"$ALERT_SUMMARY"; fi
+          elif [ "$VERDICT" = "failing" ]; then
+            status=failing
+            summary="$ALERT_SUMMARY"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "summary<<${delimiter}"
+            printf '%s\n' "$summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Raise or clear the alert
+        uses: ./.github/actions/quality-alert
+        with:
+          check: mutation-nightly
+          status: ${{ steps.decide.outputs.status }}
+          summary: ${{ steps.decide.outputs.summary }}
+          dry-run: ${{ inputs.dry_run_alert == true || github.ref_name != github.event.repository.default_branch }}

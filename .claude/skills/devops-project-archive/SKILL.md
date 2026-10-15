@@ -37,7 +37,7 @@ Close out a project cleanly:
 2. Set `Closed Date` field (from PR merge date if provided, else today)
 3. Capture final `Task Count` / `Tasks Completed` values (via `/devops-project-sync`)
 4. Close the GitHub Issue with appropriate state (`Status=Done` or label `cancelled`)
-5. **Retain** `projects/{name}/` folder + worktree (no destructive operations)
+5. **Retain** `projects/{name}/` folder + worktree (no destructive operations). **Never rename or move the folder** — no `x-` prefix, no `projects/_archive/`. A rename breaks every link to the project (the Issue's Quick Links, the board's Project Folder field, links from other projects and skills) and makes history tools see a new project on archive day. "Archived" is the `.archived` marker plus board Status, not the folder name. The 37 older `x-` folders keep their names (renaming them back would break the links that now point at them). Enforced by: the pre-commit hook and the `projects-layout-guard` workflow (both run `scripts/quality/check-project-archive-prefix.sh` on added or renamed paths, so the PR that renames is the one that fails), and `tests/Spaarke.ArchTests/ProjectFolderArchivePrefixGuardTests.cs` over the whole tree when Arch Tests run. A `projects/`-only PR counts as docs-only and skips Arch Tests, which is why the first two exist.
 6. Write `.archived` marker file with archive date + final status + closing PR # (if any) + note that worktree is intentionally preserved
 
 Remote branch is preserved — branch history stays on GitHub for audit.
@@ -140,7 +140,7 @@ Archived project: projects/{name}/
 |---|---|---|
 | Issue close fails (rate limit) | Concurrent operations | Re-run skill — idempotency ensures state is healed |
 | `.archived` marker write fails | Permission issue | Skill warns; user manually creates the marker |
-| Skill run twice on same project | User unsure if first run completed | Idempotent — second run detects Issue already closed + `.archived` already present; reports no-op |
+| Skill run twice on same project | User unsure if first run completed | Idempotent — second run detects Issue already closed + `.archived` already present; reports no-op. The 37 older `x-` folders got their `.archived` marker on 2026-10-14 without any board change: for those, the marker alone does not mean the board was updated, so check the Issue and Status and run the board steps if they are still open |
 | Project has no portfolio pointer block | Project never registered | Run `/devops-project-register --from-folder` first |
 | `--pr-number` references a non-merged PR | Wrong PR number provided | Skill warns; uses today's date as Closed Date fallback |
 

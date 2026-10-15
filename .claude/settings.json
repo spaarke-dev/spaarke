@@ -8,6 +8,7 @@
   },
   "workflowSizeGuideline": "small",
   "autoCompactWindow": 400000,
+  "promptCacheTtl": "1h",
   "hooks": {
     "PreToolUse": [
       {
@@ -48,6 +49,16 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/reinject-project-state.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/quality-alert-banner.py\"",
+            "timeout": 10
           }
         ]
       }
