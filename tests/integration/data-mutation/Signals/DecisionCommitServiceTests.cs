@@ -352,7 +352,7 @@ public sealed class DecisionCommitServiceTests
                 return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.UserContextRequired, "no user");
             if (path is "WhoAmI" or "WhoAmI()")
                 return Ok(new Dictionary<string, object?> { ["UserId"] = Caller.ToString("D") });
-            if (path.Contains("&$filter=", StringComparison.Ordinal))
+            if (path.Contains("&$filter=Microsoft.Dynamics.CRM.In(PropertyName='", StringComparison.Ordinal))
             {
                 // Task 150 (D-141): the worklist's Do-lane "mine" read of a subject, AS THE CALLER. The subject is the caller's own
                 // work unless a test says otherwise.
@@ -2326,6 +2326,57 @@ public sealed class DecisionCommitServiceTests
 
         result.Status.Should().Be(DecisionCommitStatus.Unavailable);
         rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task D141_ARepeatOfARecordedReview_AfterTheDecisionReassignedTheItem_ReturnsTheFirstOutcome()
+    {
+        // Adversarial review F1: Reassign moves the To Do to someone else; the wizard resends the same review id after a lost
+        // response. The caller passed the "mine" check on the first attempt; the repeat returns that outcome, never a 404.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        var review = MarkComplete();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.CallerNotMine.Add(ItemTodo);   // the item is no longer the caller's work
+
+        var repeat = await rig.CommitAsync(review, DoSignal);
+
+        repeat.Status.Should().Be(DecisionCommitStatus.Recorded, repeat.Detail);
+        repeat.Replayed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task D141_AResumeOfTheCallersFailedReview_AfterTheItemWasReassigned_StillRuns()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Executors["mark-complete"].Result = DecisionActionOutcome.Refused("mark-complete", DecisionActionReasons.WriteFailed, "no");
+        var review = MarkComplete();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Status.Should().Be(DecisionCommitStatus.Failed, failed.Detail);
+        failed.Resumable.Should().BeTrue();
+        rig.CallerNotMine.Add(ItemTodo);
+        rig.Executors["mark-complete"].Result = null;
+
+        var resumed = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+
+        resumed.Status.Should().Be(DecisionCommitStatus.Recorded, resumed.Detail);
+    }
+
+    [Fact]
+    public async Task D141_AReviewIdTheCallerUsedBefore_OnANotMineItem_IsTheUniform404_NotReviewChanged()
+    {
+        // Same review id, other content: never the same review, so the "mine" check runs before the ledger can answer.
+        var rig = new Rig();
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.CallerNotMine.Add(ItemTodo);
+
+        var reused = await rig.CommitAsync(MarkComplete() with { ReviewId = review.ReviewId }, DoSignal);
+
+        reused.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.Status(DoSignal).Should().Be(Open);
     }
 
     [Fact]

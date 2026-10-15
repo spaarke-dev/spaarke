@@ -39,12 +39,14 @@ public static class DecisionPlanEndpoints
             .WithName("GetSignalDecisionPlan")
             .WithSummary("Get a Signal's decision plan resolved against the action catalog")
             .WithDescription("Returns the plan's actions in plan order (the first is the recommendation), the Next-steps set and the "
-                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller; "
+                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller, or a Do item "
+                + "is not the caller's own work (D-141); 503 when that could not be checked; "
                 + "422 when the plan does not resolve against the closed catalog.")
             .Produces<DecisionPlanResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // Task 034 (FR-17, reconciliation B.2 row 034): the suppression count the wizard's dismissal step and admin show.
         group.MapGet("/{signalId:guid}/suppression", GetSuppressionAsync)
@@ -52,7 +54,8 @@ public static class DecisionPlanEndpoints
             .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
             .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
                 + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
-                + "core record is not readable by the caller; 403 when the caller cannot be resolved; 503 when an authorized caller's count cannot be read.")
+                + "core record is not readable by the caller, or a Do item is not the caller's own work (D-141); 403 when the caller cannot be "
+                + "resolved; 503 when access could not be checked or an authorized caller's count cannot be read.")
             .Produces<SuppressionResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)

@@ -137,6 +137,38 @@ public sealed class DoLanePrivacyTests
         Problem(await PlanRoute(world.As(Alice))).Status.Should().Be(503);
     }
 
+    public static IEnumerable<object[]> MineReadAnswers() =>
+    [
+        [DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no read on the table"), SignalAccessOutcome.NotFound],
+        [DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed, "obo"), SignalAccessOutcome.CallerUnresolved],
+        // A row that is not the subject (never the case in Dataverse, but the gate matches the id, not "any row").
+        [DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = new[] { new Dictionary<string, object> { ["sprk_todoid"] = Guid.NewGuid().ToString("D") } } })),
+            SignalAccessOutcome.NotFound],
+    ];
+
+    [Theory]
+    [MemberData(nameof(MineReadAnswers))]
+    public async Task TheMineReadsOtherAnswers_DenyOrAreTheSingle403(DataverseUserResponse answer, SignalAccessOutcome expected)
+    {
+        var world = new World("sprk_todo", hasCore: true) { MineAnswer = answer, Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+
+        (await world.As(Alice).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task TheCommitRoutesTwoStepForm_DefersMine_AndConfirmingItDeniesTheColleague()
+    {
+        var world = new World("sprk_todo", hasCore: true) { Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+        var access = world.As(Bob);
+
+        var readable = await access.AuthorizeAsync(SignalId, CancellationToken.None, enforceDoLaneMine: false);
+
+        readable.Outcome.Should().Be(SignalAccessOutcome.Allowed, "Bob can read the Signal, the matter and the To Do");
+        (readable.SubjectTable, readable.SubjectId).Should().Be(("sprk_todo", SubjectId));
+        world.Requests.Should().NotContain(p => p.Contains("&$filter=", StringComparison.Ordinal));
+        (await access.ConfirmDoLaneMineAsync(readable, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
     // ---- Decide lane unchanged ------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -230,6 +262,7 @@ public sealed class DoLanePrivacyTests
         public string Table { get; } = table;
         public DecisionLane Lane { get; init; } = DecisionLane.Do;
         public bool SignalUnreadable { get; init; }
+        public DataverseUserResponse? MineAnswer { get; init; }
         public Dictionary<string, Guid> Subject { get; } = new(StringComparer.Ordinal);
         public List<string> Requests { get; } = new();
         public IDataverseUserClient Client => _client.Object;
@@ -317,6 +350,11 @@ public sealed class DoLanePrivacyTests
                 if (_fault == Fault.MineReadUnparseable)
                 {
                     return Ok(new { unexpected = true });
+                }
+
+                if (MineAnswer is { } answer)
+                {
+                    return answer;
                 }
 
                 var filter = path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..];

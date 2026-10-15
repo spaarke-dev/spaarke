@@ -40,8 +40,12 @@ public enum SignalAccessOutcome
 /// <param name="CoreTypeId">The core-record pair the caller's own read returned (task 043 K2), so a route that re-reads the
 /// Signal app-only can refuse when the pair changed between the two reads. Both null for a no-core Signal.</param>
 /// <param name="CoreId">The core record id of that pair; null for a no-core Signal.</param>
+/// <param name="SubjectTable">Do lane only (task 150): the subject's table, from the subject lookup that carries the pair id (task
+/// 141); null when it cannot be derived. Carried so <see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/> can run later.</param>
+/// <param name="SubjectId">Do lane only: the subject's id (<c>sprk_regardingrecordid</c>); null when absent.</param>
 public sealed record SignalAccessDecision(
-    SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null)
+    SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null,
+    string? SubjectTable = null, Guid? SubjectId = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -69,11 +73,14 @@ public sealed record SignalAccessDecision(
 /// table has no "mine" rule, a subject that cannot be derived, or a read that does not return the subject is the uniform
 /// <see cref="SignalAccessOutcome.NotFound"/>, exactly as an unreadable Signal; a fault is <see cref="SignalAccessOutcome.Unavailable"/>.
 /// So a same-BU colleague who can read the Signal and its subject cannot open or act on someone else's Do item by id. Decide-lane
-/// Signals are unchanged.</para>
+/// Signals are unchanged. The commit route asks for the readability half first and the "mine" half itself
+/// (<see cref="ConfirmDoLaneMineAsync"/>), skipping it only to return or resume this caller's own recorded review of the same
+/// content: the decision may have reassigned the item (adversarial review F1).</para>
 /// <para><b>Fail closed, one denial.</b> A row the caller cannot read, a malformed core-record pair, a catalog row that
 /// does not resolve, a Dataverse fault of any kind: all <see cref="SignalAccessOutcome.NotFound"/>, except a fault reading a
-/// no-core Signal's SUBJECT, which is <see cref="SignalAccessOutcome.Unavailable"/> (503, uac-r2 F4-b: a fault is not a
-/// denial). Only a caller who cannot be resolved at all is <see cref="SignalAccessOutcome.CallerUnresolved"/>.</para>
+/// no-core Signal's SUBJECT or answering a Do-lane Signal's "mine" read, which is <see cref="SignalAccessOutcome.Unavailable"/>
+/// (503, uac-r2 F4-b: a fault is not a denial). Only a caller who cannot be resolved at all is
+/// <see cref="SignalAccessOutcome.CallerUnresolved"/>.</para>
 /// <para>The catalog row and entity-set name are configuration and metadata, not matter data, so they are read with the
 /// BFF's own <see cref="IGenericEntityService"/>; nothing read that way is returned to the caller.</para>
 /// <para><b>Core set (K2).</b> The core record's table must be one of <see cref="CoreAncestorResolver.CoreRecordEntities"/>,
@@ -117,7 +124,14 @@ public sealed class SignalCoreRecordAccess
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<SignalAccessDecision> AuthorizeAsync(Guid signalId, CancellationToken ct)
+    /// <summary>
+    /// The decision: readability and, for a Do-lane Signal, the "mine" rule (D-141). Read routes never pass
+    /// <paramref name="enforceDoLaneMine"/>. False is for the commit route only, which then calls <see cref="ConfirmDoLaneMineAsync"/>
+    /// itself unless it is returning or resuming the caller's own recorded review of the same content; an allowed Do-lane decision
+    /// carries its subject for that later call. (One method, not an overload: the route ledger requires every body of
+    /// <c>AuthorizeAsync</c> to reach the caller-identity client.)
+    /// </summary>
+    public async Task<SignalAccessDecision> AuthorizeAsync(Guid signalId, CancellationToken ct, bool enforceDoLaneMine = true)
     {
         if (signalId == Guid.Empty)
         {
@@ -148,7 +162,7 @@ public sealed class SignalCoreRecordAccess
 
             if (!hasType && string.IsNullOrWhiteSpace(coreIdText))
             {
-                return await AuthorizeNoCoreRecordAsync(row, lane, policyVersionId, ct).ConfigureAwait(false);
+                return await AuthorizeNoCoreRecordAsync(row, lane, policyVersionId, enforceDoLaneMine, ct).ConfigureAwait(false);
             }
 
             // A pair with only one half is malformed, not "no core record": deny rather than treat it as owner-only.
@@ -185,7 +199,14 @@ public sealed class SignalCoreRecordAccess
             }
 
             var allowed = new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
-            return lane == DecisionLane.Do ? await AuthorizeDoLaneMineAsync(row, allowed, ct).ConfigureAwait(false) : allowed;
+            if (lane != DecisionLane.Do)
+            {
+                return allowed;
+            }
+
+            var (subjectTable, subjectId) = SubjectOf(row);
+            allowed = allowed with { SubjectTable = subjectTable, SubjectId = subjectId };
+            return enforceDoLaneMine ? await ConfirmDoLaneMineAsync(allowed, ct).ConfigureAwait(false) : allowed;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -196,10 +217,10 @@ public sealed class SignalCoreRecordAccess
     }
 
     private async Task<SignalAccessDecision> AuthorizeNoCoreRecordAsync(
-        JsonElement signalRow, DecisionLane lane, Guid policyVersionId, CancellationToken ct)
+        JsonElement signalRow, DecisionLane lane, Guid policyVersionId, bool enforceDoLaneMine, CancellationToken ct)
     {
         // D-35 as amended by D-129 (records are owned by teams, never by a person): a no-core item is visible to whoever can read
-        // its SUBJECT row as themselves, and only in the Do lane. The Signal row itself was read as the caller before this point
+        // its SUBJECT row as themselves, and only in the Do lane; and, D-141, only when the worklist's "mine" rule admits them. The Signal row itself was read as the caller before this point
         // (both reads must succeed), so the subject's own team and sharing decide, not an owner-equality test; a subject in a
         // secure record family is unreadable to a non-member and so is the uniform denial (D-123).
         if (lane != DecisionLane.Do)
@@ -210,9 +231,8 @@ public sealed class SignalCoreRecordAccess
         // Task 141: the subject table comes from the subject lookup that carries the pair id (SignalWriter.SubjectEntityOf),
         // never from sprk_regardingrecordtype, which is a lookup to sprk_recordtype_ref since task 140 (and absent on an
         // untyped pair).
-        var subjectId = Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var pairId) ? pairId : Guid.Empty;
-        var subjectType = SignalWriter.SubjectEntityOf(
-            subjectId, lookup => TryReadGuid(signalRow, $"_{lookup}_value", out var id) ? id : null);
+        var (subjectType, subject) = SubjectOf(signalRow);
+        var subjectId = subject ?? Guid.Empty;
         if (subjectId == Guid.Empty || !RecordOwnershipResolver.IsOwnershipParent(subjectType))
         {
             // No subject pair, or a table that is not one of uac-r2's ownership parents: a forged or stale pointer (the K2 rule,
@@ -234,10 +254,10 @@ public sealed class SignalCoreRecordAccess
         }
 
         // createdon exists on every Dataverse table; the value is not used, only whether the caller may read the row.
-        DataverseUserResponse subject;
+        DataverseUserResponse subjectRead;
         try
         {
-            subject = await _userClient.GetAsync($"{entitySet}({subjectId})?$select=createdon", ct).ConfigureAwait(false);
+            subjectRead = await _userClient.GetAsync($"{entitySet}({subjectId})?$select=createdon", ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -245,27 +265,40 @@ public sealed class SignalCoreRecordAccess
             return SignalAccessDecision.Unavailable;
         }
 
-        if (!subject.IsSuccess)
+        if (!subjectRead.IsSuccess)
         {
-            return await DeniedAsync(subject, "subject", ct, faultIsUnavailable: true).ConfigureAwait(false);
+            return await DeniedAsync(subjectRead, "subject", ct, faultIsUnavailable: true).ConfigureAwait(false);
         }
 
-        return await AuthorizeDoLaneMineAsync(
-            signalRow, new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId), ct).ConfigureAwait(false);
+        var allowed = new SignalAccessDecision(
+            SignalAccessOutcome.Allowed, lane, policyVersionId, SubjectTable: subjectType, SubjectId: subjectId);
+        return enforceDoLaneMine ? await ConfirmDoLaneMineAsync(allowed, ct).ConfigureAwait(false) : allowed;
+    }
+
+    /// <summary>The subject the rest of this class uses (task 141): the subject lookup that carries the pair id, and that id.</summary>
+    private static (string? Table, Guid? Id) SubjectOf(JsonElement signalRow)
+    {
+        Guid? subjectId = Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var pairId) && pairId != Guid.Empty ? pairId : null;
+        var subjectType = SignalWriter.SubjectEntityOf(
+            subjectId ?? Guid.Empty, lookup => TryReadGuid(signalRow, $"_{lookup}_value", out var id) ? id : null);
+        return (subjectType, subjectId);
     }
 
     /// <summary>
-    /// D-141 (task 150): a Do-lane Signal the earlier reads allowed stays allowed only when the worklist's "mine" read, asked AS THE
-    /// CALLER for this Signal's subject, returns that subject. Otherwise the uniform <see cref="SignalAccessOutcome.NotFound"/>; a
-    /// fault is <see cref="SignalAccessOutcome.Unavailable"/> (the worklist answers 503 for the same faults).
+    /// D-141 (task 150): a Do-lane Signal the readability reads allowed stays allowed only when the worklist's "mine" read, asked AS
+    /// THE CALLER for this Signal's subject, returns that subject. Otherwise the uniform <see cref="SignalAccessOutcome.NotFound"/>; a
+    /// fault is <see cref="SignalAccessOutcome.Unavailable"/> (the worklist answers 503 for the same faults). Any decision that is not
+    /// an allowed Do-lane one is returned unchanged.
     /// </summary>
-    private async Task<SignalAccessDecision> AuthorizeDoLaneMineAsync(JsonElement signalRow, SignalAccessDecision allowed, CancellationToken ct)
+    internal async Task<SignalAccessDecision> ConfirmDoLaneMineAsync(SignalAccessDecision allowed, CancellationToken ct)
     {
-        // The subject is the one the rest of this class uses: the subject lookup that carries the pair id (task 141).
-        var subjectId = Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var pairId) ? pairId : Guid.Empty;
-        var subjectType = SignalWriter.SubjectEntityOf(
-            subjectId, lookup => TryReadGuid(signalRow, $"_{lookup}_value", out var id) ? id : null);
-        if (subjectType is null || !SignalReadService.DoLaneMineRules.TryGetValue(subjectType, out var rule))
+        if (allowed.Outcome != SignalAccessOutcome.Allowed || allowed.Lane != DecisionLane.Do)
+        {
+            return allowed;
+        }
+
+        if (allowed.SubjectTable is not { } subjectType || allowed.SubjectId is not { } subjectId
+            || !SignalReadService.DoLaneMineRules.TryGetValue(subjectType, out var rule))
         {
             // No derivable subject, or a subject table with no "mine" rule: the worklist shows such a Do row to nobody.
             _logger.LogDebug("Signal access: the Do-lane Signal's subject cannot be derived or has no mine rule; denying.");

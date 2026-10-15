@@ -453,7 +453,8 @@ public sealed class DecisionCommitService
         var lanes = new Dictionary<Guid, SignalAccessDecision>();
         foreach (var id in ids)
         {
-            var decision = await _access.AuthorizeAsync(id, ct).ConfigureAwait(false);
+            // Readability only here; the Do-lane "mine" half (D-141) follows below, once the review id is known (task 150).
+            var decision = await _access.AuthorizeAsync(id, ct, enforceDoLaneMine: false).ConfigureAwait(false);
             if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = review.ReviewId };
             if (decision.Outcome == SignalAccessOutcome.Unavailable)
@@ -465,6 +466,15 @@ public sealed class DecisionCommitService
 
         var hash = ContentHash(signalId, review);
         var ledgerKey = $"{callerObjectId}:{review.ReviewId:D}";
+
+        // ---- (1b) D-141 (task 150): a Do item is the caller's own work, or the uniform 404, before any lock, ledger answer or write.
+        // The one exception is THIS caller's own review of exactly this content already in the ledger: it passed this check on its
+        // first attempt, and the decision may since have reassigned the item (Reassign), so its stored outcome is returned or its
+        // failure resumed. Any other review id, or the same id with other content, is checked here, so a not-mine item never gets
+        // an in-progress, review-changed or replay answer an unreadable item would not.
+        var mineConfirmed = !await IsSameReviewInLedgerAsync(tenantId, ledgerKey, hash, ct).ConfigureAwait(false);
+        if (mineConfirmed && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
 
         // ---- (0a) Locks, across instances: atomic leases (Redis SET NX PX when Redis is on; the same primitive
         // NoAccessShareEnforcer uses as a keyed mutex). One for the review id (the ledger's marker alone is a get-then-set), and
@@ -496,7 +506,7 @@ public sealed class DecisionCommitService
                 ct.ThrowIfCancellationRequested();
             }
 
-            return await CommitLeasedAsync(signalId, review, http, now, tenantId, callerObjectId, ids, lanes, hash, ledgerKey, ct).ConfigureAwait(false);
+            return await CommitLeasedAsync(signalId, review, http, now, tenantId, callerObjectId, ids, lanes, hash, ledgerKey, mineConfirmed, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -526,6 +536,46 @@ public sealed class DecisionCommitService
     private static DateTimeOffset Bounded(DateTimeOffset reviewStart, DateTimeOffset now) =>
         reviewStart > now - DecisionPlanReadStamp.Ttl ? reviewStart : now - DecisionPlanReadStamp.Ttl;
 
+    /// <summary>
+    /// Task 150: whether THIS caller's ledger already holds this review id with this content (in progress or with an outcome). A
+    /// ledger fault answers false, so the Do-lane "mine" check runs (fail closed; the locked read then answers the fault itself).
+    /// </summary>
+    private async Task<bool> IsSameReviewInLedgerAsync(string tenantId, string ledgerKey, string hash, CancellationToken ct)
+    {
+        try
+        {
+            var prior = await _ledger.GetAsync<LedgerEntry>(tenantId, LedgerResource, ledgerKey, LedgerVersion, ct: ct).ConfigureAwait(false);
+            return prior is not null && string.Equals(prior.ContentHash, hash, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: the review ledger could not be read before the Do-lane check ({ExceptionType}); checking.",
+                ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// D-141 (task 150): every Do-lane Signal in the review must be the caller's own work (<see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/>,
+    /// the worklist's rule). Null when they all are; otherwise exactly the answer the readability check gives an unreadable item.
+    /// </summary>
+    private async Task<DecisionCommitResult?> ConfirmDoLaneMineAsync(
+        Guid reviewId, IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, CancellationToken ct)
+    {
+        foreach (var id in ids)
+        {
+            var decision = await _access.ConfirmDoLaneMineAsync(lanes[id], ct).ConfigureAwait(false);
+            if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
+                return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = reviewId };
+            if (decision.Outcome == SignalAccessOutcome.Unavailable)
+                return Unavailable(reviewId, DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.");
+            if (decision.Outcome != SignalAccessOutcome.Allowed)
+                return new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = reviewId };
+        }
+
+        return null;
+    }
+
     private static DecisionCommitResult InProgress(Guid reviewId) =>
         new()
         {
@@ -537,7 +587,8 @@ public sealed class DecisionCommitService
 
     private async Task<DecisionCommitResult> CommitLeasedAsync(
         Guid signalId, DecisionReview review, HttpContext http, DateTimeOffset now, string tenantId, string callerObjectId,
-        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, string hash, string ledgerKey, CancellationToken ct)
+        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, string hash, string ledgerKey, bool mineConfirmed,
+        CancellationToken ct)
     {
         // ---- (0) The review id: in progress, or a first outcome to return --------------------------------------------
         LedgerEntry? prior;
@@ -550,6 +601,12 @@ public sealed class DecisionCommitService
             _logger.LogWarning(ex, "Decision commit: the review ledger could not be read for review {ReviewId}; refusing (fail closed).", review.ReviewId);
             return Unavailable(review.ReviewId);
         }
+
+        // D-141 (task 150): the check was skipped before the lock because this review was in the ledger; under the lock it is not
+        // (or holds other content), so this is a first attempt after all and the check runs now.
+        if (!mineConfirmed && (prior is null || !string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
+            && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
 
         DecisionCommitResult? resume = null;
         if (prior is { InProgress: true })
