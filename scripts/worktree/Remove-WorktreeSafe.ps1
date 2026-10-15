@@ -16,7 +16,9 @@
     delete of a worktree root; this script is the safe way to remove one.
 
     Refuses (exit 1, nothing touched) when a path is not a registered worktree root, is the main worktree, is itself a
-    reparse point, or (without -Force) has uncommitted changes. All paths are validated before any is touched.
+    reparse point, is LOCKED (`git worktree unlock <path>` first; -Force does not override a lock), has a folder that
+    cannot be enumerated (fails closed: a link we cannot see is a link we cannot unlink), or (without -Force) has
+    uncommitted changes. All paths are validated and every worktree is scanned (read-only) before any link is removed.
 
     Reports how many links were removed and lists every link whose target resolves OUTSIDE its worktree; those are
     the dangerous ones.
@@ -59,6 +61,19 @@ function Get-RegisteredWorktree([string]$dir) {
     return , @($roots)
 }
 
+function Get-LockedWorktree([string]$dir) {
+    # Registered worktree roots that carry a `locked` line in `git worktree list --porcelain`, as root -> reason.
+    $locked = @{}
+    $lines = & git -C $dir worktree list --porcelain 2>$null
+    if ($LASTEXITCODE -ne 0) { return $locked }
+    $current = $null
+    foreach ($l in $lines) {
+        if ($l -like 'worktree *') { $current = ConvertTo-NormalPath $l.Substring(9) }
+        elseif ($current -and ($l -eq 'locked' -or $l -like 'locked *')) { $locked[$current] = $l.Substring(6).Trim() }
+    }
+    return $locked
+}
+
 function Test-IsUnder([string]$child, [string]$root) {
     return $child.StartsWith($root.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)
 }
@@ -85,6 +100,12 @@ foreach ($p in $Path) {
     if ((Get-Item -LiteralPath $full -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         $refusals += "$full : the worktree root is itself a link; resolve it by hand"; continue
     }
+    $locks = Get-LockedWorktree $full
+    $lockKey = @($locks.Keys | Where-Object { $_ -ieq $full })
+    if ($lockKey.Count) {
+        $why = $locks[$lockKey[0]]
+        $refusals += "$full : locked$(if ($why) { " ($why)" }) - run ``git worktree unlock $full`` first (-Force does not override a lock)"; continue
+    }
     if (-not $Force) {
         $dirty = & git -C $full status --porcelain 2>&1
         if ($LASTEXITCODE -ne 0) { $refusals += "$full : git status failed: $dirty"; continue }
@@ -98,16 +119,22 @@ if ($refusals) {
     exit 1
 }
 
-# --- 2. unlink every reparse point, never descending into one ---------------------------------------------
-$failed = $false
+# --- 2. scan every worktree (read-only) and list its reparse points, never descending into one -----------------
+# A folder we cannot enumerate may hold a link we would miss, and git would then delete through it: refuse before
+# anything is touched.
+$scans = @()
 foreach ($wt in $plan) {
-    $removed = 0
-    $outside = [System.Collections.Generic.List[string]]::new()
+    $links = [System.Collections.Generic.List[object]]::new()
     $stack = [System.Collections.Generic.Stack[System.IO.DirectoryInfo]]::new()
     $stack.Push([System.IO.DirectoryInfo]::new($wt))
     while ($stack.Count -gt 0) {
         $dir = $stack.Pop()
-        try { $entries = $dir.EnumerateFileSystemInfos() } catch { Write-Warning "cannot enumerate $($dir.FullName): $($_.Exception.Message)"; continue }
+        try { $entries = @($dir.EnumerateFileSystemInfos()) } catch {
+            $msg = "cannot enumerate $($dir.FullName): $($_.Exception.Message)"
+            Write-Warning $msg
+            $refusals += "$wt : $msg"
+            continue
+        }
         foreach ($e in $entries) {
             $isLink = [bool]($e.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
             $isDir = [bool]($e.Attributes -band [System.IO.FileAttributes]::Directory)
@@ -118,22 +145,41 @@ foreach ($wt in $plan) {
             $target = Get-LinkTargetFull $e
             if (-not $isDir -and -not $target) { continue }   # a cloud placeholder, not a link: git deals with it
             $label = if ($target) { "$($e.FullName) -> $target" } else { "$($e.FullName) -> (unreadable target)" }
-            if (-not $target -or -not (Test-IsUnder $target $wt)) { $outside.Add($label) }
-            if ($PSCmdlet.ShouldProcess($e.FullName, 'Remove link (the target is not touched)')) {
-                try {
-                    if ($isDir) { [System.IO.Directory]::Delete($e.FullName, $false) } else { [System.IO.File]::Delete($e.FullName) }
-                    $removed++
-                } catch {
-                    [Console]::Error.WriteLine("FAILED to unlink $($e.FullName): $($_.Exception.Message)")
-                    $failed = $true
-                }
+            $links.Add([pscustomobject]@{
+                Path = $e.FullName; IsDir = $isDir; Label = $label
+                Outside = (-not $target -or -not (Test-IsUnder $target $wt))
+            })
+        }
+    }
+    $scans += [pscustomobject]@{ Wt = $wt; Links = $links }
+}
+if ($refusals) {
+    foreach ($r in $refusals) { [Console]::Error.WriteLine("REFUSED  $r") }
+    [Console]::Error.WriteLine('Nothing was touched.')
+    exit 1
+}
+
+# --- 3. unlink every reparse point found (the link only, never its target) ---------------------------------------
+$failed = $false
+foreach ($scan in $scans) {
+    $removed = 0
+    foreach ($l in $scan.Links) {
+        if ($PSCmdlet.ShouldProcess($l.Path, 'Remove link (the target is not touched)')) {
+            try {
+                if ($l.IsDir) { [System.IO.Directory]::Delete($l.Path, $false) } else { [System.IO.File]::Delete($l.Path) }
+                $removed++
+            } catch {
+                [Console]::Error.WriteLine("FAILED to unlink $($l.Path): $($_.Exception.Message)")
+                $failed = $true
+                break                                         # no further unlinks in this worktree
             }
         }
     }
-    Write-Host "$wt : $removed link(s) removed"
+    Write-Host "$($scan.Wt) : $removed link(s) removed"
+    $outside = @($scan.Links | Where-Object { $_.Outside })
     if ($outside.Count) {
         Write-Host "  links pointing OUTSIDE this worktree ($($outside.Count)) - these would have been deleted through:"
-        foreach ($o in $outside) { Write-Host "    $o" }
+        foreach ($o in $outside) { Write-Host "    $($o.Label)" }
     }
 }
 if ($failed) {
@@ -141,7 +187,7 @@ if ($failed) {
     exit 1
 }
 
-# --- 3. git removes the (now link-free) tree; no fallback delete ------------------------------------------
+# --- 4. git removes the (now link-free) tree; no fallback delete ------------------------------------------
 foreach ($wt in $plan) {
     $gitArgs = [System.Collections.Generic.List[string]]::new()
     $gitArgs.AddRange([string[]]@('worktree', 'remove'))

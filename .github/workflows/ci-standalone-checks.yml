@@ -673,6 +673,11 @@ jobs:
             scripts/ai-cost
             tests/scripts
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Git identity for the temp repos the tests create
         shell: pwsh
         run: |

@@ -55,6 +55,27 @@ BeforeAll {
         @(& git -C $mainDir worktree list --porcelain | Where-Object { $_ -like 'worktree *' } | ForEach-Object { $_.Substring(9) -replace '/', '\' })
     }
 
+    function Get-ScriptCode {
+        # the script minus block comments and full-line comments (the help text names the forbidden commands)
+        $t = Get-Content -LiteralPath $script:Script -Raw
+        $t = [regex]::Replace($t, '(?s)<#.*?#>', '')
+        return (($t -split "`r?`n" | Where-Object { $_.TrimStart() -notlike '#*' }) -join "`n")
+    }
+
+    function Find-ForbiddenDelete([string]$code) {
+        # patterns that would let the script delete THROUGH a link, or fall back to a recursive delete
+        $patterns = @('(?i)-Recurse', '(?i)\bDelete\([^)]*\$true', '(?i)\brm\s+-[a-z]*r', '(?i)\brd\s+/s', '(?i)\brmdir\s+/s')
+        return @($patterns | Where-Object { $code -match $_ })
+    }
+
+    function Set-DenyList([string]$dir, [bool]$deny) {
+        # deny (or restore) "list folder" for the current user, so enumerating $dir throws UnauthorizedAccessException
+        $sid = '*' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if (-not $deny -and -not (Test-Path -LiteralPath $dir)) { return }
+        if ($deny) { & icacls $dir /deny "${sid}:(RD)" | Out-Null } else { & icacls $dir /remove:d $sid | Out-Null }
+        if ($LASTEXITCODE -ne 0) { throw "icacls failed on $dir" }
+    }
+
     function Remove-Fixture($f) {
         # test cleanup only: unlink junctions first so nothing is deleted through them
         foreach ($j in @((Join-Path $f.Wt 'node_modules'), (Join-Path $f.Victim 'nested'))) {
@@ -137,6 +158,72 @@ Describe 'Remove-WorktreeSafe.ps1' {
             Test-Path -LiteralPath $script:F.Wt | Should -BeFalse
             Test-Path -LiteralPath (Join-Path $script:F.Victim 'precious.txt') | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $script:F.Victim2 'precious2.txt') | Should -BeTrue
+        }
+    }
+
+    Context 'never falls back: a path git cannot remove is left for a human' {
+        BeforeAll { $script:F = New-Fixture }
+        AfterAll {
+            & git -C $script:F.Main worktree unlock $script:F.Wt 2>$null | Out-Null
+            Remove-Fixture $script:F
+        }
+
+        It 'refuses a locked worktree even with -Force, before unlinking anything' {
+            Invoke-Git $script:F.Main @('worktree', 'lock', '--reason', 'test lock', $script:F.Wt) | Out-Null
+            $r = Invoke-Safe -Paths $script:F.Wt -Force
+            $r.Code | Should -Not -Be 0 -Because $r.Out
+            $r.Out | Should -Match 'locked'
+            $r.Out | Should -Match 'git worktree unlock'
+            Test-Path -LiteralPath $script:F.Wt | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $script:F.Victim 'precious.txt') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $script:F.Victim2 'precious2.txt') | Should -BeTrue
+            (Get-Item -LiteralPath (Join-Path $script:F.Wt 'node_modules') -Force).LinkType | Should -Be 'Junction'
+        }
+
+        It 'removes the worktree once it is unlocked (the refusal was the lock, nothing else)' {
+            Invoke-Git $script:F.Main @('worktree', 'unlock', $script:F.Wt) | Out-Null
+            $r = Invoke-Safe -Paths $script:F.Wt -Force
+            $r.Code | Should -Be 0 -Because $r.Out
+            Test-Path -LiteralPath $script:F.Wt | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $script:F.Victim 'precious.txt') | Should -BeTrue
+        }
+    }
+
+    Context 'fails closed when a folder cannot be enumerated' {
+        BeforeAll {
+            $script:F = New-Fixture
+            $script:Blocked = Join-Path $script:F.Wt 'blocked'
+            New-Item -ItemType Directory -Path $script:Blocked | Out-Null
+            Set-DenyList $script:Blocked $true
+        }
+        AfterAll {
+            Set-DenyList $script:Blocked $false
+            Remove-Fixture $script:F
+        }
+
+        It 'touches nothing: no unlink, no git worktree remove, non-zero exit' {
+            $r = Invoke-Safe -Paths $script:F.Wt -Force
+            $r.Code | Should -Not -Be 0 -Because $r.Out
+            $r.Out | Should -Match 'cannot enumerate'
+            Test-Path -LiteralPath $script:F.Wt | Should -BeTrue
+            (Get-Item -LiteralPath (Join-Path $script:F.Wt 'node_modules') -Force).LinkType | Should -Be 'Junction'
+            Test-Path -LiteralPath (Join-Path $script:F.Victim 'precious.txt') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $script:F.Victim2 'precious2.txt') | Should -BeTrue
+            @(Get-WorktreePaths $script:F.Main).Count | Should -Be 2
+        }
+    }
+
+    Context 'static control: the script has no recursive-delete fallback' {
+        It 'the real script contains none of the forbidden spellings' {
+            Find-ForbiddenDelete (Get-ScriptCode) | Should -BeNullOrEmpty
+        }
+
+        It 'the check itself fires on each forbidden spelling (must-fire control)' {
+            foreach ($bad in @('Remove-Item -LiteralPath $p -Recurse -Force', '[System.IO.Directory]::Delete($p, $true)',
+                               '[IO.Directory]::Delete($p,$true)', 'rm -rf $p', 'rd /s /q $p', 'rmdir /s /q $p')) {
+                Find-ForbiddenDelete $bad | Should -Not -BeNullOrEmpty -Because $bad
+            }
+            Find-ForbiddenDelete '[System.IO.Directory]::Delete($e.FullName, $false)' | Should -BeNullOrEmpty
         }
     }
 }
