@@ -41,6 +41,7 @@ This directory contains authoritative documentation for Dataverse entity schemas
 |----------|-------------|--------------|---------------|--------|
 | [sprk_billingevent.md](sprk_billingevent.md) | Billing event entity | 2026-02-12 | — | — |
 | [sprk_billingcode.md](sprk_billingcode.md) | UTBMS code sets: `sprk_billingcodeset` + `sprk_billingcode`, alternate key, default-code-set lookups on the matter-type / practice-area tables, the eight seeded sets (eBilling R1 task 018) | 2026-10-15 | 2026-10-15 | Current |
+| [sprk_ruleset.md](sprk_ruleset.md) | Rule sets and the billing extensions to the shared policy store: `sprk_ruleset`, `sprk_policydomain`, `sprk_policy` domain / rule set, `sprk_policyversion` clause / consequence / proposal status, visible-to-firms flag (eBilling R1 task 019) | 2026-10-15 | 2026-10-15 | Current |
 | [sprk_budget.md](sprk_budget.md) | Budget entity | 2026-02-12 | — | — |
 | [sprk_invoice-matter-project.md](sprk_invoice-matter-project.md) | Invoice / matter / project entities | 2026-02-13 | — | — |
 | [sprk_financial-related-entities.md](sprk_financial-related-entities.md) | Includes `sprk_budgetbucket`, `sprk_invoice`, `sprk_spendsignal`, `sprk_spendsnapshot` (stub entity pages archived under `archive/`) | 2026-02-12 | — | — |

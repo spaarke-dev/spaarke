@@ -1798,6 +1798,15 @@ pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaa
 pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
+### `ebilling/Deploy-EbillingPolicyStoreSchema.ps1`
+
+Additive Dataverse metadata script that extends the ontology-owned policy store for billing rules (FR-09, D-26, D-66): the global option set `sprk_policydomain` (Billing, Ontology, Docketing), `sprk_domain` and the `sprk_ruleset` lookup on `sprk_policy`, `sprk_clausereference` / `sprk_clauselocation` / `sprk_consequence` / `sprk_proposalstatus` on `sprk_policyversion`, and the new user-owned table `sprk_ruleset` (domain, source document, scope, firm, `sprk_visibletofirms` defaulting to No, effective dates, not-converted JSON, statuscode Draft / Published / Retired). Never relabels, deletes or renumbers an existing policy column or option and writes no policy row; stops with exit 2 if a planned name exists with another type, target or option list. Supports `-WhatIf`; retries on customization / publish locks, a new table still propagating and stale option reads; ends with a metadata read-back. Columns and values: `docs/data-model/sprk_ruleset.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
@@ -1975,3 +1984,4 @@ Most scripts require:
 - **2026-10-15:** Added the eBilling Scripts section: Deploy-EbillingInvoiceLineSchema.ps1 (task 010) and content-understanding/Deploy-Analyzers.ps1 (task 004), `ebilling-r1`.
 - **2026-10-15:** Added ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (sprk_invoice header columns and lifecycle statuscode values, `ebilling-r1` task 012).
 - **2026-10-15:** Added ebilling/Deploy-EbillingBillingCodeSchema.ps1 and ebilling/Seed-EbillingBillingCodes.ps1 (UTBMS code set tables, alternate key, default-code-set lookups, eight seeded sets; `ebilling-r1` task 018).
+- **2026-10-15:** Added ebilling/Deploy-EbillingPolicyStoreSchema.ps1 (policy store domain / rule set / clause / consequence columns, `sprk_policydomain`, `sprk_ruleset` table; `ebilling-r1` task 019).

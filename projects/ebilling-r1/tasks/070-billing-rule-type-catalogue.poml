@@ -53,6 +53,7 @@
   </context>
 
   <constraints>
+    <constraint source="task 019">Ontology Signals readers load every enabled sprk_policy regardless of domain (SignalReevaluationJob.ReadEnabledPoliciesAsync, PolicyScopeResolver.LoadEnabledPoliciesAsync; inventory in notes/019-policy-store-ruleset.md section 3). Make both skip sprk_domain = Billing (100000000; empty stays Ontology) in this task, with a seeded test, before any billing policy is enabled; this is ontology-r1 code, so ontology-r1 reviews the PR (and confirmed or corrected the column list in the 019 review). A billing sprk_policyversion still fills the required sprk_proposedaction and a valid sprk_lane; billing sprk_policycode values carry a BILL- prefix.</constraint>
     <constraint source="spec FR-24, D-27">Closed set in code (enum plus exhaustive switches). No data-driven registry, no reflection discovery, no expression language.</constraint>
     <constraint source="spec MUST">A consumer that cannot evaluate a type refuses it: never compiles it, never treats it as true, never describes it as another type.</constraint>
     <constraint source="project">Ontology types and their validation, compilation and template read-set rule unchanged (existing tests unmodified).</constraint>
@@ -115,6 +116,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">An enabled sprk_policy with sprk_domain = Billing is not loaded by SignalReevaluationJob.ReadEnabledPoliciesAsync or PolicyScopeResolver.LoadEnabledPoliciesAsync (seeded test); a policy with empty or Ontology domain still is.</criterion>
     <criterion testable="true">RuleType has 14 members; a test pins each billing name to its option value and domain both ways; values match dev metadata.</criterion>
     <criterion testable="true">Per billing type: a valid body passes ValidateForSave; missing parameter, extra property, wrong "type" const, out-of-range value, messageTemplate or "then" property are refused with a field-level error.</criterion>
     <criterion testable="true">Unknown, blank, comma-combined or signed-numeric types are refused as rule_type_unsupported (existing tests unmodified, green).</criterion>

@@ -4,7 +4,7 @@
     <title>Policy store extensions, sprk_ruleset, visible-to-firms flag</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script on a shared (ontology-owned) store plus one new table; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,7 @@
     <criterion testable="true">Task notes record the collision search, the overlap and reader inventory for 070, every numeric value, and ontology-r1's review (FR-09 acceptance).</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append point: docs/data-model/INDEX.md (one row). D-66 says the flag defaults on for billing guidelines and rate cards and off for internal procedures; the column default is No (fail closed) and 076 sets the initial value from the source kind at create. The billing sprk_ruletype values are 070's. sprk_proposalstatus and sprk_notconverted are additions beyond the brief so that 075 / 076 have storage for proposal state and the not-converted list (both of their escalation triggers name 019). Admin forms and views are 029's.</notes>
+  <notes>Schema applied to dev 2026-10-15 and a second run made no change (see projects/ebilling-r1/notes/019-policy-store-ruleset.md). Open: ontology-r1's written review (acceptance 5) and the Signals unit-test run. The billing/ontology reader inventory for 070 is in the notes. Shared append point: docs/data-model/INDEX.md (one row). D-66 says the flag defaults on for billing guidelines and rate cards and off for internal procedures; the column default is No (fail closed) and 076 sets the initial value from the source kind at create. The billing sprk_ruletype values are 070's. sprk_proposalstatus and sprk_notconverted are additions beyond the brief so that 075 / 076 have storage for proposal state and the not-converted list (both of their escalation triggers name 019). Admin forms and views are 029's.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
