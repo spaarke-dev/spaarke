@@ -108,9 +108,13 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var world = new World();
         world.Signal(Decide, core: (MatterType, world.Matter(readers: [Alice])));
         world.TableDenied[Alice] = ["sprk_signal"];
+        _factory.Logs.Warnings.Clear();
         var body = await OkAsync(world, Alice);
         AllItems(body).Should().BeEmpty();
         body.GetProperty("lanes").GetArrayLength().Should().Be(2);
+        // Task 149 (uac-r2 K3 on #1891): an empty worklist from a refused read looks exactly like "no work", so the refusal is
+        // logged at Warning, the level an operator filters on (LogCapture keeps Warning and above).
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the caller has no read on sprk_signal", StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------------------------------------------------------
