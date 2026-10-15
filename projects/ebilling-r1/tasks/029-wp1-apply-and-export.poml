@@ -43,6 +43,8 @@
   </context>
 
   <constraints>
+    <constraint source="task 014 / #1957 (2026-10-15)">Hide the out-of-the-box Activate and Deactivate commands for sprk_invoice in the model-driven app command bar: invoice status changes only through IInvoiceLifecycleService (FR-06 matrix). Writes outside the product (Web API, flows) remain the accepted L4 gap of DATAVERSE-WRITE-PATH-ARCHITECTURE.md; invoice statuscode is audited.</constraint>
+    <constraint source="task 016 (2026-10-15)">Make the five invoice totals and the Adjustment-line amount read-only on every sprk_invoice / line form: IInvoiceTotalsService is their one owner (I-1).</constraint>
     <constraint source="project">Dev only (https://spaarkedev1.crm.dynamics.com). Re-runs use the existing scripts unchanged; a script that changes something on re-run is a defect in its task, reported, not patched here.</constraint>
     <constraint source="project">scripts/Import-SolutionScoped.ps1 is the only way to import a solution; this task runs it with -PlanOnly only. No real import, no Assemble-SpaarkeMasterSolution.ps1 run and no version bump (release steps owned by the release owner).</constraint>
     <constraint source="project">Only eBilling components enter the repo: export to a temp folder (path at most 140 characters) and copy eBilling files or hunks; unrelated dev drift is listed in notes, never copied.</constraint>

@@ -28,9 +28,9 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 011 | 🔲 [open] | Retire `sprk_invoicelineitem` (owner OK before delete) | STANDARD | sonnet / high | P1-B (p-safe false) | 010, 017 |
 | 012 | ✅ [done] | Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes | STANDARD | sonnet / high | P1-A | none |
 | 013 | 🔲 [open] | Core-ancestor derivation and one-lookup guard for the invoice family | FULL | opus / high | none (p-safe false: uac-r2 security files, census test shared with 011) | 010, 012, 020, 021, 022, 023, 027 |
-| 014 | 🟡 [wip] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
+| 014 | ✅ [done] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
 | 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
-| 016 | 🟡 [wip] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
+| 016 | ✅ [done] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
 | 017 | ✅ [done] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
 | 018 | ✅ [done] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
 | 019 | ✅ [done] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |

@@ -10,6 +10,32 @@
 
 ## Open (in priority order)
 
+### ISS-007 — Invoice status can be changed outside IInvoiceLifecycleService (OOB Activate / Deactivate, direct writes)
+
+| Field | Value |
+|---|---|
+| **Status** | Open - resolution planned |
+| **Urgency** | before task 029 (forms and command bar) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 014 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1957 |
+
+**Description**: the FR-06 transition matrix holds only for callers of the service. Activate on a Paid invoice returns it to In Review; Web API and flow writes bypass it too. ADR-002 rules out a plugin.
+
+**Resolution (technical, per DATAVERSE-WRITE-PATH-ARCHITECTURE.md L1-L4)**: task 029 hides the OOB Activate / Deactivate commands on sprk_invoice, so the product's only status writer is the service; non-product writes are the architecture's accepted L4 gap (statuscode is audited). A report-only reconciliation job is not planned for R1.
+
+### ISS-008 — Console user-profile role reads the timekeeper list and hard-codes its options (D-83)
+
+| Field | Value |
+|---|---|
+| **Status** | Open - Console scope |
+| **Urgency** | blocks deleting the 10 non-LEDES options of sprk_timekeeperrole |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 017 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1954 |
+
+**Description**: `sprk_userprofile.sprk_primaryrole` is bound to `sprk_timekeeperrole`; `userProfileService.ts` (`PRIMARY_ROLE_OPTIONS`) and `StatedProfileReader.cs` hard-code its 14 original options. Per D-83 it moves to a lookup on `sprk_contacttype_ref` read from Dataverse; then ebilling deletes the 10 non-LEDES options (only Legal Operations, on 1 user profile, holds data).
+
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
 
 | Field | Value |
