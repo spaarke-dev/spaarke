@@ -26,10 +26,15 @@ def msys(path):
     return "/%s/%s" % (m.group(1).lower(), m.group(2).replace("\\", "/")) if m else path
 
 
-def run(event, project_dir, raw=None):
+def run_full(event, project_dir, raw=None, env_extra=None):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=project_dir)
+    env.update(env_extra or {})
     payload = raw if raw is not None else json.dumps(event)
-    out = subprocess.run([sys.executable, HOOK], input=payload, capture_output=True, text=True, env=env, timeout=20)
+    return subprocess.run([sys.executable, HOOK], input=payload, capture_output=True, text=True, env=env, timeout=20)
+
+
+def run(event, project_dir, raw=None, env_extra=None):
+    out = run_full(event, project_dir, raw, env_extra)
     return out.returncode, out.stdout.strip()
 
 
@@ -231,6 +236,57 @@ class GuardWorktreeLinks(unittest.TestCase):
         self.ps(f"[IO.Directory]::Exists('{link}')", False)
         self.ps("[IO.Directory]::CreateSymbolicLink('relative-link', 'relative-target')", False)
 
+    def test_create_symbolic_link_text_inside_quotes_is_data(self):
+        """Re-check F1: the call text inside a string, commit message or here-string is not an invocation."""
+        link, tgt, _, _ = self._ends()
+        call = f"[IO.Directory]::CreateSymbolicLink('{link}','{tgt}')"
+        nl = chr(10)
+        for cmd in (
+            f'Write-Host "{call}"',
+            f'git commit -m "docs: {call}"',
+            nl.join(['git commit -m @"', f"docs: {call}", '"@']),
+            nl.join(["$h = @'", call, "'@"]),
+            f'Add-Content -Path docs/x.md -Value "{call}"',
+            "Write-Host '" + call.replace("'", "''") + "'",
+            f"# {call}",
+            nl.join(["# it's data", f"Write-Host ok  # {call}"]),
+        ):
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, False)
+        for cmd in (                                   # real invocations still fire, whatever came before
+            call,
+            f"$null = {call}",
+            f"& {{ {call} }}",
+            f"if ($true) {{ {call} }}",
+            f"Write-Host 'hi'; {call}",
+            "Write-Host \"it's\"; " + call,
+            nl.join(["# it's a comment", call]),
+            nl.join(["$h = @'", "it's", "'@", call]),
+        ):
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, True)
+        self.sh(f'powershell -NoProfile -Command "{call}"', True)
+        self.ps(f'pwsh -Command "{call}"', True)
+        self.ps(f'pwsh -NoProfile -c "{call}"', True)
+        self.sh(f'echo "{call}"', False)
+
+    def test_powershell_here_string_with_odd_apostrophes(self):
+        """Re-check K3: an unbalanced apostrophe in a here-string body must not break quote tracking."""
+        link, tgt, _, _ = self._ends()
+        nl = chr(10)
+        new_item = f"New-Item -ItemType Junction -Path {link} -Target {tgt}"
+        body = [nl.join(["$body = @'", "it's", new_item, "'@", "gh pr create --body $body"]),
+                nl.join(['$body = @"', "it's", new_item, '"@', "gh pr create --body $body"]),
+                nl.join(["git commit -m @'", "don't", f"rm -rf {self.wtb}", "'@"])]
+        for cmd in body:
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, False)
+        for cmd in (nl.join(["$body = @'", "it's", "'@", new_item]),
+                    nl.join(["$body = @'", "it's", "'@", "gh pr create --body $body", new_item]),
+                    nl.join(["$body = @'", "x", "'@", f"Remove-Item -Recurse -Force {self.wtb}"])):
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, True)
+
     def test_operators_constant_removed(self):
         with open(HOOK, encoding="utf-8") as fh:
             self.assertNotIn("OPERATORS", fh.read())
@@ -351,6 +407,57 @@ class GuardWorktreeLinks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as plain:
             event = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {self.wtb}"}, "cwd": plain}
             self.assertEqual(run(event, plain), (0, ""))
+
+    # --- worktree roots are read from .git directly, not from `git worktree list` (re-check K2) -------------------
+    NOTICE = "guard-worktree-links: could not read worktree roots; check skipped"
+
+    def _no_git_env(self):
+        empty = tempfile.mkdtemp(dir=self.tmp.name)           # a PATH with no git in it
+        return {"PATH": empty}
+
+    def test_roots_read_directly_without_git_on_path(self):
+        env = self._no_git_env()
+        for project in (self.main, self.wta):                    # from the main checkout and from a linked worktree
+            for tool, cmd, deny in (("Bash", f"rm -rf {self.wtb}", True),
+                                    ("Bash", f"rm -rf {self.main}", True),
+                                    ("Bash", f"rm -rf {self.wtb}/publish", False),
+                                    ("PowerShell", f"New-Item -ItemType Junction -Path {self.wta}/nm -Target {self.wtb}/node_modules",
+                                     True),
+                                    ("PowerShell", f"New-Item -ItemType Junction -Path {self.wta}/nm -Target {self.outside}",
+                                     False)):
+                with self.subTest(project=project, cmd=cmd):
+                    event = {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": self.wta}
+                    out = run_full(event, project, env_extra=env)
+                    self.assertEqual(out.returncode, 0)
+                    self.assertEqual(denied(out.stdout.strip()), deny, out.stdout + out.stderr)
+                    self.assertNotIn(self.NOTICE, out.stderr)
+
+    def test_unreadable_common_dir_prints_notice_and_fails_open(self):
+        env = self._no_git_env()
+        with tempfile.TemporaryDirectory() as broken:
+            with open(os.path.join(broken, ".git"), "w") as fh:
+                fh.write("gitdir: " + os.path.join(broken, "nowhere", "worktrees", "x") + chr(10))
+            event = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {self.wtb}"}, "cwd": broken}
+            for label, extra in (("no git on PATH", env), ("git on PATH, which also fails here", {})):
+                with self.subTest(label):
+                    out = run_full(event, broken, env_extra=extra)
+                    self.assertEqual((out.returncode, out.stdout.strip()), (0, ""))
+                    self.assertEqual(out.stderr.strip(), self.NOTICE)
+        with tempfile.TemporaryDirectory() as plain:             # not a repository at all
+            out = run_full({**event, "cwd": plain}, plain)
+            self.assertEqual((out.returncode, out.stdout.strip(), out.stderr.strip()), (0, "", self.NOTICE))
+
+    def test_notice_only_when_a_candidate_command_needs_the_roots(self):
+        with tempfile.TemporaryDirectory() as plain:
+            out = run_full({"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "cwd": plain}, plain)
+            self.assertEqual((out.returncode, out.stdout.strip(), out.stderr.strip()), (0, "", ""))
+
+    def test_locked_worktree_is_still_a_root(self):
+        git(self.main, "worktree", "lock", self.wtb)
+        try:
+            self.sh(f"rm -rf {self.wtb}", True)
+        finally:
+            git(self.main, "worktree", "unlock", self.wtb)
 
     def test_latency_under_five_seconds(self):
         event = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {self.wtb}"}, "cwd": self.wta}

@@ -19,9 +19,12 @@ The way to remove a worktree is `pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -
 junctions first and never recurses through one.
 
 Zero false positives is the requirement: when the command cannot be parsed with confidence (variables, globs,
-unknown flags, unresolvable paths) it is ALLOWED. Fails open: unreadable input, a failing `git worktree list`
-(one call, 3 s timeout, run only once a candidate command has been recognised) or any internal error lets the call
-through. Enforced by: this hook; controls in scripts/quality/tests/test_guard_worktree_links.py.
+unknown flags, unresolvable paths) it is ALLOWED. The worktree roots are read straight from the git directory
+(`<common>/worktrees/*/gitdir`, a few small files, milliseconds even with hundreds of worktrees) and only once a
+candidate command has been recognised; `git worktree list --porcelain` (3 s timeout) is the fallback when the
+layout is not the usual one. Fails open: unreadable input or any internal error lets the call through silently;
+roots that cannot be determined at all let it through with a one-line notice on stderr. Enforced by: this hook;
+controls in scripts/quality/tests/test_guard_worktree_links.py.
 """
 import json
 import os
@@ -31,6 +34,7 @@ import subprocess
 import sys
 
 GIT_TIMEOUT_SECONDS = 3
+ROOTS_NOTICE = "guard-worktree-links: could not read worktree roots; check skipped"
 LINK_TYPES = {"junction", "symboliclink", "hardlink"}
 SHELL_WRAPPERS = {"pwsh": "ps", "powershell": "ps", "bash": "bash", "sh": "bash", "zsh": "bash", "cmd": "cmd"}
 WRAPPER_FLAGS = {"-c", "-command", "/c", "/k", "-lc", "-ic", "-cl"}
@@ -66,9 +70,15 @@ class Unsure(Exception):
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
-def strip_heredoc_bodies(text):
+PS_HERE_OPEN = re.compile(r"@(['\"])\s*$")
+
+
+def strip_heredoc_bodies(text, flavor=None):
     """Drop here-document bodies (data, not commands); a body line like `rm -rf C:/wt` in a commit message or a
-    script fed to `python -` must not be read as a command."""
+    script fed to `python -` must not be read as a command. For the PowerShell flavour the same goes for
+    `@'...'@` / `@"..."@` here-strings (opener at the end of its line, closer at the start of a line): the body may
+    hold an odd number of apostrophes that would otherwise break quote tracking. The opener and closer lines stay,
+    so the statement around them keeps its shape; a here-string with no closer is left alone."""
     out, lines, i = [], text.split("\n"), 0
     while i < len(lines):
         line = lines[i]
@@ -79,13 +89,22 @@ def strip_heredoc_bodies(text):
             while i < len(lines) and lines[i].strip() != m.group(2):
                 i += 1
             i += 1                                   # the terminator
+            continue
+        h = PS_HERE_OPEN.search(line) if flavor == "ps" else None
+        if h:
+            closer = h.group(1) + "@"
+            j = i
+            while j < len(lines) and not lines[j].startswith(closer):
+                j += 1
+            if j < len(lines):
+                i = j                                # the closer line is kept and processed as a normal line
     return "\n".join(out)
 
 
-def tokenize(text):
+def tokenize(text, flavor=None):
     """Split a shell command line into statements of tokens. Quotes group; backslashes are NOT escapes (Windows
     paths); unquoted ; && || | & and newlines separate statements; a `#` at the start of a word is a comment."""
-    text = strip_heredoc_bodies(text)
+    text = strip_heredoc_bodies(text, flavor)
     statements, cur, buf, have, quote = [], [], [], False, None
     i, n = 0, len(text)
 
@@ -151,6 +170,8 @@ def command_base(token):
 def _long_path(p):
     """Nearest existing ancestor expanded (8.3 names on Windows, symlinks elsewhere) + the rest, untouched."""
     p = os.path.abspath(p)
+    if os.name == "nt" and "~" not in p:
+        return p                                 # no 8.3 short name in it: GetLongPathNameW would change nothing
     rest = []
     probe = p
     while probe and not os.path.exists(probe):
@@ -204,13 +225,95 @@ class Paths:
         return p.rstrip("/").lower() if len(p) > 1 else p.lower()
 
 
+class RootsUnavailable(Exception):
+    """The worktree roots could not be determined at all (direct read and `git worktree list` both failed)."""
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return fh.read().strip()
+
+
+def _find_dot_git(start):
+    """Nearest `.git` (file or folder) at or above `start`, or None."""
+    cur = os.path.abspath(start)
+    while True:
+        cand = os.path.join(cur, ".git")
+        if os.path.exists(cand):
+            return cand
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def read_worktree_roots(project_dir):
+    """Registered worktree roots read straight from the git directory, or None when the layout is not the usual one
+    (bare repository, submodule, unreadable or missing files). A `.git` folder is the common dir; a `.git` file in
+    a linked worktree says `gitdir: <common>/worktrees/<name>`. The main root is the parent of the common `.git`;
+    each linked root is the `gitdir` file in `<common>/worktrees/<name>` (a path to `<root>/.git`). Locked and
+    prunable entries are roots too; an entry with no readable `gitdir` is skipped."""
+    try:
+        dot_git = _find_dot_git(project_dir)
+        if dot_git is None:
+            return None
+        if os.path.isdir(dot_git):
+            common = dot_git
+        else:
+            line = _read_text(dot_git).splitlines()[0]
+            if not line.startswith("gitdir:"):
+                return None
+            git_dir = line[len("gitdir:"):].strip()
+            if not os.path.isabs(git_dir):
+                git_dir = os.path.join(os.path.dirname(dot_git), git_dir)
+            git_dir = os.path.normpath(git_dir)
+            common_file = os.path.join(git_dir, "commondir")
+            if os.path.isfile(common_file):
+                common = os.path.join(git_dir, _read_text(common_file))
+            elif os.path.basename(os.path.dirname(git_dir)) == "worktrees":
+                common = os.path.dirname(os.path.dirname(git_dir))
+            else:
+                return None
+        common = os.path.normpath(common)
+        if os.path.basename(common).lower() != ".git" or not os.path.isdir(common):
+            return None                                   # bare repository or odd layout: let git describe it
+        roots = [os.path.dirname(common)]
+        wt_dir = os.path.join(common, "worktrees")
+        for name in (sorted(os.listdir(wt_dir)) if os.path.isdir(wt_dir) else []):
+            entry = os.path.join(wt_dir, name)
+            try:
+                target = _read_text(os.path.join(entry, "gitdir")).splitlines()[0].strip()
+            except (OSError, IndexError):
+                continue
+            if not os.path.isabs(target):
+                target = os.path.normpath(os.path.join(entry, target))
+            if target.replace("\\", "/").lower().endswith("/.git"):
+                target = target[:-len("/.git")]
+            roots.append(target)
+        return roots
+    except Exception:
+        return None
+
+
 def git_worktree_roots(project_dir):
-    """Registered worktree roots as they come from git (main first); [] when unavailable."""
-    out = subprocess.run(["git", "-C", project_dir, "worktree", "list", "--porcelain"], capture_output=True,
-                         text=True, timeout=GIT_TIMEOUT_SECONDS)
+    """Fallback: registered worktree roots as they come from `git worktree list` (main first); None on failure."""
+    try:
+        out = subprocess.run(["git", "-C", project_dir, "worktree", "list", "--porcelain"], capture_output=True,
+                             text=True, timeout=GIT_TIMEOUT_SECONDS)
+    except Exception:
+        return None
     if out.returncode != 0:
-        return []
+        return None
     return [line[len("worktree "):].strip() for line in out.stdout.splitlines() if line.startswith("worktree ")]
+
+
+def worktree_roots(project_dir):
+    roots = read_worktree_roots(project_dir)
+    if not roots:
+        roots = git_worktree_roots(project_dir)
+    if not roots:
+        raise RootsUnavailable()
+    return roots
 
 
 class Context:
@@ -221,7 +324,7 @@ class Context:
 
     def load(self):
         if self._roots is None:
-            raw = git_worktree_roots(self.project_dir)
+            raw = worktree_roots(self.project_dir)
             drive = any(re.match(r"^[A-Za-z]:", r) for r in raw)
             self._paths = Paths(drive)
             self._roots = [self._paths.key(r, None) for r in raw]
@@ -493,9 +596,41 @@ def embedded_link_command(tokens, flavor):
     return None
 
 
+def _is_data(text, pos):
+    """True when offset `pos` is inside a quoted string or a `#` comment, judged with the tokenizer's rules: `'`
+    and `"` open and close a quote (the other quote character is plain text inside one), `''` inside single quotes
+    is an escaped apostrophe, and a `#` at the start of a word outside any quote runs to the end of the line.
+    Here-string bodies are already gone by the time this runs."""
+    quote, i, word_start = None, 0, True
+    while i < pos:
+        c = text[i]
+        if quote:
+            if c == quote:
+                if quote == "'" and text[i + 1:i + 2] == "'":
+                    i += 2
+                    continue
+                quote = None
+        elif c in "'\"":
+            quote, word_start = c, False
+        elif c == "#" and word_start:
+            j = text.find("\n", i)
+            if j < 0 or j >= pos:
+                return True
+            i, word_start = j, True
+            continue
+        else:
+            word_start = c in " \t\r\n;|&({"
+        i += 1
+    return quote is not None
+
+
 def dotnet_symlink_finding(ctx, text, cwd):
-    """CreateSymbolicLink('L','T') with two literal-string arguments."""
+    """CreateSymbolicLink('L','T') with two literal-string arguments, as an invocation: a match inside a quoted
+    string, commit message, here-string or comment is data. A `-Command "..."` wrapper is analysed on its own as a
+    command by the statement walker (the quotes there are the wrapper's, not data)."""
     for m in DOTNET_SYMLINK.finditer(text):
+        if _is_data(text, m.start()):
+            continue
         link = m.group(1) if m.group(1) is not None else m.group(2)
         target = m.group(3) if m.group(3) is not None else m.group(4)
         try:
@@ -514,12 +649,14 @@ def analyse(command, cwd, ctx, flavor, depth=0):
         return None
     if flavor == "ps":
         try:
-            found = dotnet_symlink_finding(ctx, strip_heredoc_bodies(command), cwd)
+            found = dotnet_symlink_finding(ctx, strip_heredoc_bodies(command, flavor), cwd)
+        except RootsUnavailable:
+            raise
         except Exception:
             found = None
         if found:
             return found
-    for tokens in tokenize(command):
+    for tokens in tokenize(command, flavor):
         tokens = strip_assignment(tokens, flavor)
         if not tokens:
             continue
@@ -623,6 +760,9 @@ def main():
         flavor = "ps" if event.get("tool_name") == "PowerShell" else "bash"
         ctx = Context(project_dir)
         finding = analyse(command, cwd, ctx, flavor)
+    except RootsUnavailable:
+        print(ROOTS_NOTICE, file=sys.stderr)
+        return 0
     except Exception:
         return 0
     if not finding:
