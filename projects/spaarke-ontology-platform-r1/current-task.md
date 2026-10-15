@@ -46,7 +46,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Open owner questions
 
-- Remove Console User `prvCreatesprk_DecisionRecord` (Deep) as part of task 049, after 055. Every legitimate DR is created by the writer; the role grant is what lets a user forge keyed DRs. Asked uac-r2 for any human-create surface.
+- Remove `prvCreatesprk_DecisionRecord` (Deep) from **Console User** (`Roles/Spaarke Console User.xml:17`) and **Ontology Administrator** (`:20`) as part of task 049, after 055. Only Ontology Service needs it (Global). uac-r2 confirmed on master that no client, OBO, flow or UAC code creates a DR as a human.
 - None open. The owner approved R3's redeploy of `c20bff283` (2026-10-15), and ontology cleared it with the window open now. Wait for R3's SHA, healthz and restart time, then re-run 146 about 15 minutes later. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
 
 ## Peers (current session names)
