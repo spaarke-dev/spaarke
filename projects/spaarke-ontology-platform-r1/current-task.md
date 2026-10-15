@@ -1,49 +1,45 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-14 (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-15 (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
-> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; **D-138 owner approvals**) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-138). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-78**; lanes may take 78+).
+> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; **D-138 owner approvals; D-139; D-140**) and §6 gotchas.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-140). Deferred work: one self-contained GitHub issue per item,
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-88**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology lanes toward the 035 BFF deploy → 146 live gate → 059/055 Console deploy. |
-| **Blocker** | None from the owner (D-138 answered everything). |
-| **Next Action** | Wait for agents 038, 042, 145 (PRs → uac-r2 review → merge). Merge watchers run for #1865 (041) and #1869 (061). When 145 merges: run **035** (deploy BFF to dev, D-126 procedure below). |
+| **Task** | D-140: #1111 (docs branch → master) then **035** dev BFF deploy from master. |
+| **Blocker** | None. Owner questions below do not block the deploy. |
+| **Next Action** | Watcher `merge-when-green3.sh 1111 ae9bf62c3… master` is armed. When #1111 merges: send the master SHA to ebilling-r1; message word-add-in, R3 and uac-r2 BEFORE deploying; deploy master via `scripts/Deploy-BffApi.ps1` from a clean worktree at the master merge commit (hash-verify + `/healthz`); message all three AFTER (R3 redeploys its branch on top). |
 
-## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
+## Merged 2026-10-14/15 (docs branch)
 
-| Lane | PR | State | Next |
-|---|---|---|---|
-| **038** Signal read route (opus) | — | running; also adds read-time evidence redaction (145 F1 option B) | PR → uac-r2 → merge |
-| **042** gate → DR writer | — | running; main-session decision A+C: additive `WriteGateDecisionAsync`, Judgement both paths, confirmedby/policyversion/gatesessionid null, correlation id in factsnapshot, criterion 4 amended (owner may override) | PR → uac-r2 → merge |
-| **145** matter readers, evidence leak | — (local `fcb930525`) | running; F1 → option A (monotonic redaction pass in the job); DR snapshot redaction deferred to the owner as a new issue | PR → uac-r2 → merge |
-| **041** append-only live test | #1865 `7bc1ab688` | main-session review CLEAN; merging on green | mark done |
-| **061** Do-lane policies | #1869 `f34f50058` | merging on green; 4 policies on dev, `sprk_enabled=No`; grammar gained a null test (`9b382ede0`) | mark done |
-
-Merge: `scratchpad/merge-when-green3.sh <pr> <full sha> docs/ontology-platform-design` (ignores the informational Code Quality job; exits on HEAD MOVED).
+042 #1878 `6a00d1c47` · 038 #1891 `b0fe65988` · uac K1 walker batching #1892 `ae9bf62c3` (uac-r2 authored; our adversarial review CLEAN). 038/042 marked done.
 
 ## Deploy plan (D-126, D-138 approved)
 
-1. **035 BFF** after 145 merges: merge current master into the deploy branch (dev runs master `8a1f3bb11` exactly, uac-r2 confirmed, so nothing of theirs is off master), schema pre-flight on the target, hash-verify. **Before deploying, message word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`) with the SHA and the restart time — the owner is UATing add-ins on dev.** Also tell uac-r2, and R3 external access (`spaarke-wt-spa-external-access-platform-e0`): R3 deployed `4e23edeb2` (master + unmerged R3 tasks 062–065) to dev on 2026-10-14; our master-based deploy removes those, so message R3 before AND after so it can redeploy on top.
-2. After 035: run 144's stamp job and 148's reconciler **report-only** on dev, record it, and send it to uac-r2. If CLEAN, enable on dev (D-138 delegates this): `CoreAncestor__StampReconciliation__ReportOnlyTables=","` (= 145's `scripts/Invoke-OntologyStampBackfill.ps1 -Apply`) and `Ontology__TodoAssigneeOwner__WritesEnabled=true`.
-3. **146** live gate after 035 and the 6 h DR metadata cache key.
-4. **059** worklist widget (needs 038) → **055** Console deploy (needs 059, 043, 035) → 049, 064, 105.
+**Merging to master does NOT deploy** — `deploy-bff-api.yml` lost its `push: master` trigger on 2026-08-11; deploys are
+operator-driven (`/bff-deploy`, `scripts/Deploy-BffApi.ps1`) or `workflow_dispatch`. The schema pre-flight passed on dev (2026-10-14).
 
-## Done today (2026-10-14)
+1. **035 BFF** from master (includes #1885 sidecar fix and #1887). Notify before AND after: word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`, owner UATs add-ins on dev), R3 (`spaarke-wt-spa-external-access-platform-e0`, dev currently runs R3 `dfb4b9a43`; they redeploy on top), uac-r2 (`spaarke-wt-unified-access-control-r2-ac`).
+2. 035 follow-ups: job registered; alerts in `infrastructure/bicep/modules/alerts.bicep` (`ontology.writer.failures > 0` / 15 min, unfiltered; no successful `ontology.evaluator.runs`); negative alert test (blank the writer client id on dev, restore); deploy-log note; mark 035 done.
+3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882: `prvReadsprk_Policy` Deep added to Spaarke Basic User on dev 2026-10-14) → close #1882.
+4. Run 144's stamp job and 148's reconciler **report-only**, send to uac-r2. If CLEAN, enable on dev (D-138): `CoreAncestor__StampReconciliation__ReportOnlyTables=","` (= `scripts/Invoke-OntologyStampBackfill.ps1 -Apply`) and `Ontology__TodoAssigneeOwner__WritesEnabled=true`.
+5. **146** live gate (after the 6 h DR metadata cache) → **059** (worklist widget; render `withheld: true` evidence lines, not "No value recorded") → **055** Console deploy → 049, 064, 105.
+6. **149** (D-139 gate DR queue job, idempotent). Also carry: raise the empty-worklist refusal log (`SignalReadService.cs:526-531`) from Information to Warning (uac-r2 K3 on #1891).
 
-#1844 (050, row live on dev), #1858 (148), #1862 (144), #1854 (143 K1/K2; #1855 closed), #1856 (058). DI-77 (#1868): the dev `sprk_recordtype_ref` row for `sprk_workassignment` was fixed to `sprk_name` (other environments are still open).
+## Owner decisions to implement (2026-10-15, after the deploy)
 
-## Owner items still open
-
-- The DR `sprk_factsnapshot` after a re-file into secure (145 F1): redact via a service write, or store references only. 145 files it as an issue.
-- **D-140:** #1111 to master NOW (supersedes Q8). Sync lane `C:/wts-sync` (branch `sync/ontology-master-2026-10-14`, opus agent) merges master into the branch → PR into docs → then #1111. The master push auto-deploys the dev BFF = the 035 deploy (pre-flight + notify first; alerts after).
+- **D-141** (DI-86 #1883): Do items private to the assignee — scope per-Signal routes (`SignalCoreRecordAccess`) to the worklist "mine" set.
+- **D-142** (DI-80 #1873): hide evidence detail when the caller cannot read the witness — read-time batched caller read per witness table; match the 145 write-time rule.
+- **D-144** (DI-84 #1876): unfiled-communication gate DRs owned by the BU default team — with task 149; uac-r2 reviews.
+- D-143: audit stays on (DI-81 #1879 closed). Still open: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
+- Pending push after #1111 merges (do not push earlier, it restarts #1111 CI): local edits to CLAUDE.md, decisions.md (D-141..D-144), current-task.md, `Roles/Spaarke Basic User.xml` (+`prvReadsprk_Policy` Deep, matches dev) + a `notes/security-roles.md` entry + #1355 note (D-110).
 
 ## Coordination
 
-- uac-r2 = `spaarke-wt-unified-access-control-r2-ac` (also post on #1355). Security F (#1857) is fixed by them in master `8a1f3bb11` (PR #1861). Secure-family owner team per family = their project uac-secure-project-r3 (owner round 100b).
-- word-add-in = `spaarke-wt-spaarkeai-word-add-in-r1-ea` (notify before any dev BFF deploy).
+- uac-r2 owns #1894 (typed read-rows wrapper for the walker seed; K2 of #1892). Post ontology review requests on #1355 too.
+- ebilling-r1 (`spaarke-wt-ebilling-r1-47`): send the #1111 master SHA; their PRs (FR-15 schema, FR-06 `sprk_invoicestatus` retirement) follow under the agreed conditions; FR-06 supersedes D-137 Q24 (`CountedInvoiceStatuses` → statuscode).

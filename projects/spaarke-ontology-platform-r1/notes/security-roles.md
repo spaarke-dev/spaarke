@@ -885,3 +885,15 @@ rows.** Both tables hold 0 rows in total after the run.
   statement about 049 and not a regression.
 - Impersonation proves the privilege model; it does not drive the Console UI. Any Dataverse update on a Decision Record
   from the Console would see the same 403. The BFF commit route is the only writer (FR-18).
+
+## 12. 2026-10-14 — Read on `sprk_policy` for Spaarke Basic User (D-110, DI-83 #1882)
+
+- **Why**: the worklist FetchXML (task 050) outer-links `sprk_policy`; Dataverse refuses the whole query (0x80040220) when the
+  caller lacks table Read on a linked table, so a Basic + Core user without Spaarke Console User got an empty worklist (task 038 live seam).
+- **Before** (live query, spaarkedev1): Spaarke Basic User held `prvReadsprk_Signal` (Basic) but no `prvReadsprk_Policy`;
+  Spaarke Console User holds `prvReadsprk_Policy` at Deep.
+- **Change**: `AddPrivilegesRole` on the root-BU Spaarke Basic User (`11f93c04-ddf6-f011-8406-7c1e520aa4df`):
+  `prvReadsprk_Policy` (`eda1df58-8428-4b7a-827c-d9c9ebf6140f`) at **Deep**, matching Console User and the house convention.
+- **After**: read-back `privilegedepthmask = 4`. Repo role XML `Roles/Spaarke Basic User.xml` updated to match.
+- **Still to do**: re-run `SignalReadRouteLiveTests` as the non-Console user after the 035 deploy, then close #1882.
+  Other environments need the same grant when ontology is provisioned there.
