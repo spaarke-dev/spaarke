@@ -53,6 +53,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-75">Per D-75 (with ontology-r1, 2026-10-15): the core record of an invoice line (sprk_billingevent) is derived only from the line's OWN core-record lookup (sprk_matter / sprk_project / sprk_regardingworkassignment, FR-05), never by walking sprk_billingevent.sprk_invoice; a line may in future not belong to exactly one invoice. Any other derivation needs uac-r2 approval (STOP and ask).</constraint>
     <constraint source="ADR-024 / spec FR-05">The guard refuses (does not pick one) when more than one of the entity's Matter / Project / Work Assignment lookups is set, and when none is set on an entity where FR-05 requires one; the refusal carries a stable reason code. When exactly one is set, it returns all five resolver fields (type via sprk_recordtype_ref, id lowercase "D" GUID, name, relative URL, number) — never a partial set.</constraint>
     <constraint source="ADR-034 / NFR-01 of the access model">Fail closed: a metadata or read failure is a refusal, never "no ancestor". Keep CoreAncestorStatus.NoAncestor and Error distinct.</constraint>
     <constraint source="project">Do NOT add any new entity to ChildRecordEntities or CoreRecordEntities, and do not change StampSourceColumns or StampedOutsideAccessTaxonomy, without uac-r2's written agreement (escalation trigger). Adding sprk_regardingworkassignment to IntermediateRootColumns["sprk_invoice"] and its TypeScript mirror is in scope.</constraint>
@@ -115,6 +116,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-75, CoreAncestorResolver derives a sprk_billingevent row's core record from its own core lookup: a test with a line whose sprk_invoice points at a different (or no) invoice still resolves the line's own matter / project / work assignment, and a line with no core lookup is refused, not resolved through the invoice.</criterion>
     <criterion testable="true">For each of the five entities: given exactly one of Matter / Project / Work Assignment set, the guard returns that core record and five non-empty resolver fields; given two or three set, it returns a refusal with a stable reason code; given none, it returns a refusal.</criterion>
     <criterion testable="true">A read or metadata failure inside the derivation yields a refusal, not success and not "no ancestor".</criterion>
     <criterion testable="true">IntermediateRootColumns["sprk_invoice"] and the TypeScript mirror both include sprk_regardingworkassignment; the C#-to-TypeScript pinning tests pass.</criterion>

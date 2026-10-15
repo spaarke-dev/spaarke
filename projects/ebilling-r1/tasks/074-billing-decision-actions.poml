@@ -46,6 +46,7 @@ Gaps against the spec: an invoice approve with no findings has no policy version
   </context>
 
   <constraints>
+    <constraint source="D-75">One Decision Record per line decision (subject sprk_regardinginvoiceline = the line) and one per invoice decision (subject the invoice), each through WriteAsync; the line record's core grouping comes from 026 / 013 (the line's own core lookup), never from the invoice. Send the writer-entry questions (policy-version requirement, communication-only gate subject) to ontology-r1 under root CLAUDE.md section 6.5 before coding the recorder; ontology-r1 reviews the PR.</constraint>
     <constraint source="spec FR-30">Exactly one Decision Record per approve, reject, return and override; a retried call with the same decision id writes nothing new.</constraint>
     <constraint source="project">No fake data to satisfy the writer: never pass a placeholder policy version id, a communication id or an invented core. If the shapes do not fit, the fix is an additive, ontology-reviewed writer entry.</constraint>
     <constraint source="project">Billing codes are recorded by eBilling endpoints, not taken through the Signals commit route. The commit route must refuse a billing code fail-closed; never register a no-op executor to satisfy MissingCodes.</constraint>

@@ -46,6 +46,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-75">Per D-75 (with ontology-r1, 2026-10-15): the core record of an invoice line (sprk_billingevent) is derived only from the line's OWN core-record lookup (sprk_matter / sprk_project / sprk_regardingworkassignment, FR-05), never by walking sprk_billingevent.sprk_invoice; a line may in future not belong to exactly one invoice. Any other derivation needs uac-r2 approval (STOP and ask). The line subject is registered in SecureChildLineage and the census (ontology-r1 condition) so secure-family placement works for line-subject Signals and Decision Records.</constraint>
     <constraint source="project">Existing dedupe keys do not change: BuildDedupeKey keeps its inputs and format; a line subject only adds keys whose subject segment is sprk_billingevent.</constraint>
     <constraint source="project">The lookup is added only through TodoRegardingBuilder.SignalAndDecisionRecordRegardingLookupByEntity; no second map is created in SignalWriter or DecisionRecordWriter.</constraint>
     <constraint source="project">Core derivation for invoice and line subjects comes only from CoreAncestorResolver.ResolveStampsAsync (task 013's extension); SignalWriter does not walk lookups itself.</constraint>
@@ -112,6 +113,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-75, a Decision Record and a Signal whose subject is an invoice line get their core grouping (CoreAncestorResolver) from the line's own core lookup, proven by a test where the line's sprk_invoice is absent; the line subject appears in SecureChildLineage and the census.</criterion>
     <criterion testable="true">Dev metadata shows sprk_regardinginvoiceline (→ sprk_billingevent) on sprk_signal and sprk_decisionrecord and sprk_firmreason on sprk_signal; the solution source declares the same.</criterion>
     <criterion testable="true">SignalPairTypeSchemaAgreementTests passes for an invoice-line subject and for every existing subject.</criterion>
     <criterion testable="true">An invoice-line Signal on a Project-scoped invoice carries sprk_corerecordtype Project (negative: not Matter); a Work Assignment-scoped one carries Work Assignment.</criterion>
