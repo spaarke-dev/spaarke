@@ -219,8 +219,8 @@ describe('ReconciliationWorkspace', () => {
     // budget: the splitter IS in the DOM, but the SprkModal's Fluent `DialogSurface`
     // carries `aria-hidden="true"` (tabster modalizer never activated — `activeId`
     // undefined — because jsdom focuses the surface before the modalizer API is
-    // initialised; whether a real browser can do the same is not yet verified — the
-    // follow-up on #1906 tracks it). Testing Library's default role query
+    // initialised; jsdom-only — in a real browser the surface is not aria-hidden,
+    // verified 2026-10-15; .claude/FAILURE-MODES.md G-21). Testing Library's default role query
     // skips an aria-hidden subtree, so it can never find the splitter here no matter
     // how long it waits. The assertion is "the splitter is rendered inside the
     // two-pane body", so query the hidden-inclusive tree, scoped to that container.
