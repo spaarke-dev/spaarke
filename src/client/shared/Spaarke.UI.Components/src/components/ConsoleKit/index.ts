@@ -6,5 +6,18 @@ export { RecordRow } from './RecordRow';
 export type { RecordRowProps } from './RecordRow';
 export { AggregateCard } from './AggregateCard';
 export type { AggregateCardProps } from './AggregateCard';
+export { OutcomeCards } from './OutcomeCards';
+export type { OutcomeCardOption, OutcomeCardsProps } from './OutcomeCards';
+export { CountFilters } from './CountFilters';
+export type { CountFilterItem, CountFiltersProps } from './CountFilters';
+export { Disclosure } from './Disclosure';
+export type { DisclosureProps } from './Disclosure';
 export { CONSOLE_STATE_BADGES, resolveConsoleState, resolveDecisionRecordState } from './consoleStatus';
-export type { ConsoleState, ConsoleStateBadge, ResolutionType, RecordClass, DecisionOutcome } from './consoleStatus';
+export type {
+  ConsoleState,
+  ConsoleStateBadge,
+  ConsoleStatusOverride,
+  ResolutionType,
+  RecordClass,
+  DecisionOutcome,
+} from './consoleStatus';

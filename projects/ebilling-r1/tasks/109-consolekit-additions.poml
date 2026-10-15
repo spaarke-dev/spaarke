@@ -4,7 +4,7 @@
     <title>ConsoleKit additions: outcome cards, count filters, disclosure, status labels</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Small presentational additions to an existing shared kit; existing ConsoleKit behaviour must stay unchanged (ontology-r1 consumers).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -129,7 +129,9 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Parallel group P4-A: this task alone edits ConsoleKit/ (108 edits FilePreview/). Never import from the prototype repository.</notes>
+  <notes>Parallel group P4-A: this task alone edits ConsoleKit/ (108 edits FilePreview/). Never import from the prototype repository.
+Completed: statusOverride on StatusBar and RecordRow; OutcomeCards, CountFilters and Disclosure added and exported. Disclosure added because Fluent Accordion sets aria-expanded but no aria-controls and cannot give the inline button look. 63 ConsoleKit tests pass (28 new, 35 unchanged); tsc, eslint (ConsoleKit) and the ui-components client-lint ratchet are clean. Browser ui-tests not run (no Chrome in the session); jest covers the behaviour and the dark theme render. ontology-r1 notice is carried in the orchestrator report. TASK-INDEX.md left to the orchestrator (parallel mode). Detail: projects/ebilling-r1/notes/109-consolekit-additions.md
+rework: none task 109</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

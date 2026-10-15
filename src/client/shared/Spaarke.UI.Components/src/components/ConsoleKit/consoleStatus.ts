@@ -11,13 +11,33 @@ import type { StatusBadgeTone } from '../StatusBadge';
 
 /** The nine display states of the Console (HANDOFF section 1.3 "Show state"). */
 export type ConsoleState =
-  'Open' | 'Decided' | 'Done' | 'Dismissed' | 'ClearedItself' | 'Superseded' | 'RuleRetired' | 'Authorized' | 'Denied';
+  | 'Open'
+  | 'Decided'
+  | 'Done'
+  | 'Dismissed'
+  | 'ClearedItself'
+  | 'Superseded'
+  | 'RuleRetired'
+  | 'Authorized'
+  | 'Denied';
 
 export interface ConsoleStateBadge {
   label: string;
   tone: StatusBadgeTone;
   /** One-line plain-language meaning, usable as a tooltip. */
   description: string;
+}
+
+/**
+ * A caller-supplied badge that replaces the table entry on `StatusBar` / `RecordRow` for states the Console does
+ * not have (for example a domain's own outcome words). It is a display override only: it never adds to, or changes,
+ * `ConsoleState` or `CONSOLE_STATE_BADGES`, which stay the Console's single state mapping.
+ */
+export interface ConsoleStatusOverride {
+  label: string;
+  tone: StatusBadgeTone;
+  /** One-line plain-language meaning (accessible name suffix on the bar). Optional. */
+  description?: string;
 }
 
 /** State to badge. Every ConsoleState has an entry (the type enforces it). */
