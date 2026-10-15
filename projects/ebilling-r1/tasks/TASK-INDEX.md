@@ -27,7 +27,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 010 | ✅ [done] | Invoice Line columns on `sprk_billingevent` | STANDARD | sonnet / high | P1-A | none |
 | 011 | 🔲 [open] | Retire `sprk_invoicelineitem` (owner OK before delete) | STANDARD | sonnet / high | P1-B (p-safe false) | 010, 017 |
 | 012 | ✅ [done] | Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes | STANDARD | sonnet / high | P1-A | none |
-| 013 | 🔲 [open] | Core-ancestor derivation and one-lookup guard for the invoice family | FULL | opus / high | none (p-safe false: uac-r2 security files, census test shared with 011) | 010, 012, 020, 021, 022, 023, 027 |
+| 013 | 🟡 [wip] | Core-ancestor derivation and one-lookup guard for the invoice family | FULL | opus / high | none (p-safe false: uac-r2 security files, census test shared with 011) | 010, 012, 020, 021, 022, 023, 027 |
 | 014 | ✅ [done] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
 | 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
 | 016 | ✅ [done] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
@@ -91,7 +91,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 105 | 🔲 [open] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | 🔲 [open] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | 🔲 [open] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
-| 108 | 🔲 [open] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
+| 108 | 🟡 [wip] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
 | 109 | 🔲 [open] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | 🔲 [open] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |
 | 111 | 🔲 [open] | Invoice decision wizard and context / related / history panes | STANDARD | sonnet / high | none | 110, 103, 104, 105, 106, 107 |

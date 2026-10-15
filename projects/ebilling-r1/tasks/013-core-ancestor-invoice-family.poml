@@ -4,7 +4,7 @@
     <title>Core-ancestor derivation and one-lookup guard for the invoice family</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a shared security component (CoreAncestorResolver, its TypeScript mirror, SecureChildLineage) on the write path; tags security, write-path.</rigor-reason>
     <model-tier>opus</model-tier>

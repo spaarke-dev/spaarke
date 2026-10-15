@@ -4,7 +4,7 @@
     <title>Bounding-box document viewer (shared component)</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New presentational shared component with a small, fixed geometry contract; no data writes or authorization.</rigor-reason>
     <model-tier>sonnet</model-tier>
