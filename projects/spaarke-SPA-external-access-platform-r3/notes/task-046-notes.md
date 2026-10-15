@@ -137,3 +137,11 @@ Filtered runs (`dotnet test tests/unit/Sprk.Bff.Api.Tests --filter`):
 - Round-1 re-check (main session, fix diff and callers): the new home-contact read matches ReadContactsAsync except for its single log; the $orderby copies the ResolveSystemUserAsync precedent; the notifier skip is narrow. No F remains.
 - Carried constraints were added to the 047 and 048 POMLs (validator PASS).
 - Not deployed: dev runs 3115b90f2 (no 046). The next R3 dev deploy turns on home-principal resolution on dev, and it needs owner approval plus the shared-BFF coordination check.
+
+## UAC review (2026-10-15)
+
+- **F3 fixed by a test.** `ContactBindingDecision.DecideHomeContact` returned `DenyContactOidAmbiguous` for several WorkforceHome matches, but no test covered it. Added `WorkforcePrincipalResolverTests.Home_TwoWorkforceHomeContactsWithTheSameTidAndOid_AreDeniedAmbiguous`: two active plane-WorkforceHome contacts with the caller's tid and oid are not resolved, the deny code is `DenyContactOidAmbiguous`, and nothing is written.
+- **Seeding proof.** With the `matches.Count > 1` guard removed and `== 1` changed to `>= 1`, the new test fails (`Expected result.IsResolved to be false, but found True.`); the production file was restored (`git diff -- src/` empty).
+- **Filtered counts** (`WorkforcePrincipalResolverTests | ContactBindingDecision`): 0 failed / 227 passed (227).
+- **K1 (carried to 047).** The home-link and home-contact filters match lowercase `:D` GUID text only; 047 must write `:D`-formatted GUIDs.
+- **K2 (noted).** The `GrantAccessNotifier` skip for home callers is defensive: its callers are on `/api/v1/external-access`, which uses the default scheme, so a home principal does not normally reach it.

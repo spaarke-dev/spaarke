@@ -484,6 +484,22 @@ public class WorkforcePrincipalResolverTests
             "the binder's workforce path (bind, create, inline link) is never reached");
     }
 
+    [Fact]
+    public async Task Home_TwoWorkforceHomeContactsWithTheSameTidAndOid_AreDeniedAmbiguous()
+    {
+        // UAC review F3: two ACTIVE WorkforceHome contacts for one (tid, oid) must never resolve to either of them.
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        AddHomeContact(Guid.Parse("55555555-5555-4555-8555-555555555555"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactOidAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
     [Theory]
     [InlineData("no-oid")]
     [InlineData("no-tid")]
