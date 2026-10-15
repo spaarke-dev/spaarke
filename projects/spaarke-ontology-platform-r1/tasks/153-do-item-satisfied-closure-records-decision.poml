@@ -4,7 +4,7 @@
     <title>A Do item closed because someone satisfied it writes a Routine Decision Record naming them (D-145b)</title>
     <phase>4 Decision Record</phase>
     <gate>blocked: #1907 (task 149) merged into docs/ontology-platform-design (same writer file)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New secure-family record write from the nightly job; extends the single Decision Record create path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -76,4 +76,7 @@
       <file>.claude/adr/ADR-052-workload-placement.md</file>
     </files>
   </knowledge>
+  <notes>
+    <note date="2026-10-15">Implemented on task/ontology-153-satisfied-close-dr (PR into docs/ontology-platform-design, awaiting review; not merged). Writer entry point WriteConditionClearedAsync (key "cleared-dr-{signal}-{episode}" in sprk_steps.reviewId, lookup also requires the step code "condition-cleared"); the gate is now named by Plan.IsGate, not by an empty confirmer. Attribution: subject modifiedby, only an Eligible person (ClassifyEligibility) whose change falls after the Signal's createdon and not after the close; otherwise confirmedby null + condition_cleared_person_unknown. Job: close, then record, then a conditional link (sprk_decisionrecord + sprk_resolvedby); Do lane only; re-file closes excluded; failures metered, run fails, retried for 7 days. No census entry needed (no owner write added). Judgment calls for review: re-file exclusion, the attribution window, the 7-day retry window (it also backfills Do ConditionCleared closures from the 7 days before deploy).</note>
+  </notes>
 </task>
