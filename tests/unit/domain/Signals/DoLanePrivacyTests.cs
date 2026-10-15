@@ -218,6 +218,53 @@ public sealed class DoLanePrivacyTests
             "the gate never builds the predicate itself");
     }
 
+    // ---- Task 154 (D-111): an inquiry's "Record the outcome" To Do is never offered Mark complete --------------------------------
+
+    private static readonly Guid Inquiry = Guid.Parse("15000000-0000-4000-8000-0000000000f1");
+    private static readonly Guid OtherInquiry = Guid.Parse("15000000-0000-4000-8000-0000000000f2");
+    private const string TodoPlan = "{\"actions\":[\"mark-complete\",\"reschedule\",\"reassign\"],\"nextSteps\":[\"add-todo\"]}";
+
+    private static World AlicesTodo(Guid rowId, string? notes) =>
+        new("sprk_todo", hasCore: true) { SubjectRowId = rowId, Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_ItsPlanOffersNoMarkComplete_RescheduleAndReassignRemain_WithNoRequestOfItsOwn()
+    {
+        var inquiryTodo = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), $"{InquiryReplyTodoCreator.NotesKey}{Inquiry:D}");
+        var ordinary = AlicesTodo(SubjectId, null);
+
+        var plan = Plan(await PlanRoute(inquiryTodo.As(Alice), TodoPlan));
+        Plan(await PlanRoute(ordinary.As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("reschedule", "reassign");
+        plan.Actions[0].IsRecommended.Should().BeTrue("the plan's next action becomes the recommendation");
+        plan.NextSteps.Select(a => a.Code).Should().Equal("add-todo");
+        inquiryTodo.Requests.Should().HaveCount(ordinary.Requests.Count, "the gate's own mine read carries the notes; nothing else is read");
+        inquiryTodo.Requests.Should().Contain(r => r.StartsWith("sprk_todos?$select=", StringComparison.Ordinal) && r.Contains("sprk_notes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnOrdinaryTodo_StillOffersMarkComplete()
+    {
+        var plan = Plan(await PlanRoute(AlicesTodo(SubjectId, "Call the client back").As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("mark-complete", "reschedule", "reassign");
+    }
+
+    [Theory]
+    [InlineData(true)]   // the hint names another inquiry: the derived id is not this To Do's
+    [InlineData(false)]  // the hint is on the second line, not the first
+    public async Task ATodoWhoseHintDoesNotDeriveItsOwnId_IsOrdinary_ItStillOffersMarkComplete(bool otherInquiry)
+    {
+        var notes = otherInquiry
+            ? $"{InquiryReplyTodoCreator.NotesKey}{OtherInquiry:D}"
+            : $"Chase this\n{InquiryReplyTodoCreator.NotesKey}{Inquiry:D}";
+
+        var plan = Plan(await PlanRoute(AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), notes).As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Contain("mark-complete");
+    }
+
     // =================================================================================================
     // Fixtures
     // =================================================================================================
@@ -244,6 +291,25 @@ public sealed class DoLanePrivacyTests
         return DecisionPlanEndpoints.GetSuppressionAsync(
             SignalId, Http(), access, strict, world.Client, NullLogger<SignalSuppressionService>.Instance, CancellationToken.None);
     }
+
+    /// <summary>The plan route with the version's plan readable (configuration, the BFF's own read).</summary>
+    private static Task<IResult> PlanRoute(SignalCoreRecordAccess access, string planJson)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = planJson });
+        return DecisionPlanEndpoints.GetDecisionPlanAsync(
+            SignalId, Http(), access,
+            new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance),
+            new RuleBodyDescriber(
+                new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
+                    NullLogger<PolicyVersionValidator>.Instance),
+                new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+            CancellationToken.None);
+    }
+
+    private static DecisionPlanResponse Plan(IResult result) =>
+        result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
 
     private static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-150" };
 
@@ -273,6 +339,12 @@ public sealed class DoLanePrivacyTests
         public bool SignalUnreadable { get; init; }
         public DataverseUserResponse? MineAnswer { get; init; }
         public Dictionary<string, Guid> Subject { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The subject row's id (task 154: an inquiry-outcome To Do's id is derived from its inquiry).</summary>
+        public Guid SubjectRowId { get; init; } = SubjectId;
+
+        /// <summary>The subject row's <c>sprk_notes</c>, returned only when the request selects it (task 154).</summary>
+        public string? Notes { get; init; }
         public List<string> Requests { get; } = new();
         public IDataverseUserClient Client => _client.Object;
 
@@ -337,8 +409,8 @@ public sealed class DoLanePrivacyTests
                 {
                     ["sprk_lane"] = (int)Lane,
                     ["_sprk_policyversion_value"] = VersionId.ToString("D"),
-                    [$"_{SignalWriter.RegardingLookupByEntity[Table]}_value"] = SubjectId.ToString("D"),
-                    ["sprk_regardingrecordid"] = SubjectId.ToString("D"),
+                    [$"_{SignalWriter.RegardingLookupByEntity[Table]}_value"] = SubjectRowId.ToString("D"),
+                    ["sprk_regardingrecordid"] = SubjectRowId.ToString("D"),
                 };
                 if (hasCore)
                 {
@@ -372,7 +444,13 @@ public sealed class DoLanePrivacyTests
                 var mine = Regex.Matches(filter, @"(_\w+_value) eq ([0-9a-f-]{36})")
                     .Any(m => Subject.TryGetValue(m.Groups[1].Value, out var v) && v == Guid.Parse(m.Groups[2].Value));
                 var pk = $"{Table}id";
-                return Ok(new { value = ids.Contains(SubjectId) && mine ? new[] { new Dictionary<string, object> { [pk] = SubjectId.ToString("D") } } : [] });
+                var subjectRow = new Dictionary<string, object> { [pk] = SubjectRowId.ToString("D") };
+                if (Notes is not null && Regex.IsMatch(path, @"\$select=[^&]*sprk_notes"))
+                {
+                    subjectRow["sprk_notes"] = Notes;
+                }
+
+                return Ok(new { value = ids.Contains(SubjectRowId) && mine ? new[] { subjectRow } : [] });
             }
 
             // The matter and the subject row (createdon): both readable to Alice and Bob.

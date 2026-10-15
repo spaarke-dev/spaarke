@@ -165,6 +165,9 @@ public sealed class SignalReadService
 
     internal const string SignalEntitySet = "sprk_signals";
     internal const string HighPriorityColumn = "sprk_highpriority";
+
+    /// <summary><c>sprk_todo.sprk_notes</c>: its first line is the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
+    internal const string TodoNotesColumn = "sprk_notes";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
 
@@ -843,7 +846,10 @@ public sealed class SignalReadService
         DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId)
     {
         var pk = $"{rule.Table}id";
-        var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
+        var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty)
+            // Task 154 (D-111): a To Do's notes carry the inquiry hint, so the per-Signal gate knows an inquiry-outcome To Do from
+            // this same read (InquiryDispositionService.InquiryOfTodo) with no request of its own. A column, never a predicate.
+            + (string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn}" : string.Empty);
         return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
     }
 

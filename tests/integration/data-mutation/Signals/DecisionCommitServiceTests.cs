@@ -159,6 +159,12 @@ public sealed class DecisionCommitServiceTests
 
         public DataverseUserResponse? SubjectReadFails { get; set; }
 
+        /// <summary>Task 154 (D-111): a To Do's <c>sprk_notes</c> as the caller reads it (the inquiry hint), returned when selected.</summary>
+        public Dictionary<Guid, string> TodoNotes { get; } = new();
+
+        /// <summary>Task 154: a fault answer for the caller's read of a To Do's notes only.</summary>
+        public DataverseUserResponse? TodoNotesReadFails { get; set; }
+
         /// <summary>Task 150 (D-141): subjects the caller can read but that are not their own work (the "mine" read omits them).</summary>
         public HashSet<Guid> CallerNotMine { get; } = new();
 
@@ -400,9 +406,15 @@ public sealed class DecisionCommitServiceTests
                 var id = Guid.Parse(path["sprk_todos(".Length..path.IndexOf(')')]);
                 if (SubjectReadFails is { } fault)
                     return fault;
-                return CallerCannotReadSubject.Contains(id)
-                    ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no")
-                    : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
+                var selectsNotes = path.Contains("$select=sprk_notes", StringComparison.Ordinal);
+                if (selectsNotes && TodoNotesReadFails is { } notesFault)
+                    return notesFault;
+                if (CallerCannotReadSubject.Contains(id))
+                    return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+                var todo = new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" };
+                if (selectsNotes)
+                    todo["sprk_notes"] = TodoNotes.TryGetValue(id, out var notes) ? notes : null;
+                return Ok(todo);
             }
 
             if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) || path.StartsWith("sprk_projects(", StringComparison.Ordinal))
@@ -1363,6 +1375,107 @@ public sealed class DecisionCommitServiceTests
 
     private static DecisionReview MarkComplete() =>
         new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+    // ── Task 154 (D-111, 059 review): an inquiry's "Record the outcome" To Do is never completed by Mark complete ──────────
+
+    private static readonly Guid InquiryTodo = InquiryDispositionService.TodoIdFor(ServiceRequestId);
+
+    private static Rig InquiryTodoRig(Guid todoId, string? notes)
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: todoId);
+        if (notes is not null)
+            rig.TodoNotes[todoId] = notes;
+        return rig;
+    }
+
+    private static string InquiryHint(Guid serviceRequestId) => $"{InquiryReplyTodoCreator.NotesKey}{serviceRequestId:D}";
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> RescheduleValues =
+        Values(("dueDate", "2026-10-30"), ("reason", "Waiting for the client's reply"));
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_MarkCompleteTaken_Is409DispositionRequired_AndNothingIsWritten()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        result.ReasonCode.Should().Be("inquiry.disposition_required");
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_RescheduleUnderTheReducedPlan_IsRecorded()
+    {
+        // The plan route offers [reschedule] (Mark complete removed); a review built from it lists only that action.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_AReviewThatSkipsMarkComplete_IsRecorded_TheSkipIsNotAnActionOfThePlan()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Skip("mark-complete"), Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]                                   // no notes: an ordinary To Do
+    [InlineData("Call the client back")]                 // notes without the hint
+    [InlineData("serviceRequestId=other")]               // a hint that is not a GUID
+    public async Task AnOrdinaryTodo_StillExecutesMarkComplete(string? notes)
+    {
+        var rig = InquiryTodoRig(ItemTodo, notes);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+    }
+
+    [Fact]
+    public async Task ATodoWhoseHintNamesAnInquiryThatDoesNotDeriveItsId_IsOrdinary_MarkCompleteExecutes()
+    {
+        // The hint is only a hint: a To Do that copies another inquiry's hint is not that inquiry's outcome To Do.
+        var rig = InquiryTodoRig(ItemTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task WhenTheTodosNotesCannotBeRead_TheCommitIsUnavailable_NeverMarkedComplete()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.TodoNotesReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task ATeamOwnedNoCoreItem_NowRecords_OwnedByTheTeamUac2sResolverNames_D129()

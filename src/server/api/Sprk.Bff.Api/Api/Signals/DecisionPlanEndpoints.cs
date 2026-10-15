@@ -197,6 +197,13 @@ public static class DecisionPlanEndpoints
                 });
         }
 
+        // Task 154 (D-111): an inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark complete.
+        // Known from the gate's own "mine" read of the To Do (no request of its own); the commit route applies the same reduction.
+        if (decision.InquiryOutcomeTodo)
+        {
+            plan = plan.WithoutMarkComplete();
+        }
+
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);

@@ -46,9 +46,12 @@ public enum SignalAccessOutcome
 /// <param name="CallerContactId">Do lane only, once the "mine" read admitted the caller (<see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/>):
 /// the caller's linked contact (null when they have none), so the suppression count reports only the caller's own Do-lane count
 /// (task 152, D-145a).</param>
+/// <param name="InquiryOutcomeTodo">Do lane only, from the same "mine" read (task 154, D-111): the subject is an inquiry's
+/// "Record the outcome" To Do (<see cref="InquiryDispositionService.InquiryOfTodo"/>), which is completed by recording the inquiry's
+/// disposition, never by Mark complete.</param>
 public sealed record SignalAccessDecision(
     SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null,
-    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null)
+    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null, bool InquiryOutcomeTodo = false)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -353,7 +356,10 @@ public sealed class SignalCoreRecordAccess
             {
                 if (TryReadGuid(subject, pk, out var id) && id == subjectId)
                 {
-                    return allowed with { CallerContactId = caller.ContactId };
+                    // Task 154 (D-111): the same row says whether this To Do records an inquiry's outcome (no request of its own).
+                    var inquiryOutcome = string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase)
+                        && InquiryDispositionService.InquiryOfTodo(id, ReadNotes(subject)) is not null;
+                    return allowed with { CallerContactId = caller.ContactId, InquiryOutcomeTodo = inquiryOutcome };
                 }
             }
 
@@ -365,6 +371,26 @@ public sealed class SignalCoreRecordAccess
             _logger.LogError("Signal access: the Do-lane mine check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
             return SignalAccessDecision.Unavailable;
         }
+    }
+
+    private static string? ReadNotes(JsonElement row) =>
+        row.TryGetProperty(SignalReadService.TodoNotesColumn, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>
+    /// Task 154 (D-111), for the commit route: whether the To Do <paramref name="todoId"/> is an inquiry's "Record the outcome" To Do,
+    /// read AS THE CALLER (its notes hint, judged by <see cref="InquiryDispositionService.InquiryOfTodo"/>, the plan's own test). Null
+    /// when it could not be read (any failure): the commit then refuses as unavailable rather than guess.
+    /// </summary>
+    internal async Task<bool?> IsInquiryOutcomeTodoAsync(Guid todoId, CancellationToken ct)
+    {
+        var response = await _userClient.GetAsync($"sprk_todos({todoId:D})?$select={SignalReadService.TodoNotesColumn}", ct).ConfigureAwait(false);
+        if (!response.IsSuccess || response.Body is not { ValueKind: JsonValueKind.Object } body)
+        {
+            _logger.LogWarning("Signal access: the To Do's inquiry hint could not be read ({ErrorCode}).", response.ErrorCode ?? "unparseable");
+            return null;
+        }
+
+        return InquiryDispositionService.InquiryOfTodo(todoId, ReadNotes(body)) is not null;
     }
 
     private async Task<SignalAccessDecision> DeniedAsync(
