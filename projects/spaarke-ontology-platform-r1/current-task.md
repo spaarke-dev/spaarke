@@ -13,14 +13,14 @@
 |---|---|
 | **Task** | 059 worklist widget (lane running); 153 (#1953) adversarial pass 1; 146 waits for R3's c20bff283 redeploy. |
 | **Blocker** | None. |
-| **Next Action** | (1) 059 agent returns a PR, then one adversarial review, a fix round and a re-check, then merge. (2) 153 pass 1 returns, then a fix round that keeps uac-r2's anti-spoof property, then pass 2, then uac-r2, then merge. (3) R3 reports the c20bff283 deploy (SHA, healthz, writer setting); about 15 minutes later, resume the 146 agent for items 1, 2, 3, 9, 11. |
+| **Next Action** | (1) 059 agent returns a PR, then one adversarial review, a fix round and a re-check, then merge. (2) 153 fix round returns, then pass 2, then uac-r2, then merge. (3) R3 reports the c20bff283 deploy (SHA, healthz, writer setting); about 15 minutes later, resume the 146 agent for items 1, 2, 3, 9, 11. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
 | 059 worklist widget | — | — | `C:\wts-059` | Sonnet/high implementer running through task-execute. Branch `task/ontology-059-worklist-widget` from `7fc51a796`. On the path to 055 (Console deploy). |
-| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `09e2d6432` | `C:\wts-153` | Adversarial pass 1 is running and was given uac-r2's anti-spoof check: `FindGateRecordAsync` matched only `sprk_confirmedby IS NULL`, and the switch to `Plan.IsGate` must not let a human, condition-cleared or crafted-`sprk_steps` DR satisfy or block the gate lookup. Also watch: "a failed record write fails the run" vs the fail-closed rule and the evaluator-stalled alert; the 7-day backfill. |
+| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `09e2d6432` → fix | `C:\wts-153` | Pass 1 done. The gate lookup is unchanged (anti-spoof holds). Opus fix round running on 3 defects. F1: a deleted subject now counts as a skip, and closure-record failures no longer fail the run. F2: the closing record replaces a D-128 reminder or inquiry link, under the row-version check. F3: no `sprk_createdbyperson` on a condition-cleared record (route to uac-r2). Plus K4; K1, K2, K3 and K5 documented. Next: pass 2 (security), then uac-r2. |
 | 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | Docs only. Items 5, 6, 7, 10 pass; 4 and 9 are partial; 8 is the UAC known limit. Items 1, 2, 3, 9, 11 are refused because the BFF connection still caches the writer's privileges after the AppendTo-contact grant (`RetrievePrincipalAccess` flipped at 17:51Z). All test data is deleted. |
 
 Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
