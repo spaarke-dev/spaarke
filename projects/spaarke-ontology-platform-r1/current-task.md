@@ -19,10 +19,10 @@
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 149 gate DR queue job (D-139, D-144, K3 log → Warning) | #1907 | `fe7c5cd0d` | `C:\wts-149` | Adversarial pass 2 running. uac-r2 looks hardest at D-144 ownership. |
-| 150 Do items private to assignee (D-141) | #1905 | `e5fb90b09` | `C:\wts-150` | Fix round for pass-2 F4 (resume / repair replay skipped "mine") done; scoped Sonnet re-check running. PR body needs pass-2 K1–K4: K1 oracle only under faults; K2 ledger-peek fault → 404 not 503; K3 gate copies worklist error classification, derives subject table from lookup, repeats WhoAmI per Do id; K4 pre-150 ledger entries. |
-| 151 evidence hidden unless witness readable (D-142) | #1903 | `98b5a1ee0` | `C:\wts-151` | Adversarial pass 2 running. DI-89 (#1913) filed for the write-time limit. |
-| 146 child-contract live gate | — | — | `C:\wts-146` | Agent running writer-dependent items 1, 2, 3, 7, 9 on dev. Cleanup owed: ZZ-146-RECIPE policy `f93129b9-9dc8-f111-a05c-0022482913fc`, version `527b54d8-9dc8-f111-a05c-0022482913fc`, matter `0f8514b9-9dc8-f111-a05c-3833c5e9614d`, test Signal; confirm 0 zz rows. Then PR → review → merge. |
+| 149 gate DR queue job (D-139, D-144, K3 log → Warning) | #1907 | `fe7c5cd0d` → new | `C:\wts-149` | Pass 2 CLEAN. Small Sonnet round running: K2 ArchTest bypass shapes, K4 secure-BU unfiled test, K1/K3/K5 notes. Then the new SHA goes to uac-r2 (they look hardest at D-144). |
+| 150 Do items private to assignee (D-141) | #1905 | `e5fb90b09` | `C:\wts-150` | CLEAN (pass 2 F4 fixed, re-check clean); PR body has the K list. **With uac-r2** at this SHA. |
+| 151 evidence hidden unless witness readable (D-142) | #1903 | `98b5a1ee0` | `C:\wts-151` | CLEAN at pass 2. **With uac-r2** at this SHA. DI-89 (#1913) filed. |
+| 146 child-contract live gate | — | — | `C:\wts-146` (clean, no commits) | **Agent stopped by the session restart; resume it (SendMessage to its agent id, or a fresh agent) AFTER R3's dev deploy reports done.** Writer-dependent items 1, 2, 3, 7, 9 on dev. Cleanup owed: ZZ-146-RECIPE policy `f93129b9-9dc8-f111-a05c-0022482913fc`, version `527b54d8-9dc8-f111-a05c-0022482913fc`, matter `0f8514b9-9dc8-f111-a05c-3833c5e9614d`; Signals `zz-146-Sx`/`-Sm`/`recipe`/2× `gate` (5 rows); communications `zz-146-Cx` `534e347f-…`, `zz-146-Cm` `554e347f-…`; their gate DRs `584e347f-…`, `bb67d283-…`. Confirm 0 zz rows. Then PR → review → merge. |
 
 uac-r2 asked for the head SHA with each CLEAN; also post on #1355.
 
@@ -31,7 +31,7 @@ uac-r2 asked for the head SHA with each CLEAN; also post on #1355.
 - Runs master `f292ad119` + app setting `Ontology__Writer__ManagedIdentityClientId=69040982-612e-469e-a85f-26d5172367c5` (added 13:46:55Z). Healthz 200.
 - 035 done (`c9fd04c66`): writer-failure alert fired on the negative run (13:44:53Z); positive run wrote 1 Signal (13:48:04Z).
 - **Writes stay OFF** for 144 (`CoreAncestor__StampReconciliation__ReportOnlyTables`) and 148 (`Ontology__TodoAssigneeOwner__WritesEnabled`) until: 146 makes real Signals → one report-only pass of both → uac-r2 CLEAN → set `ReportOnlyTables=","` and `WritesEnabled=true` (BFF restarts: notify word-add-in, R3, uac-r2 before and after).
-- R3 has not redeployed yet; they notify us when they do. Our app settings survive their deploy.
+- R3 is deploying `9bb7f5724` (R3 + master `f292ad119`) now with our "go"; they report the SHA, healthz and that the writer setting is intact.
 
 ## Next, in order
 
