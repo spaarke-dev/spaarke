@@ -167,3 +167,16 @@ recorded in detail because it is observable.
 With the writer's ordinary-team answer put back as the owner (the first version of D-144), 8 of 186 filtered unit tests fail: the owner assertions, the
 Basic-colleague case, the discard case and the missing-owner skips. Restored: 186/186. The re-file test is about the reconciler, not the writer, so the
 seeding does not apply to it; it passes against the unchanged reconciler because the walk already reaches the record through `sprk_regardingcommunication`.
+
+## uac-r2 re-check of the D-144 fix round (F3, K1, K2)
+
+- **F3.** The second (secure-if-any) ask is now exercised: with the first ask `Unchanged`, a second-ask refusal of `SecureOwnerTeamUnresolved`,
+  `SecureParentNotIsolated` or `SecureBusinessUnitAmbiguous` refuses (`OwnerRefused`), and a fault in it gives `OwnerResolutionFailed`. Nothing is
+  created and the communication's owner row is never read. Seeding proof: routing any second-ask refusal except `ParentUnresolved` to the user owner
+  fails the three refusal cases (the fault case holds either way, as the ask itself throws).
+- **K1.** The Basic-colleague test also asserts on the shared entity service: only reads, no share or access row.
+- **K2.** A DISABLED owning user is a counted skip, not a failure: `gate_dr_skipped_owner_disabled` (Warning, event 50314, `ontology.writer.skips`), the
+  job completes, and it never falls to a team. `isdisabled` is read in the same request as the owner (a left outer link from the communication to
+  `systemuser`), so there is no extra read. Seeding proof: with the check disabled, the writer test and the job test fail.
+- Census wording changed as uac-r2 asked (the Routed entry now names the two second-ask answers that lead to the owner).
+

@@ -233,13 +233,14 @@ public sealed class GateDecisionRecordJobHandler : IJobHandler
                 result.AlreadyRecorded ? "already recorded" : "written", (long)stopwatch.Elapsed.TotalMilliseconds, job.CorrelationId);
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }
-        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.GateSkippedNoUnitTeam)
+        catch (DecisionRecordRefusedException ex) when (ex.Reason is DecisionRecordRefusalReason.GateSkippedNoUnitTeam
+                                                          or DecisionRecordRefusalReason.GateSkippedOwnerDisabled)
         {
             // D-144, by design: nothing is written and a retry meets the same condition. The writer has already logged it (Warning) and
             // counted it on ontology.writer.skips; completing the message is the honest outcome.
             _logger.LogInformation(GateDecisionRecordEvents.HandlerCompleted,
                 "[GATE-DR] job {JobId} done without a record: communication {CommunicationId} authorized {Authorize} was skipped by design " +
-                "(its owner or owning business unit cannot be read, D-144).",
+                "(its owner is disabled or its owner or owning business unit cannot be read, D-144).",
                 job.JobId, payload.CommunicationId, payload.Authorize);
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }

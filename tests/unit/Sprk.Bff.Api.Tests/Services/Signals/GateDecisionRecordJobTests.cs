@@ -309,6 +309,31 @@ public sealed class GateDecisionRecordJobTests
     }
 
     [Fact]
+    public async Task AnUnfiledCommunicationWhoseOwnerIsDisabled_WritesNothing_TheJobCompletes_CountedAsASkipNeverAFailure_D144Amended()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (failureListener, failures) = ListenReasons(scope);
+        var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
+        using var _ = failureListener;
+        using var __ = skipListener;
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var rig = new Rig(filedUnderMatter: false, realResolver: directory.Resolver());
+        rig.Writer.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["ownerid"] = new EntityReference("systemuser", CommunicationOwner),
+            ["owner.isdisabled"] = new AliasedValue("systemuser", "isdisabled", true),
+        };
+
+        var outcome = await rig.RunAsync(Payload());
+
+        outcome.Status.Should().Be(JobStatus.Completed, "a retry meets the same condition: dead-lettering it would only page the failures alert");
+        rig.Writer.Created.Should().BeEmpty();
+        failures.Should().BeEmpty();
+        skips.Should().Equal(DecisionRecordRefusalReason.GateSkippedOwnerDisabled);
+    }
+
+    [Fact]
     public async Task ATransientFault_IsAFailure_ForRedelivery_NotPoisoned_AndTheWriterMetersIt()
     {
         var scope = Guid.NewGuid();

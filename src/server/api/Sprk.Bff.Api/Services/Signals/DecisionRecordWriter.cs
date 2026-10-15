@@ -190,6 +190,12 @@ public static class DecisionRecordRefusalReason
     /// SKIP counter (<c>ontology.writer.skips</c>, never <c>ontology.writer.failures</c>) under this tag.</summary>
     public const string GateSkippedNoUnitTeam = "gate_dr_skipped_no_unit_team";
 
+    /// <summary>Task 149 (D-144 as amended, uac-r2 K2): the unfiled communication's owning user is DISABLED, so Dataverse would refuse the create
+    /// (a retry meets the same condition and would dead-letter and page the writer-failures alert). Nothing is written; it is a skip, not a
+    /// failure: Warning (<see cref="DecisionRecordEvents.GateDecisionSkippedOwnerDisabled"/>) and counted on <c>ontology.writer.skips</c>
+    /// under this tag. It never falls through to a team.</summary>
+    public const string GateSkippedOwnerDisabled = "gate_dr_skipped_owner_disabled";
+
     /// <summary>Task 149 (D-139): whether the gate decision's record already exists could not be checked (a Dataverse fault on the lookup), so
     /// nothing was written rather than risk a second record. A retry may succeed.</summary>
     public const string GateRecordLookupFailed = "decision_gate_lookup_failed";
@@ -292,6 +298,10 @@ public static class DecisionRecordEvents
     /// stands alone is not recorded because its owner, or its owning business unit (needed to rule out the Secure Record unit), cannot be read
     /// (<see cref="DecisionRecordRefusalReason.GateSkippedNoUnitTeam"/>). Ids and the resolver's refusal code only.</summary>
     public static readonly EventId GateDecisionSkippedNoUnitTeam = new(50313, nameof(GateDecisionSkippedNoUnitTeam));
+
+    /// <summary>Warning (task 149, D-144 as amended, uac-r2 K2): a gate decision about an unfiled communication is not recorded because the
+    /// communication's owning user is disabled (<see cref="DecisionRecordRefusalReason.GateSkippedOwnerDisabled"/>). Ids only.</summary>
+    public static readonly EventId GateDecisionSkippedOwnerDisabled = new(50314, nameof(GateDecisionSkippedOwnerDisabled));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -726,6 +736,16 @@ public sealed class DecisionRecordWriter
             return;
         }
 
+        if (ex.Reason == DecisionRecordRefusalReason.GateSkippedOwnerDisabled)
+        {
+            // D-144 as amended (uac-r2 K2): same shape as the skip above. A disabled owner cannot be assigned a record and does not recover on
+            // a retry, so it is metered as a skip, not a failure, and logged at Warning so an operator can see it.
+            _logger.LogWarning(DecisionRecordEvents.GateDecisionSkippedOwnerDisabled,
+                "Gate decision {EvaluationId} not recorded: its communication's owning user is disabled.", reviewId);
+            OntologyWriterTelemetry.RecordSkip(ex.Reason);
+            return;
+        }
+
         _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
             "Decision Record writer refused review {ReviewId} (reason={Reason}, ownerRefusal={OwnerRefusalCode}).",
             reviewId, ex.Reason, ex.OwnerRefusalCode);
@@ -1137,6 +1157,9 @@ public sealed class DecisionRecordWriter
         return (owner, principal);
     }
 
+    /// <summary>The alias of the owner's <c>systemuser</c> link in <see cref="ReadCommunicationOwnerAsync"/>.</summary>
+    private const string OwnerAlias = "owner";
+
     /// <summary>
     /// Task 149 / D-144 as amended: the owning principal of the unfiled communication a gate decision is about, as READ from the row (the
     /// shared sysadmin reader, which sees any owner; the writer identity cannot be assumed to). Only a user owner is accepted: a
@@ -1144,11 +1167,13 @@ public sealed class DecisionRecordWriter
     /// else (no row, no owner, a team, an empty id) is "missing or unreadable": the by-design skip, never a fall-through to any team.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.GateSkippedNoUnitTeam"/> when there is no
-    /// readable user owner; <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/> when the read faulted.</exception>
+    /// readable user owner; <see cref="DecisionRecordRefusalReason.GateSkippedOwnerDisabled"/> when that user is disabled;
+    /// <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/> when the read faulted.</exception>
     private async Task<EntityReference> ReadCommunicationOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
     {
         var communicationId = context.Parents.First(p => p.EntityLogicalName == GateSubjectEntity).RecordId;
         EntityReference? owner;
+        bool disabled;
         try
         {
             var query = new QueryExpression(GateSubjectEntity)
@@ -1158,8 +1183,14 @@ public sealed class DecisionRecordWriter
                 NoLock = true,
             };
             query.Criteria.AddCondition($"{GateSubjectEntity}id", ConditionOperator.Equal, communicationId);
-            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            owner = rows?.Entities?.FirstOrDefault()?.GetAttributeValue<EntityReference>("ownerid");
+            // The owner's isdisabled comes back with the SAME read (a left outer link to systemuser: a team owner still returns the row, with
+            // no alias value), so a disabled owner costs no second request.
+            var ownerLink = query.AddLink("systemuser", "ownerid", "systemuserid", JoinOperator.LeftOuter);
+            ownerLink.EntityAlias = OwnerAlias;
+            ownerLink.Columns = new ColumnSet("isdisabled");
+            var row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities?.FirstOrDefault();
+            owner = row?.GetAttributeValue<EntityReference>("ownerid");
+            disabled = row?.GetAttributeValue<AliasedValue>($"{OwnerAlias}.isdisabled")?.Value is true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1171,6 +1202,15 @@ public sealed class DecisionRecordWriter
 
         if (owner is { Id: var id, LogicalName: "systemuser" } && id != Guid.Empty)
         {
+            if (disabled)
+            {
+                // Uac-r2 K2: Dataverse refuses to assign a record to a disabled user, and a retry meets the same condition. Skip by design;
+                // never fall through to a team.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.GateSkippedOwnerDisabled,
+                    "The communication's owning user is disabled, so nobody can own a Decision Record about it; nothing was written.");
+            }
+
             return owner;
         }
 

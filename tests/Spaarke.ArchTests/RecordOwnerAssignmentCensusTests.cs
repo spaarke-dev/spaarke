@@ -555,8 +555,9 @@ public class RecordOwnerAssignmentCensusTests
         // filed under nothing) is owned by the communication's own owning user, as read from the row; the business unit's default team is
         // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's.
         new OwnerWriteEntry("DecisionRecordWriter.cs", "FiledAndOwnedAsync", 1, OwnerWriteKind.Routed,
-            "D-144 as amended: only after IRecordOwnershipResolver answered Unchanged for a communication-gate decision (and the plain-parent "
-            + "secure-if-any ask did not name the Secure Record team); the owner written is the unfiled communication's own owning user."),
+            "D-144 as amended: only after IRecordOwnershipResolver answered Unchanged for a communication-gate decision and the second ask "
+            + "answered an ordinary team or NoDefaultOwnerTeam; every other answer refuses; the owner is the communication's own owner "
+            + "(user or application user)."),
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),

@@ -256,6 +256,15 @@ public sealed partial class DecisionRecordWriterTests
         h.Org.Invocations.Select(i => i.Method.Name).Distinct().Should().OnlyContain(
             name => name == "CreateAsync" || name == "RetrieveAsync",
             "no GrantAccess / ModifyAccess / Assign / Associate / Execute: the colleague gets no share");
+
+        // The shared sysadmin service (h.Entities) is the other way a share or grant could be made: it is only ever READ through.
+        h.Entities.Invocations.Select(i => i.Method.Name).Distinct().Should().OnlyContain(
+            name => name == "RetrieveAsync" || name == "RetrieveMultipleAsync",
+            "the shared entity service makes no create, update, share or grant");
+        h.Lookups.Should().OnlyContain(q => q.EntityName == "sprk_decisionrecord" || q.EntityName == "sprk_communication",
+            "no query touches a share or access table");
+        h.Created.Concat(h.Seeded).Should().NotContain(e => e.LogicalName == "principalobjectaccess" || e.LogicalName.Contains("share") || e.LogicalName.Contains("access"),
+            "no share or grant row exists");
     }
 
     [Fact]
@@ -314,6 +323,69 @@ public sealed partial class DecisionRecordWriterTests
         h.Row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(UserRef(CommunicationOwner),
             "the second ask is only the secure-if-any check: an ordinary team it names is discarded, never applied");
         h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().NotBe(team);
+    }
+
+    [Theory]
+    [InlineData(RecordOwnerRefusal.SecureOwnerTeamUnresolved)]
+    [InlineData(RecordOwnerRefusal.SecureParentNotIsolated)]
+    [InlineData(RecordOwnerRefusal.SecureBusinessUnitAmbiguous)]
+    [InlineData("fault")]
+    public async Task Gate_WhenTheSecondAskRefusesOrFaults_NothingIsWritten_AndTheCommunicationsOwnerIsNeverRead_FailClosed_D144Amended(string answer)
+    {
+        // uac-r2 F3. The first ask answers Unchanged (an unfiled, user-owned communication); only the SECOND ask (the secure-if-any check)
+        // answers differently. Only ParentUnresolved (the unit cannot be read: the by-design skip) and NoDefaultOwnerTeam (ordinary, the unit
+        // has no default team) may lead to the communication's owner; every other refusal, and a fault, must refuse and write nothing. The
+        // owner row is seeded, so an implementation that routed the refusal to the user owner would write a record and read the row.
+        var h = new Harness();
+        CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        h.Ownership.Setup(r => r.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => c.KeepCreatorUnlessTargetIsTeamOwned), It.IsAny<CancellationToken>()))
+            .Callback<RecordOwnershipContext, CancellationToken>((c, _) => h.OwnerAsks.Add(c))
+            .ReturnsAsync(RecordOwnerResolution.Unchanged("not team-owned and filed under nothing"));
+        var second = h.Ownership.Setup(r => r.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => !c.KeepCreatorUnlessTargetIsTeamOwned), It.IsAny<CancellationToken>()))
+            .Callback<RecordOwnershipContext, CancellationToken>((c, _) => h.OwnerAsks.Add(c));
+        if (answer == "fault")
+            second.ThrowsAsync(new InvalidOperationException("dataverse"));
+        else
+            second.ReturnsAsync(RecordOwnerResolution.Refused(answer, "refused"));
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        var thrown = (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        thrown.Reason.Should().Be(answer == "fault" ? DecisionRecordRefusalReason.OwnerResolutionFailed : DecisionRecordRefusalReason.OwnerRefused);
+        if (answer != "fault")
+            thrown.OwnerRefusalCode.Should().Be(answer);
+        h.OwnerAsks.Should().HaveCount(2, "the second ask was really made, so its answer is what is being tested");
+        h.Created.Should().BeEmpty();
+        h.Lookups.Should().NotContain(q => q.EntityName == "sprk_communication", "the communication's owner row is never read after a refused or faulted secure check");
+    }
+
+    [Fact]
+    public async Task Gate_AnUnfiledCommunicationWhoseOwnerIsDisabled_WritesNothing_IsASkipNotAFailure_AndReadsTheOwnerOnce_D144Amended()
+    {
+        // uac-r2 K2: Dataverse refuses to assign a record to a disabled user, a retry meets the same condition, and the dead-lettered job would
+        // page the writer-failures alert. So it is a counted skip (Warning), decided from isdisabled returned with the owner row.
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (failureListener, failures) = ListenReasons(scope);
+        var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
+        using var _ = failureListener;
+        using var __ = skipListener;
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var h = new Harness(realResolver: directory.Resolver());
+        CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        h.Rows[("sprk_communication", CommunicationId)]["owner.isdisabled"] = new AliasedValue("systemuser", "isdisabled", true);
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.GateSkippedOwnerDisabled);
+        h.Created.Should().BeEmpty();
+        failures.Should().BeEmpty("a disabled owner is by design, not a failure");
+        skips.Should().Equal(DecisionRecordRefusalReason.GateSkippedOwnerDisabled);
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedOwnerDisabled).Which.Level.Should().Be(LogLevel.Warning);
+        h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.WriteRefused);
+        var ownerReads = h.Lookups.Where(q => q.EntityName == "sprk_communication").ToList();
+        ownerReads.Should().ContainSingle("isdisabled comes with the owner row: no second request");
+        ownerReads[0].LinkEntities.Should().ContainSingle().Which.Columns.Columns.Should().Contain("isdisabled");
     }
 
     [Fact]
