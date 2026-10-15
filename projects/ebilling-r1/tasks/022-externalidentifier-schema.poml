@@ -4,7 +4,7 @@
     <title>sprk_externalidentifier schema and firm-scoped key</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new table, an alternate key and a new script file; no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,6 +111,15 @@
     FR-05 names Matter / Project / Work Assignment lookups; sprk_regardinginvoice is added because FR-12 says "regarding per ADR-024" and the firm invoice number and PO identify an invoice, not a core record.
     sprk_normalizedvalue exists so matching does not depend on case or spaces; the normalization rule is owned by 044.
     Open for 013 / uac-r2 (not this task): secure-record family membership and sprk_createdbyperson for this table.
+
+    COMPLETION (2026-10-15): full record in projects/ebilling-r1/notes/022-externalidentifier-schema.md.
+    - Script scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 run against spaarkedev1: run 1 created table, 14 columns / lookups and the D-68 key (Active); run 2 and a -WhatIf: no change.
+    - The D-68 key (issuing organization, identifier type, normalized value, regarding record id) was buildable; escalation trigger 1 did not fire. D-68 is already in decisions-log.md. Trigger 2 (012 lookup names) did not fire (mixed scheme, task 013).
+    - Live key tests: exact duplicate refused (HTTP 412, 0x80060892); same value for another firm accepted; same value for another core record accepted; test rows deleted (0 remain).
+    - Deviation: sprk_identifiertype and sprk_normalizedvalue raised to SystemRequired (ApplicationRequired is not enforced on API writes, DEF-009); verified live.
+    - Finding for 044 / 013: a row with an empty key column (issuing organization or regarding record id) is not covered by the key, so the writer must always fill both for a firm-quoted identifier. Documented in docs/data-model/sprk_externalidentifier.md.
+    - TASK-INDEX.md step 7 left to the main session (parallel-run rule).
+    rework: none task 022
   </notes>
 
   <execution>

@@ -43,6 +43,7 @@ These alternate keys are composite keys used for idempotent upsert operations. R
 |---|---|---|
 | `sprk_billingevent` | `sprk_invoice` + `sprk_linesequence` | Idempotent invoice line re-extraction |
 | `sprk_billingcode` | `sprk_codeset` + `sprk_code` (key `sprk_billingcode_codeset_code_key`) | Idempotent UTBMS code seeding; a code is unique within its set. Address by key as `sprk_billingcodes(_sprk_codeset_value=<id>,sprk_code='L110')`. See [sprk_billingcode.md](sprk_billingcode.md) |
+| `sprk_externalidentifier` | `sprk_issuingorganization` + `sprk_identifiertype` + `sprk_normalizedvalue` + `sprk_regardingrecordid` (key `sprk_externalidentifier_firm_type_value_record`, owner decision D-68) | An identifier is unique per firm, type, normalized value and core record; the same value for another firm, another type or another core record is allowed. A row with any of the four empty is not covered. Address by key as `sprk_externalidentifiers(_sprk_issuingorganization_value=<id>,sprk_identifiertype=<n>,sprk_normalizedvalue='<v>',sprk_regardingrecordid='<id>')`. See [sprk_externalidentifier.md](sprk_externalidentifier.md) |
 | `sprk_spendsnapshot` | `sprk_matter` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (matter-scoped) | Idempotent snapshot regeneration |
 | `sprk_spendsnapshot` | `sprk_project` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (project-scoped) | Idempotent snapshot regeneration |
 | Processing Job entity | `sprk_idempotencykey` | Idempotency key for background jobs |
