@@ -166,7 +166,7 @@ public sealed class SignalReadService
     internal const string SignalEntitySet = "sprk_signals";
     internal const string HighPriorityColumn = "sprk_highpriority";
 
-    /// <summary><c>sprk_todo.sprk_notes</c>: its first line is the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
+    /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
     internal const string TodoNotesColumn = "sprk_notes";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
@@ -842,14 +842,15 @@ public sealed class SignalReadService
     /// work. The worklist (a chunk of ids) and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, one id) both send this
     /// request; neither builds the predicate itself.
     /// </summary>
+    /// <param name="includeTodoNotes">The per-Signal gate's single-id read only (task 154, D-111): a To Do's notes carry the inquiry
+    /// hint, so the gate knows a candidate inquiry-outcome To Do from this same read with no request of its own. A column, never a
+    /// predicate. The worklist's chunked read leaves it out (adversarial pass 1 K3: an unused ntext column on up to 100 rows).</param>
     internal static string MineSubjectQuery(
-        DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId)
+        DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId, bool includeTodoNotes = false)
     {
         var pk = $"{rule.Table}id";
         var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty)
-            // Task 154 (D-111): a To Do's notes carry the inquiry hint, so the per-Signal gate knows an inquiry-outcome To Do from
-            // this same read (InquiryDispositionService.InquiryOfTodo) with no request of its own. A column, never a predicate.
-            + (string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn}" : string.Empty);
+            + (includeTodoNotes && string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn}" : string.Empty);
         return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
     }
 

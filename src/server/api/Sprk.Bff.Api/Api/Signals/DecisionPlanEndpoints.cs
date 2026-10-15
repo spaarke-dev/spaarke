@@ -197,11 +197,22 @@ public static class DecisionPlanEndpoints
                 });
         }
 
-        // Task 154 (D-111): an inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark complete.
-        // Known from the gate's own "mine" read of the To Do (no request of its own); the commit route applies the same reduction.
-        if (decision.InquiryOutcomeTodo)
+        // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
+        // complete. The candidate comes from the gate's own "mine" read of the To Do (its notes hint); whether that inquiry is still
+        // open costs one GET as the caller, sent only for such a To Do whose plan offers Mark complete (adversarial pass 1: once the
+        // inquiry is closed, the To Do is an ordinary To Do). The commit route applies the same reduction.
+        if (decision.InquiryHint is { } hintedInquiry && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
         {
-            plan = plan.WithoutMarkComplete();
+            var open = await signalAccess.IsOpenInquiryAsync(hintedInquiry, ct);
+            if (open is null)
+            {
+                return AccessUnavailable(httpContext);
+            }
+
+            if (open.Value)
+            {
+                plan = plan.WithoutMarkComplete();
+            }
         }
 
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never

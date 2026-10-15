@@ -201,6 +201,43 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
     }
 
     [Fact]
+    public async Task AValidHintNamingAClosedInquiry_Is404_TheHintedPathAppliesTheFallbacksOpenTest()
+    {
+        // Adversarial pass 1 F1: once the disposition is recorded, the To Do is an ordinary To Do; the picker has nothing to record.
+        TheInquiryWorld(null);
+        var closedTodo = InquiryDispositionService.TodoIdFor(ClosedInquiry);
+        _fixture.Rights[("sprk_todos", closedTodo)] = AccessRights.Read;
+        W.Todos[closedTodo] = (Hint(ClosedInquiry), Matter);
+
+        var response = await GetAsync(closedTodo);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(ClosedInquiry.ToString("D"));
+        W.Requests.Should().Contain($"sprk_servicerequests({ClosedInquiry:D})?$select=statecode,sprk_direction");
+    }
+
+    [Fact]
+    public async Task AValidHintNamingAnInboundServiceRequest_Is404()
+    {
+        TheInquiryWorld(Hint(Inquiry));
+        W.ServiceRequests[Inquiry] = (Matter, 100000000, 0);
+
+        (await GetAsync(InquiryTodo)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task AHintBelowATypedNote_IsStillTheHint_NoListIsRead()
+    {
+        // Adversarial pass 1 F2: every serviceRequestId= occurrence is a candidate; the derived id decides.
+        TheInquiryWorld($"Spoke to the firm\n{Hint(OtherInquiry)}\n{Hint(Inquiry)}");
+
+        var body = await BodyOf(await GetAsync(InquiryTodo));
+
+        body.GetProperty("serviceRequestId").GetGuid().Should().Be(Inquiry);
+        W.Requests.Should().NotContain(r => r.StartsWith("sprk_servicerequests?", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ACallerWhoCannotReadTheInquiry_OnTheFallback_Is404()
     {
         TheInquiryWorld(null);
@@ -240,6 +277,23 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         (await response.Content.ReadAsStringAsync()).Should().NotContain("RE: budget");
     }
 
+    [Theory]
+    [InlineData("sprk_todos(", null)]
+    [InlineData("sprk_servicerequests(", "hint")]
+    [InlineData("sprk_servicerequests?", null)]
+    [InlineData("sprk_communications?", "hint")]
+    public async Task ADataverseTimeout_Is503_Never500(string throwingRead, string? hint)
+    {
+        // Adversarial pass 1 F3: HttpClient's timeout is a TaskCanceledException while the request's own token is not cancelled.
+        TheInquiryWorld(hint is null ? null : Hint(Inquiry));
+        W.ThrowReadsStartingWith = throwingRead;
+
+        var response = await GetAsync(InquiryTodo);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await BodyOf(response)).GetProperty("reasonCode").GetString().Should().Be("inquiry.unavailable");
+    }
+
     [Fact]
     public async Task AFurtherPageOfReplies_Is503_NeverTheFirstPageAsTheList()
     {
@@ -260,12 +314,17 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
         public List<(Guid Id, Guid ServiceRequest, int Direction, string Subject, string? ReceivedOn)> Communications { get; } = new();
         public HashSet<Guid> CallerCannotRead { get; } = new();
         public string? FailReadsStartingWith { get; set; }
+
+        /// <summary>Reads starting with this THROW (adversarial pass 1 F3: DataverseUserClient lets a timeout through).</summary>
+        public string? ThrowReadsStartingWith { get; set; }
         public bool RepliesHaveAnotherPage { get; set; }
         public ConcurrentQueue<string> Requests { get; } = new();
 
         public DataverseUserResponse Answer(string path)
         {
             Requests.Enqueue(path);
+            if (ThrowReadsStartingWith is { } throwing && path.StartsWith(throwing, StringComparison.Ordinal))
+                throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
             if (FailReadsStartingWith is { } failing && path.StartsWith(failing, StringComparison.Ordinal))
                 return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
 
@@ -284,8 +343,8 @@ public class InquiryForTodoEndpointTests : IClassFixture<InquiryForTodoTestFixtu
             if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
             {
                 var id = IdIn(path);
-                return ServiceRequests.ContainsKey(id) && !CallerCannotRead.Contains(id)
-                    ? Ok(new Dictionary<string, object?> { ["sprk_servicerequestid"] = id.ToString("D") })
+                return ServiceRequests.TryGetValue(id, out var request) && !CallerCannotRead.Contains(id)
+                    ? Ok(new Dictionary<string, object?> { ["statecode"] = request.State, ["sprk_direction"] = request.Direction })
                     : NotFound();
             }
 
@@ -370,8 +429,17 @@ public sealed class InquiryForTodoTestFixture : WorkspaceTestFixture
 
     private sealed class WorldClient(InquiryForTodoTestFixture fixture) : IDataverseUserClient
     {
-        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
-            Task.FromResult(fixture.World.Answer(relativePath));
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Task.FromResult(fixture.World.Answer(relativePath));
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException<DataverseUserResponse>(ex);
+            }
+        }
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("The lookup never writes.");

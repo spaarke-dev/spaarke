@@ -1267,17 +1267,21 @@ public sealed class DecisionCommitService
 
         var given = review.Actions ?? [];
 
-        // Task 154 (D-111, 059 review): an inquiry's "Record the outcome" To Do is completed by recording the inquiry's disposition
-        // (071's route), never by Mark complete, which would close the To Do and leave the inquiry open with nobody prompted again.
-        // The plan route offers the reduced plan (ResolvedDecisionPlan.WithoutMarkComplete); this route applies the same reduction and
-        // refuses a Mark complete that is taken. The To Do is read AS THE CALLER, only when the plan offers Mark complete on a To Do.
+        // Task 154 (D-111, 059 review): an OPEN inquiry's "Record the outcome" To Do is completed by recording the inquiry's
+        // disposition (071's route), never by Mark complete, which would close the To Do and leave the inquiry open with nobody
+        // prompted again. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). The plan route offers the reduced plan
+        // (ResolvedDecisionPlan.WithoutMarkComplete); this route applies the same reduction and refuses a Mark complete that is taken.
+        // Read AS THE CALLER, only when the plan offers Mark complete on a To Do: the To Do, then the hinted inquiry or (no usable
+        // hint) the matter's open inquiries, the for-todo lookup's own identification.
         if (lane == DecisionLane.Do && string.Equals(primary.SubjectEntity, "sprk_todo", StringComparison.OrdinalIgnoreCase)
             && primary.SubjectId is { } todoId && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
         {
-            var inquiryOutcome = await _access.IsInquiryOutcomeTodoAsync(todoId, ct).ConfigureAwait(false);
-            if (inquiryOutcome is null)
+            var inquiryOutcome = await _access.CheckInquiryOutcomeTodoAsync(todoId, ct).ConfigureAwait(false);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.Unavailable)
                 return No(DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.", status: DecisionCommitStatus.Unavailable);
-            if (inquiryOutcome.Value)
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.NotReadable)
+                return (new DecisionCommitResult { Status = DecisionCommitStatus.NotFound }, null);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.OpenInquiry)
             {
                 if (given.Any(a => a?.Code == ResolvedDecisionPlan.MarkCompleteCode && a.Taken))
                     return No(DecisionCommitReasons.InquiryDispositionRequired,

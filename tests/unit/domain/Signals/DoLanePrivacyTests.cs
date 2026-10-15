@@ -224,13 +224,21 @@ public sealed class DoLanePrivacyTests
     private static readonly Guid OtherInquiry = Guid.Parse("15000000-0000-4000-8000-0000000000f2");
     private const string TodoPlan = "{\"actions\":[\"mark-complete\",\"reschedule\",\"reassign\"],\"nextSteps\":[\"add-todo\"]}";
 
-    private static World AlicesTodo(Guid rowId, string? notes) =>
-        new("sprk_todo", hasCore: true) { SubjectRowId = rowId, Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+    private static World AlicesTodo(Guid rowId, string? notes, int? inquiryState = 0, bool inquiryReadFaults = false) =>
+        new("sprk_todo", hasCore: true)
+        {
+            SubjectRowId = rowId, Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            InquiryState = inquiryState, InquiryReadFaults = inquiryReadFaults,
+        };
+
+    private static string Hint(Guid inquiry) => $"{InquiryReplyTodoCreator.NotesKey}{inquiry:D}";
+
+    private static string InquiryStateRead(Guid inquiry) => $"sprk_servicerequests({inquiry:D})?$select=statecode,sprk_direction";
 
     [Fact]
-    public async Task AnInquiryOutcomeTodo_ItsPlanOffersNoMarkComplete_RescheduleAndReassignRemain_WithNoRequestOfItsOwn()
+    public async Task AnOpenInquirysOutcomeTodo_ItsPlanOffersNoMarkComplete_RescheduleAndReassignRemain_WithOneGetOfTheInquiry()
     {
-        var inquiryTodo = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), $"{InquiryReplyTodoCreator.NotesKey}{Inquiry:D}");
+        var inquiryTodo = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry));
         var ordinary = AlicesTodo(SubjectId, null);
 
         var plan = Plan(await PlanRoute(inquiryTodo.As(Alice), TodoPlan));
@@ -239,8 +247,66 @@ public sealed class DoLanePrivacyTests
         plan.Actions.Select(a => a.Code).Should().Equal("reschedule", "reassign");
         plan.Actions[0].IsRecommended.Should().BeTrue("the plan's next action becomes the recommendation");
         plan.NextSteps.Select(a => a.Code).Should().Equal("add-todo");
-        inquiryTodo.Requests.Should().HaveCount(ordinary.Requests.Count, "the gate's own mine read carries the notes; nothing else is read");
+        inquiryTodo.Requests.Should().HaveCount(ordinary.Requests.Count + 1, "the gate's own mine read carries the notes; only the inquiry's state is read");
+        inquiryTodo.Requests.Where(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal)).Should().Equal(InquiryStateRead(Inquiry));
         inquiryTodo.Requests.Should().Contain(r => r.StartsWith("sprk_todos?$select=", StringComparison.Ordinal) && r.Contains("sprk_notes", StringComparison.Ordinal));
+        ordinary.Requests.Should().NotContain(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal), "an ordinary To Do costs nothing more");
+    }
+
+    [Theory]
+    [InlineData(1)]     // the disposition was recorded (or the inquiry closed otherwise), but the To Do stayed open
+    [InlineData(null)]  // the caller cannot read the inquiry (403/404)
+    public async Task ATodoWhoseInquiryIsClosedOrUnreadable_IsOrdinary_ItsPlanOffersMarkComplete(int? inquiryState)
+    {
+        // Adversarial pass 1 F1: a closed inquiry's To Do that went overdue must not be stuck (409 already_resolved on the
+        // disposition, 409 disposition_required on Mark complete).
+        var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryState);
+
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("mark-complete", "reschedule", "reassign");
+        world.Requests.Should().Contain(InquiryStateRead(Inquiry));
+    }
+
+    [Fact]
+    public async Task WhenTheInquirysStateCannotBeRead_ThePlanIs503_NeverAGuess()
+    {
+        var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryReadFaults: true);
+
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+
+        problem.Status.Should().Be(503);
+        problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
+    }
+
+    [Fact]
+    public async Task AHintBelowANoteTheAssigneeTyped_IsStillTheHint_ThePlanOffersNoMarkComplete()
+    {
+        // Adversarial pass 1 F2: the v5 id match is the proof, not the line the hint sits on.
+        var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), $"Chased by phone on Monday\r\n{Hint(Inquiry)}\nwaiting");
+
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("reschedule", "reassign");
+    }
+
+    [Fact]
+    public void TheWorklistsMineRead_SelectsTheColumnsItDidBefore_OnlyTheGatesSingleIdReadAddsTheNotes()
+    {
+        // Adversarial pass 1 K3: sprk_notes is ntext; the worklist's chunked read (up to 100 To Dos) never uses it.
+        var rule = SignalReadService.DoLaneMineRules["sprk_todo"];
+        static string SelectOf(string query) => query[(query.IndexOf("$select=", StringComparison.Ordinal) + 8)..query.IndexOf("&$filter=", StringComparison.Ordinal)];
+
+        var worklist = SignalReadService.MineSubjectQuery(rule, "sprk_todos", [SubjectId, Guid.NewGuid()], Alice, AliceContact);
+        var gate = SignalReadService.MineSubjectQuery(rule, "sprk_todos", [SubjectId], Alice, AliceContact, includeTodoNotes: true);
+
+        SelectOf(worklist).Should().Be($"sprk_todoid,{PersonColumn("sprk_todo")},sprk_highpriority", "the base (pre-154) select, unchanged");
+        SelectOf(gate).Should().Be($"sprk_todoid,{PersonColumn("sprk_todo")},sprk_highpriority,sprk_notes");
+        gate[gate.IndexOf("&$filter=", StringComparison.Ordinal)..].Should().Be(
+            SignalReadService.MineSubjectQuery(rule, "sprk_todos", [SubjectId], Alice, AliceContact)[worklist.IndexOf("&$filter=", StringComparison.Ordinal)..],
+            "the same predicate: a column, never a filter");
+        SelectOf(SignalReadService.MineSubjectQuery(SignalReadService.DoLaneMineRules["sprk_event"], "sprk_events", [SubjectId], Alice, AliceContact, includeTodoNotes: true))
+            .Should().NotContain("sprk_notes", "only a To Do carries the hint");
     }
 
     [Fact]
@@ -252,17 +318,26 @@ public sealed class DoLanePrivacyTests
     }
 
     [Theory]
-    [InlineData(true)]   // the hint names another inquiry: the derived id is not this To Do's
-    [InlineData(false)]  // the hint is on the second line, not the first
-    public async Task ATodoWhoseHintDoesNotDeriveItsOwnId_IsOrdinary_ItStillOffersMarkComplete(bool otherInquiry)
+    [InlineData(false)]  // the hint names another inquiry: the derived id is not this To Do's
+    [InlineData(true)]   // the hint is on the second line and its id matches: guarded (adversarial pass 1 F2)
+    public async Task ATodoIsGuarded_OnlyWhenAHintDerivesItsOwnId_OnWhicheverLine(bool hintOnLineTwoDerivesTheId)
     {
-        var notes = otherInquiry
-            ? $"{InquiryReplyTodoCreator.NotesKey}{OtherInquiry:D}"
-            : $"Chase this\n{InquiryReplyTodoCreator.NotesKey}{Inquiry:D}";
+        var notes = hintOnLineTwoDerivesTheId
+            ? $"Chase this\n{Hint(Inquiry)}"
+            : Hint(OtherInquiry);
 
-        var plan = Plan(await PlanRoute(AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), notes).As(Alice), TodoPlan));
+        var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), notes);
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
 
-        plan.Actions.Select(a => a.Code).Should().Contain("mark-complete");
+        if (hintOnLineTwoDerivesTheId)
+        {
+            plan.Actions.Select(a => a.Code).Should().NotContain("mark-complete");
+        }
+        else
+        {
+            plan.Actions.Select(a => a.Code).Should().Contain("mark-complete");
+            world.Requests.Should().NotContain(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal), "a hint that fails costs no request");
+        }
     }
 
     // =================================================================================================
@@ -345,6 +420,13 @@ public sealed class DoLanePrivacyTests
 
         /// <summary>The subject row's <c>sprk_notes</c>, returned only when the request selects it (task 154).</summary>
         public string? Notes { get; init; }
+
+        /// <summary>The hinted inquiry's <c>statecode</c> as the caller reads it (0 open, 1 closed); null when the caller cannot read it
+        /// (404). Outbound. Task 154, adversarial pass 1.</summary>
+        public int? InquiryState { get; init; } = 0;
+
+        /// <summary>The caller's read of the inquiry faults (503).</summary>
+        public bool InquiryReadFaults { get; init; }
         public List<string> Requests { get; } = new();
         public IDataverseUserClient Client => _client.Object;
 
@@ -451,6 +533,18 @@ public sealed class DoLanePrivacyTests
                 }
 
                 return Ok(new { value = ids.Contains(SubjectRowId) && mine ? new[] { subjectRow } : [] });
+            }
+
+            if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
+            {
+                if (InquiryReadFaults)
+                {
+                    return DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                }
+
+                return InquiryState is { } state
+                    ? Ok(new { statecode = state, sprk_direction = BudgetInquiryExecutor.DirectionOutbound })
+                    : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
             }
 
             // The matter and the subject row (createdon): both readable to Alice and Bob.

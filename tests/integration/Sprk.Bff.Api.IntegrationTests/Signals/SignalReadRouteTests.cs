@@ -410,6 +410,42 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
+    public async Task NotFiled_IsLastInTheDoLane_InTheClosedTodaySetToo()
+    {
+        // Adversarial pass 1 F4: the order holds in every set, not only the lanes. The closed query orders by the core pair first, so
+        // the Not filed item (no core) is the first row the fake returns.
+        var world = new World();
+        var mA = world.Matter(readers: [Alice], number: "MAT-0002");
+        var mB = world.Matter(readers: [Alice], number: "MAT-0001");
+        var closed = world.Now.AddMinutes(-5);
+        var notFiled = world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice)), sets: ["closedToday", "closedEarlier"], resolvedOn: closed);
+        world.Signal(Do, core: (MatterType, mA), subject: (TodoType, world.Todo(owner: Alice)), sets: ["closedToday", "closedEarlier"], resolvedOn: closed);
+        world.Signal(Do, core: (MatterType, mB), subject: (TodoType, world.Todo(owner: Alice)), sets: ["closedToday", "closedEarlier"], resolvedOn: closed);
+
+        var groups = Lane(await OkAsync(world, Alice, "?set=closedToday"), "Do").GetProperty("groups").EnumerateArray().ToList();
+
+        groups.Select(g => g.GetProperty("notFiled").GetBoolean()).Should().Equal(false, false, true);
+        groups.Take(2).Select(g => g.GetProperty("core").GetProperty("recordId").GetGuid()).Should().Equal([mA, mB], "filed groups keep the configuration's order");
+        groups[2].GetProperty("items")[0].GetProperty("signalId").GetGuid().Should().Be(notFiled);
+    }
+
+    [Fact]
+    public async Task TheWorklistsMineRead_NeverSelectsTheTodosNotes()
+    {
+        // Adversarial pass 1 K3: only the per-Signal gate's single-id read carries the inquiry hint column.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Do, core: (MatterType, m), subject: (TodoType, world.Todo(owner: Alice)));
+        world.Signal(Do, core: (MatterType, m), subject: (TodoType, world.Todo(owner: Alice)));
+
+        AllItems(await OkAsync(world, Alice)).Should().HaveCount(2);
+
+        var mine = world.Requests.Where(r => r.StartsWith("sprk_todos?$select=", StringComparison.Ordinal)).ToList();
+        mine.Should().NotBeEmpty();
+        mine.Should().OnlyContain(r => !r.Contains("sprk_notes", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task TheNewFields_AddNoRequest_OneRowPerLaneAndManyRowsSendTheSameRequests()
     {
         static World Build(int perLane)
