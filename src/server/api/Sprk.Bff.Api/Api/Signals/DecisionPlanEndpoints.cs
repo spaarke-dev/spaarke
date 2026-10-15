@@ -128,7 +128,8 @@ public static class DecisionPlanEndpoints
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
 
-    /// <summary>A no-core Signal's subject could not be read because of a fault: 503, never the uniform 404 (that is for "not yours").</summary>
+    /// <summary>A no-core Signal's subject, or a Do-lane Signal's "mine" read, could not be answered because of a fault: 503, never the
+    /// uniform 404 (that is for "not yours").</summary>
     private static IResult AccessUnavailable(HttpContext httpContext) =>
         Results.Problem(
             title: "Service Unavailable",

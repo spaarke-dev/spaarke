@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -9,7 +10,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <summary>What <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> decided.</summary>
 public enum SignalAccessOutcome
 {
-    /// <summary>The caller may read the Signal and its core record (or, for a no-core Do item, its subject row).</summary>
+    /// <summary>The caller may read the Signal and its core record (or, for a no-core Do item, its subject row), and a Do-lane
+    /// Signal is the caller's own work (D-141).</summary>
     Allowed,
 
     /// <summary>
@@ -22,9 +24,11 @@ public enum SignalAccessOutcome
     CallerUnresolved,
 
     /// <summary>
-    /// A no-core Signal's subject could not be read because of a FAULT (throttling, a 5xx, a failed entity-set lookup), which says
-    /// nothing about whether the caller may read it: the route answers 503, never the uniform 404 that means "not yours" (uac-r2 F4-b).
-    /// Only the no-core subject read produces it; every other fault stays the uniform denial.
+    /// A no-core Signal's subject could not be read, or a Do-lane Signal's "mine" read could not be answered (the caller's identity
+    /// or linked contact, the subject's entity set, the read itself), because of a FAULT (throttling, a 5xx, a failed lookup), which
+    /// says nothing about whether the caller may see it: the route answers 503, never the uniform 404 that means "not yours"
+    /// (uac-r2 F4-b; task 150: the worklist answers 503 for the same faults). Only those reads produce it; every other fault stays
+    /// the uniform denial.
     /// </summary>
     Unavailable,
 }
@@ -58,6 +62,14 @@ public sealed record SignalAccessDecision(
 /// the pair id <c>sprk_regardingrecordid</c>, an ownership-parent table; task 141) as themselves, in addition to the Signal row (D-129: records are
 /// owned by teams, so the old "caller is the Signal's owner" test matched nobody for a team-owned item). A subject in a secure
 /// record family is unreadable to a non-member, so the Signal is too (D-123).</para>
+/// <para><b>Do items are private to their assignee (D-141, task 150).</b> After (1)-(3) allow a Do-lane Signal, core or no-core,
+/// the caller must also be one the worklist's Do-lane "mine" rule admits for the Signal's subject: the SAME request the worklist
+/// sends (<see cref="SignalReadService.MineSubjectQuery"/> over <see cref="SignalReadService.DoLaneMineRules"/>, with the caller
+/// and linked contact from <see cref="SignalReadService.ResolveMineCallerAsync"/>), never a copy of the predicate. A subject whose
+/// table has no "mine" rule, a subject that cannot be derived, or a read that does not return the subject is the uniform
+/// <see cref="SignalAccessOutcome.NotFound"/>, exactly as an unreadable Signal; a fault is <see cref="SignalAccessOutcome.Unavailable"/>.
+/// So a same-BU colleague who can read the Signal and its subject cannot open or act on someone else's Do item by id. Decide-lane
+/// Signals are unchanged.</para>
 /// <para><b>Fail closed, one denial.</b> A row the caller cannot read, a malformed core-record pair, a catalog row that
 /// does not resolve, a Dataverse fault of any kind: all <see cref="SignalAccessOutcome.NotFound"/>, except a fault reading a
 /// no-core Signal's SUBJECT, which is <see cref="SignalAccessOutcome.Unavailable"/> (503, uac-r2 F4-b: a fault is not a
@@ -90,15 +102,18 @@ public sealed class SignalCoreRecordAccess
 
     private readonly IDataverseUserClient _userClient;
     private readonly IGenericEntityService _entities;
+    private readonly IIdentityNormalizationService _identity;
     private readonly ILogger<SignalCoreRecordAccess> _logger;
 
     public SignalCoreRecordAccess(
         IDataverseUserClient userClient,
         IGenericEntityService entities,
+        IIdentityNormalizationService identity,
         ILogger<SignalCoreRecordAccess> logger)
     {
         _userClient = userClient ?? throw new ArgumentNullException(nameof(userClient));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -169,7 +184,8 @@ public sealed class SignalCoreRecordAccess
                 return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
             }
 
-            return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
+            var allowed = new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
+            return lane == DecisionLane.Do ? await AuthorizeDoLaneMineAsync(row, allowed, ct).ConfigureAwait(false) : allowed;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -234,7 +250,85 @@ public sealed class SignalCoreRecordAccess
             return await DeniedAsync(subject, "subject", ct, faultIsUnavailable: true).ConfigureAwait(false);
         }
 
-        return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId);
+        return await AuthorizeDoLaneMineAsync(
+            signalRow, new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// D-141 (task 150): a Do-lane Signal the earlier reads allowed stays allowed only when the worklist's "mine" read, asked AS THE
+    /// CALLER for this Signal's subject, returns that subject. Otherwise the uniform <see cref="SignalAccessOutcome.NotFound"/>; a
+    /// fault is <see cref="SignalAccessOutcome.Unavailable"/> (the worklist answers 503 for the same faults).
+    /// </summary>
+    private async Task<SignalAccessDecision> AuthorizeDoLaneMineAsync(JsonElement signalRow, SignalAccessDecision allowed, CancellationToken ct)
+    {
+        // The subject is the one the rest of this class uses: the subject lookup that carries the pair id (task 141).
+        var subjectId = Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var pairId) ? pairId : Guid.Empty;
+        var subjectType = SignalWriter.SubjectEntityOf(
+            subjectId, lookup => TryReadGuid(signalRow, $"_{lookup}_value", out var id) ? id : null);
+        if (subjectType is null || !SignalReadService.DoLaneMineRules.TryGetValue(subjectType, out var rule))
+        {
+            // No derivable subject, or a subject table with no "mine" rule: the worklist shows such a Do row to nobody.
+            _logger.LogDebug("Signal access: the Do-lane Signal's subject cannot be derived or has no mine rule; denying.");
+            return SignalAccessDecision.NotFound;
+        }
+
+        try
+        {
+            var caller = await SignalReadService.ResolveMineCallerAsync(_userClient, _identity, _logger, ct).ConfigureAwait(false);
+            if (caller.Failure is { } failure)
+            {
+                return failure.Outcome == SignalReadOutcome.CallerUnresolved
+                    ? SignalAccessDecision.CallerUnresolved
+                    : SignalAccessDecision.Unavailable;
+            }
+
+            var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
+            var mine = await _userClient.GetAsync(
+                SignalReadService.MineSubjectQuery(rule, entitySet, [subjectId], caller.CallerId, caller.ContactId), ct).ConfigureAwait(false);
+            if (!mine.IsSuccess)
+            {
+                if (mine.ErrorCode is DataverseUserClientErrorCodes.UserContextRequired
+                    or DataverseUserClientErrorCodes.OboExchangeFailed
+                    or DataverseUserClientErrorCodes.OboNotConfigured)
+                {
+                    return SignalAccessDecision.CallerUnresolved;
+                }
+
+                if (mine.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+                {
+                    // No Read on the subject's table at all: nothing there is the caller's (the worklist drops these rows too).
+                    _logger.LogDebug("Signal access: the caller has no read on the Do-lane subject's table; denying.");
+                    return SignalAccessDecision.NotFound;
+                }
+
+                _logger.LogWarning("Signal access: the Do-lane mine read failed ({ErrorCode}); unavailable.", mine.ErrorCode);
+                return SignalAccessDecision.Unavailable;
+            }
+
+            if (mine.Body is not { ValueKind: JsonValueKind.Object } body
+                || !body.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("Signal access: the Do-lane mine read was unparseable; unavailable.");
+                return SignalAccessDecision.Unavailable;
+            }
+
+            var pk = $"{rule.Table}id";
+            foreach (var subject in rows.EnumerateArray())
+            {
+                if (TryReadGuid(subject, pk, out var id) && id == subjectId)
+                {
+                    return allowed;
+                }
+            }
+
+            _logger.LogDebug("Signal access: the Do-lane Signal is not the caller's own work (D-141); denying.");
+            return SignalAccessDecision.NotFound;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Signal access: the Do-lane mine check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return SignalAccessDecision.Unavailable;
+        }
     }
 
     private async Task<SignalAccessDecision> DeniedAsync(

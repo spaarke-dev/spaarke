@@ -156,6 +156,14 @@ public sealed class DecisionCommitServiceTests
         public HashSet<Guid> CallerCannotReadSubject { get; } = new();
 
         public DataverseUserResponse? SubjectReadFails { get; set; }
+
+        /// <summary>Task 150 (D-141): subjects the caller can read but that are not their own work (the "mine" read omits them).</summary>
+        public HashSet<Guid> CallerNotMine { get; } = new();
+
+        /// <summary>Task 150: a fault answer for the Do-lane "mine" read, and every such read asked.</summary>
+        public DataverseUserResponse? MineReadFails { get; set; }
+
+        public List<string> MineAsked { get; } = new();
         public Dictionary<Guid, Guid> CallerSeesCore { get; } = new();
         public List<(string Set, Guid Id)> RightsAsked { get; } = new();
 
@@ -342,8 +350,24 @@ public sealed class DecisionCommitServiceTests
         {
             if (CallerUnresolved)
                 return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.UserContextRequired, "no user");
-            if (path == "WhoAmI")
+            if (path is "WhoAmI" or "WhoAmI()")
                 return Ok(new Dictionary<string, object?> { ["UserId"] = Caller.ToString("D") });
+            if (path.Contains("&$filter=", StringComparison.Ordinal))
+            {
+                // Task 150 (D-141): the worklist's Do-lane "mine" read of a subject, AS THE CALLER. The subject is the caller's own
+                // work unless a test says otherwise.
+                var pk = System.Text.RegularExpressions.Regex.Match(path, "PropertyName='(\\w+)'").Groups[1].Value;
+                var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(path, "PropertyValues=\\['([0-9a-f-]{36})'").Groups[1].Value);
+                MineAsked.Add(path);
+                if (MineReadFails is { } mineFault)
+                    return mineFault;
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = CallerNotMine.Contains(id) || CallerCannotReadSubject.Contains(id)
+                        ? Array.Empty<object>()
+                        : new object[] { new Dictionary<string, object?> { [pk] = id.ToString("D") } },
+                });
+            }
             if (path.StartsWith("sprk_signals(", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(path["sprk_signals(".Length..path.IndexOf(')')]);
@@ -394,7 +418,7 @@ public sealed class DecisionCommitServiceTests
 
         public DecisionCommitService Service()
         {
-            var access = new SignalCoreRecordAccess(User.Object, Entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+            var access = new SignalCoreRecordAccess(User.Object, Entities.Object, Identity.Object, NullLogger<SignalCoreRecordAccess>.Instance);
             var plans = new DecisionPlanService(Entities.Object, NullLogger<DecisionPlanService>.Instance);
             var ownership = new Mock<IRecordOwnershipResolver>();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
@@ -2223,17 +2247,97 @@ public sealed class DecisionCommitServiceTests
     {
         // Task 141 review F3: the pair id is set but no subject lookup carries it (the sprk_signal_reg* relationships cascade a
         // subject delete as RemoveLink, which clears the lookup and leaves the pair id). An unknown subject is never "no subject".
+        // Task 150 (D-141): on a Decide Signal. A Do Signal whose subject cannot be derived has no "mine" and is now the uniform 404 at
+        // the access check (ADoSignalWhoseSubjectCannotBeDerived_IsTheUniform404_D141), before this refusal is reached.
         var rig = new Rig();
-        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
-        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+        rig.Signals[Primary]["sprk_regardingrecordid"] = ItemTodo.ToString("D"); // the pair id, with no subject lookup carrying it
+        var review = PathBReview(inquiry: false, todo: false);
 
-        var result = await rig.CommitAsync(review, DoSignal);
+        var result = await rig.CommitAsync(review);
 
         // Task 141 fix round 2 (K2): the same refusal (Forbidden, fail closed), with its own code and message.
         result.Status.Should().Be(DecisionCommitStatus.Forbidden);
         result.ReasonCode.Should().Be(DecisionCommitReasons.SignalSubjectMissing);
         result.ReasonCode.Should().Be("ontology.decision.signal_subject_missing");
         result.Detail.Should().Be("This Signal's subject no longer exists.");
+        rig.Writes.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    // ── Task 150 (D-141): Do items are private to their assignee ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task D141_ASameBuColleagueWhoIsNotTheDoItemsAssignee_GetsExactlyTheUnreadableSignalAnswer_AndNothingIsWritten(bool hasCore)
+    {
+        var notMine = new Rig();
+        notMine.AddSignal(DoSignal, DecisionLane.Do, hasCore ? Matter : null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        notMine.CallerNotMine.Add(ItemTodo);   // the caller reads the Signal, the matter and the To Do, but it is not their work
+        var unreadable = new Rig();
+        unreadable.AddSignal(DoSignal, DecisionLane.Do, hasCore ? Matter : null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        unreadable.CallerCannotRead.Add(DoSignal);
+        var review = MarkComplete();
+
+        var denied = await notMine.CommitAsync(review, DoSignal);
+        var baseline = await unreadable.CommitAsync(review, DoSignal);
+
+        denied.Status.Should().Be(DecisionCommitStatus.NotFound);
+        denied.Should().BeEquivalentTo(baseline);
+        notMine.MineAsked.Should().ContainSingle("the worklist's own mine read, as the caller");
+        notMine.Writes.Should().BeEmpty();
+        notMine.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D141_ANotMineDoItemInAlsoResolve_RefusesTheWholeReview_AsAnUnreadableOneDoes()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.CallerNotMine.Add(ItemTodo);
+        var review = PathBReview(inquiry: false, todo: false) with { AlsoResolve = [Second] };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.Writes.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D141_TheAssignee_StillCommits()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.MineAsked.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task D141_AFaultInTheMineRead_IsUnavailable_AndNothingIsWritten()
+    {
+        var rig = new Rig { MineReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom") };
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ADoSignalWhoseSubjectCannotBeDerived_IsTheUniform404_D141()
+    {
+        // Task 141 review F3's case on a Do Signal: no subject, so no "mine"; the worklist shows it to nobody.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
         rig.Writes.Should().BeEmpty();
         rig.Status(DoSignal).Should().Be(Open);
     }
