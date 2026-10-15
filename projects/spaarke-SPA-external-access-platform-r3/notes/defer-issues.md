@@ -369,6 +369,48 @@ Failure mode: a partner clicks a listed document and gets an error.
 
 ---
 
+### ISS-012 — WorkforceHome scheme tests fail order-dependently in a full unit run (process-wide issuer-validator cache)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-15 |
+| **Source** | Full `Sprk.Bff.Api.Tests` run on R3 `9bb7f5724` (R3 + master `f292ad119`), 2026-10-15 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1930 |
+
+**Description**
+
+In one full unit run, six `AuthorizationModuleWorkforceHomeTests` must-reject cases failed in about 1 s each:
+- `WrongAudience_IncludingCopilot_Returns401` (3 cases)
+- `IssuerTenantMismatch_Returns401`
+- `SignedByKeyWhoseIssuerIsAnotherDirectory_Returns401`
+- `ExpiredToken_Returns401`
+
+Each asserts which validation exception the WorkforceHome scheme reported.
+
+The same build then passed them alone (43/43), in the auth slice (5,285/5,285) and in two further full runs. The six were not saved to TRX on the failing run.
+
+The test file's own header names the likely cause, `AadIssuerValidator.s_issuerValidators`. Microsoft.Identity.Web keeps it per process and keys it by authority. The WorkforceHome scheme's authority is fixed (`https://login.microsoftonline.com/organizations`, `AuthorizationModule.cs:571-572`), so any test that boots the real app and authenticates through the scheme can create that validator before this class does, without the class's `FakeEntraDiscovery` client.
+
+Failure mode: an intermittent red full run (CI or local), which hides real failures or trains people to ignore this class. The product is not affected.
+
+**Entry-points**
+
+- `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleWorkforceHomeTests.cs` (header KNOWN LIMIT; `host.Failures` assertions at :320, :335, :346)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs:555-580` (`AddWorkforceHomeScheme`)
+- Reproduce: `dotnet test tests/unit/Sprk.Bff.Api.Tests` repeatedly, with the TRX logger to keep the message
+
+**Suggested fix**
+
+Give the class a `[Collection]` with `DisableParallelization = true`, and make its hosts independent of the process-wide cache. For example, assert the 401 plus a deny reason the test owns rather than the library's exception type, or have each host register its own `IssuerValidator` delegate. Capture the failure message first, to confirm the cause.
+
+**Estimated effort**: hours.
+**Blockers**: none.
+**Related**: task 045 (the scheme and these tests), task 046.
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |
