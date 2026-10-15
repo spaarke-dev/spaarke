@@ -1652,8 +1652,8 @@ public sealed class DecisionCommitService
         return false;
     }
 
-    /// <summary>The record this caller already wrote for this review id, if any (<c>sprk_steps</c> carries the review id), with
-    /// what it stored about the review: its content hash, its Signals and what it did (F1).</summary>
+    /// <summary>The record this caller already wrote for this review id, if any (<c>sprk_steps</c> carries the review id; created by the
+    /// ontology writer itself, not by a person), with what it stored about the review: its content hash, its Signals and what it did (F1).</summary>
     private async Task<StoredRecord?> FindRecordAsync(Guid reviewId, Guid confirmedBy, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_decisionrecord")
@@ -1663,6 +1663,12 @@ public sealed class DecisionCommitService
         };
         query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Equal, confirmedBy);
         query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{reviewId:D}\"%");
+        // Task 153 (uac-r2 re-check F1): and only a record the ontology writer itself created. Console User and Ontology Administrator have Deep
+        // Create on sprk_decisionrecord, and sprk_confirmedby / sprk_steps are not field-secured, so a person can write a row carrying their own
+        // confirmer, this review id, the (predictable) review hash and the Signals; without this condition it would be taken as "already written"
+        // and the finishing path would close the Signals with the forged resolution, running no executor. A WhoAmI fault throws here and lands in
+        // the caller's catch (Unavailable, fail closed), never as "no record found".
+        query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false));
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty ? StoredRecord.From(row) : null;
     }
@@ -1682,9 +1688,10 @@ public sealed class DecisionCommitService
         {
             if (TakenCodes.Count == 0 && FollowOnCount == 0)
                 return (Resolution.Dismissed, Reason);
-            return (TakenCodes.Any(c => DecisionActionCatalog.TryGet(c, out var def) && def.ResolvesSignal)
-                ? Resolution.Acted
-                : Resolution.InquirySent, null);
+            // Task 153 (uac-r2 re-check K2): the same rule the closure retry uses to recognise this record as one that left the item open.
+            return (DecisionRecordWriter.LeavesSignalOpen(TakenCodes, FollowOnCount)
+                ? Resolution.InquirySent
+                : Resolution.Acted, null);
         }
 
         public static StoredRecord From(Entity row)

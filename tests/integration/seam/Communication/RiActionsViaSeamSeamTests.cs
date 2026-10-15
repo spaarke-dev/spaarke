@@ -53,6 +53,9 @@ namespace Sprk.Bff.Api.Tests.Seam.Communication;
 /// </remarks>
 public sealed class RiActionsViaSeamSeamTests
 {
+    /// <summary>The ontology writer's own application user (WhoAmI on its connection): the <c>createdby</c> of the records it creates.</summary>
+    private static readonly Guid WriterUser = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+
     /// <summary>Records the real ping calls + appends "ping:{recipient}" to the shared ordering log.</summary>
     private sealed class RecordingDelivery : SignalRDeliveryService
     {
@@ -211,7 +214,17 @@ public sealed class RiActionsViaSeamSeamTests
         var decisionRecords = new List<DataverseEntity>();
         var writerOrg = new Mock<IOrganizationServiceAsync2>();
         writerOrg.Setup(o => o.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DataverseEntity e, CancellationToken _) => { decisionRecords.Add(e); events.Add("decision-record-create"); return Guid.NewGuid(); });
+            .ReturnsAsync((DataverseEntity e, CancellationToken _) =>
+            {
+                // Dataverse stamps the creator: the writer's own application user, with no impersonation (uac-r2 re-check, F3-1).
+                e["createdby"] = new EntityReference("systemuser", WriterUser);
+                decisionRecords.Add(e);
+                events.Add("decision-record-create");
+                return Guid.NewGuid();
+            });
+        // WhoAmI on the writer's own connection: the createdby the gate's "already recorded" lookup narrows on (without it the lookup fails closed).
+        writerOrg.Setup(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<OrganizationResponse>(new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = WriterUser } }));
         // Task 149 (D-139): the gate only QUEUES the decision (the queue's send is the doubled boundary; it logs "decision-job-enqueue" in the
         // ordering log), and a REAL GateDecisionRecordJobHandler writes the record when a test runs the queued jobs, with the real writer, the
         // real idempotency service over an in-memory cache, and the doubled Dataverse boundary above. The writer's "already recorded" lookup
@@ -231,7 +244,10 @@ public sealed class RiActionsViaSeamSeamTests
                 var communicationCondition = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_regardingcommunication");
                 var likeCondition = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_steps");
                 var needle = ((string)likeCondition.Values.Single()).Trim('%');
+                // Like Dataverse, answer only the rows whose createdby equals the query's createdby condition (the writer's own records).
+                var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
                 var found = decisionRecords
+                    .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
                     .Where(r => r.GetAttributeValue<EntityReference>("sprk_regardingcommunication")?.Id.Equals(communicationCondition.Values.Single()) == true
                                 && (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(needle, StringComparison.Ordinal))
                     .Select(r => new DataverseEntity("sprk_decisionrecord", Guid.NewGuid()))

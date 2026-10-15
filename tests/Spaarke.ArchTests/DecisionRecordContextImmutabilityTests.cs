@@ -20,8 +20,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Crude by design</b>, like every <see cref="SourceScan"/> rule: it reads comment-stripped text, not a compilation. Each
 /// rule has a must-fire control (a seeded violation is reported) and a must-not-fire control (the sanctioned shape and the reads
 /// that name the same columns are not).</para>
-/// <para><b>One create site, every entry point (task 042).</b> The writer has two public entry points that create a record,
-/// <c>WriteAsync</c> (a human review) and <c>WriteGateDecisionAsync</c> (an automated communications-gate decision). Both must reach
+/// <para><b>One create site, every entry point (task 042).</b> The writer has three public entry points that create a record,
+/// <c>WriteAsync</c> (a human review), <c>WriteGateDecisionAsync</c> (an automated communications-gate decision) and, task 153,
+/// <c>WriteConditionClearedAsync</c> (a Do-lane ConditionCleared closure). All must reach
 /// the SAME private <c>CreateAsync</c> (the only <c>_writerClient.CreateAsync</c> call, which builds the payload from
 /// <c>Content</c> and files and owns it through <c>FiledAndOwnedAsync</c>), so a new entry point cannot grow a second create that
 /// skips the filing, the owner answer or the D-34 context rule. <see cref="OneCreateSiteReachedByEveryEntryPoint"/> pins it, with
@@ -63,13 +64,16 @@ public class DecisionRecordContextImmutabilityTests
     /// <summary>Any mention of the writer's shared sysadmin reader (<c>IGenericEntityService</c>, which CAN create and update).</summary>
     private static readonly Regex EntitiesToken = new(@"\b_entities\b", RegexOptions.Compiled);
 
-    /// <summary>The ONE sanctioned use: task 149's gate-record lookup read. <c>\s</c> spans newlines, so a split call is allowed.</summary>
+    /// <summary>The ONE sanctioned use: a read (task 149's gate-record lookup; task 153's condition-cleared lookup and its attribution read of the
+    /// subject's last change). <c>\s</c> spans newlines, so a split call is allowed.</summary>
     private static readonly Regex EntitiesLookupRead = new(@"\G_entities\s*\.\s*RetrieveMultipleAsync\s*\(", RegexOptions.Compiled);
 
     /// <summary>(a) the field declaration (checked inline, preceded by the type) and (b) the constructor assignment: the only other sanctioned mentions.</summary>
     private static readonly Regex EntitiesCtorAssignment = new(@"\G_entities\s*=(?![=>])\s*entities\b[^;]*;", RegexOptions.Compiled);
 
-    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
+    /// <remarks>Task 153 (adversarial pass 2 F1): <c>GetWriterUserIdAsync</c> is WhoAmI on the writer's own connection (a read of its
+    /// identity, so the "already recorded" lookups match only rows the writer created); it writes nothing.</remarks>
+    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync", "GetWriterUserIdAsync" };
 
     /// <summary>A Decision Record row addressed for an update through a string literal: a Web API path to one row
     /// (<c>"sprk_decisionrecords(…"</c>), an update/upsert/patch call naming the table or its entity set as its first argument,
@@ -189,7 +193,8 @@ public class DecisionRecordContextImmutabilityTests
     }
 
     /// <summary>The entry points that create a Decision Record (public members of the writer), each of which must reach <see cref="SharedCreate"/>.</summary>
-    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync"];
+    /// <remarks>Task 153 adds <c>WriteConditionClearedAsync</c> (the Routine record of a Do-lane ConditionCleared closure).</remarks>
+    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync"];
 
     private const string SharedCreate = "CreateAsync";
 
@@ -208,7 +213,7 @@ public class DecisionRecordContextImmutabilityTests
     [Fact(DisplayName = "Task 042 / D-34: create-site detector controls — a second create, a missing entry point and a bypassing entry point fire")]
     public void OneCreateSite_Controls()
     {
-        static string Writer(string gateBody, string extra = "") => SourceScan.CodeText(new[]
+        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);") => SourceScan.CodeText(new[]
         {
             "public sealed class DecisionRecordWriter",
             "{",
@@ -220,6 +225,11 @@ public class DecisionRecordContextImmutabilityTests
             "    public async Task<R> WriteGateDecisionAsync(G request, CancellationToken ct = default)",
             "    {",
             gateBody,
+            "    }",
+            "",
+            "    public async Task<R> WriteConditionClearedAsync(C request, CancellationToken ct = default)",
+            "    {",
+            clearedBody,
             "    }",
             "",
             "    private async Task<R> CreateAsync(A request, Plan plan, DecisionRecordOwner? o, CancellationToken ct)",
@@ -246,6 +256,11 @@ public class DecisionRecordContextImmutabilityTests
 
         // Must fire: an entry point is renamed away (the list must move with it, not silently empty).
         Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);").Replace("WriteGateDecisionAsync", "WriteGateAsync")));
+
+        // Must fire (task 153): the condition-cleared entry builds and creates its own record, or never reaches the shared create.
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
+            clearedBody: "        return await _writerClient.CreateAsync(new Entity(\"sprk_decisionrecord\"), ct);")));
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", clearedBody: "        return new R();")));
     }
 
     /// <summary>Problems with the writer's create shape: not exactly one <c>_writerClient.CreateAsync</c> call, that call outside
