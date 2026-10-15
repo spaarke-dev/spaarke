@@ -123,3 +123,4 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | 19:12 UTC | PR #1901 merged (`98c5962d7`, all checks green); the master push published ARM build `2026.10.15-15` | Verified: `customer-arm-2026.10.15-15.json` sets `keyVaultReferenceIdentity` on site + slot; sha256 matches the manifest |
 | 19:13:50 UTC | `clear-quarantine` b6941254 (owner OK) | 202 |
 | 19:13:52 UTC | `resume` b6941254 (owner OK) | 202; polling |
+| ≈19:30 UTC | External-access R3 deployed spaarke-bff-dev `1.0.0+e276357a7` (source `c20bff283`, which contains #1901 `98c5962d7`), with owner OK. | The identity-link reconciliation job now skips the ACME in-progress registry row, so its per-run failure logs should stop. Not a provisioning action. |
