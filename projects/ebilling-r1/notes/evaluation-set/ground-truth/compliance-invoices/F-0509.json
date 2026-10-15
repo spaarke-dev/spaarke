@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0509",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0509","generator_id":"gen_eval_set.py@1 F-0509","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0509.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Kingsley and Forsythe LLP","firm_invoice_number":"INV-2025-71343","invoice_date":"2025-09-02","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"43417-0021","po_number":"PO-4509838","fees_total":3165.5,"expenses_total":2033.35,"adjustments_total":0.0,"total_due":5198.85,"currency":"USD"},
+ "timekeepers":[{"name":"Hannah Ramanathan","title":"Paralegal","rate":155.0,"billed_as":"HR"},{"name":"Jordan Kowalczyk","title":"Legal Assistant","rate":110.0,"billed_as":"JK"},{"name":"Louis Oyelaran","title":"Senior Associate","rate":340.0,"billed_as":"LO"},{"name":"Naomi Abernathy","title":"Associate","rate":230.0,"billed_as":"NA"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-07","timekeeper":"HR","timekeeper_name":"Hannah Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":155.0,"amount":201.5,"narrative":"Attend hearing on answer and affirmative defenses in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-11","timekeeper":"NA","timekeeper_name":"Naomi Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":230.0,"amount":368.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-12","timekeeper":"HR","timekeeper_name":"Hannah Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":155.0,"amount":434.0,"narrative":"Draft post-trial motion in the insurance coverage issue","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-15","timekeeper":"NA","timekeeper_name":"Naomi Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":230.0,"amount":391.0,"narrative":"Draft settlement proposal for trial in the licensing dispute","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-15","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":340.0,"amount":986.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-21","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":340.0,"amount":510.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-29","timekeeper":"JK","timekeeper_name":"Jordan Kowalczyk","timekeeper_title":"Legal Assistant","title":"LA","hours":2.5,"rate":110.0,"amount":275.0,"narrative":"Telephone conference with witness regarding the customs audit","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":123.53,"amount":123.53,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-08-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1909.82,"amount":1909.82,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["369 Elm Court","Portland","Tax ID 63-5742034"],"template":"T22","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-05-09","matter_close":"2025-11-29","matter_budget":45795.0,"approved_timekeepers":["Naomi Abernathy","Mei Halloran","Samuel Delacroix","Hannah Ramanathan","Jordan Kowalczyk","Louis Oyelaran","Ingrid Brennan","Daniel Voss"],"invoice_received_date":"2025-09-18"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

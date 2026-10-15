@@ -1,0 +1,19 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rule-set",
+ "id":"RS-05",
+ "set":"F",
+ "meta":{"title":"Insurer-style guideline","generator_id":"gen_eval_set.py@1","licence":"Synthetic - authored for this evaluation set","licence_status":"synthetic","pii_note":"No personal data.","pii_scan":null,"storage":{"location":"committed","path":"ground-truth/rule-sets/RS-05.json"},"spike":false,"label_method":"generator"},
+ "modelled_on":["E-OCG-04","E-OCG-13"],
+ "rules":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","params":{"rates":{"Partner":585,"Of Counsel":520,"Senior Associate":405,"Associate":315,"Paralegal":165,"Legal Assistant":135}},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","params":{"increment_hours":0.1},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","params":{"observations":["block_billing","vague_description"]},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-05-R04","rule_type":"NonBillableActivity","params":{"keywords":["scheduled conference call","calendar entries","docketed deadlines","conflict check","invoice preparation","photocopied exhibits","organized and indexed","internal conference"]},"consequence":"Disallow","expressible":true},
+  {"rule_id":"RS-05-R05","rule_type":"Duplicate","params":{"match_on":["timekeeper","date","hours","narrative"]},"consequence":"Disallow","expressible":true},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","params":{"max_hours_per_timekeeper_per_day":12},"consequence":"Flag","expressible":true},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","params":{"codes_required":true,"fields":["po_number"]},"consequence":"Reject","expressible":true},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","params":{"max_days_work_age":120},"consequence":"Disallow","expressible":true}
+ ],
+ "unmapped_provisions":[]
+}

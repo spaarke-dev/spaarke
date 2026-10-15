@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0381",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0381","generator_id":"gen_eval_set.py@1 F-0381","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0381.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Sutherland and Ellison LLP","firm_invoice_number":"A-54947/2026","invoice_date":"2026-07-01","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"64610-0033","po_number":"PO-4583302","fees_total":3615.5,"expenses_total":16.08,"adjustments_total":0.0,"total_due":3631.58,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Yilmaz","title":"Partner","rate":385.0,"billed_as":"AY"},{"name":"Anders Marchetti","title":"Paralegal","rate":125.0,"billed_as":"AM"},{"name":"Cyrus Kowalczyk","title":"Partner","rate":495.0,"billed_as":"CK"},{"name":"Peter Ramanathan","title":"Senior Associate","rate":305.0,"billed_as":"PR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-10","timekeeper":"CK","timekeeper_name":"Cyrus Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":495.0,"amount":1039.5,"narrative":"Research authority for reply brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-15","timekeeper":"PR","timekeeper_name":"Peter Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.6,"rate":305.0,"amount":793.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-16","timekeeper":"AY","timekeeper_name":"Aisha Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":1.8,"rate":385.0,"amount":693.0,"narrative":"Review and analyze motion to dismiss received from Orchard Row Brands","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-18","timekeeper":"PR","timekeeper_name":"Peter Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":305.0,"amount":549.0,"narrative":"Research authority for requests for production","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-24","timekeeper":"PR","timekeeper_name":"Peter Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":305.0,"amount":244.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-26","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":125.0,"amount":125.0,"narrative":"Review expert report served by Quarry Lane Partners","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-29","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":125.0,"amount":50.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-30","timekeeper":"PR","timekeeper_name":"Peter Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.4,"rate":305.0,"amount":122.0,"narrative":"Draft pretrial brief to Summit Ridge Homes","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":16.08,"amount":16.08,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["329 Federal Plaza","Minneapolis","Tax ID 58-4174633"],"template":"T07","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-10-11","matter_close":"2026-09-28","matter_budget":39526.0,"approved_timekeepers":["Ivan Ashdown","Peter Ramanathan","Anders Marchetti","Aisha Yilmaz","Katya Blackwood","Cyrus Kowalczyk"],"invoice_received_date":"2026-07-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

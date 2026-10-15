@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0274",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0274","generator_id":"gen_eval_set.py@1 F-0274","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0274.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Pryce and Vance LLP","firm_invoice_number":"INV-2026-35624","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"24069-0031","po_number":"PO-4539368","fees_total":7431.25,"expenses_total":678.13,"adjustments_total":0.0,"total_due":8109.38,"currency":"USD"},
+ "timekeepers":[{"name":"Ivan Abernathy","title":"Associate","rate":390.0,"billed_as":"IA"},{"name":"Leila Eriksen","title":"Associate","rate":315.0,"billed_as":"LE"},{"name":"Marcus Zielinski","title":"Partner","rate":655.0,"billed_as":"MZ"},{"name":"Oliver Lindqvist","title":"Partner","rate":580.0,"billed_as":"OL"},{"name":"Yusuf Thornbury","title":"Associate","rate":395.0,"billed_as":"YT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-06","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":390.0,"amount":292.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-06","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":315.0,"amount":472.5,"narrative":"Draft post-trial motion in the warranty claim","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-13","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":315.0,"amount":630.0,"narrative":"Telephone conference with witness regarding the lease dispute","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-14","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":395.0,"amount":592.5,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-14","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":315.0,"amount":866.25,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-15","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":390.0,"amount":97.5,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-21","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":315.0,"amount":551.25,"narrative":"Draft post-trial motion in the licensing dispute","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-22","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":395.0,"amount":1086.25,"narrative":"Prepare fact witness for testimony regarding the customs audit","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-25","timekeeper":"OL","timekeeper_name":"Oliver Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":2.25,"rate":580.0,"amount":1305.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-26","timekeeper":"MZ","timekeeper_name":"Marcus Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":655.0,"amount":327.5,"narrative":"Attend trial day in the employment claim","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-28","timekeeper":"OL","timekeeper_name":"Oliver Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":580.0,"amount":580.0,"narrative":"Prepare expert witness for testimony in the supply agreement","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-29","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":315.0,"amount":157.5,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-08-29","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":315.0,"amount":315.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the supply agreement","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-08-29","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":315.0,"amount":157.5,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":585.48,"amount":585.48,"narrative":"Airfare to Houston for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":10.9,"amount":32.7,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-08-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":337.0,"rate":0.11,"amount":37.07,"narrative":"Photocopies - 337 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2025-08-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":11.44,"amount":22.88,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["594 Commerce Avenue","Denver","Tax ID 61-2465250"],"template":"T21","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-06-05","matter_close":"2025-11-29","matter_budget":57437.0,"approved_timekeepers":["Oliver Lindqvist","Peter Delacroix","Marcus Zielinski","Leila Eriksen","Ivan Abernathy"],"invoice_received_date":"2025-09-17"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[8],"consequence":"Reject"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[14],"consequence":"Disallow","related_line_refs":[12]}
+ ],
+ "seeded_violations":3
+}

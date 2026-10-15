@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0455",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0455","generator_id":"gen_eval_set.py@1 F-0455","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0455.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Penhallow Beckett PC","firm_invoice_number":"INV-2025-12349","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"53529-0036","po_number":"PO-4594376","fees_total":2929.5,"expenses_total":44.13,"adjustments_total":0.0,"total_due":2973.63,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Oyelaran","title":"Associate","rate":230.0,"billed_as":"Gideon Oyelaran"},{"name":"Hannah Pemberton","title":"Associate","rate":255.0,"billed_as":"Hannah Pemberton"},{"name":"Yusuf Quillen","title":"Senior Associate","rate":320.0,"billed_as":"Yusuf Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-26","timekeeper":"Gideon Oyelaran","timekeeper_name":"Gideon Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":230.0,"amount":414.0,"narrative":"Review expert report served by Redstone Mining","codes":["L340","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-04","timekeeper":"Hannah Pemberton","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":255.0,"amount":178.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-11","timekeeper":"Hannah Pemberton","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":255.0,"amount":459.0,"narrative":"Review documents produced by Pacifica Telecom for responsiveness","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-16","timekeeper":"Hannah Pemberton","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":255.0,"amount":484.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-16","timekeeper":"Hannah Pemberton","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":255.0,"amount":433.5,"narrative":"Draft motion to dismiss in the vendor agreement","codes":["L250","A103"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-02","timekeeper":"Yusuf Quillen","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":320.0,"amount":448.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-31","timekeeper":"Yusuf Quillen","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":320.0,"amount":512.0,"narrative":"Review expert report served by Meridian Foods","codes":["L340","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-03-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":56.0,"rate":0.64,"amount":35.84,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-03-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":8.29,"amount":8.29,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["212 Congress Boulevard","Dallas","Tax ID 43-4765332"],"template":"T10","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-11-30","matter_close":"2026-06-29","matter_budget":36894.0,"approved_timekeepers":["Nadia Nakamura","Anders Halloran","Gideon Oyelaran","Yusuf Quillen","Hannah Pemberton","Ivan Halloran","Louis Lindqvist"],"invoice_received_date":"2026-04-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

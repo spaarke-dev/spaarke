@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0412",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0412","generator_id":"gen_eval_set.py@1 F-0412","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0412.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Northcott Vance PC","firm_invoice_number":"INV-2025-22031","invoice_date":"2025-08-03","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"44251-0027","po_number":"PO-4559353","fees_total":5520.0,"expenses_total":183.81,"adjustments_total":0.0,"total_due":5703.81,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Whitfield","title":"Partner","rate":690.0,"billed_as":"DW"},{"name":"Jordan Thornbury","title":"Associate","rate":320.0,"billed_as":"JT"},{"name":"Louis Wickham","title":"Associate","rate":345.0,"billed_as":"LW"},{"name":"Samuel Zielinski","title":"Associate","rate":390.0,"billed_as":"SZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"JT","timekeeper_name":"Jordan Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":320.0,"amount":800.0,"narrative":"Prepare responses and objections to settlement proposal","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-11","timekeeper":"LW","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":345.0,"amount":603.75,"narrative":"Review and summarize deposition transcript of Pacifica Telecom witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-15","timekeeper":"LW","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":345.0,"amount":862.5,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-16","timekeeper":"LW","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":345.0,"amount":948.75,"narrative":"Prepare responses and objections to pretrial brief","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-18","timekeeper":"SZ","timekeeper_name":"Samuel Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":390.0,"amount":390.0,"narrative":"Draft answer and affirmative defenses to Quarry Lane Partners","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-28","timekeeper":"JT","timekeeper_name":"Jordan Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":320.0,"amount":880.0,"narrative":"Draft notice of deposition in the regulatory inquiry","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-28","timekeeper":"DW","timekeeper_name":"Dmitri Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":690.0,"amount":1035.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-07-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":151.31,"amount":151.31,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-07-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":32.5,"amount":32.5,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["42 Union Square","Boston","Tax ID 45-1325773"],"template":"T08","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-26","matter_close":"2025-10-29","matter_budget":47815.0,"approved_timekeepers":["Samuel Zielinski","Louis Wickham","Dmitri Galbraith","Jordan Thornbury","Anders Quillen","Dmitri Whitfield"],"invoice_received_date":"2025-08-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

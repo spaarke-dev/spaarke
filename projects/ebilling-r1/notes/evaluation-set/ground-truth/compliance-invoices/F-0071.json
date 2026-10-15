@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0071",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0071","generator_id":"gen_eval_set.py@1 F-0071","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0071.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Eastlake and Ambrose LLP","firm_invoice_number":"INV-2026-53471","invoice_date":"2025-06-04","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"22329-0037","po_number":"PO-4594099","fees_total":4121.5,"expenses_total":598.23,"adjustments_total":0.0,"total_due":4719.73,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Eriksen","title":"Senior Associate","rate":370.0,"billed_as":"AE"},{"name":"Dalia Dunleavy","title":"Partner","rate":515.0,"billed_as":"DD"},{"name":"Hannah Nwosu","title":"Paralegal","rate":155.0,"billed_as":"HN"},{"name":"Marcus Zielinski","title":"Associate","rate":240.0,"billed_as":"MZ"},{"name":"Tomas Delacroix","title":"Of Counsel","rate":455.0,"billed_as":"TD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-02","timekeeper":"MZ","timekeeper_name":"Marcus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":240.0,"amount":264.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-07","timekeeper":"TD","timekeeper_name":"Tomas Delacroix","timekeeper_title":"Of Counsel","title":"O/C","hours":3.0,"rate":455.0,"amount":1365.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-05-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":33.0,"rate":0.64,"amount":21.12,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"expense","date":"2025-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":577.11,"amount":577.11,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-27","timekeeper":"MZ","timekeeper_name":"Marcus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.65,"rate":240.0,"amount":156.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-27","timekeeper":"DD","timekeeper_name":"Dalia Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":515.0,"amount":412.0,"narrative":"Prepare for oral argument in the warranty claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-27","timekeeper":"AE","timekeeper_name":"Aisha Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":370.0,"amount":851.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-29","timekeeper":"MZ","timekeeper_name":"Marcus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":240.0,"amount":624.0,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-30","timekeeper":"HN","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":155.0,"amount":449.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["776 Pine Street","Seattle","Tax ID 21-6293786"],"template":"T09","pages":1},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-07-04","matter_close":"2025-08-29","matter_budget":43878.0,"approved_timekeepers":["Aisha Eriksen","Tomas Delacroix","Dalia Dunleavy","Marcus Zielinski","Victor Mbeki","Oliver Delacroix","Aisha Lockhart","Hannah Nwosu","Louis Hargrove"],"invoice_received_date":"2025-06-16"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[5],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

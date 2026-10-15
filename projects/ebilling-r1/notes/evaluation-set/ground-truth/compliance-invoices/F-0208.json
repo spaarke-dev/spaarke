@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0208",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0208","generator_id":"gen_eval_set.py@1 F-0208","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0208.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Eastlake and Ellison LLP","firm_invoice_number":"INV-2025-75157","invoice_date":"2026-06-03","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"23724-0024","po_number":"PO-4599665","fees_total":6245.25,"expenses_total":2049.51,"adjustments_total":0.0,"total_due":8294.76,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Zielinski","title":"Partner","rate":745.0,"billed_as":"FZ"},{"name":"Helena Galbraith","title":"Partner","rate":660.0,"billed_as":"HG"},{"name":"Ingrid Lindqvist","title":"Senior Associate","rate":450.0,"billed_as":"IL"},{"name":"Ivan Marchetti","title":"Associate","rate":365.0,"billed_as":"IM"},{"name":"Mei Ashdown","title":"Paralegal","rate":170.0,"billed_as":"MA"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-06","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":365.0,"amount":91.25,"narrative":"Draft discovery plan in the regulatory inquiry","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-05-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1323.66,"amount":1323.66,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-08","timekeeper":"FZ","timekeeper_name":"Farah Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":745.0,"amount":968.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-12","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":365.0,"amount":91.25,"narrative":"Research case law supporting pretrial brief","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-12","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":365.0,"amount":91.25,"narrative":"Research case law supporting pretrial brief","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-13","timekeeper":"HG","timekeeper_name":"Helena Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":660.0,"amount":330.0,"narrative":"Prepare outline for deposition of Pacifica Telecom witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2026-05-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":668.31,"amount":668.31,"narrative":"Airfare to Atlanta for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-05-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":411.0,"rate":0.14,"amount":57.54,"narrative":"Photocopies - 411 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-15","timekeeper":"HG","timekeeper_name":"Helena Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":660.0,"amount":858.0,"narrative":"Draft interrogatory responses to Meridian Foods","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-15","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":450.0,"amount":1125.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-05-15","timekeeper":"MA","timekeeper_name":"Mei Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":170.0,"amount":212.5,"narrative":"Docketed deadlines in case management system","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":12,"line_type":"fee","date":"2026-05-22","timekeeper":"MA","timekeeper_name":"Mei Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":170.0,"amount":297.5,"narrative":"Research case law supporting pretrial brief","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-05-22","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.25,"rate":450.0,"amount":1012.5,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-05-26","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":450.0,"amount":1125.0,"narrative":"Review and summarize deposition transcript of Pacifica Telecom witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2026-05-28","timekeeper":"MA","timekeeper_name":"Mei Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":170.0,"amount":42.5,"narrative":"Review and organize incoming production from Summit Ridge Homes for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["709 Elm Court","Houston","Tax ID 32-5456636"],"template":"T09","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-05-06","matter_close":"2026-08-29","matter_budget":58179.0,"approved_timekeepers":["Ingrid Lindqvist","Ivan Marchetti","Ingrid Galbraith","Farah Zielinski","Leila Quillen","Mei Ashdown","Helena Galbraith"],"invoice_received_date":"2026-06-06"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[5],"consequence":"Disallow","related_line_refs":[4]},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[11],"consequence":"Disallow"}
+ ],
+ "seeded_violations":4
+}

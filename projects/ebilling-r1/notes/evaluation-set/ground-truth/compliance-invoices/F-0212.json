@@ -1,0 +1,39 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0212",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0212","generator_id":"gen_eval_set.py@1 F-0212","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0212.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Tennant & Ambrose LLP","firm_invoice_number":"LF0065338","invoice_date":"2025-12-02","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"90874-0006","po_number":"PO-4509088","fees_total":4248.5,"expenses_total":1799.15,"adjustments_total":0.0,"total_due":6047.65,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Blackwood","title":"Paralegal","rate":150.0,"billed_as":"BB"},{"name":"Hannah Delacroix","title":"Paralegal","rate":185.0,"billed_as":"HD"},{"name":"Ivan Ramanathan","title":"Partner","rate":560.0,"billed_as":"IR"},{"name":"Marcus Halloran","title":"Associate","rate":265.0,"billed_as":"MH"},{"name":"Nadia Marchetti","title":"Of Counsel","rate":430.0,"billed_as":"NM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-06","timekeeper":"MH","timekeeper_name":"Marcus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.55,"rate":265.0,"amount":410.75,"narrative":"Draft complaint and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-11","timekeeper":"BB","timekeeper_name":"Beatrix Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":150.0,"amount":60.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-13","timekeeper":"MH","timekeeper_name":"Marcus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":265.0,"amount":291.5,"narrative":"Research case law supporting protective order","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-13","timekeeper":"BB","timekeeper_name":"Beatrix Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":150.0,"amount":75.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-14","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":185.0,"amount":148.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-14","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":185.0,"amount":46.25,"narrative":"Review expert report served by Summit Ridge Homes","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-14","timekeeper":"MH","timekeeper_name":"Marcus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":265.0,"amount":265.0,"narrative":"Review opposing brief in response to notice of deposition","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-18","timekeeper":"IR","timekeeper_name":"Ivan Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":560.0,"amount":840.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-19","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":185.0,"amount":129.5,"narrative":"Draft exhibit list in the customs audit","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-24","timekeeper":"IR","timekeeper_name":"Ivan Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":560.0,"amount":140.0,"narrative":"Prepare production set and cover correspondence for service on Northwind Logistics","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-25","timekeeper":"MH","timekeeper_name":"Marcus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":265.0,"amount":318.0,"narrative":"Meet and confer with counsel for Meridian Foods regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-27","timekeeper":"NM","timekeeper_name":"Nadia Marchetti","timekeeper_title":"Of Counsel","title":"O/C","hours":2.9,"rate":430.0,"amount":1247.0,"narrative":"Review and analyze discovery plan received from Northwind Logistics","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-11-28","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":185.0,"amount":277.5,"narrative":"Review expert report served by Ironbridge Steel","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-11-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":130.57,"amount":130.57,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-11-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":772.82,"amount":772.82,"narrative":"Airfare to Boston for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-11-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":748.0,"rate":0.13,"amount":97.24,"narrative":"Photocopies - 748 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-11-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":798.52,"amount":798.52,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["497 Peachtree Way","Minneapolis","Tax ID 86-3897616"],"template":"T19","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-02-05","matter_close":"2026-02-28","matter_budget":49190.0,"approved_timekeepers":["Nadia Marchetti","Ivan Ramanathan","Marcus Halloran","Beatrix Blackwood","Hannah Delacroix","Rafael Voss"],"invoice_received_date":"2025-12-11"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[5],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

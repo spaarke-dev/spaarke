@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0289",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0289","generator_id":"gen_eval_set.py@1 F-0289","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0289.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Draycott & Cranmer LLP","firm_invoice_number":"INV-2026-63252","invoice_date":"2026-02-01","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"48545-0038","po_number":null,"fees_total":10739.5,"expenses_total":13.37,"adjustments_total":0.0,"total_due":10752.87,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Oyelaran","title":"Associate","rate":480.0,"billed_as":"CO"},{"name":"Gregory Tavares","title":"Associate","rate":470.0,"billed_as":"GT"},{"name":"Imani Esposito","title":"Of Counsel","rate":805.0,"billed_as":"IE"},{"name":"Imani Hargrove","title":"Paralegal","rate":255.0,"billed_as":"IH"},{"name":"Ivan Brennan","title":"Associate","rate":475.0,"billed_as":"IB"},{"name":"Marcus Mbeki","title":"Partner","rate":945.0,"billed_as":"MM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-01","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":475.0,"amount":855.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-02","timekeeper":"MM","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":945.0,"amount":2079.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-09","timekeeper":"GT","timekeeper_name":"Gregory Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.45,"rate":470.0,"amount":211.5,"narrative":"Research authority for pretrial brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-12","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Of Counsel","title":"O/C","hours":0.7,"rate":805.0,"amount":563.5,"narrative":"Review and summarize deposition transcript of Summit Ridge Homes witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-12","timekeeper":"GT","timekeeper_name":"Gregory Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":470.0,"amount":141.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-12","timekeeper":"GT","timekeeper_name":"Gregory Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":470.0,"amount":1363.0,"narrative":"Review and analyze interrogatory responses received from Ironbridge Steel","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-14","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Of Counsel","title":"O/C","hours":1.0,"rate":805.0,"amount":805.0,"narrative":"Ran conflict check for new party","codes":["L350","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":8,"line_type":"fee","date":"2026-01-15","timekeeper":"MM","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":945.0,"amount":283.5,"narrative":"Prepare production set and cover correspondence for service on Meridian Foods","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-21","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":475.0,"amount":617.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-22","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":475.0,"amount":1282.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-01-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":13.37,"amount":13.37,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-27","timekeeper":"CO","timekeeper_name":"Clara Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":480.0,"amount":432.0,"narrative":"Review expert report served by Redstone Mining","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-01-28","timekeeper":"IH","timekeeper_name":"Imani Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":255.0,"amount":714.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-01-30","timekeeper":"CO","timekeeper_name":"Clara Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":480.0,"amount":1392.0,"narrative":"Prepare for hearing.","codes":["L190","A104"],"page":1,"narrative_style":"vague"}
+ ],
+ "document":{"letterhead":["359 Elm Court","Denver","Tax ID 99-5129946"],"template":"T09","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-25","matter_close":"2026-05-01","matter_budget":68011.0,"approved_timekeepers":["Clara Oyelaran","Marcus Mbeki","Gregory Tavares","Imani Esposito","Ivan Brennan","Imani Hargrove"],"invoice_received_date":"2026-02-14"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[14],"consequence":"Flag"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[7],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

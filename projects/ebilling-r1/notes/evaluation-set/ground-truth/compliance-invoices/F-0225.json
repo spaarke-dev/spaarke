@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0225",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0225","generator_id":"gen_eval_set.py@1 F-0225","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0225.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Ingersoll & Ellison LLP","firm_invoice_number":"INV-2026-69839","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"76437-0040","po_number":null,"fees_total":5680.0,"expenses_total":71.52,"adjustments_total":0.0,"total_due":5751.52,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Eriksen","title":"Paralegal","rate":135.0,"billed_as":"EE"},{"name":"Louis Zielinski","title":"Associate","rate":200.0,"billed_as":"LZ"},{"name":"Marcus Mbeki","title":"Legal Assistant","rate":115.0,"billed_as":"MM"},{"name":"Oliver Voss","title":"Partner","rate":405.0,"billed_as":"OV"},{"name":"Peter Wickham","title":"Of Counsel","rate":450.0,"billed_as":"PW"},{"name":"Samuel Fairweather","title":"Partner","rate":485.0,"billed_as":"SF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-01","timekeeper":"EE","timekeeper_name":"Elena Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":135.0,"amount":27.0,"narrative":"Attend trial day in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-01","timekeeper":"EE","timekeeper_name":"Elena Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":135.0,"amount":405.0,"narrative":"Attend hearing on witness list in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-02","timekeeper":"EE","timekeeper_name":"Elena Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":135.0,"amount":27.0,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-05","timekeeper":"PW","timekeeper_name":"Peter Wickham","timekeeper_title":"Of Counsel","title":"O/C","hours":0.9,"rate":450.0,"amount":405.0,"narrative":"Internal conference with Peter Wickham regarding strategy for the licensing dispute","codes":["L460","A105"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-12-05","timekeeper":"MM","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":0.3,"rate":115.0,"amount":34.5,"narrative":"Revise motion for summary judgment after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-08","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":200.0,"amount":560.0,"narrative":"Draft complaint for trial in the employment claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-08","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":200.0,"amount":260.0,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-09","timekeeper":"OV","timekeeper_name":"Oliver Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":405.0,"amount":364.5,"narrative":"Draft post-trial motion in the supply agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-09","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":200.0,"amount":320.0,"narrative":"Research standard for new trial in the warranty claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-12","timekeeper":"SF","timekeeper_name":"Samuel Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":485.0,"amount":1212.5,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-12-17","timekeeper":"SF","timekeeper_name":"Samuel Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":485.0,"amount":97.0,"narrative":"Prepare fact witness for testimony regarding the construction contract","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-12-18","timekeeper":"SF","timekeeper_name":"Samuel Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":485.0,"amount":339.5,"narrative":"Telephone conference with witness regarding the customs audit","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-12-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":35.76,"amount":71.52,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-12-24","timekeeper":"EE","timekeeper_name":"Elena Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":135.0,"amount":175.5,"narrative":"Draft post-trial motion in the lease dispute","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-12-24","timekeeper":"SF","timekeeper_name":"Samuel Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":485.0,"amount":970.0,"narrative":"Draft notice of deposition for trial in the regulatory inquiry","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"fee","date":"2025-12-26","timekeeper":"EE","timekeeper_name":"Elena Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":135.0,"amount":202.5,"narrative":"Revise reply brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"fee","date":"2025-12-29","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":200.0,"amount":280.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["740 Commerce Avenue","Denver","Tax ID 52-1850039"],"template":"T09","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-08-25","matter_close":"2026-03-31","matter_budget":48006.0,"approved_timekeepers":["Marcus Mbeki","Oliver Voss","Elena Eriksen","Louis Zielinski","Samuel Fairweather","Peter Wickham"],"invoice_received_date":"2026-01-11"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":2
+}

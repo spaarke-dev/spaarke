@@ -15,6 +15,9 @@ coverage/
 # Generated files
 *.min.js
 *_generated.*
+# eBilling evaluation set: generated ground truth whose sha256 is checked against rendered PDFs
+# (gen_eval_set.py check); reformatting would break the check.
+projects/ebilling-r1/notes/evaluation-set/
 # PCF manifest types and other tool-emitted `generated/` directories.
 # Hand-formatting these is wasted work — the PCF tooling overwrites them.
 **/generated/

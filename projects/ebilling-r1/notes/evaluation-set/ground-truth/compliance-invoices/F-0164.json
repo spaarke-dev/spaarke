@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0164",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0164","generator_id":"gen_eval_set.py@1 F-0164","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0164.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Eastlake & Vance LLP","firm_invoice_number":"INV-2025-33054","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"19271-0004","po_number":"PO-4545006","fees_total":7875.0,"expenses_total":10.08,"adjustments_total":0.0,"total_due":7885.08,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Zielinski","title":"Associate","rate":280.0,"billed_as":"CZ"},{"name":"Dmitri Sandoval","title":"Paralegal","rate":185.0,"billed_as":"DS"},{"name":"Elena Hargrove","title":"Associate","rate":330.0,"billed_as":"EH"},{"name":"Emeka Yilmaz","title":"Associate","rate":345.0,"billed_as":"EY"},{"name":"Gideon Lindqvist","title":"Partner","rate":535.0,"billed_as":"GL"},{"name":"Yusuf Whitfield","title":"Senior Associate","rate":425.0,"billed_as":"YW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-13","timekeeper":"GL","timekeeper_name":"Gideon Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":535.0,"amount":1284.0,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-04","timekeeper":"EY","timekeeper_name":"Emeka Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":345.0,"amount":897.0,"narrative":"Prepare case assessment memorandum regarding the insurance coverage issue and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-04","timekeeper":"GL","timekeeper_name":"Gideon Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":535.0,"amount":1284.0,"narrative":"Draft appellate brief in the warranty claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-05","timekeeper":"EH","timekeeper_name":"Elena Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":330.0,"amount":462.0,"narrative":"Research appealability issues in the warranty claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-11","timekeeper":"DS","timekeeper_name":"Dmitri Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":185.0,"amount":148.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-12","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":280.0,"amount":1120.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-12","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":280.0,"amount":1120.0,"narrative":"Draft appellate brief in the distribution agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-12","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":3.1,"rate":280.0,"amount":868.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-12","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":280.0,"amount":28.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-13","timekeeper":"DS","timekeeper_name":"Dmitri Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":185.0,"amount":37.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-16","timekeeper":"DS","timekeeper_name":"Dmitri Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":185.0,"amount":499.5,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-06-24","timekeeper":"YW","timekeeper_name":"Yusuf Whitfield","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.3,"rate":425.0,"amount":127.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":84.0,"rate":0.12,"amount":10.08,"narrative":"Photocopies - 84 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["225 Lakeshore Drive","Chicago","Tax ID 71-4440010"],"template":"T15","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-07-05","matter_close":"2025-09-28","matter_budget":56540.0,"approved_timekeepers":["Cyrus Zielinski","Mei Abernathy","Gideon Lindqvist","Elena Hargrove","Yusuf Whitfield","Dmitri Sandoval"],"invoice_received_date":"2025-07-20"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-02-R04","rule_type":"DailyHoursCap","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0195",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0195","generator_id":"gen_eval_set.py@1 F-0195","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0195.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Oakhurst & Dunmore LLP","firm_invoice_number":"INV-2026-15114","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"76273-0040","po_number":"PO-4529070","fees_total":2809.0,"expenses_total":278.15,"adjustments_total":0.0,"total_due":3087.15,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Fairweather","title":"Partner","rate":395.0,"billed_as":"AF"},{"name":"Clara Quillen","title":"Associate","rate":240.0,"billed_as":"CQ"},{"name":"Hannah Delacroix","title":"Associate","rate":215.0,"billed_as":"HD"},{"name":"Oliver Okafor","title":"Partner","rate":490.0,"billed_as":"OO"},{"name":"Peter Nwosu","title":"Paralegal","rate":125.0,"billed_as":"PN"},{"name":"Victor Whitfield","title":"Associate","rate":210.0,"billed_as":"VW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-04","timekeeper":"OO","timekeeper_name":"Oliver Okafor","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":490.0,"amount":147.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-09","timekeeper":"CQ","timekeeper_name":"Clara Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":240.0,"amount":576.0,"narrative":"Telephone conference with witness regarding the insurance coverage issue","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-10","timekeeper":"PN","timekeeper_name":"Peter Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":175.0,"amount":70.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-15","timekeeper":"CQ","timekeeper_name":"Clara Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":240.0,"amount":696.0,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-16","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":215.0,"amount":451.5,"narrative":"Attend hearing on notice of deposition in the construction contract","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-22","timekeeper":"AF","timekeeper_name":"Anders Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":395.0,"amount":395.0,"narrative":"Prepare fact witness for testimony regarding the employment claim","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-22","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":215.0,"amount":236.5,"narrative":"Research standard for new trial in the regulatory inquiry","codes":["L460","A102"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-24","timekeeper":"CQ","timekeeper_name":"Clara Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":240.0,"amount":48.0,"narrative":"Prepare fact witness for testimony regarding the employment claim","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-29","timekeeper":"VW","timekeeper_name":"Victor Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":210.0,"amount":189.0,"narrative":"Draft settlement proposal for trial in the insurance coverage issue","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":278.15,"amount":278.15,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["247 Harbor Road","Phoenix","Tax ID 56-2810067"],"template":"T21","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-08-29","matter_close":"2026-09-28","matter_budget":37348.0,"approved_timekeepers":["Hannah Delacroix","Peter Nwosu","Clara Quillen","Oliver Okafor","Ivan Quillen","Anders Fairweather","Marcus Fairweather","Victor Whitfield","Gregory Kowalczyk"],"invoice_received_date":"2026-07-10"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

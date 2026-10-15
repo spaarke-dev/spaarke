@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0546",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0546","generator_id":"gen_eval_set.py@1 F-0546","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0546.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Northcott and Cranmer LLP","firm_invoice_number":"INV-2026-59116","invoice_date":"2026-07-04","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"22812-0030","po_number":"PO-4592195","fees_total":3038.0,"expenses_total":24.7,"adjustments_total":0.0,"total_due":3062.7,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Ramanathan","title":"Associate","rate":205.0,"billed_as":"D. Ramanathan"},{"name":"Ivan Nwosu","title":"Partner","rate":400.0,"billed_as":"I. Nwosu"},{"name":"Peter Nwosu","title":"Associate","rate":175.0,"billed_as":"P. Nwosu"},{"name":"Victor Fairweather","title":"Partner","rate":335.0,"billed_as":"V. Fairweather"},{"name":"Victor Mbeki","title":"Paralegal","rate":105.0,"billed_as":"V. Mbeki"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-09","timekeeper":"D. Ramanathan","timekeeper_name":"Dmitri Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":205.0,"amount":410.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-23","timekeeper":"D. Ramanathan","timekeeper_name":"Dmitri Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":205.0,"amount":492.0,"narrative":"Draft appellate brief in the distribution agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-11","timekeeper":"I. Nwosu","timekeeper_name":"Ivan Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":400.0,"amount":1160.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-04","timekeeper":"P. Nwosu","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":175.0,"amount":70.0,"narrative":"Prepare for oral argument in the employment claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-08","timekeeper":"P. Nwosu","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":175.0,"amount":402.5,"narrative":"Draft notice of appeal and docketing statement for the lease dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-15","timekeeper":"P. Nwosu","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":175.0,"amount":157.5,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-26","timekeeper":"V. Fairweather","timekeeper_name":"Victor Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":335.0,"amount":167.5,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-10","timekeeper":"V. Mbeki","timekeeper_name":"Victor Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":105.0,"amount":178.5,"narrative":"Research appealability issues in the construction contract","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":38.0,"rate":0.65,"amount":24.7,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["261 Harbor Road","Dallas","Tax ID 53-2458886"],"template":"T16","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-08-24","matter_close":"2026-09-28","matter_budget":37250.0,"approved_timekeepers":["Dalia Sandoval","Dmitri Ramanathan","Daniel Halloran","Victor Mbeki","Ingrid Lockhart","Victor Fairweather","Peter Nwosu","Ivan Nwosu"],"invoice_received_date":"2026-07-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

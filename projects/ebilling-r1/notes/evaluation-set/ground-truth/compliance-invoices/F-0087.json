@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0087",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0087","generator_id":"gen_eval_set.py@1 F-0087","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0087.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair and Zeller LLP","firm_invoice_number":"INV-2026-16517","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"40364-0017","po_number":"PO-4598359","fees_total":3241.5,"expenses_total":653.63,"adjustments_total":0.0,"total_due":3895.13,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Tavares","title":"Partner","rate":470.0,"billed_as":"Beatrix Tavares"},{"name":"Emeka Castellanos","title":"Of Counsel","rate":455.0,"billed_as":"Emeka Castellanos"},{"name":"Louis Hargrove","title":"Paralegal","rate":125.0,"billed_as":"Louis Hargrove"},{"name":"Louis Tavares","title":"Associate","rate":265.0,"billed_as":"Louis Tavares"},{"name":"Samuel Eriksen","title":"Paralegal","rate":110.0,"billed_as":"Samuel Eriksen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-01","timekeeper":"Louis Tavares","timekeeper_name":"Louis Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":265.0,"amount":768.5,"narrative":"Telephone conference with client representative regarding factual background of the licensing dispute","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-08","timekeeper":"Beatrix Tavares","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":470.0,"amount":799.0,"narrative":"Draft settlement term sheet for the vendor agreement","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-10","timekeeper":"Louis Tavares","timekeeper_name":"Louis Tavares","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":265.0,"amount":371.0,"narrative":"Prepare case assessment memorandum regarding the employment claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-10","timekeeper":"Louis Hargrove","timekeeper_name":"Louis Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":125.0,"amount":262.5,"narrative":"Conference with client regarding settlement authority for the regulatory inquiry","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-14","timekeeper":"Emeka Castellanos","timekeeper_name":"Emeka Castellanos","timekeeper_title":"Of Counsel","title":"O/C","hours":1.9,"rate":455.0,"amount":864.5,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-20","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":110.0,"amount":66.0,"narrative":"Scheduled conference call and updated calendar entries","codes":["L210","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":7,"line_type":"fee","date":"2026-04-22","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":110.0,"amount":110.0,"narrative":"Review expert qualifications and prior testimony for the construction contract","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":653.63,"amount":653.63,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["785 Pine Street","Houston","Tax ID 50-5966390"],"template":"T18","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-01-13","matter_close":"2026-07-29","matter_budget":40580.0,"approved_timekeepers":["Samuel Eriksen","Louis Hargrove","Louis Tavares","Sofia Castellanos","Beatrix Tavares","Emeka Castellanos"],"invoice_received_date":"2026-05-07"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[6],"consequence":"Disallow"}
+ ],
+ "seeded_violations":1
+}

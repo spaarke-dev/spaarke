@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rate-card",
+ "id":"E-RC-03",
+ "set":"E",
+ "meta":{"title":"Criminal Justice Act panel attorney rate chart as of 2026-01-01 (S.D. Ohio)","source_url":"https://www.ohsd.uscourts.gov/sites/ohsd/files/_2026_CJA%20Rate%20Chart.pdf","licence":"No licence stated. US federal judiciary publication (US government work, 17 USC 105: no copyright).","licence_status":"open","pii_note":"Public document from an agency or court; counts only, no matched text recorded. Hits: case_party_marker 1. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"cja-2026-ohsd.pdf","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":9132,"counts":{"email":0,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":1},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/rate-cards/cja-2026-ohsd.pdf"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"court","currency":"USD","retrieved":"2026-10-15","pages":2},
+ "rates":[
+  {"key":"CJA non-capital, from 2019-02-15","amount":148,"unit":"hour","effective_from":"2019-02-15","effective_to":"2019-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2020","amount":152,"unit":"hour","effective_from":"2020-01-01","effective_to":"2020-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2021","amount":155,"unit":"hour","effective_from":"2021-01-01","effective_to":"2021-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2022","amount":158,"unit":"hour","effective_from":"2022-01-01","effective_to":"2022-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2023","amount":164,"unit":"hour","effective_from":"2023-01-01","effective_to":"2023-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2024","amount":172,"unit":"hour","effective_from":"2024-01-01","effective_to":"2024-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2025","amount":175,"unit":"hour","effective_from":"2025-01-01","effective_to":"2025-12-31","scope":"non-capital"},
+  {"key":"CJA non-capital, 2026","amount":177,"unit":"hour","effective_from":"2026-01-01","effective_to":null,"scope":"non-capital"},
+  {"key":"CJA capital, from 2019-02-15","amount":190,"unit":"hour","effective_from":"2019-02-15","effective_to":"2019-12-31","scope":"capital"},
+  {"key":"CJA capital, 2020","amount":195,"unit":"hour","effective_from":"2020-01-01","effective_to":"2020-12-31","scope":"capital"},
+  {"key":"CJA capital, 2021","amount":197,"unit":"hour","effective_from":"2021-01-01","effective_to":"2021-12-31","scope":"capital"},
+  {"key":"CJA capital, 2022","amount":202,"unit":"hour","effective_from":"2022-01-01","effective_to":"2022-12-31","scope":"capital"},
+  {"key":"CJA capital, 2023","amount":210,"unit":"hour","effective_from":"2023-01-01","effective_to":"2023-12-31","scope":"capital"},
+  {"key":"CJA capital, 2024","amount":220,"unit":"hour","effective_from":"2024-01-01","effective_to":"2024-12-31","scope":"capital"},
+  {"key":"CJA capital, 2025","amount":223,"unit":"hour","effective_from":"2025-01-01","effective_to":"2025-12-31","scope":"capital"},
+  {"key":"CJA capital, 2026","amount":226,"unit":"hour","effective_from":"2026-01-01","effective_to":null,"scope":"capital"},
+  {"key":"Associate, non-panel attorney","amount":80,"unit":"hour","effective_from":"2026-01-01","effective_to":null,"scope":"associate"},
+  {"key":"Associate, panel attorney","amount":90,"unit":"hour","effective_from":"2026-01-01","effective_to":null,"scope":"associate"},
+  {"key":"Mentee, 60 percent of attorney rate (non-capital 2026)","amount":106.2,"unit":"hour","effective_from":"2026-01-01","effective_to":null,"scope":"mentee"}
+ ],
+ "rules":[
+  {"rule_id":"E-RC-03-R01","rule_type":"ApprovedRate","params":{"rates":{"non_capital_2026":177,"capital_2026":226,"associate_non_panel":80,"associate_panel":90},"mentee_pct_of_attorney_rate":60},"consequence":"Reduce","clause_ref":{"section":"Hourly rates","page":1},"paraphrase":"Appointed counsel are paid the stated hourly rate for the date of the work; associates and mentees have their own rates.","expressible":true},
+  {"rule_id":"E-RC-03-R02","rule_type":"CoreRecordWindow","params":{"budget_cap":{"felony_and_non_capital_habeas":13800,"misdemeanor":3900,"appeals":9800,"other":3000},"year":2026},"consequence":"Flag","clause_ref":{"section":"Compensation maximums","page":1},"paraphrase":"Statutory compensation maximums per case type cap the total that can be claimed without a waiver.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"Footnotes","page":1},"paraphrase":"Pre-indictment appointments merge with the criminal charge once indicted.","reason":"not-billing"}
+ ]
+}

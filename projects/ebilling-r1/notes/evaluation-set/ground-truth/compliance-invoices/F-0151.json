@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0151",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0151","generator_id":"gen_eval_set.py@1 F-0151","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0151.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Lindenmeyer and Beckett LLP","firm_invoice_number":"INV-2025-54351","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"74640-0011","po_number":"PO-4510076","fees_total":12446.5,"expenses_total":555.1,"adjustments_total":0.0,"total_due":13001.6,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Marchetti","title":"Associate","rate":410.0,"billed_as":"AM"},{"name":"Clara Kowalczyk","title":"Paralegal","rate":235.0,"billed_as":"CK"},{"name":"Dalia Mbeki","title":"Partner","rate":740.0,"billed_as":"DM"},{"name":"Elena Nwosu","title":"Partner","rate":720.0,"billed_as":"EN"},{"name":"Imani Nwosu","title":"Associate","rate":415.0,"billed_as":"IN"},{"name":"Samuel Esposito","title":"Associate","rate":395.0,"billed_as":"SE"},{"name":"Sofia Thornbury","title":"Senior Associate","rate":535.0,"billed_as":"ST"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-03","timekeeper":"DM","timekeeper_name":"Dalia Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":740.0,"amount":2220.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-05","timekeeper":"EN","timekeeper_name":"Elena Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":720.0,"amount":1872.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":410.0,"amount":574.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-16","timekeeper":"SE","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":395.0,"amount":1066.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-18","timekeeper":"ST","timekeeper_name":"Sofia Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":535.0,"amount":1551.5,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-19","timekeeper":"CK","timekeeper_name":"Clara Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":235.0,"amount":681.5,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-19","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":410.0,"amount":984.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-22","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":410.0,"amount":697.0,"narrative":"Research appealability issues in the licensing dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-23","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":410.0,"amount":410.0,"narrative":"Prepare for oral argument in the distribution agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-26","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":410.0,"amount":656.0,"narrative":"Draft notice of appeal and docketing statement for the construction contract","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-29","timekeeper":"ST","timekeeper_name":"Sofia Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":535.0,"amount":1070.0,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-29","timekeeper":"IN","timekeeper_name":"Imani Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":415.0,"amount":664.0,"narrative":"Draft appellate brief in the warranty claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":54.03,"amount":108.06,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":781.0,"rate":0.32,"amount":249.92,"narrative":"Photocopies - 781 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":896.0,"rate":0.22,"amount":197.12,"narrative":"Photocopies - 896 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["307 Congress Boulevard","Portland","Tax ID 82-1146210"],"template":"T23","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-31","matter_close":"2025-12-29","matter_budget":77006.0,"approved_timekeepers":["Anders Marchetti","Imani Nwosu","Dalia Mbeki","Elena Nwosu","Sofia Thornbury","Clara Kowalczyk","Samuel Esposito"],"invoice_received_date":"2025-10-20"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[15],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

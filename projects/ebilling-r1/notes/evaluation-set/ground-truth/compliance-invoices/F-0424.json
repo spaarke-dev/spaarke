@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0424",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0424","generator_id":"gen_eval_set.py@1 F-0424","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0424.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Sutherland and Beckett LLP","firm_invoice_number":"INV-2026-70626","invoice_date":"2025-06-03","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"37155-0027","po_number":"PO-4537374","fees_total":4681.25,"expenses_total":15.3,"adjustments_total":0.0,"total_due":4696.55,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Thornbury","title":"Paralegal","rate":165.0,"billed_as":"BT"},{"name":"Louis Lockhart","title":"Partner","rate":665.0,"billed_as":"LL"},{"name":"Marcus Esposito","title":"Partner","rate":550.0,"billed_as":"ME"},{"name":"Peter Rosenthal","title":"Associate","rate":335.0,"billed_as":"PR"},{"name":"Peter Thornbury","title":"Paralegal","rate":170.0,"billed_as":"PT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-01","timekeeper":"PT","timekeeper_name":"Peter Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":170.0,"amount":255.0,"narrative":"Telephone conference with witness regarding the data incident","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-09","timekeeper":"ME","timekeeper_name":"Marcus Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":550.0,"amount":962.5,"narrative":"Attend hearing on notice of deposition in the licensing dispute","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-14","timekeeper":"PR","timekeeper_name":"Peter Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":335.0,"amount":502.5,"narrative":"Revise interrogatory responses after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-15","timekeeper":"PT","timekeeper_name":"Peter Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":170.0,"amount":170.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-19","timekeeper":"BT","timekeeper_name":"Beatrix Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":165.0,"amount":371.25,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-21","timekeeper":"LL","timekeeper_name":"Louis Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":665.0,"amount":1163.75,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-21","timekeeper":"PR","timekeeper_name":"Peter Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":335.0,"amount":251.25,"narrative":"Attend hearing on interrogatory responses in the supply agreement","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-22","timekeeper":"LL","timekeeper_name":"Louis Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":665.0,"amount":332.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-22","timekeeper":"PT","timekeeper_name":"Peter Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":170.0,"amount":212.5,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-26","timekeeper":"PT","timekeeper_name":"Peter Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":170.0,"amount":127.5,"narrative":"Attend trial day in the lease dispute","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-05-28","timekeeper":"LL","timekeeper_name":"Louis Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":665.0,"amount":332.5,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":153.0,"rate":0.1,"amount":15.3,"narrative":"Photocopies - 153 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["778 Elm Court","Chicago","Tax ID 10-7531786"],"template":"T21","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-09-25","matter_close":"2025-08-29","matter_budget":43786.0,"approved_timekeepers":["Peter Rosenthal","Marcus Esposito","Louis Lockhart","Nadia Castellanos","Beatrix Thornbury","Mei Tavares","Peter Thornbury"],"invoice_received_date":"2025-06-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

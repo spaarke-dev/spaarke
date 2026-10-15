@@ -1,0 +1,39 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0294",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0294","generator_id":"gen_eval_set.py@1 F-0294","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0294.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Lindenmeyer and Ambrose LLP","firm_invoice_number":"INV-2025-90176","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"42315-0022","po_number":"PO-4513707","fees_total":4040.0,"expenses_total":5682.9,"adjustments_total":0.0,"total_due":9722.9,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Halloran","title":"Senior Associate","rate":290.0,"billed_as":"DH"},{"name":"Leila Kowalczyk","title":"Associate","rate":195.0,"billed_as":"LK"},{"name":"Marcus Whitfield","title":"Paralegal","rate":115.0,"billed_as":"MW"},{"name":"Rafael Nwosu","title":"Associate","rate":230.0,"billed_as":"RN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-05","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":230.0,"amount":230.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-07","timekeeper":"DH","timekeeper_name":"Daniel Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":290.0,"amount":696.0,"narrative":"Conference with client regarding budget variance for the warranty claim","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-08","timekeeper":"DH","timekeeper_name":"Daniel Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":290.0,"amount":348.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-11","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":195.0,"amount":19.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-12","timekeeper":"MW","timekeeper_name":"Marcus Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":115.0,"amount":92.0,"narrative":"Draft settlement term sheet for the supply agreement","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-14","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":230.0,"amount":368.0,"narrative":"Attend case management conference in the licensing dispute","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-15","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":195.0,"amount":117.0,"narrative":"Review and organize incoming production from Pacifica Telecom for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-19","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":195.0,"amount":526.5,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-20","timekeeper":"DH","timekeeper_name":"Daniel Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":290.0,"amount":348.0,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-20","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":230.0,"amount":69.0,"narrative":"Prepare case assessment memorandum regarding the employment claim and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-21","timekeeper":"DH","timekeeper_name":"Daniel Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":290.0,"amount":812.0,"narrative":"Various tasks regarding matter.","codes":["L140","A104"],"page":2,"narrative_style":"vague"},
+  {"n":12,"line_type":"fee","date":"2025-08-26","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":230.0,"amount":414.0,"narrative":"Conference with client regarding settlement authority for the warranty claim","codes":["L160","A106"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":11.76,"amount":11.76,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-08-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":687.0,"rate":0.12,"amount":82.44,"narrative":"Photocopies - 687 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5384.86,"amount":5384.86,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":196.0,"rate":0.26,"amount":50.96,"narrative":"Photocopies - 196 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-08-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":76.44,"amount":152.88,"narrative":"Overnight courier to Redstone Mining counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["608 Lakeshore Drive","Phoenix","Tax ID 73-6480598"],"template":"T22","pages":3},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-06-12","matter_close":"2025-11-29","matter_budget":63891.0,"approved_timekeepers":["Mei Brennan","Leila Kowalczyk","Daniel Halloran","Tomas Hargrove","Rafael Nwosu"],"invoice_received_date":"2025-09-06"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[5],"consequence":"Reject"},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[16],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[17],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[3],"consequence":"Reject"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[11],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

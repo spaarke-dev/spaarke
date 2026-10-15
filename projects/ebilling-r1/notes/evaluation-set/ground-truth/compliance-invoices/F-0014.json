@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0014",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0014","generator_id":"gen_eval_set.py@1 F-0014","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0014.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Ingersoll & Beckett LLP","firm_invoice_number":"INV-2025-86034","invoice_date":"2025-06-01","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"60612-0003","po_number":"PO-4582022","fees_total":7539.0,"expenses_total":794.33,"adjustments_total":0.0,"total_due":8333.33,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Kowalczyk","title":"Paralegal","rate":145.0,"billed_as":"DK"},{"name":"Jordan Abernathy","title":"Of Counsel","rate":460.0,"billed_as":"JA"},{"name":"Jordan Zielinski","title":"Associate","rate":320.0,"billed_as":"JZ"},{"name":"Mei Brennan","title":"Partner","rate":650.0,"billed_as":"MB"},{"name":"Oliver Voss","title":"Senior Associate","rate":340.0,"billed_as":"OV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-06","timekeeper":"JZ","timekeeper_name":"Jordan Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":320.0,"amount":864.0,"narrative":"Draft notice of appeal and docketing statement for the vendor agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-07","timekeeper":"JZ","timekeeper_name":"Jordan Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":320.0,"amount":96.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-12","timekeeper":"JZ","timekeeper_name":"Jordan Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":320.0,"amount":640.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-16","timekeeper":"OV","timekeeper_name":"Oliver Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":340.0,"amount":612.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-20","timekeeper":"MB","timekeeper_name":"Mei Brennan","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":650.0,"amount":585.0,"narrative":"Prepare for oral argument in the vendor agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-20","timekeeper":"OV","timekeeper_name":"Oliver Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.0,"rate":340.0,"amount":1020.0,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-21","timekeeper":"DK","timekeeper_name":"Daniel Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":145.0,"amount":406.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-21","timekeeper":"DK","timekeeper_name":"Daniel Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":145.0,"amount":377.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-22","timekeeper":"DK","timekeeper_name":"Daniel Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":145.0,"amount":319.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-23","timekeeper":"JA","timekeeper_name":"Jordan Abernathy","timekeeper_title":"Of Counsel","title":"O/C","hours":2.1,"rate":460.0,"amount":966.0,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-05-26","timekeeper":"DK","timekeeper_name":"Daniel Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":145.0,"amount":29.0,"narrative":"Draft appellate brief in the customs audit","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-05-29","timekeeper":"MB","timekeeper_name":"Mei Brennan","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":650.0,"amount":1625.0,"narrative":"Attend and present oral argument in the distribution agreement","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-05-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":794.33,"amount":794.33,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["902 Commerce Avenue","Houston","Tax ID 59-7540235"],"template":"T15","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-06-03","matter_close":"2025-08-29","matter_budget":6666.0,"approved_timekeepers":["Oliver Voss","Hector Zielinski","Daniel Kowalczyk","Mei Brennan","Jordan Zielinski","Jordan Abernathy"],"invoice_received_date":"2025-06-06"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[6],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

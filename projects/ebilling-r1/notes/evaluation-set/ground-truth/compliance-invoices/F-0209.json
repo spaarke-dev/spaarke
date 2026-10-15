@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0209",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0209","generator_id":"gen_eval_set.py@1 F-0209","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0209.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Tennant & Whitcombe LLP","firm_invoice_number":"INV-2026-77961","invoice_date":"2025-11-04","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"49906-0003","po_number":"PO-4524761","fees_total":4427.5,"expenses_total":4117.78,"adjustments_total":0.0,"total_due":8545.28,"currency":"USD"},
+ "timekeepers":[{"name":"Gregory Nakamura","title":"Partner","rate":585.0,"billed_as":"Gregory Nakamura"},{"name":"Leila Ashdown","title":"Associate","rate":275.0,"billed_as":"Leila Ashdown"},{"name":"Naomi Nakamura","title":"Senior Associate","rate":365.0,"billed_as":"Naomi Nakamura"},{"name":"Rafael Quillen","title":"Associate","rate":305.0,"billed_as":"Rafael Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-14","timekeeper":"Gregory Nakamura","timekeeper_name":"Gregory Nakamura","timekeeper_title":"Partner","title":"Partner","hours":2.8,"rate":585.0,"amount":1638.0,"narrative":"Review and summarize deposition transcript of Ironbridge Steel witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-19","timekeeper":"Leila Ashdown","timekeeper_name":"Leila Ashdown","timekeeper_title":"Associate","title":"Associate","hours":0.2,"rate":275.0,"amount":55.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-14","timekeeper":"Leila Ashdown","timekeeper_name":"Leila Ashdown","timekeeper_title":"Associate","title":"Associate","hours":1.3,"rate":275.0,"amount":357.5,"narrative":"Review and organize incoming production from Solano Freight for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-20","timekeeper":"Leila Ashdown","timekeeper_name":"Leila Ashdown","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":275.0,"amount":302.5,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-21","timekeeper":"Leila Ashdown","timekeeper_name":"Leila Ashdown","timekeeper_title":"Associate","title":"Associate","hours":0.5,"rate":275.0,"amount":137.5,"narrative":"Update document review protocol and coding panel for the construction contract","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-09","timekeeper":"Naomi Nakamura","timekeeper_name":"Naomi Nakamura","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":2.8,"rate":365.0,"amount":1022.0,"narrative":"Review expert report served by Alder & Finch Ltd","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-28","timekeeper":"Rafael Quillen","timekeeper_name":"Rafael Quillen","timekeeper_title":"Associate","title":"Associate","hours":1.5,"rate":305.0,"amount":457.5,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-28","timekeeper":"Rafael Quillen","timekeeper_name":"Rafael Quillen","timekeeper_title":"Associate","title":"Associate","hours":1.5,"rate":305.0,"amount":457.5,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-10-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1519.61,"amount":1519.61,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-10-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1247.29,"amount":1247.29,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-10-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":900.44,"amount":900.44,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-10-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":450.44,"amount":450.44,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["968 Commerce Avenue","Dallas","Tax ID 30-5645423"],"template":"T13","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-01-06","matter_close":"2026-01-29","matter_budget":59181.0,"approved_timekeepers":["Farah Kowalczyk","Gregory Nakamura","Elena Galbraith","Leila Ashdown","Elena Marchetti","Ingrid Galbraith","Naomi Nakamura","Rafael Quillen"],"invoice_received_date":"2025-11-10"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R05","rule_type":"Duplicate","scope":"line","line_refs":[8],"consequence":"Disallow","related_line_refs":[7]},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0580",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0580","generator_id":"gen_eval_set.py@1 F-0580","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0580.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Hartwell and Beckett LLP","firm_invoice_number":"INV-2025-74678","invoice_date":"2026-06-04","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"38931-0019","po_number":"PO-4534720","fees_total":4962.5,"expenses_total":1739.23,"adjustments_total":0.0,"total_due":6701.73,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Lindqvist","title":"Senior Associate","rate":415.0,"billed_as":"H. Lindqvist"},{"name":"Jordan Marchetti","title":"Associate","rate":300.0,"billed_as":"J. Marchetti"},{"name":"Katya Zielinski","title":"Associate","rate":330.0,"billed_as":"K. Zielinski"},{"name":"Marcus Delacroix","title":"Paralegal","rate":180.0,"billed_as":"M. Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-06","timekeeper":"H. Lindqvist","timekeeper_name":"Helena Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":415.0,"amount":726.25,"narrative":"Draft post-trial motion in the warranty claim","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-06","timekeeper":"H. Lindqvist","timekeeper_name":"Helena Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":415.0,"amount":103.75,"narrative":"Draft post-trial motion in the licensing dispute","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-04","timekeeper":"J. Marchetti","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":300.0,"amount":525.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-11","timekeeper":"J. Marchetti","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":300.0,"amount":825.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the supply agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-26","timekeeper":"J. Marchetti","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":300.0,"amount":825.0,"narrative":"Prepare fact witness for testimony regarding the distribution agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-07","timekeeper":"K. Zielinski","timekeeper_name":"Katya Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":330.0,"amount":247.5,"narrative":"Draft post-trial motion in the construction contract","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-04","timekeeper":"M. Delacroix","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":180.0,"amount":360.0,"narrative":"Prepare examination outlines for trial in the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-06","timekeeper":"M. Delacroix","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":180.0,"amount":495.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-21","timekeeper":"M. Delacroix","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":180.0,"amount":495.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-22","timekeeper":"M. Delacroix","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":180.0,"amount":360.0,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-05-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1323.23,"amount":1323.23,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":356.97,"amount":356.97,"narrative":"Airfare to Denver for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-05-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":59.03,"amount":59.03,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["360 Congress Boulevard","Chicago","Tax ID 69-4906122"],"template":"T16","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-09-20","matter_close":"2026-08-29","matter_budget":51806.0,"approved_timekeepers":["Katya Zielinski","Gregory Castellanos","Jordan Marchetti","Marcus Delacroix","Helena Lindqvist"],"invoice_received_date":"2026-06-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

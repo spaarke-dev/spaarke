@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0233",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0233","generator_id":"gen_eval_set.py@1 F-0233","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0233.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ingersoll and Forsythe LLP","firm_invoice_number":"INV-2025-30973","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"13119-0015","po_number":null,"fees_total":4840.0,"expenses_total":53.26,"adjustments_total":0.0,"total_due":4893.26,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Voss","title":"Associate","rate":230.0,"billed_as":"DV"},{"name":"Ivan Mbeki","title":"Paralegal","rate":160.0,"billed_as":"IM"},{"name":"Jordan Castellanos","title":"Partner","rate":555.0,"billed_as":"JC"},{"name":"Priya Zielinski","title":"Partner","rate":525.0,"billed_as":"PZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-26","timekeeper":"DV","timekeeper_name":"Dmitri Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":230.0,"amount":644.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-02","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":525.0,"amount":787.5,"narrative":"Review opposing brief in response to discovery plan","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-02","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":525.0,"amount":787.5,"narrative":"Review opposing brief in response to discovery plan","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-16","timekeeper":"DV","timekeeper_name":"Dmitri Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":230.0,"amount":138.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-24","timekeeper":"DV","timekeeper_name":"Dmitri Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":230.0,"amount":667.0,"narrative":"Attend deposition of Harbor Point Capital corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-24","timekeeper":"JC","timekeeper_name":"Jordan Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":555.0,"amount":444.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-24","timekeeper":"JC","timekeeper_name":"Jordan Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":555.0,"amount":444.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-29","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":160.0,"amount":160.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-31","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":160.0,"amount":384.0,"narrative":"Draft protective order to Ironbridge Steel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-31","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":160.0,"amount":384.0,"narrative":"Draft protective order to Ironbridge Steel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":26.63,"amount":53.26,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["177 Commerce Avenue","Houston","Tax ID 48-4347617"],"template":"T17","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-07-01","matter_close":"2026-10-29","matter_budget":44573.0,"approved_timekeepers":["Dmitri Voss","Farah Nwosu","Priya Zielinski","Ivan Mbeki","Jordan Castellanos","Emeka Quillen"],"invoice_received_date":"2026-08-06"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R05","rule_type":"Duplicate","scope":"line","line_refs":[3],"consequence":"Disallow","related_line_refs":[2]},
+  {"rule_id":"RS-05-R05","rule_type":"Duplicate","scope":"line","line_refs":[7],"consequence":"Disallow","related_line_refs":[6]},
+  {"rule_id":"RS-05-R05","rule_type":"Duplicate","scope":"line","line_refs":[10],"consequence":"Disallow","related_line_refs":[9]},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

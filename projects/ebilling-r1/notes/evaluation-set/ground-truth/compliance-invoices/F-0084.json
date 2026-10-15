@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0084",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0084","generator_id":"gen_eval_set.py@1 F-0084","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0084.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Northcott and Zeller LLP","firm_invoice_number":"A-06533/2025","invoice_date":"2026-07-02","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"16206-0023","po_number":"PO-4519867","fees_total":2811.25,"expenses_total":780.58,"adjustments_total":0.0,"total_due":3591.83,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Lindqvist","title":"Associate","rate":195.0,"billed_as":"CL"},{"name":"Ivan Abernathy","title":"Associate","rate":220.0,"billed_as":"IA"},{"name":"Louis Dunleavy","title":"Associate","rate":190.0,"billed_as":"LD"},{"name":"Louis Quillen","title":"Paralegal","rate":105.0,"billed_as":"LQ"},{"name":"Nadia Ramanathan","title":"Partner","rate":350.0,"billed_as":"NR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-01","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":220.0,"amount":352.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-02","timekeeper":"CL","timekeeper_name":"Clara Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.15,"rate":195.0,"amount":29.25,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-03","timekeeper":"LD","timekeeper_name":"Louis Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":190.0,"amount":19.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-03","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":220.0,"amount":286.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-03","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":220.0,"amount":286.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-05","timekeeper":"LQ","timekeeper_name":"Louis Quillen","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":105.0,"amount":42.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-05","timekeeper":"CL","timekeeper_name":"Clara Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":195.0,"amount":390.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-09","timekeeper":"LD","timekeeper_name":"Louis Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":190.0,"amount":266.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-11","timekeeper":"NR","timekeeper_name":"Nadia Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":350.0,"amount":1015.0,"narrative":"Draft appellate brief in the customs audit","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-06-22","timekeeper":"LQ","timekeeper_name":"Louis Quillen","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":105.0,"amount":126.0,"narrative":"Draft notice of appeal and docketing statement for the vendor agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.81,"amount":7.81,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-06-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":8.0,"rate":3.82,"amount":30.56,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":653.35,"amount":653.35,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-06-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":29.62,"amount":88.86,"narrative":"Overnight courier to Redstone Mining counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["198 Elm Court","Portland","Tax ID 37-7217143"],"template":"T07","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-07-07","matter_close":"2026-09-28","matter_budget":39367.0,"approved_timekeepers":["Nadia Ramanathan","Oliver Ashdown","Louis Quillen","Imani Wickham","Ivan Abernathy","Victor Carmichael","Louis Dunleavy","Clara Lindqvist"],"invoice_received_date":"2026-07-04"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Disallow"},
+  {"rule_id":"RS-06-R08","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[5],"consequence":"Disallow","related_line_refs":[4]},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[9],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

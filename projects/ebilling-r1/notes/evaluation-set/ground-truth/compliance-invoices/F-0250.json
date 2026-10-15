@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0250",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0250","generator_id":"gen_eval_set.py@1 F-0250","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0250.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Stanhope Dunmore PC","firm_invoice_number":"INV-2025-78911","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"98316-0024","po_number":"PO-4539026","fees_total":5149.5,"expenses_total":2243.1,"adjustments_total":0.0,"total_due":7392.6,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Eriksen","title":"Paralegal","rate":205.0,"billed_as":"AE"},{"name":"Dalia Ramanathan","title":"Associate","rate":335.0,"billed_as":"DR"},{"name":"Gregory Delacroix","title":"Of Counsel","rate":540.0,"billed_as":"GD"},{"name":"Nadia Esposito","title":"Associate","rate":300.0,"billed_as":"NE"},{"name":"Sofia Galbraith","title":"Partner","rate":700.0,"billed_as":"SG"},{"name":"Yusuf Voss","title":"Paralegal","rate":180.0,"billed_as":"YV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-06","timekeeper":"DR","timekeeper_name":"Dalia Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":335.0,"amount":837.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-10","timekeeper":"AE","timekeeper_name":"Anders Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":205.0,"amount":307.5,"narrative":"Research standard for provisional remedies concerning the customs audit","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-10","timekeeper":"AE","timekeeper_name":"Anders Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":205.0,"amount":615.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-13","timekeeper":"NE","timekeeper_name":"Nadia Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":300.0,"amount":375.0,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-18","timekeeper":"SG","timekeeper_name":"Sofia Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":700.0,"amount":2100.0,"narrative":"Draft settlement term sheet for the regulatory inquiry","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-21","timekeeper":"YV","timekeeper_name":"Yusuf Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":180.0,"amount":180.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-24","timekeeper":"GD","timekeeper_name":"Gregory Delacroix","timekeeper_title":"Of Counsel","title":"O/C","hours":1.05,"rate":540.0,"amount":567.0,"narrative":"Conference with client regarding settlement authority for the regulatory inquiry","codes":["L160","A106"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-26","timekeeper":"DR","timekeeper_name":"Dalia Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":335.0,"amount":167.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":91.09,"amount":91.09,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1539.53,"amount":1539.53,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":597.12,"amount":597.12,"narrative":"Airfare to Houston for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":5.12,"amount":15.36,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["165 Pine Street","Phoenix","Tax ID 55-2228422"],"template":"T21","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-15","matter_close":"2026-02-28","matter_budget":54570.0,"approved_timekeepers":["Nadia Esposito","Gregory Delacroix","Dalia Ramanathan","Sofia Galbraith","Anders Eriksen","Yusuf Voss","Victor Esposito","Samuel Esposito"],"invoice_received_date":"2025-12-16"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[7],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

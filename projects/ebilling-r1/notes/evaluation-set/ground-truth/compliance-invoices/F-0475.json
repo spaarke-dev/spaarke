@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0475",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0475","generator_id":"gen_eval_set.py@1 F-0475","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0475.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Montclair Yardley PC","firm_invoice_number":"INV-2025-75382","invoice_date":"2025-04-01","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"51902-0017","po_number":"PO-4582953","fees_total":5654.5,"expenses_total":5893.05,"adjustments_total":0.0,"total_due":11547.55,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Ashdown","title":"Associate","rate":475.0,"billed_as":"Aisha Ashdown"},{"name":"Dmitri Nakamura","title":"Paralegal","rate":240.0,"billed_as":"Dmitri Nakamura"},{"name":"Louis Pemberton","title":"Legal Assistant","rate":205.0,"billed_as":"Louis Pemberton"},{"name":"Marcus Yilmaz","title":"Paralegal","rate":250.0,"billed_as":"Marcus Yilmaz"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-04","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":475.0,"amount":95.0,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-06","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":475.0,"amount":570.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-07","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":475.0,"amount":712.5,"narrative":"Prepare case assessment memorandum regarding the customs audit and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-10","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":475.0,"amount":142.5,"narrative":"Prepare for oral argument in the distribution agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-14","timekeeper":"Louis Pemberton","timekeeper_name":"Louis Pemberton","timekeeper_title":"Legal Assistant","title":"LA","hours":0.7,"rate":205.0,"amount":143.5,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-19","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":475.0,"amount":1282.5,"narrative":"Attend and present oral argument in the supply agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-20","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":475.0,"amount":142.5,"narrative":"Prepare for oral argument in the vendor agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-21","timekeeper":"Marcus Yilmaz","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":250.0,"amount":700.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-25","timekeeper":"Aisha Ashdown","timekeeper_name":"Aisha Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":475.0,"amount":570.0,"narrative":"Draft notice of appeal and docketing statement for the employment claim","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-26","timekeeper":"Dmitri Nakamura","timekeeper_name":"Dmitri Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":240.0,"amount":720.0,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5893.05,"amount":5893.05,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-03-31","timekeeper":"Dmitri Nakamura","timekeeper_name":"Dmitri Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":240.0,"amount":576.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["750 Federal Plaza","Minneapolis","Tax ID 31-3713757"],"template":"T18","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2023-10-30","matter_close":"2025-06-29","matter_budget":71190.0,"approved_timekeepers":["Hector Marchetti","Marcus Yilmaz","Louis Pemberton","Aisha Lockhart","Aisha Ashdown","Dmitri Nakamura"],"invoice_received_date":"2025-04-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

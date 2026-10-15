@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0080",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0080","generator_id":"gen_eval_set.py@1 F-0080","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0080.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Kingsley & Dunmore LLP","firm_invoice_number":"INV-2026-18413","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"23509-0037","po_number":"PO-4542542","fees_total":5181.75,"expenses_total":980.8,"adjustments_total":0.0,"total_due":6162.55,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Esposito","title":"Partner","rate":485.0,"billed_as":"Cyrus Esposito"},{"name":"Elena Wickham","title":"Senior Associate","rate":330.0,"billed_as":"Elena Wickham"},{"name":"Hector Thornbury","title":"Legal Assistant","rate":135.0,"billed_as":"Hector Thornbury"},{"name":"Leila Fairweather","title":"Associate","rate":285.0,"billed_as":"Leila Fairweather"},{"name":"Mei Nakamura","title":"Paralegal","rate":175.0,"billed_as":"Mei Nakamura"},{"name":"Yusuf Dunleavy","title":"Associate","rate":255.0,"billed_as":"Yusuf Dunleavy"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-03","timekeeper":"Mei Nakamura","timekeeper_name":"Mei Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":175.0,"amount":385.0,"narrative":"Research authority for witness list","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-07","timekeeper":"Leila Fairweather","timekeeper_name":"Leila Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":285.0,"amount":28.5,"narrative":"Review and organize incoming production from Northwind Logistics for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-10-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":980.8,"amount":980.8,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-14","timekeeper":"Hector Thornbury","timekeeper_name":"Hector Thornbury","timekeeper_title":"Legal Assistant","title":"LA","hours":1.8,"rate":135.0,"amount":243.0,"narrative":"Review documents produced by Summit Ridge Homes for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-14","timekeeper":"Cyrus Esposito","timekeeper_name":"Cyrus Esposito","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":485.0,"amount":1455.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-16","timekeeper":"Leila Fairweather","timekeeper_name":"Leila Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":285.0,"amount":655.5,"narrative":"Review documents produced by Meridian Foods for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-20","timekeeper":"Elena Wickham","timekeeper_name":"Elena Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":330.0,"amount":363.0,"narrative":"Prepare outline for deposition of Northwind Logistics witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-20","timekeeper":"Cyrus Esposito","timekeeper_name":"Cyrus Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":485.0,"amount":485.0,"narrative":"Research case law supporting motion to dismiss","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-24","timekeeper":"Cyrus Esposito","timekeeper_name":"Cyrus Esposito","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":485.0,"amount":97.0,"narrative":"Review and summarize deposition transcript of Caldera Energy witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-27","timekeeper":"Leila Fairweather","timekeeper_name":"Leila Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":285.0,"amount":228.0,"narrative":"Prepare production set and cover correspondence for service on Harbor Point Capital","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-28","timekeeper":"Yusuf Dunleavy","timekeeper_name":"Yusuf Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":255.0,"amount":357.0,"narrative":"Research case law supporting mediation statement","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-10-31","timekeeper":"Yusuf Dunleavy","timekeeper_name":"Yusuf Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":255.0,"amount":561.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-10-31","timekeeper":"Mei Nakamura","timekeeper_name":"Mei Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":1.85,"rate":175.0,"amount":323.75,"narrative":"Review opposing brief in response to settlement proposal","codes":["L240","A104"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["754 Federal Plaza","Phoenix","Tax ID 52-9876264"],"template":"T18","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-08-29","matter_close":"2026-01-29","matter_budget":49650.0,"approved_timekeepers":["Leila Fairweather","Elena Wickham","Mei Nakamura","Yusuf Dunleavy","Cyrus Esposito","Hector Thornbury","Ingrid Lindqvist","Elena Ashdown"],"invoice_received_date":"2025-11-05"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[13],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

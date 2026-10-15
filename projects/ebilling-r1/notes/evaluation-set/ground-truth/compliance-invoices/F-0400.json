@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0400",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0400","generator_id":"gen_eval_set.py@1 F-0400","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0400.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Maddox & Cranmer LLP","firm_invoice_number":"2026039466","invoice_date":"2026-01-03","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"55462-0006","po_number":"PO-4593812","fees_total":4837.5,"expenses_total":6547.73,"adjustments_total":0.0,"total_due":11385.23,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Nwosu","title":"Paralegal","rate":160.0,"billed_as":"Dalia Nwosu"},{"name":"Hannah Santoro","title":"Associate","rate":390.0,"billed_as":"Hannah Santoro"},{"name":"Nadia Voss","title":"Associate","rate":330.0,"billed_as":"Nadia Voss"},{"name":"Rafael Delacroix","title":"Partner","rate":640.0,"billed_as":"Rafael Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-03","timekeeper":"Rafael Delacroix","timekeeper_name":"Rafael Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":2.25,"rate":640.0,"amount":1440.0,"narrative":"Review expert report served by Orchard Row Brands","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-04","timekeeper":"Dalia Nwosu","timekeeper_name":"Dalia Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":160.0,"amount":320.0,"narrative":"Review and summarize deposition transcript of Meridian Foods witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-11","timekeeper":"Hannah Santoro","timekeeper_name":"Hannah Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":390.0,"amount":97.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-19","timekeeper":"Dalia Nwosu","timekeeper_name":"Dalia Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":160.0,"amount":40.0,"narrative":"Meet and confer with counsel for Solano Freight regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-25","timekeeper":"Nadia Voss","timekeeper_name":"Nadia Voss","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":330.0,"amount":990.0,"narrative":"Draft discovery plan and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-26","timekeeper":"Hannah Santoro","timekeeper_name":"Hannah Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":390.0,"amount":975.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-26","timekeeper":"Hannah Santoro","timekeeper_name":"Hannah Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":390.0,"amount":975.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-12-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":367.18,"amount":367.18,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-12-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6172.38,"amount":6172.38,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-12-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":8.17,"amount":8.17,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["322 Union Square","Denver","Tax ID 14-2796321"],"template":"T02","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-02-16","matter_close":"2026-03-31","matter_budget":70540.0,"approved_timekeepers":["Nadia Voss","Beatrix Halloran","Dalia Nwosu","Rafael Delacroix","Beatrix Sandoval","Hannah Santoro","Gideon Pemberton"],"invoice_received_date":"2026-01-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

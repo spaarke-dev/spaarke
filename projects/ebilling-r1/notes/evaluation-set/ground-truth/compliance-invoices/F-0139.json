@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0139",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0139","generator_id":"gen_eval_set.py@1 F-0139","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0139.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Draycott & Zeller LLP","firm_invoice_number":"INV-2026-12567","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"36249-0005","po_number":null,"fees_total":12157.0,"expenses_total":105.17,"adjustments_total":0.0,"total_due":12262.17,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Santoro","title":"Associate","rate":425.0,"billed_as":"Santoro, B."},{"name":"Dmitri Nakamura","title":"Partner","rate":790.0,"billed_as":"Nakamura, D."},{"name":"Hannah Ashdown","title":"Associate","rate":460.0,"billed_as":"Ashdown, H."},{"name":"Ivan Quillen","title":"Partner","rate":825.0,"billed_as":"Quillen, I."},{"name":"Marcus Ashdown","title":"Senior Associate","rate":555.0,"billed_as":"Ashdown, M."},{"name":"Mei Delacroix","title":"Associate","rate":410.0,"billed_as":"Delacroix, M."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-18","timekeeper":"Santoro, B.","timekeeper_name":"Beatrix Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":425.0,"amount":255.0,"narrative":"Prepare updated litigation budget for the licensing dispute","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-20","timekeeper":"Santoro, B.","timekeeper_name":"Beatrix Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":425.0,"amount":127.5,"narrative":"Conference with client regarding settlement authority for the data incident","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-28","timekeeper":"Santoro, B.","timekeeper_name":"Beatrix Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":425.0,"amount":680.0,"narrative":"Organized and indexed file materials","codes":["L140","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":4,"line_type":"fee","date":"2025-08-29","timekeeper":"Santoro, B.","timekeeper_name":"Beatrix Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":425.0,"amount":1105.0,"narrative":"Draft settlement term sheet for the data incident","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-18","timekeeper":"Nakamura, D.","timekeeper_name":"Dmitri Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":790.0,"amount":1580.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-18","timekeeper":"Nakamura, D.","timekeeper_name":"Dmitri Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":790.0,"amount":1580.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-05","timekeeper":"Ashdown, H.","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":460.0,"amount":552.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-14","timekeeper":"Ashdown, H.","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":460.0,"amount":1104.0,"narrative":"Draft motion for preliminary injunction in the customs audit","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-11","timekeeper":"Quillen, I.","timekeeper_name":"Ivan Quillen","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":825.0,"amount":660.0,"narrative":"Prepare updated litigation budget for the distribution agreement","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-01","timekeeper":"Ashdown, M.","timekeeper_name":"Marcus Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":555.0,"amount":499.5,"narrative":"Prepare for case management conference in the vendor agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-01","timekeeper":"Ashdown, M.","timekeeper_name":"Marcus Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":555.0,"amount":499.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-01","timekeeper":"Ashdown, M.","timekeeper_name":"Marcus Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":555.0,"amount":444.0,"narrative":"Work on case.","codes":["L150","A103"],"page":1,"narrative_style":"vague"},
+  {"n":13,"line_type":"fee","date":"2025-08-20","timekeeper":"Ashdown, M.","timekeeper_name":"Marcus Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":555.0,"amount":610.5,"narrative":"Prepare updated litigation budget for the lease dispute","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-08-08","timekeeper":"Delacroix, M.","timekeeper_name":"Mei Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":410.0,"amount":1230.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-08-08","timekeeper":"Delacroix, M.","timekeeper_name":"Mei Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":410.0,"amount":1230.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":809.0,"rate":0.13,"amount":105.17,"narrative":"Photocopies - 809 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["649 Union Square","Phoenix","Tax ID 11-9932512"],"template":"T24","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-10","matter_close":"2025-11-29","matter_budget":74048.0,"approved_timekeepers":["Hannah Ashdown","Samuel Wickham","Beatrix Santoro","Jordan Eriksen","Cyrus Ramanathan","Mei Delacroix","Dmitri Nakamura","Ivan Quillen","Marcus Ashdown"],"invoice_received_date":"2025-09-11"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[12],"consequence":"Flag"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[3],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[6],"consequence":"Disallow","related_line_refs":[5]},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[15],"consequence":"Disallow","related_line_refs":[14]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

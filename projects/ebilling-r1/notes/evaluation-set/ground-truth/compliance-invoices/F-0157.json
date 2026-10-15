@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0157",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0157","generator_id":"gen_eval_set.py@1 F-0157","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0157.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Northcott Beckett PC","firm_invoice_number":"A-16919/2026","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"22641-0011","po_number":"PO-4542640","fees_total":7984.5,"expenses_total":1982.49,"adjustments_total":0.0,"total_due":9966.99,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Esposito","title":"Paralegal","rate":235.0,"billed_as":"DE"},{"name":"Dalia Thornbury","title":"Associate","rate":420.0,"billed_as":"DT"},{"name":"Hector Delacroix","title":"Partner","rate":740.0,"billed_as":"HD"},{"name":"Hector Hargrove","title":"Paralegal","rate":250.0,"billed_as":"HH"},{"name":"Priya Yilmaz","title":"Partner","rate":765.0,"billed_as":"PY"},{"name":"Yusuf Castellanos","title":"Associate","rate":425.0,"billed_as":"YC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-05","timekeeper":"DE","timekeeper_name":"Dalia Esposito","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":235.0,"amount":611.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-11","timekeeper":"HH","timekeeper_name":"Hector Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":250.0,"amount":125.0,"narrative":"Draft motion for preliminary injunction in the warranty claim","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-11","timekeeper":"YC","timekeeper_name":"Yusuf Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":425.0,"amount":977.5,"narrative":"Draft interrogatory responses in the supply agreement","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-16","timekeeper":"YC","timekeeper_name":"Yusuf Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":425.0,"amount":255.0,"narrative":"Ran conflict check for new party","codes":["L130","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-12-17","timekeeper":"DT","timekeeper_name":"Dalia Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":420.0,"amount":84.0,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-18","timekeeper":"PY","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":765.0,"amount":1683.0,"narrative":"Review expert qualifications and prior testimony for the insurance coverage issue","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-18","timekeeper":"HD","timekeeper_name":"Hector Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":740.0,"amount":1295.0,"narrative":"Prepare case assessment memorandum regarding the customs audit and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-19","timekeeper":"YC","timekeeper_name":"Yusuf Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":425.0,"amount":850.0,"narrative":"Review and revise motion to compel based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-19","timekeeper":"DE","timekeeper_name":"Dalia Esposito","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":235.0,"amount":399.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-19","timekeeper":"DE","timekeeper_name":"Dalia Esposito","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":235.0,"amount":399.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-12-24","timekeeper":"HH","timekeeper_name":"Hector Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":250.0,"amount":200.0,"narrative":"Research public records concerning Pacifica Telecom and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-12-29","timekeeper":"YC","timekeeper_name":"Yusuf Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":425.0,"amount":1105.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-12-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":587.82,"amount":587.82,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-12-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":14.49,"amount":14.49,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-12-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1360.17,"amount":1360.17,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-12-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":29.0,"rate":0.69,"amount":20.01,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["988 Lakeshore Drive","Portland","Tax ID 55-6203849"],"template":"T07","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-08-05","matter_close":"2026-03-31","matter_budget":64867.0,"approved_timekeepers":["Dalia Thornbury","Yusuf Castellanos","Hector Delacroix","Jordan Oyelaran","Oliver Wickham","Hector Hargrove","Naomi Quillen","Dalia Esposito","Priya Yilmaz"],"invoice_received_date":"2026-01-08"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[10],"consequence":"Disallow","related_line_refs":[9]}
+ ],
+ "seeded_violations":3
+}

@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0310",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0310","generator_id":"gen_eval_set.py@1 F-0310","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0310.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Sutherland Ambrose PC","firm_invoice_number":"INV-2025-81086","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"68673-0040","po_number":"PO-4549475","fees_total":4401.25,"expenses_total":54.83,"adjustments_total":0.0,"total_due":4456.08,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Halloran","title":"Associate","rate":315.0,"billed_as":"Aisha Halloran"},{"name":"Hannah Esposito","title":"Of Counsel","rate":500.0,"billed_as":"Hannah Esposito"},{"name":"Louis Sandoval","title":"Associate","rate":385.0,"billed_as":"Louis Sandoval"},{"name":"Naomi Ramanathan","title":"Partner","rate":730.0,"billed_as":"Naomi Ramanathan"},{"name":"Sofia Galbraith","title":"Legal Assistant","rate":170.0,"billed_as":"Sofia Galbraith"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-24","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":315.0,"amount":787.5,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-16","timekeeper":"Hannah Esposito","timekeeper_name":"Hannah Esposito","timekeeper_title":"Of Counsel","title":"O/C","hours":2.0,"rate":500.0,"amount":1000.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-02","timekeeper":"Louis Sandoval","timekeeper_name":"Louis Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":385.0,"amount":673.75,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-03","timekeeper":"Naomi Ramanathan","timekeeper_name":"Naomi Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":730.0,"amount":912.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-04","timekeeper":"Naomi Ramanathan","timekeeper_name":"Naomi Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":730.0,"amount":182.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-23","timekeeper":"Naomi Ramanathan","timekeeper_name":"Naomi Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.75,"rate":730.0,"amount":547.5,"narrative":"Draft appellate brief in the customs audit","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-23","timekeeper":"Sofia Galbraith","timekeeper_name":"Sofia Galbraith","timekeeper_title":"Legal Assistant","title":"LA","hours":1.75,"rate":170.0,"amount":297.5,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":40.0,"rate":0.68,"amount":27.2,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":27.63,"amount":27.63,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["454 Harbor Road","Seattle","Tax ID 65-9350798"],"template":"T10","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-11-11","matter_close":"2026-09-28","matter_budget":42824.0,"approved_timekeepers":["Helena Whitfield","Sofia Galbraith","Priya Dunleavy","Hannah Esposito","Aisha Halloran","Naomi Ramanathan","Louis Sandoval"],"invoice_received_date":"2026-07-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

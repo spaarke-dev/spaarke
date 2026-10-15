@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0457",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0457","generator_id":"gen_eval_set.py@1 F-0457","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0457.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Aldridge and Ambrose LLP","firm_invoice_number":"INV-2025-95957","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"37457-0028","po_number":"PO-4530399","fees_total":5085.5,"expenses_total":2299.38,"adjustments_total":0.0,"total_due":7384.88,"currency":"USD"},
+ "timekeepers":[{"name":"Leila Hargrove","title":"Partner","rate":525.0,"billed_as":"LH"},{"name":"Marcus Dunleavy","title":"Associate","rate":260.0,"billed_as":"MD"},{"name":"Peter Yilmaz","title":"Paralegal","rate":150.0,"billed_as":"PY"},{"name":"Rafael Voss","title":"Associate","rate":285.0,"billed_as":"RV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-02","timekeeper":"MD","timekeeper_name":"Marcus Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":260.0,"amount":156.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-03","timekeeper":"MD","timekeeper_name":"Marcus Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":260.0,"amount":520.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-03","timekeeper":"PY","timekeeper_name":"Peter Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":150.0,"amount":405.0,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-03","timekeeper":"RV","timekeeper_name":"Rafael Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":285.0,"amount":342.0,"narrative":"Conference with client regarding budget variance for the customs audit","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-17","timekeeper":"RV","timekeeper_name":"Rafael Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":285.0,"amount":769.5,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-17","timekeeper":"RV","timekeeper_name":"Rafael Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":285.0,"amount":114.0,"narrative":"Review expert qualifications and prior testimony for the customs audit","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-18","timekeeper":"PY","timekeeper_name":"Peter Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.1,"rate":150.0,"amount":15.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-19","timekeeper":"PY","timekeeper_name":"Peter Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":150.0,"amount":150.0,"narrative":"Conference with client regarding settlement authority for the employment claim","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-23","timekeeper":"LH","timekeeper_name":"Leila Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":525.0,"amount":1470.0,"narrative":"Draft motion for summary judgment in the insurance coverage issue","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-23","timekeeper":"MD","timekeeper_name":"Marcus Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":260.0,"amount":598.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-27","timekeeper":"MD","timekeeper_name":"Marcus Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":260.0,"amount":546.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-03-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1538.35,"amount":1538.35,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":59.21,"amount":59.21,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":701.82,"amount":701.82,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["783 Pine Street","Dallas","Tax ID 27-4116235"],"template":"T23","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-02-06","matter_close":"2026-06-29","matter_budget":54539.0,"approved_timekeepers":["Victor Esposito","Leila Hargrove","Rafael Voss","Marcus Dunleavy","Clara Fairweather","Peter Yilmaz","Peter Eriksen","Mei Ashdown"],"invoice_received_date":"2026-04-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

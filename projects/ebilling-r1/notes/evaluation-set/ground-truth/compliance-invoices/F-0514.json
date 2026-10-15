@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0514",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0514","generator_id":"gen_eval_set.py@1 F-0514","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0514.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Fenwick & Forsythe LLP","firm_invoice_number":"LF0097302","invoice_date":"2025-12-01","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"81348-0013","po_number":"PO-4593149","fees_total":2416.25,"expenses_total":210.12,"adjustments_total":0.0,"total_due":2626.37,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Dunleavy","title":"Paralegal","rate":175.0,"billed_as":"CD"},{"name":"Cyrus Zielinski","title":"Associate","rate":370.0,"billed_as":"CZ"},{"name":"Rafael Brennan","title":"Senior Associate","rate":410.0,"billed_as":"RB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-05","timekeeper":"RB","timekeeper_name":"Rafael Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":410.0,"amount":102.5,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-07","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":370.0,"amount":740.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-13","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":370.0,"amount":277.5,"narrative":"Draft discovery plan for trial in the lease dispute","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-17","timekeeper":"RB","timekeeper_name":"Rafael Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":410.0,"amount":717.5,"narrative":"Attend hearing on witness list in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-19","timekeeper":"CD","timekeeper_name":"Cyrus Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":175.0,"amount":306.25,"narrative":"Prepare trial notebook and demonstrative exhibits for the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-20","timekeeper":"CD","timekeeper_name":"Cyrus Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":175.0,"amount":87.5,"narrative":"Prepare examination outlines for trial in the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-21","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":370.0,"amount":92.5,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-25","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":370.0,"amount":92.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":270.0,"rate":0.09,"amount":24.3,"narrative":"Photocopies - 270 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":20.14,"amount":20.14,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":165.68,"amount":165.68,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["553 Lakeshore Drive","Chicago","Tax ID 69-4198090"],"template":"T19","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-01-02","matter_close":"2026-02-28","matter_budget":35505.0,"approved_timekeepers":["Cyrus Zielinski","Daniel Wickham","Beatrix Abernathy","Rafael Brennan","Cyrus Dunleavy"],"invoice_received_date":"2025-12-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

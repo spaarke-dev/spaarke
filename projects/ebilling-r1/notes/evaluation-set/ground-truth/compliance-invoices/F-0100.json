@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0100",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0100","generator_id":"gen_eval_set.py@1 F-0100","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0100.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kestrel Whitcombe PC","firm_invoice_number":"INV-2025-38197","invoice_date":"2026-01-04","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"58299-0011","po_number":"PO-4503643","fees_total":1961.0,"expenses_total":17.75,"adjustments_total":0.0,"total_due":1978.75,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Whitfield","title":"Legal Assistant","rate":145.0,"billed_as":"Helena Whitfield"},{"name":"Ingrid Lindqvist","title":"Paralegal","rate":155.0,"billed_as":"Ingrid Lindqvist"},{"name":"Naomi Lockhart","title":"Associate","rate":380.0,"billed_as":"Naomi Lockhart"},{"name":"Priya Mbeki","title":"Paralegal","rate":180.0,"billed_as":"Priya Mbeki"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2025-12-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.79,"amount":5.79,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-10","timekeeper":"Naomi Lockhart","timekeeper_name":"Naomi Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.45,"rate":380.0,"amount":171.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-11","timekeeper":"Naomi Lockhart","timekeeper_name":"Naomi Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":380.0,"amount":855.0,"narrative":"Prepare examination outlines for trial in the warranty claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-12","timekeeper":"Ingrid Lindqvist","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":155.0,"amount":38.75,"narrative":"Photocopied exhibits and assembled binders","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-12-12","timekeeper":"Helena Whitfield","timekeeper_name":"Helena Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":2.5,"rate":145.0,"amount":362.5,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-15","timekeeper":"Priya Mbeki","timekeeper_name":"Priya Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":180.0,"amount":90.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2025-12-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":92.0,"rate":0.13,"amount":11.96,"narrative":"Photocopies - 92 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-17","timekeeper":"Priya Mbeki","timekeeper_name":"Priya Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":180.0,"amount":405.0,"narrative":"Attend hearing on motion for summary judgment in the employment claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-22","timekeeper":"Ingrid Lindqvist","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":155.0,"amount":38.75,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["213 Pine Street","Phoenix","Tax ID 38-9402443"],"template":"T18","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-09-07","matter_close":"2026-03-31","matter_budget":1583.0,"approved_timekeepers":["Farah Delacroix","Naomi Lockhart","Dalia Rosenthal","Priya Mbeki","Ingrid Lindqvist","Helena Whitfield"],"invoice_received_date":"2026-01-05"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

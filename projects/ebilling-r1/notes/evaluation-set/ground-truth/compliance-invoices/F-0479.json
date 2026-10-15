@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0479",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0479","generator_id":"gen_eval_set.py@1 F-0479","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0479.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Northcott & Beckett LLP","firm_invoice_number":"INV-2025-30901","invoice_date":"2026-08-03","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"86972-0023","po_number":"PO-4547350","fees_total":5683.5,"expenses_total":1508.17,"adjustments_total":0.0,"total_due":7191.67,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Rosenthal","title":"Paralegal","rate":135.0,"billed_as":"DR"},{"name":"Gideon Wickham","title":"Senior Associate","rate":370.0,"billed_as":"GW"},{"name":"Ingrid Yilmaz","title":"Partner","rate":490.0,"billed_as":"IY"},{"name":"Peter Dunleavy","title":"Paralegal","rate":165.0,"billed_as":"PD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-02","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":370.0,"amount":666.0,"narrative":"Prepare for oral argument in the customs audit","codes":["L530","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-03","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":370.0,"amount":851.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-03","timekeeper":"PD","timekeeper_name":"Peter Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":165.0,"amount":49.5,"narrative":"Research appealability issues in the regulatory inquiry","codes":["L510","A102"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-09","timekeeper":"PD","timekeeper_name":"Peter Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":165.0,"amount":379.5,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-10","timekeeper":"PD","timekeeper_name":"Peter Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":165.0,"amount":445.5,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-14","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":370.0,"amount":518.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-16","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.6,"rate":370.0,"amount":222.0,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-17","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":135.0,"amount":202.5,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-20","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":370.0,"amount":1036.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-22","timekeeper":"IY","timekeeper_name":"Ingrid Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":490.0,"amount":98.0,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-07-29","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":135.0,"amount":364.5,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-07-29","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":370.0,"amount":851.0,"narrative":"Prepare case assessment memorandum regarding the insurance coverage issue and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1508.17,"amount":1508.17,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["477 Market Street","Portland","Tax ID 80-5273660"],"template":"T21","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-04-10","matter_close":"2026-10-29","matter_budget":53766.0,"approved_timekeepers":["Naomi Mbeki","Gideon Wickham","Dmitri Rosenthal","Ingrid Yilmaz","Gideon Lindqvist","Peter Dunleavy"],"invoice_received_date":"2026-08-11"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

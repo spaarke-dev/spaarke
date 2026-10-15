@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0531",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0531","generator_id":"gen_eval_set.py@1 F-0531","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0531.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Eastlake Zeller PC","firm_invoice_number":"INV-2025-15208","invoice_date":"2025-12-04","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"27245-0006","po_number":"PO-4560055","fees_total":2880.0,"expenses_total":1189.83,"adjustments_total":0.0,"total_due":4069.83,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Lindqvist","title":"Associate","rate":275.0,"billed_as":"DL"},{"name":"Samuel Oyelaran","title":"Associate","rate":270.0,"billed_as":"SO"},{"name":"Sofia Marchetti","title":"Paralegal","rate":125.0,"billed_as":"SM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-04","timekeeper":"SO","timekeeper_name":"Samuel Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-04","timekeeper":"SO","timekeeper_name":"Samuel Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":270.0,"amount":486.0,"narrative":"Draft answer and affirmative defenses in the lease dispute","codes":["L210","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-07","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":275.0,"amount":467.5,"narrative":"Attend case management conference in the lease dispute","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-11","timekeeper":"SM","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":125.0,"amount":200.0,"narrative":"Conference with client regarding budget variance for the supply agreement","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-14","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":275.0,"amount":742.5,"narrative":"Research pleading standards applicable to the vendor agreement","codes":["L210","A102"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-26","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":275.0,"amount":275.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-27","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":275.0,"amount":385.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-11-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1004.21,"amount":1004.21,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":26.22,"amount":26.22,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":33.04,"amount":33.04,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":42.12,"amount":126.36,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["193 Peachtree Way","Phoenix","Tax ID 62-7121449"],"template":"T21","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-11-04","matter_close":"2026-02-28","matter_budget":41279.0,"approved_timekeepers":["Samuel Oyelaran","Dalia Voss","Nadia Blackwood","Sofia Marchetti","Tomas Nakamura","Dmitri Lindqvist"],"invoice_received_date":"2025-12-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

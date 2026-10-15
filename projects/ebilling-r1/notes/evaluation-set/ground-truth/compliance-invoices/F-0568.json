@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0568",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0568","generator_id":"gen_eval_set.py@1 F-0568","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0568.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ingersoll and Dunmore LLP","firm_invoice_number":"INV-2026-01987","invoice_date":"2025-10-02","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"65001-0034","po_number":"PO-4575622","fees_total":4191.25,"expenses_total":233.16,"adjustments_total":0.0,"total_due":4424.41,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Lockhart","title":"Senior Associate","rate":470.0,"billed_as":"Gideon Lockhart"},{"name":"Hector Wickham","title":"Associate","rate":370.0,"billed_as":"Hector Wickham"},{"name":"Ivan Carmichael","title":"Associate","rate":365.0,"billed_as":"Ivan Carmichael"},{"name":"Mei Eriksen","title":"Paralegal","rate":160.0,"billed_as":"Mei Eriksen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"Mei Eriksen","timekeeper_name":"Mei Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":160.0,"amount":320.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-04","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":370.0,"amount":370.0,"narrative":"Research authority for discovery plan","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"Gideon Lockhart","timekeeper_name":"Gideon Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":470.0,"amount":940.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-11","timekeeper":"Ivan Carmichael","timekeeper_name":"Ivan Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":365.0,"amount":456.25,"narrative":"Research case law supporting reply brief","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-15","timekeeper":"Mei Eriksen","timekeeper_name":"Mei Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":160.0,"amount":120.0,"narrative":"Review and organize incoming production from Caldera Energy for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2025-09-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":58.29,"amount":233.16,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-29","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":370.0,"amount":185.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-29","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":370.0,"amount":185.0,"narrative":"Prepare production set and cover correspondence for service on Harbor Point Capital","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-29","timekeeper":"Gideon Lockhart","timekeeper_name":"Gideon Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":470.0,"amount":235.0,"narrative":"Review documents produced by Larkspur Medical for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-30","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":370.0,"amount":832.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-30","timekeeper":"Ivan Carmichael","timekeeper_name":"Ivan Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":365.0,"amount":547.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["47 Union Square","Seattle","Tax ID 36-9370825"],"template":"T18","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-02","matter_close":"2025-12-29","matter_budget":42697.0,"approved_timekeepers":["Hector Wickham","Ivan Carmichael","Dmitri Lockhart","Gideon Lockhart","Mei Eriksen"],"invoice_received_date":"2025-10-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

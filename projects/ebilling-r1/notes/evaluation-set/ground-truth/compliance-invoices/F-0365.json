@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0365",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0365","generator_id":"gen_eval_set.py@1 F-0365","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0365.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Pryce Zeller PC","firm_invoice_number":"INV-2026-02575","invoice_date":"2026-03-03","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"56215-0020","po_number":"PO-4573012","fees_total":2727.0,"expenses_total":2016.15,"adjustments_total":0.0,"total_due":4743.15,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Dunleavy","title":"Partner","rate":500.0,"billed_as":"Dunleavy, D."},{"name":"Hannah Abernathy","title":"Associate","rate":285.0,"billed_as":"Abernathy, H."},{"name":"Nadia Tavares","title":"Associate","rate":235.0,"billed_as":"Tavares, N."},{"name":"Rafael Ramanathan","title":"Partner","rate":545.0,"billed_as":"Ramanathan, R."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-03","timekeeper":"Ramanathan, R.","timekeeper_name":"Rafael Ramanathan","timekeeper_title":"Partner","title":"Partner","hours":0.8,"rate":545.0,"amount":436.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-06","timekeeper":"Abernathy, H.","timekeeper_name":"Hannah Abernathy","timekeeper_title":"Associate","title":"Associate","hours":1.7,"rate":285.0,"amount":484.5,"narrative":"Review expert report served by Orchard Row Brands","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-09","timekeeper":"Abernathy, H.","timekeeper_name":"Hannah Abernathy","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":285.0,"amount":313.5,"narrative":"Meet and confer with counsel for Bluepine Holdings regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-12","timekeeper":"Tavares, N.","timekeeper_name":"Nadia Tavares","timekeeper_title":"Associate","title":"Associate","hours":2.8,"rate":235.0,"amount":658.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-19","timekeeper":"Tavares, N.","timekeeper_name":"Nadia Tavares","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":235.0,"amount":94.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-20","timekeeper":"Dunleavy, D.","timekeeper_name":"Dmitri Dunleavy","timekeeper_title":"Partner","title":"Partner","hours":1.2,"rate":500.0,"amount":600.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-25","timekeeper":"Tavares, N.","timekeeper_name":"Nadia Tavares","timekeeper_title":"Associate","title":"Associate","hours":0.6,"rate":235.0,"amount":141.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-02-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":58.91,"amount":117.82,"narrative":"Overnight courier to Redstone Mining counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-02-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1763.98,"amount":1763.98,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-02-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":55.8,"amount":111.6,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":35.0,"rate":0.65,"amount":22.75,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["17 Market Street","Chicago","Tax ID 23-9635575"],"template":"T06","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-06-19","matter_close":"2026-05-29","matter_budget":43972.0,"approved_timekeepers":["Dmitri Dunleavy","Hannah Abernathy","Beatrix Yilmaz","Nadia Rosenthal","Rafael Ramanathan","Nadia Tavares","Beatrix Delacroix","Elena Esposito"],"invoice_received_date":"2026-03-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

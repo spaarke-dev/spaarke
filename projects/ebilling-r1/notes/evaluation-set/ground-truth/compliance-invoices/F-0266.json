@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0266",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0266","generator_id":"gen_eval_set.py@1 F-0266","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0266.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Hartwell & Vance LLP","firm_invoice_number":"INV-2025-53971","invoice_date":"2026-04-03","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"82980-0027","po_number":"PO-4532729","fees_total":6685.75,"expenses_total":314.04,"adjustments_total":0.0,"total_due":6999.79,"currency":"USD"},
+ "timekeepers":[{"name":"Louis Rosenthal","title":"Paralegal","rate":150.0,"billed_as":"Louis Rosenthal"},{"name":"Mei Zielinski","title":"Associate","rate":325.0,"billed_as":"Mei Zielinski"},{"name":"Nadia Santoro","title":"Associate","rate":280.0,"billed_as":"Nadia Santoro"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-03","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":150.0,"amount":90.0,"narrative":"Prepare fact witness for testimony regarding the customs audit","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-04","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":150.0,"amount":405.0,"narrative":"Prepare fact witness for testimony regarding the employment claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-17","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":150.0,"amount":300.0,"narrative":"Research standard for new trial in the licensing dispute","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-04","timekeeper":"Mei Zielinski","timekeeper_name":"Mei Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":325.0,"amount":910.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the data incident","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-10","timekeeper":"Mei Zielinski","timekeeper_name":"Mei Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.65,"rate":325.0,"amount":536.25,"narrative":"Revise witness list after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-16","timekeeper":"Mei Zielinski","timekeeper_name":"Mei Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":325.0,"amount":357.5,"narrative":"Telephone conference with witness regarding the regulatory inquiry","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-18","timekeeper":"Mei Zielinski","timekeeper_name":"Mei Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":325.0,"amount":747.5,"narrative":"Prepare fact witness for testimony regarding the distribution agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-27","timekeeper":"Mei Zielinski","timekeeper_name":"Mei Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":325.0,"amount":357.5,"narrative":"Research standard for new trial in the data incident","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-02","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.05,"rate":280.0,"amount":294.0,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-04","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":280.0,"amount":168.0,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-12","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":280.0,"amount":448.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-03-23","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":280.0,"amount":812.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-03-27","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":280.0,"amount":700.0,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-03-31","timekeeper":"Nadia Santoro","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":280.0,"amount":560.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":892.0,"rate":0.11,"amount":98.12,"narrative":"Photocopies - 892 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2026-03-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":47.9,"amount":143.7,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2026-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":29.61,"amount":59.22,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2026-03-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":20.0,"rate":0.65,"amount":13.0,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["79 Harbor Road","Dallas","Tax ID 59-8406537"],"template":"T03","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-03-22","matter_close":"2026-06-29","matter_budget":52999.0,"approved_timekeepers":["Nadia Santoro","Gregory Fairweather","Anders Ramanathan","Hector Fairweather","Louis Rosenthal","Mei Zielinski"],"invoice_received_date":"2026-04-19"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[12],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

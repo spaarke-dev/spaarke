@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0227",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0227","generator_id":"gen_eval_set.py@1 F-0227","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0227.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Jarrow Cranmer PC","firm_invoice_number":"LF0089000","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"46269-0006","po_number":"PO-4506477","fees_total":3899.75,"expenses_total":313.19,"adjustments_total":0.0,"total_due":4212.94,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Oyelaran","title":"Associate","rate":235.0,"billed_as":"DO"},{"name":"Gideon Voss","title":"Senior Associate","rate":315.0,"billed_as":"GV"},{"name":"Louis Pemberton","title":"Paralegal","rate":145.0,"billed_as":"LP"},{"name":"Priya Nakamura","title":"Associate","rate":235.0,"billed_as":"PN"},{"name":"Tomas Delacroix","title":"Partner","rate":455.0,"billed_as":"TD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-02","timekeeper":"GV","timekeeper_name":"Gideon Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":315.0,"amount":661.5,"narrative":"Draft exhibit list for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-03","timekeeper":"PN","timekeeper_name":"Priya Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":235.0,"amount":611.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-04","timekeeper":"TD","timekeeper_name":"Tomas Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":455.0,"amount":455.0,"narrative":"Prepare examination outlines for trial in the licensing dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-04","timekeeper":"PN","timekeeper_name":"Priya Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":235.0,"amount":141.0,"narrative":"Prepare fact witness for testimony regarding the construction contract","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-09","timekeeper":"GV","timekeeper_name":"Gideon Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":495.0,"amount":742.5,"narrative":"Prepare examination outlines for trial in the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-09","timekeeper":"TD","timekeeper_name":"Tomas Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":455.0,"amount":91.0,"narrative":"Prepare expert witness for testimony in the data incident","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-11","timekeeper":"LP","timekeeper_name":"Louis Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":145.0,"amount":188.5,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-13","timekeeper":"DO","timekeeper_name":"Dmitri Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":235.0,"amount":517.0,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-24","timekeeper":"GV","timekeeper_name":"Gideon Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":315.0,"amount":220.5,"narrative":"Prepare fact witness for testimony regarding the distribution agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-24","timekeeper":"LP","timekeeper_name":"Louis Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.55,"rate":145.0,"amount":224.75,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-27","timekeeper":"PN","timekeeper_name":"Priya Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":235.0,"amount":47.0,"narrative":"Research standard for new trial in the employment claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":313.19,"amount":313.19,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["419 Harbor Road","Houston","Tax ID 76-8310785"],"template":"T19","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-10-31","matter_close":"2025-09-28","matter_budget":41851.0,"approved_timekeepers":["Louis Pemberton","Hannah Hargrove","Priya Nakamura","Gideon Voss","Dmitri Oyelaran","Tomas Delacroix"],"invoice_received_date":"2025-07-07"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[10],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

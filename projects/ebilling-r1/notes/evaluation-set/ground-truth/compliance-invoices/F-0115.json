@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0115",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0115","generator_id":"gen_eval_set.py@1 F-0115","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0115.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Holloway Vance PC","firm_invoice_number":"INV-2026-56251","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"23416-0005","po_number":null,"fees_total":5776.0,"expenses_total":3046.31,"adjustments_total":0.0,"total_due":8822.31,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Ramanathan","title":"Associate","rate":485.0,"billed_as":"Ramanathan, A."},{"name":"Ivan Castellanos","title":"Paralegal","rate":270.0,"billed_as":"Castellanos, I."},{"name":"Mei Sandoval","title":"Partner","rate":875.0,"billed_as":"Sandoval, M."},{"name":"Priya Eriksen","title":"Paralegal","rate":255.0,"billed_as":"Eriksen, P."},{"name":"Rafael Blackwood","title":"Associate","rate":485.0,"billed_as":"Blackwood, R."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"Ramanathan, A.","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Associate","hours":2.3,"rate":485.0,"amount":1115.5,"narrative":"Draft appellate brief in the licensing dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-04","timekeeper":"Eriksen, P.","timekeeper_name":"Priya Eriksen","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.0,"rate":255.0,"amount":255.0,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-12","timekeeper":"Castellanos, I.","timekeeper_name":"Ivan Castellanos","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.3,"rate":270.0,"amount":81.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-15","timekeeper":"Castellanos, I.","timekeeper_name":"Ivan Castellanos","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.1,"rate":270.0,"amount":567.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-16","timekeeper":"Eriksen, P.","timekeeper_name":"Priya Eriksen","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.5,"rate":255.0,"amount":127.5,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-24","timekeeper":"Blackwood, R.","timekeeper_name":"Rafael Blackwood","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":485.0,"amount":533.5,"narrative":"Prepare for oral argument in the construction contract","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-24","timekeeper":"Sandoval, M.","timekeeper_name":"Mei Sandoval","timekeeper_title":"Partner","title":"Partner","hours":1.9,"rate":875.0,"amount":1662.5,"narrative":"Prepare for oral argument in the supply agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-25","timekeeper":"Ramanathan, A.","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Associate","hours":0.7,"rate":485.0,"amount":339.5,"narrative":"Attend and present oral argument in the supply agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-25","timekeeper":"Castellanos, I.","timekeeper_name":"Ivan Castellanos","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.0,"rate":270.0,"amount":270.0,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-26","timekeeper":"Ramanathan, A.","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Associate","hours":1.7,"rate":485.0,"amount":824.5,"narrative":"Research appealability issues in the regulatory inquiry","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-09-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":566.91,"amount":566.91,"narrative":"Airfare to Chicago for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2479.4,"amount":2479.4,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["109 Pine Street","Dallas","Tax ID 51-6057853"],"template":"T06","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-29","matter_close":"2025-12-29","matter_budget":60289.0,"approved_timekeepers":["Anders Ramanathan","Mei Sandoval","Priya Eriksen","Rafael Blackwood","Leila Dunleavy","Hector Marchetti","Farah Rosenthal","Ivan Castellanos","Gregory Pemberton"],"invoice_received_date":"2025-10-16"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":1
+}

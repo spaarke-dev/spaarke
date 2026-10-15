@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0246",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0246","generator_id":"gen_eval_set.py@1 F-0246","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0246.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Rutherford and Zeller LLP","firm_invoice_number":"INV-2025-13409","invoice_date":"2026-02-02","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"96584-0024","po_number":"PO-4598886","fees_total":3603.5,"expenses_total":2256.76,"adjustments_total":0.0,"total_due":5860.26,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Lockhart","title":"Paralegal","rate":120.0,"billed_as":"BL"},{"name":"Gideon Fairweather","title":"Associate","rate":235.0,"billed_as":"GF"},{"name":"Oliver Dunleavy","title":"Partner","rate":360.0,"billed_as":"OD"},{"name":"Tomas Whitfield","title":"Associate","rate":245.0,"billed_as":"TW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-05","timekeeper":"BL","timekeeper_name":"Beatrix Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":145.0,"amount":290.0,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-05","timekeeper":"GF","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":235.0,"amount":211.5,"narrative":"Prepare for hearing.","codes":["L460","A102"],"page":1,"narrative_style":"vague"},
+  {"n":3,"line_type":"expense","date":"2026-01-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1361.78,"amount":1361.78,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-12","timekeeper":"OD","timekeeper_name":"Oliver Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":360.0,"amount":720.0,"narrative":"Telephone conference with witness regarding the regulatory inquiry","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-12","timekeeper":"BL","timekeeper_name":"Beatrix Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":120.0,"amount":36.0,"narrative":"Draft discovery plan for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2026-01-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":480.15,"amount":480.15,"narrative":"Airfare to Denver for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-16","timekeeper":"TW","timekeeper_name":"Tomas Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":245.0,"amount":735.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the data incident","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-21","timekeeper":"TW","timekeeper_name":"Tomas Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":245.0,"amount":147.0,"narrative":"Draft notice of deposition for trial in the supply agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-26","timekeeper":"TW","timekeeper_name":"Tomas Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":245.0,"amount":710.5,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-01-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":414.83,"amount":414.83,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-29","timekeeper":"BL","timekeeper_name":"Beatrix Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":120.0,"amount":288.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-29","timekeeper":"TW","timekeeper_name":"Tomas Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":245.0,"amount":465.5,"narrative":"Prepare fact witness for testimony regarding the vendor agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["759 Federal Plaza","Phoenix","Tax ID 84-2268596"],"template":"T09","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-12-28","matter_close":"2026-05-01","matter_budget":48441.0,"approved_timekeepers":["Beatrix Lockhart","Oliver Dunleavy","Victor Castellanos","Imani Whitfield","Gideon Fairweather","Tomas Whitfield"],"invoice_received_date":"2026-02-20"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[2],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

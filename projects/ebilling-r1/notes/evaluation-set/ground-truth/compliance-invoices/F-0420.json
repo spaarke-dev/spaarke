@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0420",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0420","generator_id":"gen_eval_set.py@1 F-0420","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0420.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Aldridge and Yardley LLP","firm_invoice_number":"INV-2025-93455","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"93305-0022","po_number":"PO-4598583","fees_total":4549.0,"expenses_total":2469.45,"adjustments_total":0.0,"total_due":7018.45,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Ramanathan","title":"Associate","rate":195.0,"billed_as":"GR"},{"name":"Priya Quillen","title":"Paralegal","rate":120.0,"billed_as":"PQ"},{"name":"Sofia Lindqvist","title":"Senior Associate","rate":260.0,"billed_as":"SL"},{"name":"Tomas Delacroix","title":"Partner","rate":450.0,"billed_as":"TD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-05","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":195.0,"amount":487.5,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-05","timekeeper":"SL","timekeeper_name":"Sofia Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":260.0,"amount":546.0,"narrative":"Prepare for oral argument in the supply agreement","codes":["L530","A101"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-09","timekeeper":"SL","timekeeper_name":"Sofia Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":260.0,"amount":520.0,"narrative":"Research appealability issues in the vendor agreement","codes":["L510","A102"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-10","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":195.0,"amount":292.5,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-11","timekeeper":"PQ","timekeeper_name":"Priya Quillen","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":120.0,"amount":276.0,"narrative":"Attend and present oral argument in the warranty claim","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-17","timekeeper":"SL","timekeeper_name":"Sofia Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.3,"rate":260.0,"amount":78.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-19","timekeeper":"TD","timekeeper_name":"Tomas Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":450.0,"amount":765.0,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-22","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":195.0,"amount":195.0,"narrative":"Draft appellate brief in the warranty claim","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-23","timekeeper":"TD","timekeeper_name":"Tomas Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":450.0,"amount":765.0,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-29","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":195.0,"amount":97.5,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-12-31","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":195.0,"amount":526.5,"narrative":"Research appealability issues in the supply agreement","codes":["L510","A102"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-12-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":721.09,"amount":721.09,"narrative":"Airfare to Seattle for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-12-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":39.0,"rate":0.08,"amount":3.12,"narrative":"Photocopies - 39 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-12-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":53.0,"rate":0.67,"amount":35.51,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-12-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1709.73,"amount":1709.73,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["923 Lakeshore Drive","Seattle","Tax ID 70-1201330"],"template":"T21","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-01-10","matter_close":"2026-03-31","matter_budget":53073.0,"approved_timekeepers":["Farah Thornbury","Priya Quillen","Gideon Ramanathan","Sofia Lindqvist","Tomas Delacroix"],"invoice_received_date":"2026-01-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

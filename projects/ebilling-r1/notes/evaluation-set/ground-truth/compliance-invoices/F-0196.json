@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0196",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0196","generator_id":"gen_eval_set.py@1 F-0196","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0196.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Lindenmeyer & Yardley LLP","firm_invoice_number":"INV-2026-37556","invoice_date":"2025-08-01","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"31972-0035","po_number":"PO-4590032","fees_total":5963.75,"expenses_total":5554.04,"adjustments_total":0.0,"total_due":11517.79,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Mbeki","title":"Of Counsel","rate":605.0,"billed_as":"AM"},{"name":"Daniel Hargrove","title":"Partner","rate":645.0,"billed_as":"DH"},{"name":"Gregory Okafor","title":"Paralegal","rate":180.0,"billed_as":"GO"},{"name":"Jordan Okafor","title":"Paralegal","rate":200.0,"billed_as":"JO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"DH","timekeeper_name":"Daniel Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":645.0,"amount":806.25,"narrative":"Draft answer and affirmative defenses in the customs audit","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-02","timekeeper":"AM","timekeeper_name":"Aisha Mbeki","timekeeper_title":"Of Counsel","title":"O/C","hours":2.0,"rate":605.0,"amount":1210.0,"narrative":"Review expert report served by Caldera Energy","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-02","timekeeper":"GO","timekeeper_name":"Gregory Okafor","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":180.0,"amount":180.0,"narrative":"Review and analyze motion for summary judgment received from Caldera Energy","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-03","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":200.0,"amount":500.0,"narrative":"Review documents produced by Harbor Point Capital for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-07","timekeeper":"DH","timekeeper_name":"Daniel Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":645.0,"amount":161.25,"narrative":"Review and analyze notice of deposition received from Summit Ridge Homes","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-08","timekeeper":"GO","timekeeper_name":"Gregory Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":180.0,"amount":90.0,"narrative":"Review and summarize deposition transcript of Bluepine Holdings witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-11","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":200.0,"amount":150.0,"narrative":"Review documents produced by Solano Freight for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-18","timekeeper":"DH","timekeeper_name":"Daniel Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":0.75,"rate":645.0,"amount":483.75,"narrative":"Review and summarize deposition transcript of Harbor Point Capital witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-18","timekeeper":"GO","timekeeper_name":"Gregory Okafor","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":180.0,"amount":270.0,"narrative":"Research case law supporting answer and affirmative defenses","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-21","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":200.0,"amount":100.0,"narrative":"Update document review protocol and coding panel for the lease dispute","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-22","timekeeper":"AM","timekeeper_name":"Aisha Mbeki","timekeeper_title":"Of Counsel","title":"O/C","hours":2.5,"rate":605.0,"amount":1512.5,"narrative":"Draft motion to compel and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-09","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":200.0,"amount":500.0,"narrative":"Research case law supporting protective order","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-07-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6.08,"amount":6.08,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-07-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":5.0,"rate":1.18,"amount":5.9,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-07-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":14.64,"amount":14.64,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1006.71,"amount":1006.71,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":5.0,"rate":2.36,"amount":11.8,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2025-07-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4508.91,"amount":4508.91,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["799 Harbor Road","Atlanta","Tax ID 26-1227802"],"template":"T08","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-04-28","matter_close":"2025-10-29","matter_budget":71071.0,"approved_timekeepers":["Jordan Okafor","Victor Eriksen","Gregory Okafor","Aisha Mbeki","Daniel Hargrove"],"invoice_received_date":"2025-08-19"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"line","line_refs":[12],"consequence":"Flag"},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[17],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

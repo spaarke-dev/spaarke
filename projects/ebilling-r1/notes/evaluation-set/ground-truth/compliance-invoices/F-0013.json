@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0013",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0013","generator_id":"gen_eval_set.py@1 F-0013","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0013.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Oakhurst Yardley PC","firm_invoice_number":"INV-2026-59137","invoice_date":"2025-06-29","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"47545-0025","po_number":null,"fees_total":10729.5,"expenses_total":499.78,"adjustments_total":0.0,"total_due":11229.28,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Thornbury","title":"Senior Associate","rate":675.0,"billed_as":"Clara Thornbury"},{"name":"Dmitri Lockhart","title":"Of Counsel","rate":810.0,"billed_as":"Dmitri Lockhart"},{"name":"Gideon Fairweather","title":"Partner","rate":895.0,"billed_as":"Gideon Fairweather"},{"name":"Helena Fairweather","title":"Associate","rate":510.0,"billed_as":"Helena Fairweather"},{"name":"Helena Nwosu","title":"Associate","rate":540.0,"billed_as":"Helena Nwosu"},{"name":"Victor Yilmaz","title":"Partner","rate":925.0,"billed_as":"Victor Yilmaz"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-14","timekeeper":"Clara Thornbury","timekeeper_name":"Clara Thornbury","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.4,"rate":675.0,"amount":270.0,"narrative":"Attend and present oral argument in the regulatory inquiry","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-25","timekeeper":"Dmitri Lockhart","timekeeper_name":"Dmitri Lockhart","timekeeper_title":"Of Counsel","title":"Of Counsel","hours":2.9,"rate":810.0,"amount":2349.0,"narrative":"Draft appellate brief in the licensing dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-11","timekeeper":"Gideon Fairweather","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Partner","title":"Partner","hours":1.7,"rate":895.0,"amount":1521.5,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-28","timekeeper":"Gideon Fairweather","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Partner","title":"Partner","hours":1.4,"rate":895.0,"amount":1253.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-28","timekeeper":"Gideon Fairweather","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Partner","title":"Partner","hours":1.4,"rate":895.0,"amount":1253.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-04","timekeeper":"Helena Fairweather","timekeeper_name":"Helena Fairweather","timekeeper_title":"Associate","title":"Associate","hours":2.3,"rate":510.0,"amount":1173.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-29","timekeeper":"Helena Fairweather","timekeeper_name":"Helena Fairweather","timekeeper_title":"Associate","title":"Associate","hours":1.2,"rate":510.0,"amount":612.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-04","timekeeper":"Helena Nwosu","timekeeper_name":"Helena Nwosu","timekeeper_title":"Associate","title":"Associate","hours":0.3,"rate":540.0,"amount":162.0,"narrative":"Research appealability issues in the licensing dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-16","timekeeper":"Helena Nwosu","timekeeper_name":"Helena Nwosu","timekeeper_title":"Associate","title":"Associate","hours":1.9,"rate":540.0,"amount":1026.0,"narrative":"Draft appellate brief in the warranty claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-11","timekeeper":"Victor Yilmaz","timekeeper_name":"Victor Yilmaz","timekeeper_title":"Partner","title":"Partner","hours":1.2,"rate":925.0,"amount":1110.0,"narrative":"Telephone calls.","codes":["L120","A101"],"page":2,"narrative_style":"vague"},
+  {"n":11,"line_type":"expense","date":"2025-04-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":34.97,"amount":34.97,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":837.0,"rate":0.25,"amount":209.25,"narrative":"Photocopies - 837 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":247.99,"amount":247.99,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-04-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.57,"amount":7.57,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["96 Elm Court","Portland","Tax ID 15-1549031"],"template":"T13","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-01-28","matter_close":"2025-07-29","matter_budget":69917.0,"approved_timekeepers":["Helena Fairweather","Gideon Fairweather","Clara Thornbury","Dmitri Lockhart","Helena Nwosu","Victor Yilmaz"],"invoice_received_date":"2025-06-30"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[10],"consequence":"Flag"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[5],"consequence":"Disallow","related_line_refs":[4]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

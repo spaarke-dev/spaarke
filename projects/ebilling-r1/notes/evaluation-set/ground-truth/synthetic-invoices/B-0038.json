@@ -1,0 +1,20 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"B-0038",
+ "set":"B",
+ "meta":{"title":"Synthetic invoice B-0038","generator_id":"gen_eval_set.py@1 B-0038","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/B-0038.pdf"},"spike":false,"label_method":"generator","profile":{"quality_mix":"mixed","hour_increment":0.25,"code_mode_requested":"none"}},
+ "header":{"firm":"Tennant and Whitcombe LLP","firm_invoice_number":"INV-2025-28417","invoice_date":"2025-05-04","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"34292-0017","po_number":null,"fees_total":1557.5,"expenses_total":0.0,"adjustments_total":-77.88,"total_due":1479.62,"currency":"USD"},
+ "timekeepers":[{"name":"Imani Abernathy","title":"Legal Assistant","rate":160.0,"billed_as":"Abernathy, I."},{"name":"Nadia Whitfield","title":"Of Counsel","rate":595.0,"billed_as":"Whitfield, N."},{"name":"Victor Ashdown","title":"Senior Associate","rate":490.0,"billed_as":"Ashdown, V."},{"name":"Victor Halloran","title":"Associate","rate":365.0,"billed_as":"Halloran, V."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-08","timekeeper":"Halloran, V.","timekeeper_name":"Victor Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":365.0,"amount":547.5,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-14","timekeeper":"Halloran, V.","timekeeper_name":"Victor Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":365.0,"amount":365.0,"narrative":"Review draft expert disclosure for the warranty claim","codes":["L420"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-21","timekeeper":"Halloran, V.","timekeeper_name":"Victor Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":365.0,"amount":91.25,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-29","timekeeper":"Whitfield, N.","timekeeper_name":"Nadia Whitfield","timekeeper_title":"Of Counsel","title":"O/C","hours":0.25,"rate":595.0,"amount":148.75,"narrative":"Attend trial day in the lease dispute","codes":["L450"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-07","timekeeper":"Abernathy, I.","timekeeper_name":"Imani Abernathy","timekeeper_title":"Legal Assistant","title":"LA","hours":1.0,"rate":160.0,"amount":160.0,"narrative":"Photocopied exhibits and assembled binders","codes":["L460"],"page":2,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2025-04-21","timekeeper":"Ashdown, V.","timekeeper_name":"Victor Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":490.0,"amount":245.0,"narrative":"Research standard for new trial in the warranty claim","codes":["L460"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"adjustment","date":null,"timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":null,"rate":null,"amount":-77.88,"narrative":"Courtesy discount","codes":[],"page":2,"narrative_style":"clear"}
+ ],
+ "intended_codes":{"1":["L190","A104"],"2":["L420","A104"],"3":["L420","A104"],"4":["L450","A109"],"5":["L460","A110"],"6":["L460","A102"],"7":[]},
+ "document":{"letterhead":["421 Market Street","Houston","Tax ID 86-2396427"],"template":"T14","scan_noise":false,"scan":null,"bundled":false,"bundle":null,"timekeeper_source":"column","rate_source":"legend","title_source":"legend","codes_printed":"task_only","grouping":"task","hours_format":"dec2","expenses_layout":"separate","page_total_rows":false,"summary_first":true,"orientation":"P","features":["adjustment_line","no_po"],"pages":2,"bundle_parts":[{"part":"invoice","pages":2}],"invoice_first_page":1,"invoice_pages":2}
+}

@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0019",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0019","generator_id":"gen_eval_set.py@1 F-0019","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0019.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Penhallow Whitcombe PC","firm_invoice_number":"INV-2026-39824","invoice_date":"2025-06-28","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"29012-0015","po_number":"PO-4507468","fees_total":6315.0,"expenses_total":178.9,"adjustments_total":0.0,"total_due":6493.9,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Nwosu","title":"Partner","rate":680.0,"billed_as":"Anders Nwosu"},{"name":"Gregory Yilmaz","title":"Legal Assistant","rate":170.0,"billed_as":"Gregory Yilmaz"},{"name":"Jordan Brennan","title":"Partner","rate":715.0,"billed_as":"Jordan Brennan"},{"name":"Leila Mbeki","title":"Associate","rate":390.0,"billed_as":"Leila Mbeki"},{"name":"Naomi Zielinski","title":"Associate","rate":395.0,"billed_as":"Naomi Zielinski"},{"name":"Sofia Kowalczyk","title":"Associate","rate":375.0,"billed_as":"Sofia Kowalczyk"},{"name":"Yusuf Marchetti","title":"Senior Associate","rate":455.0,"billed_as":"Yusuf Marchetti"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-28","timekeeper":"Anders Nwosu","timekeeper_name":"Anders Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":680.0,"amount":748.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-16","timekeeper":"Gregory Yilmaz","timekeeper_name":"Gregory Yilmaz","timekeeper_title":"Legal Assistant","title":"LA","hours":0.1,"rate":170.0,"amount":17.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-21","timekeeper":"Gregory Yilmaz","timekeeper_name":"Gregory Yilmaz","timekeeper_title":"Legal Assistant","title":"LA","hours":0.2,"rate":170.0,"amount":34.0,"narrative":"Draft appellate brief in the warranty claim","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-18","timekeeper":"Jordan Brennan","timekeeper_name":"Jordan Brennan","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":715.0,"amount":357.5,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-29","timekeeper":"Leila Mbeki","timekeeper_name":"Leila Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":390.0,"amount":936.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-10","timekeeper":"Naomi Zielinski","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":395.0,"amount":632.0,"narrative":"Research appealability issues in the employment claim","codes":["L510","A102"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-11","timekeeper":"Naomi Zielinski","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":395.0,"amount":750.5,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-09","timekeeper":"Sofia Kowalczyk","timekeeper_name":"Sofia Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":375.0,"amount":337.5,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-08","timekeeper":"Yusuf Marchetti","timekeeper_name":"Yusuf Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.6,"rate":455.0,"amount":1183.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-14","timekeeper":"Yusuf Marchetti","timekeeper_name":"Yusuf Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":455.0,"amount":1319.5,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-04-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":37.0,"rate":0.2,"amount":7.4,"narrative":"Photocopies - 37 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-04-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":110.21,"amount":110.21,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":61.29,"amount":61.29,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["536 Congress Boulevard","Atlanta","Tax ID 74-6298068"],"template":"T10","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-08-02","matter_close":"2025-07-29","matter_budget":50975.0,"approved_timekeepers":["Leila Mbeki","Anders Nwosu","Jordan Brennan","Peter Tavares","Yusuf Marchetti","Gregory Yilmaz","Sofia Kowalczyk","Yusuf Hargrove","Naomi Zielinski"],"invoice_received_date":"2025-06-29"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[11],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

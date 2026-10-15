@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0232",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0232","generator_id":"gen_eval_set.py@1 F-0232","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0232.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kestrel & Vance LLP","firm_invoice_number":"INV-2026-26076","invoice_date":"2026-02-14","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"35089-0024","po_number":"PO-4536016","fees_total":7066.25,"expenses_total":2657.72,"adjustments_total":0.0,"total_due":9723.97,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Santoro","title":"Legal Assistant","rate":155.0,"billed_as":"CS"},{"name":"Cyrus Yilmaz","title":"Paralegal","rate":215.0,"billed_as":"CY"},{"name":"Emeka Ashdown","title":"Associate","rate":350.0,"billed_as":"EA"},{"name":"Hector Halloran","title":"Partner","rate":595.0,"billed_as":"HH"},{"name":"Ivan Thornbury","title":"Paralegal","rate":205.0,"billed_as":"IT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-03","timekeeper":"CY","timekeeper_name":"Cyrus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":270.0,"amount":675.0,"narrative":"Draft notice of appeal and docketing statement for the vendor agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-06","timekeeper":"IT","timekeeper_name":"Ivan Thornbury","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":205.0,"amount":358.75,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-07","timekeeper":"CY","timekeeper_name":"Cyrus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":215.0,"amount":376.25,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-07","timekeeper":"CY","timekeeper_name":"Cyrus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":215.0,"amount":591.25,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-14","timekeeper":"HH","timekeeper_name":"Hector Halloran","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":595.0,"amount":595.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-14","timekeeper":"HH","timekeeper_name":"Hector Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":595.0,"amount":1190.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-14","timekeeper":"HH","timekeeper_name":"Hector Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":595.0,"amount":1190.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-20","timekeeper":"EA","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":350.0,"amount":612.5,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-25","timekeeper":"EA","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":350.0,"amount":437.5,"narrative":"Research appealability issues in the lease dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-25","timekeeper":"EA","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":350.0,"amount":962.5,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-27","timekeeper":"CS","timekeeper_name":"Clara Santoro","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":155.0,"amount":77.5,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-11-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1776.98,"amount":1776.98,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-11-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":681.0,"rate":0.1,"amount":68.1,"narrative":"Photocopies - 681 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-11-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":791.93,"amount":791.93,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-11-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":20.71,"amount":20.71,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["923 Commerce Avenue","Dallas","Tax ID 47-6310735"],"template":"T15","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-21","matter_close":"2026-02-28","matter_budget":63895.0,"approved_timekeepers":["Hector Halloran","Emeka Ashdown","Hannah Voss","Cyrus Yilmaz","Aisha Santoro","Clara Santoro"],"invoice_received_date":"2026-02-15"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[7],"consequence":"Disallow","related_line_refs":[6]}
+ ],
+ "seeded_violations":4
+}

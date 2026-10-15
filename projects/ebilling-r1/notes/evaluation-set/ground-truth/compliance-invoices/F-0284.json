@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0284",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0284","generator_id":"gen_eval_set.py@1 F-0284","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0284.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Eastlake Dunmore PC","firm_invoice_number":"INV-2026-36027","invoice_date":"2025-06-02","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"54545-0025","po_number":"PO-4531172","fees_total":3718.5,"expenses_total":449.66,"adjustments_total":0.0,"total_due":4168.16,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Voss","title":"Senior Associate","rate":375.0,"billed_as":"DV"},{"name":"Dmitri Quillen","title":"Associate","rate":335.0,"billed_as":"DQ"},{"name":"Elena Nwosu","title":"Paralegal","rate":180.0,"billed_as":"EN"},{"name":"Farah Wickham","title":"Associate","rate":290.0,"billed_as":"FW"},{"name":"Naomi Carmichael","title":"Partner","rate":565.0,"billed_as":"NC"},{"name":"Priya Kowalczyk","title":"Associate","rate":280.0,"billed_as":"PK"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-06","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":290.0,"amount":261.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-06","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":290.0,"amount":174.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-06","timekeeper":"EN","timekeeper_name":"Elena Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":180.0,"amount":252.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-07","timekeeper":"NC","timekeeper_name":"Naomi Carmichael","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":565.0,"amount":395.5,"narrative":"Attend hearing on pretrial brief in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-07","timekeeper":"DV","timekeeper_name":"Dalia Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":375.0,"amount":562.5,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-09","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":290.0,"amount":377.0,"narrative":"Draft discovery plan for trial in the data incident","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-13","timekeeper":"DQ","timekeeper_name":"Dmitri Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":335.0,"amount":167.5,"narrative":"Draft post-trial motion in the customs audit","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-14","timekeeper":"PK","timekeeper_name":"Priya Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":280.0,"amount":672.0,"narrative":"Draft post-trial motion in the vendor agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-15","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":290.0,"amount":551.0,"narrative":"Research standard for new trial in the data incident","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-26","timekeeper":"EN","timekeeper_name":"Elena Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":180.0,"amount":306.0,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":419.9,"amount":419.9,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":12.69,"amount":12.69,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-05-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":17.07,"amount":17.07,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["82 Congress Boulevard","Minneapolis","Tax ID 10-5743949"],"template":"T22","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-03-30","matter_close":"2025-08-29","matter_budget":3334.0,"approved_timekeepers":["Priya Kowalczyk","Farah Wickham","Naomi Carmichael","Elena Nwosu","Hannah Nwosu","Dalia Voss"],"invoice_received_date":"2025-06-14"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[7],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

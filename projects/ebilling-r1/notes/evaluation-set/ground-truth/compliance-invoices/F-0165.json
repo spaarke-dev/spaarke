@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0165",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0165","generator_id":"gen_eval_set.py@1 F-0165","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0165.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Lindenmeyer and Ellison LLP","firm_invoice_number":"INV-2026-45633","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"38423-0016","po_number":"PO-4518410","fees_total":2372.75,"expenses_total":3215.91,"adjustments_total":0.0,"total_due":5588.66,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Fairweather","title":"Senior Associate","rate":350.0,"billed_as":"Fairweather, D."},{"name":"Jordan Fairweather","title":"Paralegal","rate":115.0,"billed_as":"Fairweather, J."},{"name":"Nadia Abernathy","title":"Paralegal","rate":145.0,"billed_as":"Abernathy, N."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-05","timekeeper":"Fairweather, D.","timekeeper_name":"Dalia Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":350.0,"amount":700.0,"narrative":"Draft notice of appeal and docketing statement for the employment claim","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-15","timekeeper":"Fairweather, D.","timekeeper_name":"Dalia Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":350.0,"amount":700.0,"narrative":"Attend and present oral argument in the warranty claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-20","timekeeper":"Fairweather, J.","timekeeper_name":"Jordan Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":115.0,"amount":218.5,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-20","timekeeper":"Fairweather, J.","timekeeper_name":"Jordan Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":115.0,"amount":138.0,"narrative":"Research appealability issues in the employment claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-12","timekeeper":"Abernathy, N.","timekeeper_name":"Nadia Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":145.0,"amount":174.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-19","timekeeper":"Abernathy, N.","timekeeper_name":"Nadia Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":1.65,"rate":145.0,"amount":239.25,"narrative":"Draft notice of appeal and docketing statement for the customs audit","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-28","timekeeper":"Abernathy, N.","timekeeper_name":"Nadia Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":145.0,"amount":203.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1328.29,"amount":1328.29,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-08-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":29.61,"amount":29.61,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":818.0,"rate":0.2,"amount":163.6,"narrative":"Photocopies - 818 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-08-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":297.0,"rate":0.07,"amount":20.79,"narrative":"Photocopies - 297 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-08-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":375.0,"rate":0.19,"amount":71.25,"narrative":"Photocopies - 375 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1602.37,"amount":1602.37,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["441 Lakeshore Drive","Atlanta","Tax ID 22-2471965"],"template":"T24","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-01-04","matter_close":"2025-11-29","matter_budget":47354.0,"approved_timekeepers":["Hector Esposito","Naomi Yilmaz","Anders Carmichael","Dalia Fairweather","Dmitri Nakamura","Jordan Fairweather","Nadia Abernathy","Emeka Lockhart"],"invoice_received_date":"2025-09-06"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R06","rule_type":"ExpenseRule","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R06","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

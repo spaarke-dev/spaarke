@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0008",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0008","generator_id":"gen_eval_set.py@1 F-0008","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0008.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Kestrel and Forsythe LLP","firm_invoice_number":"INV-2026-38717","invoice_date":"2026-05-02","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"47716-0019","po_number":"PO-4589645","fees_total":3121.5,"expenses_total":455.58,"adjustments_total":0.0,"total_due":3577.08,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Zielinski","title":"Associate","rate":285.0,"billed_as":"Zielinski, A."},{"name":"Hector Rosenthal","title":"Legal Assistant","rate":120.0,"billed_as":"Rosenthal, H."},{"name":"Imani Whitfield","title":"Paralegal","rate":160.0,"billed_as":"Whitfield, I."},{"name":"Ingrid Eriksen","title":"Associate","rate":260.0,"billed_as":"Eriksen, I."},{"name":"Marcus Mbeki","title":"Associate","rate":310.0,"billed_as":"Mbeki, M."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-14","timekeeper":"Zielinski, A.","timekeeper_name":"Aisha Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":285.0,"amount":627.0,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-16","timekeeper":"Zielinski, A.","timekeeper_name":"Aisha Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":285.0,"amount":541.5,"narrative":"Draft appellate brief in the distribution agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-22","timekeeper":"Zielinski, A.","timekeeper_name":"Aisha Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":285.0,"amount":114.0,"narrative":"Research appealability issues in the supply agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-08","timekeeper":"Rosenthal, H.","timekeeper_name":"Hector Rosenthal","timekeeper_title":"Legal Assistant","title":"LA","hours":1.5,"rate":120.0,"amount":180.0,"narrative":"Research appealability issues in the distribution agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-09","timekeeper":"Whitfield, I.","timekeeper_name":"Imani Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":160.0,"amount":256.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-01","timekeeper":"Eriksen, I.","timekeeper_name":"Ingrid Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":260.0,"amount":455.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-30","timekeeper":"Eriksen, I.","timekeeper_name":"Ingrid Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":260.0,"amount":390.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-16","timekeeper":"Mbeki, M.","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":310.0,"amount":496.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-24","timekeeper":"Mbeki, M.","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":310.0,"amount":62.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":455.58,"amount":455.58,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["938 Congress Boulevard","Seattle","Tax ID 71-4189920"],"template":"T24","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-01-27","matter_close":"2026-07-29","matter_budget":39308.0,"approved_timekeepers":["Ivan Lockhart","Ingrid Esposito","Ingrid Eriksen","Imani Whitfield","Cyrus Marchetti","Samuel Pemberton","Marcus Mbeki","Aisha Zielinski"],"invoice_received_date":"2026-05-03"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

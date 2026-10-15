@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0582",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0582","generator_id":"gen_eval_set.py@1 F-0582","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0582.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Rutherford Whitcombe PC","firm_invoice_number":"LF0083172","invoice_date":"2025-06-02","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"27699-0018","po_number":"PO-4588559","fees_total":2066.0,"expenses_total":4615.77,"adjustments_total":0.0,"total_due":6681.77,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Ramanathan","title":"Associate","rate":190.0,"billed_as":"AR"},{"name":"Imani Esposito","title":"Partner","rate":390.0,"billed_as":"IE"},{"name":"Ivan Kowalczyk","title":"Partner","rate":415.0,"billed_as":"IK"},{"name":"Leila Yilmaz","title":"Paralegal","rate":95.0,"billed_as":"LY"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-01","timekeeper":"AR","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":190.0,"amount":456.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-02","timekeeper":"AR","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":190.0,"amount":76.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-05","timekeeper":"LY","timekeeper_name":"Leila Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":95.0,"amount":171.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-07","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":390.0,"amount":78.0,"narrative":"Prepare outline for deposition of Quarry Lane Partners witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-15","timekeeper":"IK","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":415.0,"amount":290.5,"narrative":"Draft notice of deposition to Ironbridge Steel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-20","timekeeper":"IK","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":415.0,"amount":249.0,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-20","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":390.0,"amount":546.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-28","timekeeper":"LY","timekeeper_name":"Leila Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":95.0,"amount":66.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-29","timekeeper":"LY","timekeeper_name":"Leila Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":95.0,"amount":133.0,"narrative":"Draft reply brief in the warranty claim","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4615.77,"amount":4615.77,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["421 Commerce Avenue","Portland","Tax ID 12-4293007"],"template":"T19","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-06-07","matter_close":"2025-08-29","matter_budget":51727.0,"approved_timekeepers":["Imani Esposito","Elena Delacroix","Leila Yilmaz","Anders Ramanathan","Ivan Kowalczyk","Priya Sandoval"],"invoice_received_date":"2025-06-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

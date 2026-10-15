@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0144",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0144","generator_id":"gen_eval_set.py@1 F-0144","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0144.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Sutherland and Dunmore LLP","firm_invoice_number":"INV-2025-92308","invoice_date":"2026-07-04","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"37687-0022","po_number":"PO-4535398","fees_total":3755.5,"expenses_total":4553.07,"adjustments_total":0.0,"total_due":8308.57,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Castellanos","title":"Associate","rate":240.0,"billed_as":"CC"},{"name":"Gideon Esposito","title":"Partner","rate":450.0,"billed_as":"GE"},{"name":"Nadia Quillen","title":"Associate","rate":205.0,"billed_as":"NQ"},{"name":"Oliver Eriksen","title":"Paralegal","rate":125.0,"billed_as":"OE"},{"name":"Priya Mbeki","title":"Associate","rate":215.0,"billed_as":"PM"},{"name":"Tomas Lockhart","title":"Paralegal","rate":100.0,"billed_as":"TL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-03","timekeeper":"OE","timekeeper_name":"Oliver Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":125.0,"amount":62.5,"narrative":"Attend and present oral argument in the regulatory inquiry","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-11","timekeeper":"GE","timekeeper_name":"Gideon Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":450.0,"amount":1260.0,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-15","timekeeper":"OE","timekeeper_name":"Oliver Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":125.0,"amount":237.5,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-19","timekeeper":"GE","timekeeper_name":"Gideon Esposito","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":450.0,"amount":135.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-23","timekeeper":"PM","timekeeper_name":"Priya Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":215.0,"amount":451.5,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-24","timekeeper":"GE","timekeeper_name":"Gideon Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":450.0,"amount":495.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-24","timekeeper":"CC","timekeeper_name":"Cyrus Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":240.0,"amount":216.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-24","timekeeper":"PM","timekeeper_name":"Priya Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":215.0,"amount":473.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-29","timekeeper":"TL","timekeeper_name":"Tomas Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":170.0,"amount":425.0,"narrative":"Analyze exposure and damages model for the warranty claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3768.81,"amount":3768.81,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":44.47,"amount":177.88,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":39.59,"amount":39.59,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-06-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":566.79,"amount":566.79,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["344 Commerce Avenue","Chicago","Tax ID 23-6157453"],"template":"T08","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-09-02","matter_close":"2026-09-28","matter_budget":58234.0,"approved_timekeepers":["Tomas Lockhart","Jordan Castellanos","Priya Mbeki","Aisha Delacroix","Oliver Eriksen","Nadia Quillen","Gideon Esposito"],"invoice_received_date":"2026-07-11"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[7],"consequence":"Reject"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[9],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

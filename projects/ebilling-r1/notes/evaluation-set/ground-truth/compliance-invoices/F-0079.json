@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0079",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0079","generator_id":"gen_eval_set.py@1 F-0079","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0079.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Northcott and Beckett LLP","firm_invoice_number":"INV-2025-47103","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"73666-0010","po_number":null,"fees_total":3211.25,"expenses_total":429.0,"adjustments_total":0.0,"total_due":3640.25,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Wickham","title":"Associate","rate":285.0,"billed_as":"Dmitri Wickham"},{"name":"Gregory Eriksen","title":"Senior Associate","rate":355.0,"billed_as":"Gregory Eriksen"},{"name":"Yusuf Galbraith","title":"Paralegal","rate":140.0,"billed_as":"Yusuf Galbraith"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-02","timekeeper":"Gregory Eriksen","timekeeper_name":"Gregory Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.3,"rate":355.0,"amount":461.5,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":486.0,"rate":0.25,"amount":121.5,"narrative":"Photocopies - 486 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-04","timekeeper":"Dmitri Wickham","timekeeper_name":"Dmitri Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":285.0,"amount":342.0,"narrative":"Prepare case assessment memorandum regarding the customs audit and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"expense","date":"2026-06-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":273.34,"amount":273.34,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2026-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":56.0,"rate":0.61,"amount":34.16,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-17","timekeeper":"Dmitri Wickham","timekeeper_name":"Dmitri Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.15,"rate":285.0,"amount":327.75,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-23","timekeeper":"Yusuf Galbraith","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":140.0,"amount":280.0,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-24","timekeeper":"Gregory Eriksen","timekeeper_name":"Gregory Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.7,"rate":355.0,"amount":603.5,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-25","timekeeper":"Yusuf Galbraith","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":140.0,"amount":238.0,"narrative":"Research appealability issues in the regulatory inquiry","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-06-26","timekeeper":"Gregory Eriksen","timekeeper_name":"Gregory Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.7,"rate":355.0,"amount":958.5,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["138 Lakeshore Drive","Houston","Tax ID 99-6617083"],"template":"T18","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-06-18","matter_close":"2026-09-28","matter_budget":39561.0,"approved_timekeepers":["Peter Rosenthal","Samuel Lindqvist","Gregory Eriksen","Imani Pemberton","Dmitri Wickham","Yusuf Galbraith"],"invoice_received_date":"2026-07-03"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

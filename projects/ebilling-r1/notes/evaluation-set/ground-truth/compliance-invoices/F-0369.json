@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0369",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0369","generator_id":"gen_eval_set.py@1 F-0369","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0369.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Ingersoll and Beckett LLP","firm_invoice_number":"INV-2026-31050","invoice_date":"2026-03-03","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"17403-0027","po_number":"PO-4532740","fees_total":1525.5,"expenses_total":36.48,"adjustments_total":0.0,"total_due":1561.98,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Pemberton","title":"Paralegal","rate":125.0,"billed_as":"EP"},{"name":"Hector Dunleavy","title":"Associate","rate":275.0,"billed_as":"HD"},{"name":"Jordan Halloran","title":"Associate","rate":230.0,"billed_as":"JH"},{"name":"Mei Halloran","title":"Paralegal","rate":145.0,"billed_as":"MH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-10","timekeeper":"MH","timekeeper_name":"Mei Halloran","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":145.0,"amount":130.5,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-12","timekeeper":"JH","timekeeper_name":"Jordan Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":230.0,"amount":253.0,"narrative":"Revise reply brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-18","timekeeper":"MH","timekeeper_name":"Mei Halloran","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":145.0,"amount":232.0,"narrative":"Draft pretrial brief for trial in the data incident","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-18","timekeeper":"JH","timekeeper_name":"Jordan Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":230.0,"amount":23.0,"narrative":"Prepare examination outlines for trial in the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-19","timekeeper":"MH","timekeeper_name":"Mei Halloran","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":145.0,"amount":304.5,"narrative":"Research standard for new trial in the distribution agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-26","timekeeper":"HD","timekeeper_name":"Hector Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":275.0,"amount":220.0,"narrative":"Draft witness list for trial in the insurance coverage issue","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-27","timekeeper":"EP","timekeeper_name":"Elena Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":125.0,"amount":362.5,"narrative":"Review draft expert disclosure for the data incident","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-02-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":57.0,"rate":0.64,"amount":36.48,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["943 Pine Street","Phoenix","Tax ID 78-4940144"],"template":"T01","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-10-23","matter_close":"2026-05-29","matter_budget":31247.0,"approved_timekeepers":["Elena Pemberton","Imani Halloran","Mei Halloran","Jordan Halloran","Hector Dunleavy","Dmitri Thornbury","Naomi Carmichael","Leila Fairweather","Imani Ramanathan"],"invoice_received_date":"2026-03-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

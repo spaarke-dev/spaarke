@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0444",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0444","generator_id":"gen_eval_set.py@1 F-0444","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0444.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Jarrow & Cranmer LLP","firm_invoice_number":"LF0070515","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"24204-0012","po_number":"PO-4518684","fees_total":5419.0,"expenses_total":19.2,"adjustments_total":0.0,"total_due":5438.2,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Abernathy","title":"Associate","rate":225.0,"billed_as":"AA"},{"name":"Gideon Hargrove","title":"Partner","rate":440.0,"billed_as":"GH"},{"name":"Imani Delacroix","title":"Paralegal","rate":130.0,"billed_as":"ID"},{"name":"Ivan Brennan","title":"Senior Associate","rate":235.0,"billed_as":"IB"},{"name":"Oliver Halloran","title":"Partner","rate":430.0,"billed_as":"OH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-02","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":225.0,"amount":112.5,"narrative":"Research appealability issues in the customs audit","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-05","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":225.0,"amount":202.5,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-06","timekeeper":"ID","timekeeper_name":"Imani Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":130.0,"amount":247.0,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-09","timekeeper":"OH","timekeeper_name":"Oliver Halloran","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":430.0,"amount":817.0,"narrative":"Draft notice of appeal and docketing statement for the customs audit","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-09","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.7,"rate":235.0,"amount":399.5,"narrative":"Draft notice of appeal and docketing statement for the data incident","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-19","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":225.0,"amount":630.0,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-20","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.4,"rate":235.0,"amount":94.0,"narrative":"Research appealability issues in the data incident","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-23","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":235.0,"amount":681.5,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-24","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":225.0,"amount":225.0,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-24","timekeeper":"GH","timekeeper_name":"Gideon Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":2.7,"rate":440.0,"amount":1188.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-25","timekeeper":"OH","timekeeper_name":"Oliver Halloran","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":430.0,"amount":258.0,"narrative":"Prepare for oral argument in the customs audit","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-03-25","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":235.0,"amount":564.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":30.0,"rate":0.64,"amount":19.2,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["270 Federal Plaza","Denver","Tax ID 60-8210767"],"template":"T19","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-04-22","matter_close":"2026-06-29","matter_budget":46752.0,"approved_timekeepers":["Ivan Brennan","Oliver Halloran","Dalia Galbraith","Gideon Hargrove","Aisha Abernathy","Imani Delacroix"],"invoice_received_date":"2026-04-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

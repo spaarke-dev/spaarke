@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0273",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0273","generator_id":"gen_eval_set.py@1 F-0273","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0273.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Tennant & Ellison LLP","firm_invoice_number":"INV-2025-30987","invoice_date":"2026-08-04","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"87506-0034","po_number":"PO-4550791","fees_total":6421.0,"expenses_total":2176.23,"adjustments_total":0.0,"total_due":8597.23,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Fairweather","title":"Legal Assistant","rate":90.0,"billed_as":"Cyrus Fairweather"},{"name":"Imani Santoro","title":"Partner","rate":455.0,"billed_as":"Imani Santoro"},{"name":"Leila Halloran","title":"Associate","rate":240.0,"billed_as":"Leila Halloran"},{"name":"Tomas Ramanathan","title":"Partner","rate":390.0,"billed_as":"Tomas Ramanathan"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-17","timekeeper":"Cyrus Fairweather","timekeeper_name":"Cyrus Fairweather","timekeeper_title":"Legal Assistant","title":"LA","hours":0.3,"rate":90.0,"amount":27.0,"narrative":"Research public records concerning Alder & Finch Ltd and related entities","codes":["L110","A102"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-22","timekeeper":"Imani Santoro","timekeeper_name":"Imani Santoro","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":455.0,"amount":455.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-31","timekeeper":"Imani Santoro","timekeeper_name":"Imani Santoro","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":455.0,"amount":955.5,"narrative":"Update document review protocol and coding panel for the distribution agreement","codes":["L140","A110"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-31","timekeeper":"Imani Santoro","timekeeper_name":"Imani Santoro","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":455.0,"amount":182.0,"narrative":"Review and organize incoming production from Bluepine Holdings for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-20","timekeeper":"Leila Halloran","timekeeper_name":"Leila Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":240.0,"amount":264.0,"narrative":"Review and organize incoming production from Alder & Finch Ltd for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-31","timekeeper":"Leila Halloran","timekeeper_name":"Leila Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":240.0,"amount":384.0,"narrative":"Prepare updated litigation budget for the data incident","codes":["L150","A103"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-13","timekeeper":"Tomas Ramanathan","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":390.0,"amount":117.0,"narrative":"Draft settlement term sheet for the regulatory inquiry","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-23","timekeeper":"Tomas Ramanathan","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.95,"rate":390.0,"amount":370.5,"narrative":"Research pleading standards applicable to the lease dispute","codes":["L210","A102"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-28","timekeeper":"Tomas Ramanathan","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":390.0,"amount":1560.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-28","timekeeper":"Tomas Ramanathan","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":390.0,"amount":1560.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-07-28","timekeeper":"Tomas Ramanathan","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":390.0,"amount":546.0,"narrative":"Telephone conference with client representative regarding factual background of the warranty claim","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2132.55,"amount":2132.55,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.61,"amount":5.61,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-07-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":38.07,"amount":38.07,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["378 Federal Plaza","Dallas","Tax ID 20-1697682"],"template":"T10","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-06-03","matter_close":"2026-10-29","matter_budget":59388.0,"approved_timekeepers":["Tomas Ramanathan","Cyrus Fairweather","Imani Santoro","Nadia Eriksen","Leila Halloran","Priya Okafor"],"invoice_received_date":"2026-08-07"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R03","rule_type":"DailyHoursCap","scope":"line","line_refs":[11],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

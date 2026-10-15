@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0423",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0423","generator_id":"gen_eval_set.py@1 F-0423","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0423.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Sutherland Forsythe PC","firm_invoice_number":"INV-2026-56000","invoice_date":"2025-04-03","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"85220-0008","po_number":"PO-4590424","fees_total":5260.5,"expenses_total":1039.28,"adjustments_total":0.0,"total_due":6299.78,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Marchetti","title":"Associate","rate":250.0,"billed_as":"HM"},{"name":"Ivan Eriksen","title":"Paralegal","rate":125.0,"billed_as":"IE"},{"name":"Oliver Eriksen","title":"Partner","rate":420.0,"billed_as":"OE"},{"name":"Priya Santoro","title":"Associate","rate":205.0,"billed_as":"PS"},{"name":"Victor Delacroix","title":"Partner","rate":375.0,"billed_as":"VD"},{"name":"Victor Marchetti","title":"Associate","rate":220.0,"billed_as":"VM"},{"name":"Yusuf Pemberton","title":"Senior Associate","rate":285.0,"billed_as":"YP"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-04","timekeeper":"PS","timekeeper_name":"Priya Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":205.0,"amount":574.0,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-05","timekeeper":"VD","timekeeper_name":"Victor Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":375.0,"amount":75.0,"narrative":"Draft protective order for trial in the supply agreement","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-05","timekeeper":"VM","timekeeper_name":"Victor Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":220.0,"amount":484.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the supply agreement","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-06","timekeeper":"HM","timekeeper_name":"Hector Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":250.0,"amount":750.0,"narrative":"Draft protective order for trial in the insurance coverage issue","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-07","timekeeper":"YP","timekeeper_name":"Yusuf Pemberton","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":285.0,"amount":427.5,"narrative":"Prepare examination outlines for trial in the licensing dispute","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-10","timekeeper":"YP","timekeeper_name":"Yusuf Pemberton","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.6,"rate":285.0,"amount":741.0,"narrative":"Attend hearing on interrogatory responses in the lease dispute","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-25","timekeeper":"IE","timekeeper_name":"Ivan Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":125.0,"amount":325.0,"narrative":"Attend hearing on pretrial brief in the lease dispute","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-25","timekeeper":"PS","timekeeper_name":"Priya Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":205.0,"amount":246.0,"narrative":"Draft post-trial motion in the insurance coverage issue","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-25","timekeeper":"OE","timekeeper_name":"Oliver Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":420.0,"amount":420.0,"narrative":"Attend hearing on pretrial brief in the data incident","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-31","timekeeper":"OE","timekeeper_name":"Oliver Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":420.0,"amount":1218.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1034.21,"amount":1034.21,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.07,"amount":5.07,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["439 Peachtree Way","Phoenix","Tax ID 84-3320993"],"template":"T21","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2023-11-20","matter_close":"2025-06-29","matter_budget":50199.0,"approved_timekeepers":["Oliver Eriksen","Helena Nakamura","Victor Marchetti","Victor Delacroix","Yusuf Pemberton","Priya Santoro","Hector Marchetti","Ivan Eriksen"],"invoice_received_date":"2025-04-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

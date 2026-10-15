@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0343",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0343","generator_id":"gen_eval_set.py@1 F-0343","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0343.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Rutherford Beckett PC","firm_invoice_number":"INV-2025-81315","invoice_date":"2026-02-01","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"41101-0012","po_number":"PO-4538901","fees_total":2821.5,"expenses_total":1761.26,"adjustments_total":0.0,"total_due":4582.76,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Oyelaran","title":"Paralegal","rate":155.0,"billed_as":"AO"},{"name":"Gregory Tavares","title":"Of Counsel","rate":430.0,"billed_as":"GT"},{"name":"Helena Voss","title":"Partner","rate":505.0,"billed_as":"HV"},{"name":"Leila Esposito","title":"Paralegal","rate":145.0,"billed_as":"LE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-01","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":155.0,"amount":310.0,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-01-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":674.86,"amount":674.86,"narrative":"Airfare to Seattle for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2026-01-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":528.26,"amount":528.26,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-09","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":155.0,"amount":217.0,"narrative":"Prepare production set and cover correspondence for service on Meridian Foods","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-13","timekeeper":"HV","timekeeper_name":"Helena Voss","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":505.0,"amount":1111.0,"narrative":"Prepare responses and objections to pretrial brief","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2026-01-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":530.14,"amount":530.14,"narrative":"Airfare to Seattle for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2026-01-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":14.0,"amount":28.0,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-21","timekeeper":"GT","timekeeper_name":"Gregory Tavares","timekeeper_title":"Of Counsel","title":"O/C","hours":1.2,"rate":430.0,"amount":516.0,"narrative":"Meet and confer with counsel for Ironbridge Steel regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-26","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":155.0,"amount":108.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-27","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":155.0,"amount":46.5,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-27","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":155.0,"amount":77.5,"narrative":"Draft requests for production in the customs audit","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-29","timekeeper":"LE","timekeeper_name":"Leila Esposito","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":145.0,"amount":435.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["998 Market Street","Chicago","Tax ID 11-8670711"],"template":"T09","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-09-28","matter_close":"2026-05-01","matter_budget":43331.0,"approved_timekeepers":["Tomas Pemberton","Helena Voss","Leila Esposito","Anders Delacroix","Gregory Fairweather","Aisha Oyelaran","Gregory Tavares"],"invoice_received_date":"2026-02-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

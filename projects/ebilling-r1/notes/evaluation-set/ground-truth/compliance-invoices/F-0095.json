@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0095",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0095","generator_id":"gen_eval_set.py@1 F-0095","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0095.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Northcott & Zeller LLP","firm_invoice_number":"INV-2025-61585","invoice_date":"2026-02-04","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"77107-0006","po_number":"PO-4510832","fees_total":13130.0,"expenses_total":54.36,"adjustments_total":0.0,"total_due":13184.36,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Zielinski","title":"Associate","rate":260.0,"billed_as":"Zielinski, C."},{"name":"Ivan Nakamura","title":"Senior Associate","rate":375.0,"billed_as":"Nakamura, I."},{"name":"Nadia Lindqvist","title":"Associate","rate":235.0,"billed_as":"Lindqvist, N."},{"name":"Samuel Voss","title":"Partner","rate":510.0,"billed_as":"Voss, S."},{"name":"Yusuf Fairweather","title":"Partner","rate":540.0,"billed_as":"Fairweather, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-07","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Partner","hours":1.3,"rate":540.0,"amount":702.0,"narrative":"Meet and confer with counsel for Meridian Foods regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-09","timekeeper":"Voss, S.","timekeeper_name":"Samuel Voss","timekeeper_title":"Partner","title":"Partner","hours":1.6,"rate":510.0,"amount":816.0,"narrative":"Prepare production set and cover correspondence for service on Alder & Finch Ltd","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-13","timekeeper":"Voss, S.","timekeeper_name":"Samuel Voss","timekeeper_title":"Partner","title":"Partner","hours":1.5,"rate":510.0,"amount":765.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-13","timekeeper":"Nakamura, I.","timekeeper_name":"Ivan Nakamura","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.9,"rate":375.0,"amount":712.5,"narrative":"Draft complaint regarding deficiencies in Bluepine Holdings responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-23","timekeeper":"Zielinski, C.","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Associate","hours":2.5,"rate":260.0,"amount":650.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-23","timekeeper":"Lindqvist, N.","timekeeper_name":"Nadia Lindqvist","timekeeper_title":"Associate","title":"Associate","hours":0.9,"rate":235.0,"amount":211.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-27","timekeeper":"Zielinski, C.","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Associate","title":"Associate","hours":3.0,"rate":260.0,"amount":780.0,"narrative":"Ran conflict check for new party","codes":["L310","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":8,"line_type":"fee","date":"2026-01-27","timekeeper":"Voss, S.","timekeeper_name":"Samuel Voss","timekeeper_title":"Partner","title":"Partner","hours":1.6,"rate":510.0,"amount":816.0,"narrative":"Meet and confer with counsel for Larkspur Medical regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-29","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Partner","hours":4.0,"rate":540.0,"amount":2160.0,"narrative":"Prepare outline for deposition of Bluepine Holdings witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-29","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Partner","hours":4.0,"rate":540.0,"amount":2160.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-29","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Partner","hours":4.0,"rate":540.0,"amount":2160.0,"narrative":"Draft mediation statement to Quarry Lane Partners","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-29","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Partner","hours":1.8,"rate":540.0,"amount":972.0,"narrative":"Research authority for discovery plan","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-01-30","timekeeper":"Nakamura, I.","timekeeper_name":"Ivan Nakamura","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.6,"rate":375.0,"amount":225.0,"narrative":"Draft protective order to Larkspur Medical","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-01-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":453.0,"rate":0.12,"amount":54.36,"narrative":"Photocopies - 453 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["509 Lakeshore Drive","Boston","Tax ID 28-1618686"],"template":"T06","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-05-14","matter_close":"2026-05-01","matter_budget":77737.0,"approved_timekeepers":["Samuel Voss","Ivan Nakamura","Nadia Lindqvist","Marcus Delacroix","Rafael Eriksen","Cyrus Zielinski","Yusuf Fairweather"],"invoice_received_date":"2026-02-13"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[7],"consequence":"Disallow"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[12],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

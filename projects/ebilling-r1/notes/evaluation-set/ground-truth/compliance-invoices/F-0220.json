@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0220",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0220","generator_id":"gen_eval_set.py@1 F-0220","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0220.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Hartwell Cranmer PC","firm_invoice_number":"A-26995/2026","invoice_date":"2026-01-01","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"22649-0019","po_number":"PO-4571667","fees_total":8263.75,"expenses_total":319.82,"adjustments_total":0.0,"total_due":8583.57,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Abernathy","title":"Associate","rate":335.0,"billed_as":"AA"},{"name":"Ingrid Castellanos","title":"Partner","rate":710.0,"billed_as":"IC"},{"name":"Jordan Marchetti","title":"Legal Assistant","rate":160.0,"billed_as":"JM"},{"name":"Leila Tavares","title":"Associate","rate":320.0,"billed_as":"LT"},{"name":"Sofia Yilmaz","title":"Paralegal","rate":215.0,"billed_as":"SY"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":335.0,"amount":335.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-01","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":320.0,"amount":80.0,"narrative":"Revise requests for production after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-01","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":335.0,"amount":335.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-02","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":335.0,"amount":251.25,"narrative":"Prepare fact witness for testimony regarding the regulatory inquiry","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-02","timekeeper":"IC","timekeeper_name":"Ingrid Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":2.25,"rate":710.0,"amount":1597.5,"narrative":"Prepare expert witness for testimony in the vendor agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-03","timekeeper":"JM","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Legal Assistant","title":"LA","hours":2.75,"rate":160.0,"amount":440.0,"narrative":"Telephone conference with witness regarding the supply agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-09","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":320.0,"amount":400.0,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-10","timekeeper":"IC","timekeeper_name":"Ingrid Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":710.0,"amount":887.5,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-11","timekeeper":"SY","timekeeper_name":"Sofia Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":215.0,"amount":537.5,"narrative":"Attend hearing on discovery plan in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-16","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":335.0,"amount":418.75,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-17","timekeeper":"SY","timekeeper_name":"Sofia Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":215.0,"amount":107.5,"narrative":"Telephone conference with witness regarding the construction contract","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-17","timekeeper":"IC","timekeeper_name":"Ingrid Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":2.75,"rate":710.0,"amount":1952.5,"narrative":"Attend hearing on notice of deposition in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-09-18","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":335.0,"amount":83.75,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-09-26","timekeeper":"AA","timekeeper_name":"Anders Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":335.0,"amount":837.5,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":319.82,"amount":319.82,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["450 Harbor Road","Minneapolis","Tax ID 56-3149416"],"template":"T07","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-14","matter_close":"2025-12-29","matter_budget":59334.0,"approved_timekeepers":["Anders Abernathy","Jordan Marchetti","Mei Kowalczyk","Ingrid Castellanos","Yusuf Dunleavy","Sofia Yilmaz","Hannah Oyelaran","Leila Tavares"],"invoice_received_date":"2026-01-02"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[3],"consequence":"Disallow","related_line_refs":[1]}
+ ],
+ "seeded_violations":2
+}

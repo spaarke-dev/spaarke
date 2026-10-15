@@ -1,0 +1,40 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0172",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0172","generator_id":"gen_eval_set.py@1 F-0172","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0172.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Rutherford & Zeller LLP","firm_invoice_number":"INV-2026-40302","invoice_date":"2025-06-24","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"55077-0015","po_number":"PO-4583196","fees_total":6773.25,"expenses_total":305.02,"adjustments_total":0.0,"total_due":7078.27,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Marchetti","title":"Associate","rate":345.0,"billed_as":"B. Marchetti"},{"name":"Beatrix Wickham","title":"Paralegal","rate":210.0,"billed_as":"B. Wickham"},{"name":"Clara Castellanos","title":"Paralegal","rate":205.0,"billed_as":"C. Castellanos"},{"name":"Farah Eriksen","title":"Senior Associate","rate":410.0,"billed_as":"F. Eriksen"},{"name":"Louis Nakamura","title":"Associate","rate":365.0,"billed_as":"L. Nakamura"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-06","timekeeper":"B. Marchetti","timekeeper_name":"Beatrix Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":345.0,"amount":862.5,"narrative":"Ran conflict check for new party","codes":["L310","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":2,"line_type":"fee","date":"2025-03-14","timekeeper":"B. Marchetti","timekeeper_name":"Beatrix Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":345.0,"amount":776.25,"narrative":"Draft interrogatory responses in the insurance coverage issue","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-20","timekeeper":"B. Marchetti","timekeeper_name":"Beatrix Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":345.0,"amount":948.75,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-05","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":210.0,"amount":157.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-06","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":210.0,"amount":315.0,"narrative":"Prepare responses and objections to reply brief","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-18","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":210.0,"amount":472.5,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-19","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":210.0,"amount":577.5,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-21","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":1.95,"rate":210.0,"amount":409.5,"narrative":"Meet and confer with counsel for Ironbridge Steel regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-26","timekeeper":"B. Wickham","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":210.0,"amount":105.0,"narrative":"Meet and confer with counsel for Orchard Row Brands regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-27","timekeeper":"C. Castellanos","timekeeper_name":"Clara Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":205.0,"amount":256.25,"narrative":"Research authority for protective order","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-14","timekeeper":"F. Eriksen","timekeeper_name":"Farah Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":410.0,"amount":615.0,"narrative":"Prepare responses and objections to exhibit list","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-03-28","timekeeper":"L. Nakamura","timekeeper_name":"Louis Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":365.0,"amount":638.75,"narrative":"Review documents produced by Northwind Logistics for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-03-28","timekeeper":"L. Nakamura","timekeeper_name":"Louis Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":365.0,"amount":638.75,"narrative":"Review documents produced by Northwind Logistics for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":43.25,"amount":129.75,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":2.08,"amount":6.24,"narrative":"Facsimile charges","codes":["E104"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":130.71,"amount":130.71,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":30.0,"rate":0.68,"amount":20.4,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2025-03-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":28.0,"rate":0.64,"amount":17.92,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["759 Harbor Road","Atlanta","Tax ID 15-7397692"],"template":"T16","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-05-04","matter_close":"2025-06-29","matter_budget":53313.0,"approved_timekeepers":["Louis Nakamura","Farah Eriksen","Beatrix Wickham","Clara Castellanos","Hannah Hargrove","Imani Dunleavy","Beatrix Marchetti"],"invoice_received_date":"2025-06-25"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[13],"consequence":"Disallow","related_line_refs":[12]},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[15],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

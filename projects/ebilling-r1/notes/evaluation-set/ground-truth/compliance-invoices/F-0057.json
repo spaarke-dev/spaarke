@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0057",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0057","generator_id":"gen_eval_set.py@1 F-0057","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0057.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Hartwell Dunmore PC","firm_invoice_number":"INV-2026-20131","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"42912-0022","po_number":"PO-4562354","fees_total":4476.5,"expenses_total":242.9,"adjustments_total":0.0,"total_due":4719.4,"currency":"USD"},
+ "timekeepers":[{"name":"Gregory Carmichael","title":"Associate","rate":220.0,"billed_as":"GC"},{"name":"Ingrid Lockhart","title":"Senior Associate","rate":325.0,"billed_as":"IL"},{"name":"Louis Sandoval","title":"Of Counsel","rate":430.0,"billed_as":"LS"},{"name":"Marcus Marchetti","title":"Paralegal","rate":120.0,"billed_as":"MM"},{"name":"Yusuf Whitfield","title":"Associate","rate":240.0,"billed_as":"YW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-03","timekeeper":"GC","timekeeper_name":"Gregory Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":220.0,"amount":44.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-04","timekeeper":"MM","timekeeper_name":"Marcus Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":200.0,"amount":100.0,"narrative":"Review documents produced by Redstone Mining for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-09","timekeeper":"MM","timekeeper_name":"Marcus Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":120.0,"amount":24.0,"narrative":"Draft discovery plan in the regulatory inquiry","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-09","timekeeper":"LS","timekeeper_name":"Louis Sandoval","timekeeper_title":"Of Counsel","title":"O/C","hours":0.5,"rate":430.0,"amount":215.0,"narrative":"Internal conference with Louis Sandoval regarding strategy for the supply agreement","codes":["L320","A105"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-09-10","timekeeper":"LS","timekeeper_name":"Louis Sandoval","timekeeper_title":"Of Counsel","title":"O/C","hours":2.8,"rate":430.0,"amount":1204.0,"narrative":"Review opposing brief in response to pretrial brief","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-12","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":325.0,"amount":910.0,"narrative":"Draft requests for production to Solano Freight","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-15","timekeeper":"YW","timekeeper_name":"Yusuf Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":240.0,"amount":720.0,"narrative":"Review documents produced by Orchard Row Brands for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-23","timekeeper":"MM","timekeeper_name":"Marcus Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":120.0,"amount":132.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-23","timekeeper":"YW","timekeeper_name":"Yusuf Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":240.0,"amount":600.0,"narrative":"Attend deposition of Tidewater Retail corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-30","timekeeper":"MM","timekeeper_name":"Marcus Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":120.0,"amount":300.0,"narrative":"Research authority for complaint","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-30","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":325.0,"amount":227.5,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":518.0,"rate":0.08,"amount":41.44,"narrative":"Photocopies - 518 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":84.49,"amount":84.49,"narrative":"Word processing and document formatting","codes":["E103"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":52.3,"amount":104.6,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":12.37,"amount":12.37,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["247 Congress Boulevard","Seattle","Tax ID 69-8204556"],"template":"T05","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-12-13","matter_close":"2025-12-29","matter_budget":43877.0,"approved_timekeepers":["Louis Sandoval","Gregory Carmichael","Marcus Blackwood","Marcus Marchetti","Ivan Eriksen","Ingrid Lockhart","Yusuf Whitfield"],"invoice_received_date":"2025-10-20"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

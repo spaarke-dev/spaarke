@@ -1,0 +1,22 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"ocg",
+ "id":"E-OCG-08",
+ "set":"E",
+ "meta":{"title":"Solano Superior Court appointed-counsel billing guidelines (rev 2025-11-18)","source_url":"https://solano.courts.ca.gov/system/files/general/billing-guidelines-cac-fc3150-rev11-18-25.pdf","licence":"No licence stated. Government/public-institution publication posted on the open web; used only as a public document for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. Hits: email 1, street_address 2, case_party_marker 2. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"solano-courts.pdf","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":10265,"counts":{"email":1,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":2,"case_party_marker":2},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/ocg/solano-courts.pdf"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"court","pages":4,"retrieved":"2026-10-15"},
+ "rules":[
+  {"rule_id":"E-OCG-08-R01","rule_type":"ApprovedRate","params":{"rates_by_work_date":[{"after":"2023-05-01","attorney":95},{"after":"2025-01-09","attorney":108}],"unit":"USD per hour"},"consequence":null,"clause_ref":{"section":"4.a.A","page":2},"paraphrase":"Fixed hourly attorney rate of 95 dollars for work after 1 May 2023 and 108 dollars after 9 January 2025.","expressible":true},
+  {"rule_id":"E-OCG-08-R02","rule_type":"ApprovedTimekeeper","params":{"attorney_work_only":true,"support_staff_billable":false},"consequence":"Disallow","clause_ref":{"section":"4.b.A","page":2},"paraphrase":"Only attorney work may be billed; support staff time is not compensated.","expressible":true},
+  {"rule_id":"E-OCG-08-R03","rule_type":"TimeIncrement","params":{"increment_hours":0.1,"rounding":"up","actual_time_only":true},"consequence":null,"clause_ref":{"section":"4.b.A","page":2},"paraphrase":"Actual time only, rounded up to the nearest tenth of an hour.","expressible":true},
+  {"rule_id":"E-OCG-08-R04","rule_type":"Duplicate","params":{"match_on":["court_time_across_cases"]},"consequence":"Disallow","clause_ref":{"section":"4.b.B","page":2},"paraphrase":"Double or multiple billing for one court appearance across cases is not tolerated.","expressible":true},
+  {"rule_id":"E-OCG-08-R05","rule_type":"AiObservation","params":{"observations":["block_billing"]},"consequence":"Disallow","clause_ref":{"section":"4.b.C","page":2},"paraphrase":"No bundling of services; each task is itemised.","expressible":true},
+  {"rule_id":"E-OCG-08-R06","rule_type":"NonBillableActivity","params":{"keywords":["travel to and from place of business to court"],"allowed":"actual travel to meet a party outside court"},"consequence":"Disallow","clause_ref":{"section":"4.a.B","page":2},"paraphrase":"Travel between place of business and court is not reimbursable.","expressible":true},
+  {"rule_id":"E-OCG-08-R07","rule_type":"ExpenseRule","params":{"reimbursable":["court filing fees","mandatory public agency fees"],"all_other_expenses_not_reimbursable":true,"includes":["travel expenses","mileage"]},"consequence":"Disallow","clause_ref":{"section":"4.a.C / 4.c.D","page":2},"paraphrase":"Only court filing fees and mandatory public agency fees are reimbursed; fees cover all other expenses.","expressible":true},
+  {"rule_id":"E-OCG-08-R08","rule_type":"InvoiceAge","params":{"max_days_after_service_completion":30,"hard_limit_days":60,"claim_frequency":"monthly per case"},"consequence":"Reject","clause_ref":{"section":"4.b.D / 4.b.G","page":2},"paraphrase":"One claim monthly per case; completed work within 30 days and no later than 60 days.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"4.b.E","page":3},"paraphrase":"The claim packet must include the signed vendor claim form, order and FL-323.","reason":"not-billing"},
+  {"clause_ref":{"section":"4.b.H","page":3},"paraphrase":"Fiscal-year-end invoices are submitted within twenty days after June 30.","reason":"needs-new-type"}
+ ]
+}

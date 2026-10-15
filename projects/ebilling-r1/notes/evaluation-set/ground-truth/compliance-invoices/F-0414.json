@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0414",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0414","generator_id":"gen_eval_set.py@1 F-0414","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0414.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Jarrow & Cranmer LLP","firm_invoice_number":"INV-2026-09565","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"59514-0013","po_number":"PO-4526488","fees_total":1198.5,"expenses_total":1970.97,"adjustments_total":0.0,"total_due":3169.47,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Yilmaz","title":"Paralegal","rate":120.0,"billed_as":"DY"},{"name":"Emeka Marchetti","title":"Senior Associate","rate":295.0,"billed_as":"EM"},{"name":"Jordan Voss","title":"Paralegal","rate":110.0,"billed_as":"JV"},{"name":"Louis Lockhart","title":"Partner","rate":375.0,"billed_as":"LL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-03","timekeeper":"LL","timekeeper_name":"Louis Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":375.0,"amount":337.5,"narrative":"Review and analyze settlement proposal received from Quarry Lane Partners","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-04","timekeeper":"JV","timekeeper_name":"Jordan Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":110.0,"amount":121.0,"narrative":"Research authority for complaint","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-11-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":45.0,"rate":0.7,"amount":31.5,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-07","timekeeper":"JV","timekeeper_name":"Jordan Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":110.0,"amount":110.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-14","timekeeper":"JV","timekeeper_name":"Jordan Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":110.0,"amount":165.0,"narrative":"Prepare production set and cover correspondence for service on Orchard Row Brands","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2025-11-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.39,"amount":35.39,"narrative":"Overnight courier to Ironbridge Steel counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-17","timekeeper":"DY","timekeeper_name":"Dmitri Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":120.0,"amount":36.0,"narrative":"Prepare responses and objections to settlement proposal","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-21","timekeeper":"LL","timekeeper_name":"Louis Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":375.0,"amount":75.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-25","timekeeper":"EM","timekeeper_name":"Emeka Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":295.0,"amount":354.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1904.08,"amount":1904.08,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["975 Pine Street","Houston","Tax ID 65-5161507"],"template":"T09","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-12-11","matter_close":"2026-02-28","matter_budget":37677.0,"approved_timekeepers":["Daniel Mbeki","Sofia Mbeki","Emeka Marchetti","Gregory Halloran","Jordan Voss","Dmitri Yilmaz","Louis Lockhart","Rafael Tavares"],"invoice_received_date":"2025-12-18"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

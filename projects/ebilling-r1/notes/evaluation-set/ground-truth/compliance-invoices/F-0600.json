@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0600",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0600","generator_id":"gen_eval_set.py@1 F-0600","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0600.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Quimby and Yardley LLP","firm_invoice_number":"INV-2026-23144","invoice_date":"2025-12-01","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"39219-0029","po_number":"PO-4565096","fees_total":2551.5,"expenses_total":6727.51,"adjustments_total":0.0,"total_due":9279.01,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Whitfield","title":"Senior Associate","rate":260.0,"billed_as":"Elena Whitfield"},{"name":"Jordan Oyelaran","title":"Paralegal","rate":130.0,"billed_as":"Jordan Oyelaran"},{"name":"Katya Hargrove","title":"Associate","rate":235.0,"billed_as":"Katya Hargrove"},{"name":"Yusuf Quillen","title":"Associate","rate":215.0,"billed_as":"Yusuf Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-04","timekeeper":"Elena Whitfield","timekeeper_name":"Elena Whitfield","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":260.0,"amount":468.0,"narrative":"Draft mediation statement to Ironbridge Steel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-05","timekeeper":"Jordan Oyelaran","timekeeper_name":"Jordan Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":130.0,"amount":221.0,"narrative":"Draft exhibit list and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-10","timekeeper":"Elena Whitfield","timekeeper_name":"Elena Whitfield","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.2,"rate":260.0,"amount":572.0,"narrative":"Draft motion to dismiss and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-10","timekeeper":"Yusuf Quillen","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":215.0,"amount":21.5,"narrative":"Prepare responses and objections to interrogatory responses","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2025-11-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6369.89,"amount":6369.89,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-11","timekeeper":"Yusuf Quillen","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":215.0,"amount":129.0,"narrative":"Prepare responses and objections to motion to compel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2025-11-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":292.85,"amount":292.85,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-14","timekeeper":"Katya Hargrove","timekeeper_name":"Katya Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":235.0,"amount":423.0,"narrative":"Prepare responses and objections to exhibit list","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-21","timekeeper":"Jordan Oyelaran","timekeeper_name":"Jordan Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":130.0,"amount":247.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.24,"amount":35.24,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":29.53,"amount":29.53,"narrative":"Overnight courier to Summit Ridge Homes counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-28","timekeeper":"Katya Hargrove","timekeeper_name":"Katya Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":235.0,"amount":470.0,"narrative":"Research case law supporting answer and affirmative defenses","codes":["L240","A102"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["76 Lakeshore Drive","Chicago","Tax ID 35-9894742"],"template":"T18","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-10-30","matter_close":"2026-02-28","matter_budget":62116.0,"approved_timekeepers":["Elena Whitfield","Hector Mbeki","Katya Hargrove","Jordan Oyelaran","Yusuf Quillen"],"invoice_received_date":"2025-12-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

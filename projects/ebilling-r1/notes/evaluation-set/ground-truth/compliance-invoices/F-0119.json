@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0119",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0119","generator_id":"gen_eval_set.py@1 F-0119","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0119.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Aldridge & Beckett LLP","firm_invoice_number":"INV-2025-06121","invoice_date":"2026-03-02","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"94346-0005","po_number":"PO-4521683","fees_total":4297.5,"expenses_total":105.24,"adjustments_total":0.0,"total_due":4402.74,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Wickham","title":"Senior Associate","rate":315.0,"billed_as":"BW"},{"name":"Leila Pemberton","title":"Associate","rate":260.0,"billed_as":"LP"},{"name":"Nadia Ashdown","title":"Of Counsel","rate":510.0,"billed_as":"NA"},{"name":"Nadia Halloran","title":"Associate","rate":260.0,"billed_as":"NH"},{"name":"Naomi Voss","title":"Partner","rate":575.0,"billed_as":"NV"},{"name":"Sofia Mbeki","title":"Paralegal","rate":150.0,"billed_as":"SM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-02","timekeeper":"LP","timekeeper_name":"Leila Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":260.0,"amount":728.0,"narrative":"Telephone conference with witness regarding the lease dispute","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-04","timekeeper":"BW","timekeeper_name":"Beatrix Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":315.0,"amount":252.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the employment claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-10","timekeeper":"NV","timekeeper_name":"Naomi Voss","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":575.0,"amount":747.5,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-13","timekeeper":"SM","timekeeper_name":"Sofia Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":150.0,"amount":135.0,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-16","timekeeper":"NH","timekeeper_name":"Nadia Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":260.0,"amount":598.0,"narrative":"Draft answer and affirmative defenses for trial in the licensing dispute","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-23","timekeeper":"LP","timekeeper_name":"Leila Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":260.0,"amount":442.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-25","timekeeper":"NA","timekeeper_name":"Nadia Ashdown","timekeeper_title":"Of Counsel","title":"O/C","hours":2.1,"rate":600.0,"amount":1260.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-27","timekeeper":"SM","timekeeper_name":"Sofia Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":150.0,"amount":135.0,"narrative":"Draft post-trial motion in the regulatory inquiry","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-02-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":9.04,"amount":9.04,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-02-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":48.1,"amount":96.2,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["339 Market Street","Portland","Tax ID 67-4782827"],"template":"T15","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-06-11","matter_close":"2026-05-29","matter_budget":42610.0,"approved_timekeepers":["Leila Pemberton","Sofia Pemberton","Daniel Delacroix","Nadia Ashdown","Sofia Mbeki","Naomi Voss","Beatrix Wickham","Nadia Halloran"],"invoice_received_date":"2026-03-14"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

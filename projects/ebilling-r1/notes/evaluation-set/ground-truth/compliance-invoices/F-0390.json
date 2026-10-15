@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0390",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0390","generator_id":"gen_eval_set.py@1 F-0390","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0390.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ingersoll Yardley PC","firm_invoice_number":"INV-2026-35681","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"38732-0009","po_number":"PO-4527891","fees_total":3112.5,"expenses_total":1284.76,"adjustments_total":0.0,"total_due":4397.26,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Zielinski","title":"Paralegal","rate":110.0,"billed_as":"FZ"},{"name":"Hannah Castellanos","title":"Paralegal","rate":125.0,"billed_as":"HC"},{"name":"Imani Mbeki","title":"Associate","rate":225.0,"billed_as":"IM"},{"name":"Imani Pemberton","title":"Senior Associate","rate":280.0,"billed_as":"IP"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-04","timekeeper":"HC","timekeeper_name":"Hannah Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":125.0,"amount":150.0,"narrative":"Update document review protocol and coding panel for the distribution agreement","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-04","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.4,"rate":280.0,"amount":112.0,"narrative":"Conference with client regarding budget variance for the employment claim","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-05","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":225.0,"amount":202.5,"narrative":"Attend case management conference in the licensing dispute","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-10","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":225.0,"amount":157.5,"narrative":"Update document review protocol and coding panel for the employment claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-13","timekeeper":"HC","timekeeper_name":"Hannah Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":125.0,"amount":37.5,"narrative":"Review expert qualifications and prior testimony for the lease dispute","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-16","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":225.0,"amount":652.5,"narrative":"Telephone conference with client representative regarding factual background of the supply agreement","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-17","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":225.0,"amount":427.5,"narrative":"Attend case management conference in the vendor agreement","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-19","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":225.0,"amount":247.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-20","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.6,"rate":280.0,"amount":728.0,"narrative":"Review and revise requests for production based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-26","timekeeper":"FZ","timekeeper_name":"Farah Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":110.0,"amount":330.0,"narrative":"Prepare for case management conference in the customs audit","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-26","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":225.0,"amount":67.5,"narrative":"Research public records concerning Quarry Lane Partners and related entities","codes":["L110","A102"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":34.61,"amount":103.83,"narrative":"Overnight courier to Larkspur Medical counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1158.36,"amount":1158.36,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-06-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":37.0,"rate":0.61,"amount":22.57,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["670 Commerce Avenue","Phoenix","Tax ID 13-5784252"],"template":"T05","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-08-09","matter_close":"2025-09-28","matter_budget":42589.0,"approved_timekeepers":["Imani Pemberton","Hannah Castellanos","Hector Yilmaz","Cyrus Delacroix","Aisha Santoro","Imani Mbeki","Farah Zielinski"],"invoice_received_date":"2025-07-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -15,7 +15,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 001 | ✅ [completed] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
-| 002 | 🟡 [in-progress] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
+| 002 | ✅ [completed] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
 | 003 | ✅ [completed] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
 | 004 | ✅ [completed] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |
 | 005 | 🔲 [open] | Extraction spike — four arms, coding model comparison, package size; go / no-go | STANDARD | opus / high | none | 002, 004 |
@@ -32,7 +32,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
 | 016 | 🔲 [open] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
 | 017 | 🔲 [open] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
-| 018 | 🔲 [open] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
+| 018 | 🟡 [in-progress] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
 | 019 | 🔲 [open] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
 | 020 | 🔲 [open] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
 | 021 | 🔲 [open] | `sprk_invoiceapproval` schema | STANDARD | sonnet / high | P1-A | none |

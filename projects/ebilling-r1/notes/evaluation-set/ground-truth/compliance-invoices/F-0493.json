@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0493",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0493","generator_id":"gen_eval_set.py@1 F-0493","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0493.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Ingersoll Whitcombe PC","firm_invoice_number":"INV-2025-04443","invoice_date":"2026-03-03","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"10961-0003","po_number":"PO-4525524","fees_total":5205.5,"expenses_total":655.67,"adjustments_total":0.0,"total_due":5861.17,"currency":"USD"},
+ "timekeepers":[{"name":"Ingrid Hargrove","title":"Associate","rate":350.0,"billed_as":"Hargrove, I."},{"name":"Leila Lockhart","title":"Paralegal","rate":175.0,"billed_as":"Lockhart, L."},{"name":"Marcus Delacroix","title":"Associate","rate":330.0,"billed_as":"Delacroix, M."},{"name":"Sofia Marchetti","title":"Associate","rate":325.0,"billed_as":"Marchetti, S."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-02","timekeeper":"Marchetti, S.","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Associate","title":"Associate","hours":2.9,"rate":325.0,"amount":942.5,"narrative":"Research authority for complaint","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-03","timekeeper":"Hargrove, I.","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Associate","title":"Associate","hours":3.0,"rate":350.0,"amount":1050.0,"narrative":"Research authority for motion to compel","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-04","timekeeper":"Hargrove, I.","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Associate","title":"Associate","hours":2.0,"rate":350.0,"amount":700.0,"narrative":"Attend deposition of Caldera Energy corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-05","timekeeper":"Delacroix, M.","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Associate","title":"Associate","hours":2.1,"rate":330.0,"amount":693.0,"narrative":"Analyze exposure and damages model for the warranty claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-12","timekeeper":"Marchetti, S.","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Associate","title":"Associate","hours":0.1,"rate":325.0,"amount":32.5,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-12","timekeeper":"Lockhart, L.","timekeeper_name":"Leila Lockhart","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.7,"rate":175.0,"amount":122.5,"narrative":"Review documents produced by Meridian Foods for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-13","timekeeper":"Lockhart, L.","timekeeper_name":"Leila Lockhart","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.3,"rate":175.0,"amount":227.5,"narrative":"Review and analyze motion to dismiss received from Larkspur Medical","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-17","timekeeper":"Marchetti, S.","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Associate","title":"Associate","hours":1.0,"rate":325.0,"amount":325.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-19","timekeeper":"Marchetti, S.","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Associate","title":"Associate","hours":0.3,"rate":325.0,"amount":97.5,"narrative":"Update document review protocol and coding panel for the vendor agreement","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-02-23","timekeeper":"Hargrove, I.","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Associate","title":"Associate","hours":1.2,"rate":350.0,"amount":420.0,"narrative":"Review expert report served by Harbor Point Capital","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-02-26","timekeeper":"Hargrove, I.","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Associate","title":"Associate","hours":1.7,"rate":350.0,"amount":595.0,"narrative":"Draft requests for production to Quarry Lane Partners","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-02-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":655.67,"amount":655.67,"narrative":"Airfare to Boston for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["392 Peachtree Way","Atlanta","Tax ID 32-1448681"],"template":"T06","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-11-23","matter_close":"2026-05-29","matter_budget":48444.0,"approved_timekeepers":["Anders Galbraith","Imani Esposito","Leila Lockhart","Ingrid Hargrove","Nadia Marchetti","Marcus Delacroix","Cyrus Wickham","Sofia Marchetti"],"invoice_received_date":"2026-03-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

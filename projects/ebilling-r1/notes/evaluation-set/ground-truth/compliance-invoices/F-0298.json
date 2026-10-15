@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0298",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0298","generator_id":"gen_eval_set.py@1 F-0298","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0298.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Lindenmeyer and Beckett LLP","firm_invoice_number":"INV-2026-41630","invoice_date":"2026-08-02","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"50078-0027","po_number":"PO-4569879","fees_total":2845.5,"expenses_total":3158.39,"adjustments_total":0.0,"total_due":6003.89,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Tavares","title":"Senior Associate","rate":380.0,"billed_as":"BT"},{"name":"Cyrus Sandoval","title":"Associate","rate":295.0,"billed_as":"CS"},{"name":"Elena Carmichael","title":"Associate","rate":365.0,"billed_as":"EC"},{"name":"Hannah Nwosu","title":"Paralegal","rate":185.0,"billed_as":"HN"},{"name":"Ivan Eriksen","title":"Legal Assistant","rate":165.0,"billed_as":"IE"},{"name":"Oliver Brennan","title":"Paralegal","rate":195.0,"billed_as":"OB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-01","timekeeper":"EC","timekeeper_name":"Elena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":365.0,"amount":273.75,"narrative":"Draft notice of deposition in the vendor agreement","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-03","timekeeper":"CS","timekeeper_name":"Cyrus Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":295.0,"amount":118.0,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-13","timekeeper":"OB","timekeeper_name":"Oliver Brennan","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":195.0,"amount":341.25,"narrative":"Draft settlement term sheet for the insurance coverage issue","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-20","timekeeper":"HN","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":185.0,"amount":416.25,"narrative":"Review and revise motion to dismiss based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-22","timekeeper":"OB","timekeeper_name":"Oliver Brennan","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":195.0,"amount":292.5,"narrative":"Ran conflict check for new party","codes":["L130","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2026-07-27","timekeeper":"BT","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":380.0,"amount":950.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-29","timekeeper":"IE","timekeeper_name":"Ivan Eriksen","timekeeper_title":"Legal Assistant","title":"LA","hours":2.75,"rate":165.0,"amount":453.75,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-07-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1409.1,"amount":1409.1,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":487.0,"rate":0.1,"amount":48.7,"narrative":"Photocopies - 487 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1662.8,"amount":1662.8,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":37.79,"amount":37.79,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["305 Harbor Road","Minneapolis","Tax ID 62-7320027"],"template":"T05","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-07-26","matter_close":"2026-10-29","matter_budget":49015.0,"approved_timekeepers":["Cyrus Sandoval","Oliver Brennan","Beatrix Tavares","Daniel Whitfield","Elena Carmichael","Gregory Castellanos","Hannah Nwosu","Dalia Blackwood"],"invoice_received_date":"2026-08-10"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[7],"consequence":"Reject"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

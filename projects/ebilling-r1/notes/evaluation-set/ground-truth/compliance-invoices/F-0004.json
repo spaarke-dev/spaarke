@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0004",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0004","generator_id":"gen_eval_set.py@1 F-0004","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0004.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ravenscroft Beckett PC","firm_invoice_number":"LF0038311","invoice_date":"2025-10-03","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"50741-0002","po_number":"PO-4576770","fees_total":7050.0,"expenses_total":786.8,"adjustments_total":0.0,"total_due":7836.8,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Quillen","title":"Associate","rate":365.0,"billed_as":"AQ"},{"name":"Daniel Yilmaz","title":"Paralegal","rate":210.0,"billed_as":"DY"},{"name":"Helena Whitfield","title":"Partner","rate":585.0,"billed_as":"HW"},{"name":"Leila Santoro","title":"Associate","rate":380.0,"billed_as":"LS"},{"name":"Louis Esposito","title":"Associate","rate":360.0,"billed_as":"LE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-02","timekeeper":"LE","timekeeper_name":"Louis Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":360.0,"amount":360.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"DY","timekeeper_name":"Daniel Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":210.0,"amount":52.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-04","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":365.0,"amount":273.75,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-09","timekeeper":"LS","timekeeper_name":"Leila Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":380.0,"amount":950.0,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-10","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":365.0,"amount":1003.75,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-14","timekeeper":"DY","timekeeper_name":"Daniel Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":210.0,"amount":105.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-18","timekeeper":"DY","timekeeper_name":"Daniel Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":210.0,"amount":105.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-18","timekeeper":"DY","timekeeper_name":"Daniel Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":210.0,"amount":630.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-22","timekeeper":"HW","timekeeper_name":"Helena Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":585.0,"amount":292.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-24","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":365.0,"amount":912.5,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-25","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":365.0,"amount":1095.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-07-29","timekeeper":"LE","timekeeper_name":"Louis Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":360.0,"amount":540.0,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-07-29","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":365.0,"amount":730.0,"narrative":"Draft notice of appeal and docketing statement for the vendor agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-07-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":15.82,"amount":15.82,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-07-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":739.76,"amount":739.76,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":31.22,"amount":31.22,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["128 Pine Street","Houston","Tax ID 63-8906639"],"template":"T19","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-11-02","matter_close":"2025-10-29","matter_budget":56347.0,"approved_timekeepers":["Daniel Yilmaz","Louis Esposito","Anders Quillen","Leila Santoro","Helena Whitfield"],"invoice_received_date":"2025-10-04"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":1
+}

@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0054",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0054","generator_id":"gen_eval_set.py@1 F-0054","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0054.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Eastlake & Beckett LLP","firm_invoice_number":"INV-2026-30468","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"79500-0039","po_number":"PO-4511060","fees_total":4228.0,"expenses_total":848.31,"adjustments_total":0.0,"total_due":5076.31,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Ramanathan","title":"Of Counsel","rate":295.0,"billed_as":"Cyrus Ramanathan"},{"name":"Daniel Nwosu","title":"Partner","rate":365.0,"billed_as":"Daniel Nwosu"},{"name":"Louis Whitfield","title":"Associate","rate":220.0,"billed_as":"Louis Whitfield"},{"name":"Oliver Dunleavy","title":"Paralegal","rate":100.0,"billed_as":"Oliver Dunleavy"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2025-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":798.91,"amount":798.91,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-04","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":220.0,"amount":484.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-05","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":220.0,"amount":484.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-06","timekeeper":"Cyrus Ramanathan","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Of Counsel","title":"O/C","hours":1.2,"rate":295.0,"amount":354.0,"narrative":"Prepare examination outlines for trial in the warranty claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-06","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":220.0,"amount":66.0,"narrative":"Prepare fact witness for testimony regarding the warranty claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-10","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":220.0,"amount":66.0,"narrative":"Research standard for new trial in the construction contract","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-12","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":220.0,"amount":374.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-13","timekeeper":"Daniel Nwosu","timekeeper_name":"Daniel Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":365.0,"amount":511.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-13","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":220.0,"amount":264.0,"narrative":"Prepare examination outlines for trial in the licensing dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-18","timekeeper":"Oliver Dunleavy","timekeeper_name":"Oliver Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":100.0,"amount":190.0,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-24","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":220.0,"amount":264.0,"narrative":"Prepare expert witness for testimony in the vendor agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":20.0,"rate":2.47,"amount":49.4,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-06-25","timekeeper":"Oliver Dunleavy","timekeeper_name":"Oliver Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":100.0,"amount":280.0,"narrative":"Revise motion to compel after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-06-25","timekeeper":"Cyrus Ramanathan","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Of Counsel","title":"O/C","hours":1.0,"rate":295.0,"amount":295.0,"narrative":"Review and respond to emails.","codes":["L120","A103"],"page":1,"narrative_style":"vague"},
+  {"n":15,"line_type":"fee","date":"2025-06-27","timekeeper":"Louis Whitfield","timekeeper_name":"Louis Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":220.0,"amount":506.0,"narrative":"Telephone conference with witness regarding the employment claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"fee","date":"2025-06-27","timekeeper":"Oliver Dunleavy","timekeeper_name":"Oliver Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":100.0,"amount":90.0,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["795 Market Street","Minneapolis","Tax ID 27-7131893"],"template":"T18","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-09-09","matter_close":"2025-09-28","matter_budget":45305.0,"approved_timekeepers":["Priya Oyelaran","Cyrus Ramanathan","Oliver Dunleavy","Louis Whitfield","Rafael Voss","Daniel Nwosu"],"invoice_received_date":"2025-07-19"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Disallow"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[14],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

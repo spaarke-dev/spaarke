@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0548",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0548","generator_id":"gen_eval_set.py@1 F-0548","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0548.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Sutherland & Beckett LLP","firm_invoice_number":"INV-2025-89134","invoice_date":"2025-07-04","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"10482-0013","po_number":"PO-4549993","fees_total":4185.0,"expenses_total":195.6,"adjustments_total":0.0,"total_due":4380.6,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Ashdown","title":"Associate","rate":320.0,"billed_as":"DA"},{"name":"Hector Okafor","title":"Paralegal","rate":155.0,"billed_as":"HO"},{"name":"Leila Ashdown","title":"Partner","rate":580.0,"billed_as":"LA"},{"name":"Marcus Delacroix","title":"Of Counsel","rate":545.0,"billed_as":"MD"},{"name":"Naomi Blackwood","title":"Associate","rate":255.0,"billed_as":"NB"},{"name":"Sofia Blackwood","title":"Paralegal","rate":165.0,"billed_as":"SB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-02","timekeeper":"NB","timekeeper_name":"Naomi Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":255.0,"amount":25.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-12","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":580.0,"amount":406.0,"narrative":"Review and summarize deposition transcript of Larkspur Medical witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-13","timekeeper":"SB","timekeeper_name":"Sofia Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":165.0,"amount":330.0,"narrative":"Review documents produced by Caldera Energy for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-16","timekeeper":"HO","timekeeper_name":"Hector Okafor","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":155.0,"amount":248.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-19","timekeeper":"NB","timekeeper_name":"Naomi Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":255.0,"amount":612.0,"narrative":"Review opposing brief in response to discovery plan","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-19","timekeeper":"MD","timekeeper_name":"Marcus Delacroix","timekeeper_title":"Of Counsel","title":"O/C","hours":1.9,"rate":545.0,"amount":1035.5,"narrative":"Prepare responses and objections to mediation statement","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-19","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":580.0,"amount":870.0,"narrative":"Prepare responses and objections to witness list","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-27","timekeeper":"NB","timekeeper_name":"Naomi Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":255.0,"amount":306.0,"narrative":"Draft protective order to Larkspur Medical","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-30","timekeeper":"DA","timekeeper_name":"Dmitri Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":320.0,"amount":352.0,"narrative":"Draft motion for summary judgment to Ironbridge Steel","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":171.8,"amount":171.8,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":23.8,"amount":23.8,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["347 Congress Boulevard","Boston","Tax ID 21-4097337"],"template":"T11","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-04-11","matter_close":"2025-09-28","matter_budget":42522.0,"approved_timekeepers":["Marcus Delacroix","Leila Ashdown","Naomi Blackwood","Hector Okafor","Nadia Esposito","Sofia Blackwood","Dmitri Ashdown"],"invoice_received_date":"2025-07-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

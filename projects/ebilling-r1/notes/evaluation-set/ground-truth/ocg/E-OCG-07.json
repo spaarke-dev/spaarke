@@ -1,0 +1,22 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"ocg",
+ "id":"E-OCG-07",
+ "set":"E",
+ "meta":{"title":"Santa Barbara Superior Court appointed-counsel billing guidelines (FC-3150, 2026-04-22)","source_url":"https://www.santabarbara.courts.ca.gov/system/files/general/fc-3150-mc-billing-guidelines-042226.pdf","licence":"No licence stated. Government/public-institution publication posted on the open web; used only as a public document for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. Hits: email 1, case_party_marker 1. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"santabarbara-courts.pdf","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":11155,"counts":{"email":1,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":1},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/ocg/santabarbara-courts.pdf"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"court","pages":4,"retrieved":"2026-10-15"},
+ "rules":[
+  {"rule_id":"E-OCG-07-R01","rule_type":"ApprovedRate","params":{"rates":{"attorney":100,"attorney support staff":50},"unit":"USD per hour"},"consequence":null,"clause_ref":{"section":"4.a.A","page":2},"paraphrase":"Fixed hourly rates of 100 dollars for attorneys and 50 dollars for attorney support staff.","expressible":true},
+  {"rule_id":"E-OCG-07-R02","rule_type":"TimeIncrement","params":{"increment_hours":0.1,"rounding":"up","actual_time_only":true},"consequence":null,"clause_ref":{"section":"4.b.A","page":2},"paraphrase":"Bill actual time only, rounded up to the nearest tenth of an hour.","expressible":true},
+  {"rule_id":"E-OCG-07-R03","rule_type":"Duplicate","params":{"match_on":["court_time_across_cases"],"allocate_waiting_time":true},"consequence":"Disallow","clause_ref":{"section":"4.b.B","page":2},"paraphrase":"Court or waiting time shared by several appointed cases must be allocated across them and not billed in full to each.","expressible":true},
+  {"rule_id":"E-OCG-07-R04","rule_type":"AiObservation","params":{"observations":["block_billing"]},"consequence":"Disallow","clause_ref":{"section":"4.b.C","page":2},"paraphrase":"No bundling of services: each legal task is itemised and multiple activities are not listed under one time allotment.","expressible":true},
+  {"rule_id":"E-OCG-07-R05","rule_type":"NonBillableActivity","params":{"keywords":["travel to and from place of business to court"]},"consequence":"Disallow","clause_ref":{"section":"4.a.B","page":2},"paraphrase":"Travel time between the place of business and court is not reimbursable.","expressible":true},
+  {"rule_id":"E-OCG-07-R06","rule_type":"InvoiceAge","params":{"max_days_after_service_completion":30,"hard_limit_days":60,"claim_frequency":"monthly per case"},"consequence":"Reject","clause_ref":{"section":"4.b.D / 4.b.G","page":3},"paraphrase":"One claim per case monthly; claims for completed work within 30 days and no later than 60 days or payment is at risk.","expressible":true},
+  {"rule_id":"E-OCG-07-R07","rule_type":"ExpenseRule","params":{"generally_not_reimbursed":["travel","mileage","filing fees"],"preapproval_required":true},"consequence":"Disallow","clause_ref":{"section":"4.a.C / 4.c.D","page":2},"paraphrase":"Expenses are not ordinarily reimbursed unless reasonable, necessary and pre-approved by the court.","expressible":true},
+  {"rule_id":"E-OCG-07-R08","rule_type":"RequiredData","params":{"fields":["detailed_vendor_invoice","FL-323_order","client_instead_of_party_names"]},"consequence":null,"clause_ref":{"section":"4.b.E","page":3},"paraphrase":"Claim packet includes a detailed invoice using the word client instead of party names, and Form FL-323.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"4.b.H","page":3},"paraphrase":"Fiscal-year-end invoices are submitted within ten days after June 30.","reason":"needs-new-type"},
+  {"clause_ref":{"section":"4.c.A","page":3},"paraphrase":"The judge may limit amounts deemed excessive.","reason":"judgement"}
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0485",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0485","generator_id":"gen_eval_set.py@1 F-0485","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0485.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Lindenmeyer & Whitcombe LLP","firm_invoice_number":"2025074956","invoice_date":"2025-07-04","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"63882-0021","po_number":"PO-4569161","fees_total":2071.0,"expenses_total":5612.32,"adjustments_total":0.0,"total_due":7683.32,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Halloran","title":"Associate","rate":250.0,"billed_as":"Aisha Halloran"},{"name":"Oliver Rosenthal","title":"Legal Assistant","rate":100.0,"billed_as":"Oliver Rosenthal"},{"name":"Rafael Brennan","title":"Senior Associate","rate":390.0,"billed_as":"Rafael Brennan"},{"name":"Rafael Rosenthal","title":"Associate","rate":290.0,"billed_as":"Rafael Rosenthal"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-02","timekeeper":"Rafael Rosenthal","timekeeper_name":"Rafael Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":290.0,"amount":116.0,"narrative":"Attend deposition of Northwind Logistics corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-13","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":250.0,"amount":50.0,"narrative":"Draft motion to dismiss regarding deficiencies in Summit Ridge Homes responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-13","timekeeper":"Oliver Rosenthal","timekeeper_name":"Oliver Rosenthal","timekeeper_title":"Legal Assistant","title":"LA","hours":0.4,"rate":100.0,"amount":40.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-19","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":250.0,"amount":675.0,"narrative":"Draft reply brief in the construction contract","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-24","timekeeper":"Rafael Brennan","timekeeper_name":"Rafael Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":390.0,"amount":390.0,"narrative":"Prepare responses and objections to witness list","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-25","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":250.0,"amount":700.0,"narrative":"Review opposing brief in response to witness list","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-25","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":250.0,"amount":100.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-06-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":22.69,"amount":22.69,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-06-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5563.5,"amount":5563.5,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":39.0,"rate":0.67,"amount":26.13,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["337 Pine Street","Chicago","Tax ID 64-2894311"],"template":"T02","pages":1},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-03-26","matter_close":"2025-09-28","matter_budget":55733.0,"approved_timekeepers":["Rafael Rosenthal","Rafael Brennan","Emeka Eriksen","Hannah Santoro","Aisha Halloran","Oliver Rosenthal"],"invoice_received_date":"2025-07-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

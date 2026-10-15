@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0015",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0015","generator_id":"gen_eval_set.py@1 F-0015","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0015.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Hartwell Vance PC","firm_invoice_number":"INV-2026-78602","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"22026-0030","po_number":"PO-4570326","fees_total":2021.5,"expenses_total":6367.05,"adjustments_total":0.0,"total_due":8388.55,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Pemberton","title":"Paralegal","rate":110.0,"billed_as":"AP"},{"name":"Cyrus Esposito","title":"Legal Assistant","rate":105.0,"billed_as":"CE"},{"name":"Farah Marchetti","title":"Partner","rate":405.0,"billed_as":"FM"},{"name":"Gregory Lockhart","title":"Associate","rate":225.0,"billed_as":"GL"},{"name":"Ingrid Quillen","title":"Associate","rate":220.0,"billed_as":"IQ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":110.0,"amount":253.0,"narrative":"Prepare for case management conference in the licensing dispute","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"IQ","timekeeper_name":"Ingrid Quillen","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":220.0,"amount":242.0,"narrative":"Draft settlement term sheet for the data incident","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-08","timekeeper":"GL","timekeeper_name":"Gregory Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":225.0,"amount":135.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-08","timekeeper":"FM","timekeeper_name":"Farah Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":405.0,"amount":1134.0,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team; Prepare monthly status report to client regarding the warranty claim; Research standard for provisional remedies concerning the insurance coverage issue.","codes":["L190","A111"],"page":1,"narrative_style":"block_billed"},
+  {"n":5,"line_type":"fee","date":"2025-07-09","timekeeper":"GL","timekeeper_name":"Gregory Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":225.0,"amount":67.5,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2025-07-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":25.06,"amount":50.12,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-21","timekeeper":"CE","timekeeper_name":"Cyrus Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":0.8,"rate":105.0,"amount":84.0,"narrative":"Review and revise interrogatory responses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-24","timekeeper":"IQ","timekeeper_name":"Ingrid Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":220.0,"amount":88.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-07-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5774.67,"amount":5774.67,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-29","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.1,"rate":180.0,"amount":18.0,"narrative":"Prepare updated litigation budget for the distribution agreement","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":542.26,"amount":542.26,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["673 Harbor Road","Phoenix","Tax ID 19-2906813"],"template":"T09","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-07-27","matter_close":"2025-10-29","matter_budget":58554.0,"approved_timekeepers":["Anders Pemberton","Farah Marchetti","Cyrus Esposito","Ingrid Quillen","Sofia Yilmaz","Gregory Lockhart"],"invoice_received_date":"2025-08-20"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R07","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0136",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0136","generator_id":"gen_eval_set.py@1 F-0136","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0136.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Oakhurst & Ellison LLP","firm_invoice_number":"INV-2026-75102","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"50465-0017","po_number":"PO-4577344","fees_total":7490.0,"expenses_total":6892.88,"adjustments_total":0.0,"total_due":14382.88,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Wickham","title":"Associate","rate":295.0,"billed_as":"Emeka Wickham"},{"name":"Farah Mbeki","title":"Partner","rate":575.0,"billed_as":"Farah Mbeki"},{"name":"Ingrid Marchetti","title":"Senior Associate","rate":490.0,"billed_as":"Ingrid Marchetti"},{"name":"Jordan Sandoval","title":"Associate","rate":390.0,"billed_as":"Jordan Sandoval"},{"name":"Katya Brennan","title":"Associate","rate":310.0,"billed_as":"Katya Brennan"},{"name":"Rafael Nakamura","title":"Paralegal","rate":210.0,"billed_as":"Rafael Nakamura"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-02","timekeeper":"Ingrid Marchetti","timekeeper_name":"Ingrid Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":680.0,"amount":170.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-07-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":615.5,"amount":615.5,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-15","timekeeper":"Jordan Sandoval","timekeeper_name":"Jordan Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":390.0,"amount":390.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"expense","date":"2026-07-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6277.38,"amount":6277.38,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-24","timekeeper":"Jordan Sandoval","timekeeper_name":"Jordan Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":390.0,"amount":487.5,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-27","timekeeper":"Farah Mbeki","timekeeper_name":"Farah Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":575.0,"amount":1150.0,"narrative":"Attend and present oral argument in the construction contract","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-27","timekeeper":"Jordan Sandoval","timekeeper_name":"Jordan Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":390.0,"amount":1072.5,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-28","timekeeper":"Farah Mbeki","timekeeper_name":"Farah Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":575.0,"amount":1437.5,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-28","timekeeper":"Farah Mbeki","timekeeper_name":"Farah Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":575.0,"amount":1437.5,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-29","timekeeper":"Katya Brennan","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":310.0,"amount":852.5,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-07-29","timekeeper":"Katya Brennan","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":310.0,"amount":387.5,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-07-30","timekeeper":"Rafael Nakamura","timekeeper_name":"Rafael Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":210.0,"amount":105.0,"narrative":"Draft notice of appeal and docketing statement for the lease dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["772 Federal Plaza","Houston","Tax ID 17-7613543"],"template":"T18","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-07-16","matter_close":"2026-10-29","matter_budget":82531.0,"approved_timekeepers":["Tomas Mbeki","Emeka Wickham","Katya Brennan","Jordan Sandoval","Ingrid Marchetti","Farah Mbeki","Clara Blackwood"],"invoice_received_date":"2026-08-17"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[12],"consequence":"Reject"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[9],"consequence":"Disallow","related_line_refs":[8]}
+ ],
+ "seeded_violations":3
+}

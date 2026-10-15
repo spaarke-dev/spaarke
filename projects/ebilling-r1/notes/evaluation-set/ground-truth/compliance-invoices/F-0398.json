@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0398",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0398","generator_id":"gen_eval_set.py@1 F-0398","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0398.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Ingersoll & Whitcombe LLP","firm_invoice_number":"INV-2026-45867","invoice_date":"2026-02-03","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"49778-0014","po_number":"PO-4527008","fees_total":4612.5,"expenses_total":1073.35,"adjustments_total":0.0,"total_due":5685.85,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Brennan","title":"Associate","rate":295.0,"billed_as":"DB"},{"name":"Hannah Thornbury","title":"Partner","rate":580.0,"billed_as":"HT"},{"name":"Louis Brennan","title":"Senior Associate","rate":405.0,"billed_as":"LB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-01","timekeeper":"DB","timekeeper_name":"Dalia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":295.0,"amount":708.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-01","timekeeper":"DB","timekeeper_name":"Dalia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":295.0,"amount":324.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the distribution agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-05","timekeeper":"DB","timekeeper_name":"Dalia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":295.0,"amount":265.5,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-09","timekeeper":"LB","timekeeper_name":"Louis Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":405.0,"amount":850.5,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-09","timekeeper":"HT","timekeeper_name":"Hannah Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":580.0,"amount":986.0,"narrative":"Research standard for new trial in the insurance coverage issue","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-14","timekeeper":"HT","timekeeper_name":"Hannah Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":580.0,"amount":174.0,"narrative":"Revise protective order after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-14","timekeeper":"DB","timekeeper_name":"Dalia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":295.0,"amount":413.0,"narrative":"Research standard for new trial in the supply agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-20","timekeeper":"LB","timekeeper_name":"Louis Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":405.0,"amount":445.5,"narrative":"Attend hearing on notice of deposition in the warranty claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-30","timekeeper":"LB","timekeeper_name":"Louis Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":405.0,"amount":445.5,"narrative":"Prepare examination outlines for trial in the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-01-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1073.35,"amount":1073.35,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["420 Elm Court","Portland","Tax ID 93-9275549"],"template":"T23","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-01-08","matter_close":"2026-05-01","matter_budget":47743.0,"approved_timekeepers":["Farah Oyelaran","Dalia Brennan","Louis Brennan","Hannah Thornbury","Clara Ashdown"],"invoice_received_date":"2026-02-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

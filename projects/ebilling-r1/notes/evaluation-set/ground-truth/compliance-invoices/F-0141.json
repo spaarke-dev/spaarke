@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0141",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0141","generator_id":"gen_eval_set.py@1 F-0141","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0141.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair and Beckett LLP","firm_invoice_number":"INV-2026-61053","invoice_date":"2025-10-02","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"90349-0029","po_number":"PO-4586541","fees_total":4067.5,"expenses_total":12.59,"adjustments_total":0.0,"total_due":4080.09,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Thornbury","title":"Associate","rate":220.0,"billed_as":"HT"},{"name":"Ingrid Mbeki","title":"Legal Assistant","rate":110.0,"billed_as":"IM"},{"name":"Ivan Brennan","title":"Partner","rate":425.0,"billed_as":"IB"},{"name":"Nadia Wickham","title":"Associate","rate":220.0,"billed_as":"NW"},{"name":"Priya Whitfield","title":"Paralegal","rate":135.0,"billed_as":"PW"},{"name":"Victor Lockhart","title":"Associate","rate":270.0,"billed_as":"VL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":1.7,"rate":155.0,"amount":263.5,"narrative":"Attend hearing on reply brief in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-02","timekeeper":"HT","timekeeper_name":"Hector Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":220.0,"amount":44.0,"narrative":"Docketed deadlines in case management system","codes":["L410","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":3,"line_type":"fee","date":"2025-09-04","timekeeper":"IB","timekeeper_name":"Ivan Brennan","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":425.0,"amount":935.0,"narrative":"Revise interrogatory responses after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-09","timekeeper":"PW","timekeeper_name":"Priya Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":135.0,"amount":229.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the employment claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-09","timekeeper":"VL","timekeeper_name":"Victor Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":270.0,"amount":783.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-10","timekeeper":"NW","timekeeper_name":"Nadia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":220.0,"amount":528.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the warranty claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-10","timekeeper":"NW","timekeeper_name":"Nadia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":220.0,"amount":44.0,"narrative":"Telephone conference with witness regarding the supply agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-22","timekeeper":"PW","timekeeper_name":"Priya Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":135.0,"amount":283.5,"narrative":"Telephone conference with witness regarding the customs audit","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-26","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":4.0,"rate":110.0,"amount":440.0,"narrative":"Attend trial day in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-26","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":4.0,"rate":110.0,"amount":440.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-26","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":0.6,"rate":110.0,"amount":66.0,"narrative":"Prepare fact witness for testimony regarding the insurance coverage issue","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-26","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Legal Assistant","title":"LA","hours":0.1,"rate":110.0,"amount":11.0,"narrative":"Draft discovery plan for trial in the data incident","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":12.59,"amount":12.59,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["894 Harbor Road","Houston","Tax ID 35-3315817"],"template":"T17","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-18","matter_close":"2025-12-29","matter_budget":41320.0,"approved_timekeepers":["Rafael Eriksen","Hector Thornbury","Ivan Brennan","Priya Whitfield","Nadia Wickham","Ingrid Mbeki","Victor Lockhart"],"invoice_received_date":"2025-10-18"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R03","rule_type":"DailyHoursCap","scope":"line","line_refs":[11],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

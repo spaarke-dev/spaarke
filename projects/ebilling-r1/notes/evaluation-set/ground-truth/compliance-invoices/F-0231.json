@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0231",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0231","generator_id":"gen_eval_set.py@1 F-0231","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0231.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Sutherland and Zeller LLP","firm_invoice_number":"INV-2025-12065","invoice_date":"2025-10-03","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"46851-0017","po_number":null,"fees_total":2056.5,"expenses_total":3235.46,"adjustments_total":0.0,"total_due":5291.96,"currency":"USD"},
+ "timekeepers":[{"name":"Naomi Hargrove","title":"Legal Assistant","rate":100.0,"billed_as":"Hargrove, N."},{"name":"Peter Voss","title":"Associate","rate":225.0,"billed_as":"Voss, P."},{"name":"Sofia Thornbury","title":"Senior Associate","rate":350.0,"billed_as":"Thornbury, S."},{"name":"Tomas Hargrove","title":"Associate","rate":225.0,"billed_as":"Hargrove, T."},{"name":"Tomas Nakamura","title":"Associate","rate":255.0,"billed_as":"Nakamura, T."},{"name":"Yusuf Galbraith","title":"Partner","rate":450.0,"billed_as":"Galbraith, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-04","timekeeper":"Hargrove, N.","timekeeper_name":"Naomi Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":1.0,"rate":100.0,"amount":100.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-12","timekeeper":"Hargrove, N.","timekeeper_name":"Naomi Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":100.0,"amount":50.0,"narrative":"Invoice preparation and review of billing entries","codes":["L520","A111"],"page":1,"narrative_style":"clerical"},
+  {"n":3,"line_type":"fee","date":"2025-09-05","timekeeper":"Voss, P.","timekeeper_name":"Peter Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":225.0,"amount":90.0,"narrative":"Draft appellate brief in the regulatory inquiry","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-12","timekeeper":"Voss, P.","timekeeper_name":"Peter Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":225.0,"amount":247.5,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-18","timekeeper":"Thornbury, S.","timekeeper_name":"Sofia Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":350.0,"amount":420.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-29","timekeeper":"Thornbury, S.","timekeeper_name":"Sofia Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":350.0,"amount":315.0,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-02","timekeeper":"Hargrove, T.","timekeeper_name":"Tomas Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":225.0,"amount":450.0,"narrative":"Research appealability issues in the regulatory inquiry","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-08","timekeeper":"Nakamura, T.","timekeeper_name":"Tomas Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":255.0,"amount":204.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-02","timekeeper":"Galbraith, Y.","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":450.0,"amount":180.0,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3235.46,"amount":3235.46,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["70 Lakeshore Drive","Portland","Tax ID 89-8590107"],"template":"T24","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-01-24","matter_close":"2025-12-29","matter_budget":46167.0,"approved_timekeepers":["Tomas Nakamura","Peter Voss","Naomi Hargrove","Tomas Hargrove","Yusuf Galbraith","Clara Ashdown","Sofia Thornbury","Sofia Halloran"],"invoice_received_date":"2025-10-16"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[2],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":2
+}

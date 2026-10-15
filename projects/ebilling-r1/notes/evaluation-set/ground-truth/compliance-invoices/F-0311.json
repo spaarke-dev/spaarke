@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0311",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0311","generator_id":"gen_eval_set.py@1 F-0311","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0311.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Eastlake Cranmer PC","firm_invoice_number":"INV-2026-70132","invoice_date":"2025-04-02","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"58246-0011","po_number":"PO-4548463","fees_total":6886.5,"expenses_total":254.84,"adjustments_total":0.0,"total_due":7141.34,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Zielinski","title":"Associate","rate":275.0,"billed_as":"HZ"},{"name":"Helena Marchetti","title":"Partner","rate":425.0,"billed_as":"HM"},{"name":"Ingrid Zielinski","title":"Of Counsel","rate":425.0,"billed_as":"IZ"},{"name":"Nadia Halloran","title":"Associate","rate":245.0,"billed_as":"NH"},{"name":"Yusuf Nwosu","title":"Partner","rate":550.0,"billed_as":"YN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-05","timekeeper":"YN","timekeeper_name":"Yusuf Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":550.0,"amount":1375.0,"narrative":"Review and summarize deposition transcript of Ironbridge Steel witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-07","timekeeper":"YN","timekeeper_name":"Yusuf Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":550.0,"amount":1430.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-10","timekeeper":"IZ","timekeeper_name":"Ingrid Zielinski","timekeeper_title":"Of Counsel","title":"O/C","hours":2.7,"rate":425.0,"amount":1147.5,"narrative":"Meet and confer with counsel for Meridian Foods regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-13","timekeeper":"NH","timekeeper_name":"Nadia Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":245.0,"amount":539.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-17","timekeeper":"HM","timekeeper_name":"Helena Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":425.0,"amount":340.0,"narrative":"Draft reply brief to Bluepine Holdings","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-19","timekeeper":"NH","timekeeper_name":"Nadia Halloran","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":245.0,"amount":735.0,"narrative":"Draft reply brief to Summit Ridge Homes","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-21","timekeeper":"HZ","timekeeper_name":"Hector Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":275.0,"amount":247.5,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-25","timekeeper":"HZ","timekeeper_name":"Hector Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":275.0,"amount":660.0,"narrative":"Prepare outline for deposition of Pacifica Telecom witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-28","timekeeper":"HZ","timekeeper_name":"Hector Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":275.0,"amount":412.5,"narrative":"Research case law supporting discovery plan","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-03-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.67,"amount":35.67,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":52.32,"amount":156.96,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":43.73,"amount":43.73,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":28.0,"rate":0.66,"amount":18.48,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["869 Commerce Avenue","Houston","Tax ID 21-2115414"],"template":"T17","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-04-01","matter_close":"2025-06-29","matter_budget":53565.0,"approved_timekeepers":["Ingrid Zielinski","Yusuf Nwosu","Aisha Carmichael","Louis Fairweather","Hector Zielinski","Helena Marchetti","Nadia Halloran"],"invoice_received_date":"2025-04-18"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

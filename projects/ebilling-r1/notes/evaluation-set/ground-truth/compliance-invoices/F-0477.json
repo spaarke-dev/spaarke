@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0477",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0477","generator_id":"gen_eval_set.py@1 F-0477","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0477.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Quimby and Beckett LLP","firm_invoice_number":"INV-2025-79430","invoice_date":"2025-04-02","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"73341-0016","po_number":"PO-4511945","fees_total":3004.5,"expenses_total":17.55,"adjustments_total":0.0,"total_due":3022.05,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Santoro","title":"Paralegal","rate":145.0,"billed_as":"Beatrix Santoro"},{"name":"Ivan Rosenthal","title":"Paralegal","rate":110.0,"billed_as":"Ivan Rosenthal"},{"name":"Louis Rosenthal","title":"Senior Associate","rate":295.0,"billed_as":"Louis Rosenthal"},{"name":"Priya Kowalczyk","title":"Associate","rate":270.0,"billed_as":"Priya Kowalczyk"},{"name":"Rafael Galbraith","title":"Partner","rate":425.0,"billed_as":"Rafael Galbraith"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-04","timekeeper":"Priya Kowalczyk","timekeeper_name":"Priya Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":270.0,"amount":162.0,"narrative":"Draft settlement term sheet for the insurance coverage issue","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-07","timekeeper":"Ivan Rosenthal","timekeeper_name":"Ivan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":110.0,"amount":154.0,"narrative":"Research standard for provisional remedies concerning the construction contract","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-07","timekeeper":"Rafael Galbraith","timekeeper_name":"Rafael Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":425.0,"amount":850.0,"narrative":"Research pleading standards applicable to the regulatory inquiry","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-11","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":295.0,"amount":413.0,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2025-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":195.0,"rate":0.09,"amount":17.55,"narrative":"Photocopies - 195 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-14","timekeeper":"Ivan Rosenthal","timekeeper_name":"Ivan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":110.0,"amount":187.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-17","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.3,"rate":295.0,"amount":383.5,"narrative":"Research standard for provisional remedies concerning the vendor agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-18","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.1,"rate":295.0,"amount":29.5,"narrative":"Attend case management conference in the employment claim","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-18","timekeeper":"Ivan Rosenthal","timekeeper_name":"Ivan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":110.0,"amount":198.0,"narrative":"Telephone conference with client representative regarding factual background of the data incident","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-19","timekeeper":"Louis Rosenthal","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":295.0,"amount":236.0,"narrative":"Review and revise answer and affirmative defenses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-19","timekeeper":"Beatrix Santoro","timekeeper_name":"Beatrix Santoro","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":145.0,"amount":391.5,"narrative":"Draft motion for preliminary injunction in the insurance coverage issue","codes":["L220","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["111 Congress Boulevard","Atlanta","Tax ID 26-1464487"],"template":"T18","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-05-10","matter_close":"2025-06-29","matter_budget":37088.0,"approved_timekeepers":["Ivan Rosenthal","Rafael Galbraith","Priya Kowalczyk","Gregory Abernathy","Louis Rosenthal","Gideon Marchetti","Beatrix Santoro"],"invoice_received_date":"2025-04-18"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

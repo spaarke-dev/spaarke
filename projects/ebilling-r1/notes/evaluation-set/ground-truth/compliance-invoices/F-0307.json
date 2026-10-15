@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0307",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0307","generator_id":"gen_eval_set.py@1 F-0307","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0307.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Fenwick Dunmore PC","firm_invoice_number":"INV-2026-15706","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"64314-0007","po_number":"PO-4543307","fees_total":2785.5,"expenses_total":180.55,"adjustments_total":0.0,"total_due":2966.05,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Hargrove","title":"Associate","rate":255.0,"billed_as":"CH"},{"name":"Ingrid Esposito","title":"Associate","rate":255.0,"billed_as":"IE"},{"name":"Ivan Galbraith","title":"Paralegal","rate":145.0,"billed_as":"IG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-08","timekeeper":"CH","timekeeper_name":"Cyrus Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":255.0,"amount":739.5,"narrative":"Review and organize incoming production from Meridian Foods for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-15","timekeeper":"IE","timekeeper_name":"Ingrid Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":255.0,"amount":484.5,"narrative":"Review expert report served by Pacifica Telecom","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-17","timekeeper":"CH","timekeeper_name":"Cyrus Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":255.0,"amount":204.0,"narrative":"Research case law supporting notice of deposition","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-17","timekeeper":"CH","timekeeper_name":"Cyrus Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":255.0,"amount":357.0,"narrative":"Meet and confer with counsel for Caldera Energy regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-21","timekeeper":"IG","timekeeper_name":"Ivan Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":145.0,"amount":29.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-23","timekeeper":"IE","timekeeper_name":"Ingrid Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":255.0,"amount":357.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-28","timekeeper":"IG","timekeeper_name":"Ivan Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":145.0,"amount":232.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-29","timekeeper":"IE","timekeeper_name":"Ingrid Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":255.0,"amount":127.5,"narrative":"Draft motion to dismiss regarding deficiencies in Summit Ridge Homes responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-30","timekeeper":"CH","timekeeper_name":"Cyrus Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":255.0,"amount":255.0,"narrative":"Prepare production set and cover correspondence for service on Summit Ridge Homes","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":9.88,"amount":9.88,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":6.5,"amount":19.5,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":33.72,"amount":134.88,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":16.29,"amount":16.29,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["887 Market Street","Boston","Tax ID 93-1100122"],"template":"T23","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-05-25","matter_close":"2026-07-29","matter_budget":36864.0,"approved_timekeepers":["Cyrus Hargrove","Cyrus Delacroix","Ingrid Esposito","Louis Ashdown","Daniel Marchetti","Ivan Galbraith"],"invoice_received_date":"2026-05-16"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

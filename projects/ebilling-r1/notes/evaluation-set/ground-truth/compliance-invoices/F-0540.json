@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0540",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0540","generator_id":"gen_eval_set.py@1 F-0540","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0540.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Aldridge Cranmer PC","firm_invoice_number":"INV-2025-71159","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"90905-0030","po_number":"PO-4575761","fees_total":3571.0,"expenses_total":3406.01,"adjustments_total":0.0,"total_due":6977.01,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Kowalczyk","title":"Associate","rate":225.0,"billed_as":"Kowalczyk, F."},{"name":"Katya Thornbury","title":"Paralegal","rate":120.0,"billed_as":"Thornbury, K."},{"name":"Leila Nakamura","title":"Associate","rate":205.0,"billed_as":"Nakamura, L."},{"name":"Louis Oyelaran","title":"Partner","rate":345.0,"billed_as":"Oyelaran, L."},{"name":"Louis Zielinski","title":"Associate","rate":180.0,"billed_as":"Zielinski, L."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-01","timekeeper":"Zielinski, L.","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Associate","hours":2.0,"rate":180.0,"amount":360.0,"narrative":"Review and organize incoming production from Meridian Foods for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-04","timekeeper":"Thornbury, K.","timekeeper_name":"Katya Thornbury","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.7,"rate":120.0,"amount":84.0,"narrative":"Prepare case assessment memorandum regarding the insurance coverage issue and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-06","timekeeper":"Kowalczyk, F.","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Associate","title":"Associate","hours":2.5,"rate":225.0,"amount":562.5,"narrative":"Draft motion for preliminary injunction in the vendor agreement","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-11","timekeeper":"Kowalczyk, F.","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Associate","title":"Associate","hours":2.4,"rate":225.0,"amount":540.0,"narrative":"Review expert qualifications and prior testimony for the distribution agreement","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-12","timekeeper":"Thornbury, K.","timekeeper_name":"Katya Thornbury","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.5,"rate":120.0,"amount":180.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-13","timekeeper":"Thornbury, K.","timekeeper_name":"Katya Thornbury","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.9,"rate":120.0,"amount":108.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-20","timekeeper":"Nakamura, L.","timekeeper_name":"Leila Nakamura","timekeeper_title":"Associate","title":"Associate","hours":2.5,"rate":205.0,"amount":512.5,"narrative":"Review and organize incoming production from Alder & Finch Ltd for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-26","timekeeper":"Oyelaran, L.","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Partner","title":"Partner","hours":2.4,"rate":345.0,"amount":828.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-27","timekeeper":"Zielinski, L.","timekeeper_name":"Louis Zielinski","timekeeper_title":"Associate","title":"Associate","hours":2.2,"rate":180.0,"amount":396.0,"narrative":"Review and analyze client documents concerning the supply agreement to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3406.01,"amount":3406.01,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["651 Federal Plaza","Phoenix","Tax ID 61-2471308"],"template":"T06","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-05-20","matter_close":"2025-11-29","matter_budget":52908.0,"approved_timekeepers":["Louis Zielinski","Leila Nakamura","Katya Thornbury","Farah Kowalczyk","Samuel Kowalczyk","Louis Oyelaran"],"invoice_received_date":"2025-09-11"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

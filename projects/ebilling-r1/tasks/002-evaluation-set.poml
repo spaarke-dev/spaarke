@@ -4,7 +4,7 @@
     <title>Assemble the evaluation set and manifest</title>
     <phase>0 Baseline and AI foundations (WP0)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Data collection, labelling and a manifest under projects/; no product code, no deployment.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,7 +84,7 @@
     <criterion testable="true">The ground-truth format section names every header and line field FR-21 lists and the expected-finding format for seeded violations.</criterion>
   </acceptance-criteria>
 
-  <notes>The ground-truth format is a contract for 005, 161 and 162 — change it only with a note in the manifest. The generator is evaluation tooling, not product code; /test-diet and repo-cleanup at wrap-up (190) decide whether it stays.</notes>
+  <notes>The ground-truth format is a contract for 005, 161 and 162 — change it only with a note in the manifest. The generator is evaluation tooling, not product code; /test-diet and repo-cleanup at wrap-up (190) decide whether it stays. Completed 2026-10-15: A 8, B 150, C 12, E 16 OCG + 5 rate cards, F 300 seeded + 300 clean; manifest.md and manifest.csv in notes/evaluation-set/ (committed about 6.2 MB, local-only about 164 MB). Set E labels are ai-drafted-pending-review (legal-operations sign-off outstanding). Real invoices (C) all come from three Kentucky PSC rate-case filings (one jurisdiction) - widen when other sources are available. Rework: task 004 found B-0001 stale versus its ground-truth JSON; all 150 B PDFs re-rendered, render-manifest.json freshness guard and `gen_eval_set.py check` (PDF text versus ground truth) added; task 005 should run `check` before scoring.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

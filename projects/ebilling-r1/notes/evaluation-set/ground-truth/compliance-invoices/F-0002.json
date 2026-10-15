@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0002",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0002","generator_id":"gen_eval_set.py@1 F-0002","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0002.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Kestrel & Dunmore LLP","firm_invoice_number":"INV-2025-74586","invoice_date":"2025-05-02","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"44381-0001","po_number":"PO-4544246","fees_total":9369.5,"expenses_total":730.85,"adjustments_total":0.0,"total_due":10100.35,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Oyelaran","title":"Legal Assistant","rate":145.0,"billed_as":"HO"},{"name":"Leila Tavares","title":"Paralegal","rate":175.0,"billed_as":"LT"},{"name":"Marcus Lockhart","title":"Partner","rate":620.0,"billed_as":"ML"},{"name":"Mei Zielinski","title":"Partner","rate":565.0,"billed_as":"MZ"},{"name":"Naomi Rosenthal","title":"Senior Associate","rate":340.0,"billed_as":"NR"},{"name":"Priya Yilmaz","title":"Associate","rate":345.0,"billed_as":"PY"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-02","timekeeper":"PY","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":410.0,"amount":984.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-02","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":340.0,"amount":374.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-03","timekeeper":"MZ","timekeeper_name":"Mei Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":565.0,"amount":1469.0,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-08","timekeeper":"MZ","timekeeper_name":"Mei Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":565.0,"amount":621.5,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-09","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":175.0,"amount":402.5,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-10","timekeeper":"ML","timekeeper_name":"Marcus Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":745.0,"amount":1192.0,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-10","timekeeper":"PY","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":345.0,"amount":517.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-11","timekeeper":"MZ","timekeeper_name":"Mei Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":565.0,"amount":1186.5,"narrative":"Revise appellate brief after cite check","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-16","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":175.0,"amount":70.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-18","timekeeper":"ML","timekeeper_name":"Marcus Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":620.0,"amount":806.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-04-21","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":175.0,"amount":455.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-04-24","timekeeper":"HO","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Legal Assistant","title":"LA","hours":1.3,"rate":185.0,"amount":240.5,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-04-24","timekeeper":"PY","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":345.0,"amount":552.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-04-25","timekeeper":"MZ","timekeeper_name":"Mei Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":565.0,"amount":395.5,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-04-29","timekeeper":"PY","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":345.0,"amount":103.5,"narrative":"Prepare for oral argument in the distribution agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":730.85,"amount":730.85,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["231 Congress Boulevard","Houston","Tax ID 44-9147912"],"template":"T11","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-06-03","matter_close":"2025-07-29","matter_budget":65401.0,"approved_timekeepers":["Mei Zielinski","Leila Tavares","Naomi Rosenthal","Ingrid Esposito","Priya Yilmaz","Helena Oyelaran","Marcus Lockhart"],"invoice_received_date":"2025-05-12"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[12],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[8],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

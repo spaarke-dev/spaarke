@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0361",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0361","generator_id":"gen_eval_set.py@1 F-0361","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0361.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Lindenmeyer Ambrose PC","firm_invoice_number":"INV-2026-62324","invoice_date":"2025-08-03","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"70840-0027","po_number":"PO-4553296","fees_total":5907.0,"expenses_total":558.03,"adjustments_total":0.0,"total_due":6465.03,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Ashdown","title":"Paralegal","rate":220.0,"billed_as":"CA"},{"name":"Elena Marchetti","title":"Associate","rate":360.0,"billed_as":"EM"},{"name":"Ingrid Blackwood","title":"Paralegal","rate":200.0,"billed_as":"IB"},{"name":"Katya Halloran","title":"Associate","rate":400.0,"billed_as":"KH"},{"name":"Louis Nakamura","title":"Partner","rate":690.0,"billed_as":"LN"},{"name":"Priya Zielinski","title":"Associate","rate":400.0,"billed_as":"PZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"IB","timekeeper_name":"Ingrid Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":200.0,"amount":440.0,"narrative":"Update document review protocol and coding panel for the licensing dispute","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-01","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":400.0,"amount":280.0,"narrative":"Conference with client regarding settlement authority for the distribution agreement","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-01","timekeeper":"CA","timekeeper_name":"Clara Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":220.0,"amount":528.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-02","timekeeper":"LN","timekeeper_name":"Louis Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":690.0,"amount":1311.0,"narrative":"Prepare for case management conference in the distribution agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-14","timekeeper":"KH","timekeeper_name":"Katya Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":400.0,"amount":200.0,"narrative":"Research pleading standards applicable to the data incident","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-16","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":400.0,"amount":880.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-22","timekeeper":"IB","timekeeper_name":"Ingrid Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":200.0,"amount":560.0,"narrative":"Draft answer and affirmative defenses in the construction contract","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-28","timekeeper":"EM","timekeeper_name":"Elena Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":360.0,"amount":648.0,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-30","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":400.0,"amount":760.0,"narrative":"Research public records concerning Redstone Mining and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-30","timekeeper":"EM","timekeeper_name":"Elena Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":360.0,"amount":180.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-30","timekeeper":"KH","timekeeper_name":"Katya Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":400.0,"amount":120.0,"narrative":"Draft motion for preliminary injunction in the customs audit","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":558.03,"amount":558.03,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["840 Union Square","Atlanta","Tax ID 34-3294256"],"template":"T15","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-04-01","matter_close":"2025-10-29","matter_budget":50860.0,"approved_timekeepers":["Clara Ashdown","Ingrid Blackwood","Leila Voss","Dalia Lindqvist","Leila Kowalczyk","Louis Nakamura","Priya Zielinski","Elena Marchetti","Katya Halloran"],"invoice_received_date":"2025-08-09"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

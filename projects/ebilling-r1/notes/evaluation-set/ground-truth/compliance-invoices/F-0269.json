@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0269",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0269","generator_id":"gen_eval_set.py@1 F-0269","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0269.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ingersoll & Dunmore LLP","firm_invoice_number":"INV-2025-14979","invoice_date":"2026-04-04","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"69519-0003","po_number":"PO-4513031","fees_total":6029.5,"expenses_total":250.32,"adjustments_total":0.0,"total_due":6279.82,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Lockhart","title":"Paralegal","rate":125.0,"billed_as":"AL"},{"name":"Cyrus Oyelaran","title":"Associate","rate":240.0,"billed_as":"CO"},{"name":"Jordan Quillen","title":"Paralegal","rate":125.0,"billed_as":"JQ"},{"name":"Mei Esposito","title":"Legal Assistant","rate":130.0,"billed_as":"ME"},{"name":"Naomi Voss","title":"Partner","rate":490.0,"billed_as":"NV"},{"name":"Peter Quillen","title":"Senior Associate","rate":315.0,"billed_as":"PQ"},{"name":"Tomas Yilmaz","title":"Associate","rate":265.0,"billed_as":"TY"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2026-03-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":250.32,"amount":250.32,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-04","timekeeper":"AL","timekeeper_name":"Aisha Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":125.0,"amount":225.0,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-06","timekeeper":"NV","timekeeper_name":"Naomi Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":490.0,"amount":196.0,"narrative":"Draft discovery plan and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-09","timekeeper":"TY","timekeeper_name":"Tomas Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":265.0,"amount":715.5,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-10","timekeeper":"JQ","timekeeper_name":"Jordan Quillen","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":125.0,"amount":200.0,"narrative":"Review expert report served by Ironbridge Steel","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-10","timekeeper":"AL","timekeeper_name":"Aisha Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":125.0,"amount":150.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-13","timekeeper":"CO","timekeeper_name":"Cyrus Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":240.0,"amount":264.0,"narrative":"Meet and confer with counsel for Ironbridge Steel regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-13","timekeeper":"PQ","timekeeper_name":"Peter Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.7,"rate":465.0,"amount":790.5,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-13","timekeeper":"ME","timekeeper_name":"Mei Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":0.2,"rate":130.0,"amount":26.0,"narrative":"Draft discovery plan and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-13","timekeeper":"AL","timekeeper_name":"Aisha Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":125.0,"amount":325.0,"narrative":"Draft settlement proposal in the regulatory inquiry","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-13","timekeeper":"ME","timekeeper_name":"Mei Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":2.2,"rate":130.0,"amount":286.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-03-17","timekeeper":"PQ","timekeeper_name":"Peter Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.2,"rate":315.0,"amount":693.0,"narrative":"Draft mediation statement in the warranty claim","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-03-18","timekeeper":"CO","timekeeper_name":"Cyrus Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":240.0,"amount":672.0,"narrative":"Review and summarize deposition transcript of Northwind Logistics witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-03-19","timekeeper":"NV","timekeeper_name":"Naomi Voss","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":490.0,"amount":1274.0,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2026-03-30","timekeeper":"AL","timekeeper_name":"Aisha Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":125.0,"amount":212.5,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["579 Lakeshore Drive","Portland","Tax ID 33-8781777"],"template":"T09","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-03-01","matter_close":"2026-06-29","matter_budget":50119.0,"approved_timekeepers":["Naomi Voss","Cyrus Oyelaran","Jordan Quillen","Peter Quillen","Mei Esposito","Aisha Lockhart","Tomas Yilmaz"],"invoice_received_date":"2026-04-08"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

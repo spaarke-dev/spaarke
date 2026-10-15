@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0241",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0241","generator_id":"gen_eval_set.py@1 F-0241","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0241.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Kingsley and Forsythe LLP","firm_invoice_number":"INV-2026-48150","invoice_date":"2025-06-04","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"10345-0028","po_number":"PO-4558585","fees_total":3890.25,"expenses_total":5509.9,"adjustments_total":0.0,"total_due":9400.15,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Halloran","title":"Associate","rate":280.0,"billed_as":"Cyrus Halloran"},{"name":"Dmitri Dunleavy","title":"Associate","rate":285.0,"billed_as":"Dmitri Dunleavy"},{"name":"Elena Delacroix","title":"Legal Assistant","rate":110.0,"billed_as":"Elena Delacroix"},{"name":"Elena Voss","title":"Of Counsel","rate":435.0,"billed_as":"Elena Voss"},{"name":"Imani Fairweather","title":"Paralegal","rate":140.0,"billed_as":"Imani Fairweather"},{"name":"Ingrid Voss","title":"Paralegal","rate":140.0,"billed_as":"Ingrid Voss"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-09","timekeeper":"Cyrus Halloran","timekeeper_name":"Cyrus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":280.0,"amount":700.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-13","timekeeper":"Cyrus Halloran","timekeeper_name":"Cyrus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":280.0,"amount":532.0,"narrative":"Draft notice of appeal and docketing statement for the data incident","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-13","timekeeper":"Cyrus Halloran","timekeeper_name":"Cyrus Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":280.0,"amount":392.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-01","timekeeper":"Dmitri Dunleavy","timekeeper_name":"Dmitri Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.35,"rate":285.0,"amount":384.75,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-30","timekeeper":"Dmitri Dunleavy","timekeeper_name":"Dmitri Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":285.0,"amount":228.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-13","timekeeper":"Elena Delacroix","timekeeper_name":"Elena Delacroix","timekeeper_title":"Legal Assistant","title":"LA","hours":2.0,"rate":110.0,"amount":220.0,"narrative":"Scheduled conference call and updated calendar entries","codes":["L510","A110"],"page":2,"narrative_style":"clerical"},
+  {"n":7,"line_type":"fee","date":"2025-05-08","timekeeper":"Elena Voss","timekeeper_name":"Elena Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":1.3,"rate":435.0,"amount":565.5,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-23","timekeeper":"Imani Fairweather","timekeeper_name":"Imani Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":140.0,"amount":280.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-26","timekeeper":"Imani Fairweather","timekeeper_name":"Imani Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":140.0,"amount":266.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-28","timekeeper":"Ingrid Voss","timekeeper_name":"Ingrid Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":140.0,"amount":322.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":374.64,"amount":374.64,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5135.26,"amount":5135.26,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["93 Union Square","Houston","Tax ID 64-3887242"],"template":"T10","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-09-27","matter_close":"2025-08-29","matter_budget":62600.0,"approved_timekeepers":["Elena Voss","Dmitri Dunleavy","Cyrus Halloran","Ingrid Voss","Imani Fairweather","Elena Delacroix"],"invoice_received_date":"2025-06-18"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[6],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

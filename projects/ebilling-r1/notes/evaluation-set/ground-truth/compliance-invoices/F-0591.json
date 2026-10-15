@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0591",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0591","generator_id":"gen_eval_set.py@1 F-0591","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0591.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair and Beckett LLP","firm_invoice_number":"INV-2026-25549","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"74578-0015","po_number":"PO-4520923","fees_total":3442.0,"expenses_total":5446.74,"adjustments_total":0.0,"total_due":8888.74,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Marchetti","title":"Paralegal","rate":110.0,"billed_as":"DM"},{"name":"Emeka Delacroix","title":"Associate","rate":250.0,"billed_as":"ED"},{"name":"Katya Voss","title":"Of Counsel","rate":435.0,"billed_as":"KV"},{"name":"Leila Sandoval","title":"Legal Assistant","rate":100.0,"billed_as":"LS"},{"name":"Marcus Whitfield","title":"Partner","rate":500.0,"billed_as":"MW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-01","timekeeper":"ED","timekeeper_name":"Emeka Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":250.0,"amount":700.0,"narrative":"Attend hearing on witness list in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-08","timekeeper":"LS","timekeeper_name":"Leila Sandoval","timekeeper_title":"Legal Assistant","title":"LA","hours":1.5,"rate":100.0,"amount":150.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-13","timekeeper":"KV","timekeeper_name":"Katya Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":2.4,"rate":435.0,"amount":1044.0,"narrative":"Review draft expert disclosure for the data incident","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-14","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":110.0,"amount":110.0,"narrative":"Prepare examination outlines for trial in the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-20","timekeeper":"MW","timekeeper_name":"Marcus Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":500.0,"amount":700.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-21","timekeeper":"LS","timekeeper_name":"Leila Sandoval","timekeeper_title":"Legal Assistant","title":"LA","hours":1.4,"rate":100.0,"amount":140.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-23","timekeeper":"LS","timekeeper_name":"Leila Sandoval","timekeeper_title":"Legal Assistant","title":"LA","hours":2.8,"rate":100.0,"amount":280.0,"narrative":"Attend trial day in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-27","timekeeper":"ED","timekeeper_name":"Emeka Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":250.0,"amount":175.0,"narrative":"Attend hearing on motion to compel in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-30","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":110.0,"amount":143.0,"narrative":"Draft post-trial motion in the vendor agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3829.94,"amount":3829.94,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":38.88,"amount":77.76,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1124.58,"amount":1124.58,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":414.46,"amount":414.46,"narrative":"Airfare to Boston for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["27 Harbor Road","Chicago","Tax ID 17-4668607"],"template":"T11","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-06-16","matter_close":"2026-07-29","matter_budget":60554.0,"approved_timekeepers":["Katya Voss","Dmitri Rosenthal","Daniel Marchetti","Emeka Delacroix","Leila Sandoval","Marcus Whitfield"],"invoice_received_date":"2026-05-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

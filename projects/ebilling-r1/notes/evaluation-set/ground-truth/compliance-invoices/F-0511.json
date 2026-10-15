@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0511",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0511","generator_id":"gen_eval_set.py@1 F-0511","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0511.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Holloway & Yardley LLP","firm_invoice_number":"2026069926","invoice_date":"2026-05-04","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"88652-0024","po_number":"PO-4553895","fees_total":5640.5,"expenses_total":2798.37,"adjustments_total":0.0,"total_due":8438.87,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Ashdown","title":"Paralegal","rate":280.0,"billed_as":"Dalia Ashdown"},{"name":"Dalia Whitfield","title":"Of Counsel","rate":820.0,"billed_as":"Dalia Whitfield"},{"name":"Emeka Castellanos","title":"Associate","rate":510.0,"billed_as":"Emeka Castellanos"},{"name":"Ingrid Sandoval","title":"Associate","rate":490.0,"billed_as":"Ingrid Sandoval"},{"name":"Rafael Nakamura","title":"Legal Assistant","rate":235.0,"billed_as":"Rafael Nakamura"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-01","timekeeper":"Emeka Castellanos","timekeeper_name":"Emeka Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":510.0,"amount":102.0,"narrative":"Conference with client regarding budget variance for the construction contract","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-02","timekeeper":"Ingrid Sandoval","timekeeper_name":"Ingrid Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":490.0,"amount":1225.0,"narrative":"Review and revise complaint based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-08","timekeeper":"Rafael Nakamura","timekeeper_name":"Rafael Nakamura","timekeeper_title":"Legal Assistant","title":"LA","hours":1.9,"rate":235.0,"amount":446.5,"narrative":"Prepare for case management conference in the licensing dispute","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-08","timekeeper":"Ingrid Sandoval","timekeeper_name":"Ingrid Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":490.0,"amount":294.0,"narrative":"Prepare updated litigation budget for the distribution agreement","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-08","timekeeper":"Dalia Ashdown","timekeeper_name":"Dalia Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":280.0,"amount":504.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-10","timekeeper":"Dalia Whitfield","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Of Counsel","title":"O/C","hours":1.0,"rate":820.0,"amount":820.0,"narrative":"Conference with client regarding budget variance for the insurance coverage issue","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-28","timekeeper":"Ingrid Sandoval","timekeeper_name":"Ingrid Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":490.0,"amount":1127.0,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-29","timekeeper":"Emeka Castellanos","timekeeper_name":"Emeka Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":510.0,"amount":306.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-30","timekeeper":"Emeka Castellanos","timekeeper_name":"Emeka Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":510.0,"amount":816.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2657.46,"amount":2657.46,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":593.0,"rate":0.13,"amount":77.09,"narrative":"Photocopies - 593 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":28.64,"amount":28.64,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.18,"amount":35.18,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["148 Market Street","Seattle","Tax ID 71-8095096"],"template":"T02","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-05-15","matter_close":"2026-07-29","matter_budget":58755.0,"approved_timekeepers":["Gideon Rosenthal","Ingrid Sandoval","Emeka Castellanos","Dalia Ashdown","Elena Ashdown","Dalia Whitfield","Rafael Nakamura"],"invoice_received_date":"2026-05-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}
