@@ -16,7 +16,7 @@ Incident 2026-10-13: a bulk worktree cleanup deleted through `node_modules` junc
 - **CI**: `ci-standalone-checks.yml` job `agent-guard-tests` (windows-latest) now runs all `scripts/quality/tests` hook controls (previously run by hand only) and the Pester file.
 - **`worktree-setup` skill + command, `docs/procedures/parallel-claude-sessions.md`**: removal examples use the script; new failure-mode row.
 - **`.claude/FAILURE-MODES.md`**: G-20.
-- **Root `CLAUDE.md`** §16 hooks bullet: one sentence (+559 bytes, no new lines).
+- **Root `CLAUDE.md`** §16 hooks bullet: one sentence (+403 bytes, no new lines).
 
 ---
 ###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
