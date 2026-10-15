@@ -104,7 +104,6 @@ public class SecureChildLineageTests
     [Fact]
     public void TheInvoiceFamily_KeepsItsInvoiceLineAndDocumentParents()
     {
-        SecureChildLineage.Children["sprk_invoice"].Lookups.Should().Contain("sprk_supersedesinvoice", "sprk_invoice");
         SecureChildLineage.Children["sprk_invoicesubmission"].Lookups.Should().Contain(new Dictionary<string, string>
         {
             ["sprk_invoice"] = "sprk_invoice",

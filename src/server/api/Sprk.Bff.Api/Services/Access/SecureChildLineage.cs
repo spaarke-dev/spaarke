@@ -129,11 +129,12 @@ internal static class SecureChildLineage
             ("sprk_event", "sprk_event")),
         T("sprk_fileversion", "sprk_fileversions",
             ("sprk_document", "sprk_document")),
-        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012) and sprk_supersedesinvoice (the invoice a
-        // resubmission replaces), live spaarkedev1 2026-10-15. Its sprk_billingexport lookup is left out: an export batch
-        // is not a codified table (it spans many core records and is filed under none; ebilling-r1 task 013 notes).
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012, live spaarkedev1 2026-10-15). Two other task
+        // 012 lookups are left out pending unified-access-control-r2: sprk_supersedesinvoice (the invoice a resubmission
+        // replaces — not a filing; as a lineage parent it would also join ParentLineage and the external invoices module's
+        // live-parent rule) and sprk_billingexport (an export batch is not a codified table). Task 013 notes, section 10.
         T("sprk_invoice", "sprk_invoices",
-            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_supersedesinvoice", "sprk_invoice") }
+            new[] { ("sprk_matter", Matter), ("sprk_project", Project) }
                 .Concat(Regarding("sprk_agreement", WorkAssignment)).ToArray()),
         // ebilling-r1 task 013 (FR-05, D-82): the invoice family's new tables, lookups read live, spaarkedev1 2026-10-15
         // (EntityDefinitions(<table>)/ManyToOneRelationships). Each names its core record through the CoreAncestorLookups
