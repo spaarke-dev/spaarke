@@ -11,9 +11,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Four agents running: 153 pass 2 (#1953), 059 review (#1964), 154 implementer, 146 third re-run. |
+| **Task** | Running: 154 implementer, 146 record fix round, and uac-r2's re-check of #1953. 059 merged. |
 | **Blocker** | None. |
-| **Next Action** | (1) 059 review returns, then a fix round and a re-check, then merge. (2) 154 PR, then review, then uac-r2, then merge; then launch 155. (3) 153 pass 2 returns, then fixes, then uac-r2, then merge. (4) 146 results, then review and merge #1933, then the 144/148 report-only pass. |
+| **Next Action** | (1) uac-r2 verdict on #1953, then merge on green. (2) 154 PR, then Opus review, a fix round, uac-r2, and merge; then launch 155. (3) 146 fix round, then a re-check, then merge #1933; then decide on K-1 (a possible suppression defect) and the 144/148 report-only pass. (4) Docs branch to master, then 055 (needs 154). |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
