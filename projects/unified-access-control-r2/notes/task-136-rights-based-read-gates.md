@@ -282,3 +282,27 @@ No other write was made: no organization grant, no membership, no No Access entr
 | 037 c5 (i) Restricted no list or download; (ii) org-only Secure; (iii) direct grant readable | (iii) on the workforce plane only (G2, without bytes). | (i) and (ii), and the whole CIAM-token half. (i) needs a contact grant on a Restricted root, which policy refuses (422) unless the grant predates the flag. |
 | 039 c5 (No Access entry blocks; removal restores after TTL) | None. | All of it: it needs a `sprk_noaccessentry` create and deactivate, which the BFF does not expose (form or direct Dataverse). It is owner-approved or owner-performed, with a CIAM token. The deny list is read live per request (`NoAccessListReader`, no TTL), and the grant set is cached for 60 s. |
 | 135 gate / amendment n=2 "session A item 3" | The workforce observations above. | The combined CIAM session. 136, 037, 039 and 135's gate stay **pending** (amendment n=2: they close together on that session). |
+
+### 12.1 Re-run of the G2 content check after #1889 (2026-10-15 00:35-00:37Z)
+
+
+**Setup.** Same build, callers and tooling as the 21:55Z gate (`../common.py`, `../gate_helpers.py`; admin = `az` default profile, testuser1 = `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`). Script `rerun.py`, log `rerun.log`, ledger `writes.jsonl`, state `state-{before,granted,after}.json`, reads `reads.json`, KQL `ai-*.kql`. Tokens in memory only; no Key Vault read; content hashed in memory and discarded. Container `b!OKn3KsSg…` was marked by provisioning at about 00:24Z; the gate began after 00:35Z (BFF 10-minute negative cache). App Insights shows the guard's last refusal of this container at 00:25:01Z, and no refusals of any container after 00:25:30Z (the 5-minute background refusals at 00:30, 00:35 and 00:40 did not occur).
+
+| G | Step | Verdict | Evidence |
+|---|---|---|---|
+| G2r-0 | Before-state (read-only, 00:35:50Z) | **DONE** | P `31e232ae…` has 1 grant row (`e8f85a7f…`, inactive 1/2, from W2) and **0 active**. testuser1 `/me` 200: **20 projects, P absent**; the (project, level) pairs, contactId and systemUserId equal gate step 0 exactly. |
+| G2r-1 | W3 direct ViewOnly grant | **PASS** | `POST /external-access/grant` {contact `ac6d7b68…`, P, ViewOnly} → 200 at 00:36:04Z. Row `d0b62365…`, level 100000000, narrowed false, notificationFailed false, invite **NotNeeded (no email)**. `/me` then 21 projects, P ViewOnly. |
+| G2r-2 | testuser1 reads on P | **PASS (caveat O-136-1 closed)** | `GET /documents` **200**, 2 items. `GET /documents/2b97180e…/versions` **200**, **1 version**. `GET /documents/2b97180e…/content` **200**, `application/octet-stream`, **24 bytes**, SHA-256 `c40a3ca4b7312570bff7855abeab2522e54658c0f9f510dcac389a1f02d180ac`. Dependencies on the admitted content/versions requests: `sprk_documents(2b97180e…)` read, Graph `GET /beta/drives/b!OKn3KsSg…` ×4 and one SharePoint contentstorage download, all successful. No 409 `document_storage_unverified`. |
+| G2r-3 | W4 revoke + read-back | **PASS** | `POST /external-access/revoke` {`d0b62365…`, contactId empty} → 200 at 00:36:42Z, deactivatedCount 1, speContainerOutcome **NotAttempted**. P: 2 rows, **0 active** (both 1/2). `/me` 200, 20 projects, P absent, **equal to G2r-0** (pairs, contactId, systemUserId). Immediately after: `/documents`, `/versions`, `/content` all **403** "You do not have access to this project"; on those requests only principal-building reads ran (no `sprk_documents` read, no Graph call). |
+| G2r-4 | App Insights since first write (00:36:00Z) | **PASS** | **5xx: 0.** Exceptions: Graph `ODataError` "Invalid hostname for this tenancy" ×1 (00:40:02Z, background, the known orphan-container baseline: 2,005 in prior 7 days). **New exception class: none.** **`spe_container_not_owned` / guard refusal for `b!OKn3KsSg…` after 00:35Z: 0.** Grant (41 deps) and revoke (14 deps): 0 failed. |
+
+**Write and clean-up ledger** (`writes.jsonl`)
+
+| # | Write (through the BFF) | Result | Side effects | Clean-up |
+|---|---|---|---|---|
+| W3 | `POST /external-access/grant`, contact `ac6d7b68…`, P `31e232ae…`, ViewOnly (00:36:04Z) | 200, row `d0b62365…` | In-app **appnotification `d2b62365…`** for testuser1 ("You were given access to the project …"), as W1 did. No invite/email (NotNeeded). No SPE membership. | Row deactivated by W4. The appnotification remains (no BFF delete endpoint; direct delete not approved; harmless). |
+| W4 | `POST /external-access/revoke` `d0b62365…`, contactId empty (00:36:42Z) | 200, deactivatedCount 1, SPE NotAttempted | statecode 1 / statuscode 2 | This is the clean-up. P active set 0, as before. |
+
+No other write; no Entra, Key Vault, app-setting, role or SPE change; secure project `65a3fab2…` untouched; no repo file edited.
+
+**Effect on criteria.** 136 c4 (direct ViewOnly on Secure admits reads incl. content streams, refuses mutations) is now fully evidenced on the **workforce plane** (bytes + hash + versions here; mutation refusal from the 21:55Z G2). O-136-1 is resolved by the #1889 marker. The CIAM half (136 c12, 037 c5, 039 c5, 135) remains pending as before.

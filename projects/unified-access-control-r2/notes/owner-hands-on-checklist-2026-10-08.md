@@ -179,4 +179,4 @@ The workforce half passed on 2026-10-14 (`task-136-rights-based-read-gates.md` �
 4. **No Access (039).** On the project from step 2, add the contact to the No Access List on its form. **PASS:** access stops on the next request. Remove the entry. **PASS:** access returns within about a minute.
 5. **Clean-up:** I revoke every grant. You set both test projects back to ordinary (or leave them; they hold no real data).
 
-Note: the existing secure project `31e232ae…` can't stream documents on dev (#1889, its container predates the ownership marker), so this uses new test projects. Making a project Secure gives it its own container, which stays afterwards (containers are never deleted; add it to the Remove-TestContainers list).
+Note: #1889 is fixed on dev (the container of secure project `31e232ae…` was marked on 2026-10-15, and its content now streams). This still uses new test projects, because the states have to be created in order. Making a project Secure gives it its own container, which stays afterwards (containers are never deleted; add it to the Remove-TestContainers list).

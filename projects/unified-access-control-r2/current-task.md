@@ -35,7 +35,7 @@
 - Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), DI-81 #1879 (column audit); and enabling 148's writes after its report-only dev run.
 - Restate the Model 1 `-Apply` rule once #1815 merges.
 - Task 186 ceiling decision.
-- Checklist §14 (the combined CIAM session closes 135's gate, 136, 037 and 039). #1889 (pre-marker secure containers refused): provisioning is extending Backfill-SpeContainerBusinessUnitStamp.ps1 with a customer-marker pass. Its live dev run needs the owner's OK; provisioning will tell UAC when `b!OKn3…` is marked, and then UAC re-runs the 136 content-bytes check.
+- Checklist §14 (the combined CIAM session closes 135's gate, 136, 037 and 039). #1889 fixed on dev 2026-10-15 (provisioning PR #1885; owner-approved marker backfill). The 136 content check re-ran and PASSED (notes/task-136 §12.1).
 - #1747 and #1776.
 - F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
 
