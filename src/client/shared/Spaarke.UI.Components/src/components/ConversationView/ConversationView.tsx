@@ -306,6 +306,10 @@ const useComposeStyles = makeStyles({
     borderTopColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  visibilityRow: {
+    display: 'flex',
+    alignItems: 'center',
+  },
   inputRow: {
     display: 'flex',
     alignItems: 'flex-end',
@@ -525,6 +529,16 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
 
   return (
     <div className={styles.wrapper} role="region" aria-label="Compose message">
+      {/* Who can see the message (owner 2026-10-14): "External" | "Internal Only" tags above the input, so the
+          choice is in view before typing. */}
+      <div className={styles.visibilityRow}>
+        <InternalOnlySwitch
+          variant="tags"
+          checked={internalOnly}
+          onChange={setInternalOnly}
+          disabled={status === 'sending'}
+        />
+      </div>
       <div className={styles.inputRow}>
         <Textarea
           className={styles.input}
@@ -574,13 +588,6 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
             </Text>
           )}
         </div>
-        {/* Compact chat bar: the switch without its helper line (the full wording is on the larger composers). */}
-        <InternalOnlySwitch
-          checked={internalOnly}
-          onChange={setInternalOnly}
-          disabled={status === 'sending'}
-          showHint={false}
-        />
       </div>
     </div>
   );
