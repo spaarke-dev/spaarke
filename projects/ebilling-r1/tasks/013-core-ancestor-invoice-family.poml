@@ -53,6 +53,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-68 / task 022 (2026-10-15)">Define the sprk_regardingrecordid value for sprk_externalidentifier rows that belong to an invoice only (no core record yet), so the D-68 alternate key (firm, type, value, core record) never has an empty column; task 044 writes it. Rows with an empty key column escape the key and can duplicate.</constraint>
     <constraint source="D-75">Per D-75 (with ontology-r1, 2026-10-15): the core record of an invoice line (sprk_billingevent) is derived only from the line's OWN core-record lookup (sprk_matter / sprk_project / sprk_regardingworkassignment, FR-05), never by walking sprk_billingevent.sprk_invoice; a line may in future not belong to exactly one invoice. Any other derivation needs uac-r2 approval (STOP and ask).</constraint>
     <constraint source="ADR-024 / spec FR-05">The guard refuses (does not pick one) when more than one of the entity's Matter / Project / Work Assignment lookups is set, and when none is set on an entity where FR-05 requires one; the refusal carries a stable reason code. When exactly one is set, it returns all five resolver fields (type via sprk_recordtype_ref, id lowercase "D" GUID, name, relative URL, number) — never a partial set.</constraint>
     <constraint source="ADR-034 / NFR-01 of the access model">Fail closed: a metadata or read failure is a refusal, never "no ancestor". Keep CoreAncestorStatus.NoAncestor and Error distinct.</constraint>
