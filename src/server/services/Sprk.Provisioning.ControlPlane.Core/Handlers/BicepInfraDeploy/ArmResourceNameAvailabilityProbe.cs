@@ -17,6 +17,13 @@
 // listing every conflict would produce an ambiguous "which of these did
 // Azure actually block on" diagnostic.
 //
+// OWN-STAMP NAMES (T186 L23): checkNameAvailability reports a name as taken
+// even when the taker is this stamp — every re-run of H2a after an earlier
+// deploy. An unavailable name is therefore read at its expected resource ID
+// in the stamp's resource group; if it exists there, it is ours and the
+// (incremental, idempotent) redeploy proceeds. A 404 there means someone else
+// holds the name — the genuine collision this probe exists to catch.
+//
 // CREDENTIAL REUSE (CLAUDE.md §11): reuses the shared platform ArmClient
 // singleton registered by HandlersModule (task 120) — no second credential
 // chain, no second SDK-client DI registration.
@@ -60,6 +67,7 @@ public sealed class ArmResourceNameAvailabilityProbe : IResourceNameAvailability
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SubscriptionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ResourceGroupName);
 
         if (request.Names.Count == 0)
         {
@@ -75,6 +83,14 @@ public sealed class ArmResourceNameAvailabilityProbe : IResourceNameAvailability
             try
             {
                 var conflict = await CheckOneAsync(subscription, entry, cancellationToken).ConfigureAwait(false);
+                if (conflict is not null
+                    && await ExistsInStampResourceGroupAsync(request, entry, cancellationToken).ConfigureAwait(false))
+                {
+                    _logger.LogInformation(
+                        "H2a resource-name check: kind={Kind} name={Name} already belongs to this stamp's resource group {ResourceGroup} — not a collision",
+                        entry.Kind, entry.RequestedName, request.ResourceGroupName);
+                    continue;
+                }
                 if (conflict is not null)
                 {
                     _logger.LogWarning(
@@ -100,6 +116,41 @@ public sealed class ArmResourceNameAvailabilityProbe : IResourceNameAvailability
             "H2a resource-name check ALL AVAILABLE: subscriptionId={SubscriptionId} checked={Count}",
             request.SubscriptionId, request.Names.Count);
         return new ResourceNameAvailabilityResult.AllAvailable();
+    }
+
+    /// <summary>
+    /// True when the named resource exists at its expected ID in the stamp's resource group (ARM GET 200);
+    /// false on 404. Any other ARM error propagates to the caller's catch, which reports it as a conflict.
+    /// </summary>
+    private async Task<bool> ExistsInStampResourceGroupAsync(
+        ResourceNameAvailabilityRequest request,
+        ResourceNameCheckEntry entry,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            switch (entry.Kind)
+            {
+                case ResourceNameKind.StorageAccount:
+                    await _armClient.GetStorageAccountResource(StorageAccountResource.CreateResourceIdentifier(
+                            request.SubscriptionId, request.ResourceGroupName, entry.RequestedName))
+                        .GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                    return true;
+
+                case ResourceNameKind.ServiceBusNamespace:
+                    await _armClient.GetServiceBusNamespaceResource(ServiceBusNamespaceResource.CreateResourceIdentifier(
+                            request.SubscriptionId, request.ResourceGroupName, entry.RequestedName))
+                        .GetAsync(cancellationToken).ConfigureAwait(false);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -361,6 +361,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         nameProbe.CallCount.Should().Be(1);
+        nameProbe.LastRequest!.ResourceGroupName.Should().Be("rg-spaarke-acme-prod",
+            "the probe recognises the stamp's own names in customer.bicep's resource group (T186 L23)");
         runner.CallCount.Should().Be(1);
     }
 
