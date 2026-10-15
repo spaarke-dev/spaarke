@@ -136,7 +136,9 @@
     - Docs: docs/data-model/sprk_ebillingsetting.md (+ INDEX row), scripts/README.md eBilling Scripts entry.
 
     rework: fix-round-2 task 025
-  </notes>
+  
+Main session 2026-10-15: the window column keeps the name sprk_relatedwindowdays (not sprk_relatedworkwindowdays as written in step 1). Technical decision, not an owner question: nothing outside this POML names the column, consumers read EbillingSettings.RelatedWorkWindowDays, and renaming would mean deleting a column for no behavioural gain.
+</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
