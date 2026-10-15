@@ -397,7 +397,7 @@ Not the Ontology's: `matter.invoicedToDate` by line core record is eBilling's / 
 | ADR-013 | AI through `PublicContracts` facade |
 | ADR-015 | Invoice narratives may be privileged; Signals and Decision Records carry `privilegeflagged` |
 | ADR-017 | Job status for in-session progress |
-| ADR-018 / ADR-032 | eBilling behind a feature flag with null-object fallbacks (existing Finance pattern) |
+| ADR-018 / ADR-032 | eBilling behind its own kill switch, `EbillingOptions.Enabled` (default off), with null-object fallbacks. A new flag is justified (ADR-018 rule 2): it kills invoice submission, extraction, review and AP export, while the existing Finance routes (classification review, rollups) must keep working with eBilling off. No existing flag gates the Finance route family; `DocumentIntelligence:Enabled` and `Analysis:Enabled` gate individual AI services only (task 040) |
 | ADR-024 | Dual-field core-record relationships on invoice, line, submission, approval portion, identifier |
 | ADR-034 | Core-ancestor stamping for child-inheritance access |
 | ADR-038 | Tests per the testing strategy; evaluation sets in §13 |

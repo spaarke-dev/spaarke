@@ -40,7 +40,17 @@ No `IInvoiceAi` null object was needed or touched. The registration rule in `Fin
 - `dotnet build` BFF: 0 errors. `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter EbillingEnabledFilterTests`: 13/13.
 - Finance/DiGraph/Startup/OptionsValidation/EndpointGrouping subset: 327/327. `tests/Spaarke.ArchTests`: 1045/1045.
 - `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
-- Publish size (BFF hygiene CLAUDE.md section 10): see the completion line below.
+- Publish size (BFF hygiene CLAUDE.md section 10): 37.098 MB -> 37.099 MB (+882 bytes), `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal`, PDBs included; base 5ebd41523 (branch point, not the master tip).
+
+## Component justification (root CLAUDE.md section 11)
+
+- **Existing**: `FinanceOptions` (no `Enabled`), `DocumentIntelligenceOptions.Enabled` / `AnalysisOptions.Enabled` (gate single AI services), `FeatureDisabledResults.AsFeatureDisabled503` (reused).
+- **Extension**: no existing flag can be extended, because each gates a different capability and the existing Finance routes must stay up with eBilling off; the 503 helper is reused, not copied.
+- **Cost of doing nothing**: with no eBilling kill switch, a half-deployed or faulty eBilling release (submission, extraction, AP export) cannot be switched off without a redeploy, and ADR-018 requires one flag per user capability.
+
+## Review (main session, 2026-10-15)
+
+Adversarial review (one pass): no F-class findings; K1-K3 as listed above. adr-check on 2127b142e: compliant, 0 violations. Warnings handled: ADR-018 Current Flags row committed (0815b160d); new-flag justification added to design.md ADR table; publish size and section 11 recorded here. Known limit: the HTTP-pipeline tests sit in `tests/unit/Sprk.Bff.Api.Tests/Api/Finance/` as the POML specified; under TEST-ARCHITECTURE they are endpoint-contract tests and should be reviewed at the wrap-up `/test-diet` (task 190), when the first real eBilling route (044) has its own `tests/integration/contract/` test.
 
 ## For the main session (outside this task's write boundary)
 

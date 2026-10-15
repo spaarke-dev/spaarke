@@ -49,7 +49,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 040 | 🟡 [in-progress] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
+| 040 | ✅ [completed] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
 | 041 | 🟡 [in-progress] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
 | 042 | 🔲 [open] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
 | 043 | 🔲 [open] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
