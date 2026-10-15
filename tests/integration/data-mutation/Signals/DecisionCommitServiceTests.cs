@@ -77,10 +77,12 @@ public sealed class DecisionCommitServiceTests
     private static readonly Guid SecureTeam = Guid.Parse("c0430000-0000-4000-8000-000000000074");
     private static readonly Guid OrdinaryTeam = Guid.Parse("c0430000-0000-4000-8000-000000000076");
     private static readonly Guid ReminderVersion = Guid.Parse("c0430000-0000-4000-8000-000000000075");
+    private static readonly Guid ReassignVersion = Guid.Parse("c0430000-0000-4000-8000-000000000077");
 
     private const string PathBPlan = "{\"actions\":[\"send-budget-inquiry\",\"revise-budget\",\"approve-variance\"],\"nextSteps\":[\"add-todo\",\"send-email\"]}";
     private const string DoPlan = "{\"actions\":[\"mark-complete\",\"reschedule\"],\"nextSteps\":[\"add-todo\"]}";
     private const string ReminderPlan = "{\"actions\":[\"send-reminder\",\"mark-complete\"]}";
+    private const string ReassignPlan = "{\"actions\":[\"reassign\",\"mark-complete\"],\"nextSteps\":[\"add-todo\"]}";
 
     private const int Open = SignalWriter.SignalStatusOpen;
     private const int Resolved = SignalWriter.SignalStatusResolved;
@@ -183,7 +185,7 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
             Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
-                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : PathBPlan });
+                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : id == ReassignVersion ? ReassignPlan : PathBPlan });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -2345,9 +2347,68 @@ public sealed class DecisionCommitServiceTests
         repeat.Replayed.Should().BeTrue();
     }
 
-    [Fact]
-    public async Task D141_AResumeOfTheCallersFailedReview_AfterTheItemWasReassigned_StillRuns()
+    /// <summary>A Do review whose own <c>reassign</c> moves the To Do away from the caller (the fake executor makes it not-mine as
+    /// it lands) and then adds a To Do, which a test makes fail so the review is stored Failed and resumable.</summary>
+    private static DecisionReview ReassignThenAddTodo() =>
+        new()
+        {
+            ReviewId = Guid.NewGuid(),
+            Confirmed = true,
+            Actions = [Take("reassign", Values(("assignee", Assignee.ToString("D")))), Skip("mark-complete")],
+            NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }],
+        };
+
+    private static Rig ReassignRig()
     {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, ReassignVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Executors["reassign"].OnExecute = () => rig.CallerNotMine.Add(ItemTodo);   // the review's own reassign moves the item away
+        return rig;
+    }
+
+    [Fact]
+    public async Task D141_AResumeOfTheCallersFailedReview_WhoseOwnReassignLanded_StillRuns_WithoutAskingMineAgain()
+    {
+        // Adversarial review F1 (pass 1): the review's own landed reassign is what made the item not-mine; its resume is not judged by it.
+        var rig = ReassignRig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = ReassignThenAddTodo();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Status.Should().Be(DecisionCommitStatus.Failed, failed.Detail);
+        failed.Resumable.Should().BeTrue();
+        failed.Steps.Should().Contain(s => s.Code == "reassign" && s.Status == "Done");
+        rig.CallerNotMine.Should().Contain(ItemTodo, "the reassign landed");
+        rig.Executors["add-todo"].Result = null;
+
+        var resumed = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+
+        resumed.Status.Should().Be(DecisionCommitStatus.Recorded, resumed.Detail);
+        rig.Log.Count(l => l == "execute:reassign").Should().Be(1, "a landed step is not run again");
+        rig.MineAsked.Should().ContainSingle("the check ran on the first attempt only");
+    }
+
+    [Fact]
+    public async Task D141_ARepairReplayOfARecordedReview_WhoseOwnReassignLanded_StillCloses()
+    {
+        var rig = ReassignRig();
+        FirstCloseFails(rig);
+        var review = ReassignThenAddTodo();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open, "the close failed after the record");
+
+        var replay = await rig.CommitAsync(review, DoSignal);
+
+        replay.Status.Should().Be(DecisionCommitStatus.Recorded, replay.Detail);
+        replay.Replayed.Should().BeTrue();
+        rig.Status(DoSignal).Should().Be(Resolved, "the repair finished the close the first run did not");
+        rig.MineAsked.Should().ContainSingle("the check ran on the first attempt only");
+    }
+
+    [Fact]
+    public async Task D141_ARetryOfTheCallersFailedReview_AfterAnOutsideReassign_IsTheUniform404_AndWritesNothing()
+    {
+        // Adversarial review F (pass 2): Bob's mark-complete failed transiently and is stored resumable; a manager then reassigns the
+        // To Do to Alice, outside the decision. Bob's Retry must not complete Alice's item as Bob.
         var rig = new Rig();
         rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
         rig.Executors["mark-complete"].Result = DecisionActionOutcome.Refused("mark-complete", DecisionActionReasons.WriteFailed, "no");
@@ -2355,12 +2416,53 @@ public sealed class DecisionCommitServiceTests
         var failed = await rig.CommitAsync(review, DoSignal);
         failed.Status.Should().Be(DecisionCommitStatus.Failed, failed.Detail);
         failed.Resumable.Should().BeTrue();
+        failed.Steps.Should().NotContain(s => s.Code == "reassign", "no reassign of this review landed: the item moved outside the decision");
+        var writes = rig.Writes.ToList();
         rig.CallerNotMine.Add(ItemTodo);
         rig.Executors["mark-complete"].Result = null;
 
-        var resumed = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+        var retried = await rig.CommitAsync(review with { Retry = true }, DoSignal);
 
-        resumed.Status.Should().Be(DecisionCommitStatus.Recorded, resumed.Detail);
+        retried.Status.Should().Be(DecisionCommitStatus.NotFound);
+        retried.Should().BeEquivalentTo(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId });
+        rig.Writes.Should().Equal(writes, "nothing is written for an item that is no longer the caller's");
+        rig.Status(DoSignal).Should().Be(Open);
+
+        // The refusal wrote no marker: if the item comes back to the caller, the same failure still resumes.
+        rig.CallerNotMine.Remove(ItemTodo);
+        var back = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+        back.Status.Should().Be(DecisionCommitStatus.Recorded, back.Detail);
+    }
+
+    [Fact]
+    public async Task D141_ARepairReplayOfTheCallersRecordedReview_AfterAnOutsideReassign_IsTheUniform404_AndWritesNothing()
+    {
+        // The same hole through the repair: the record landed, the close did not; the item then moves outside the decision.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        FirstCloseFails(rig);
+        var review = MarkComplete();
+        var first = await rig.CommitAsync(review, DoSignal);
+        first.Status.Should().Be(DecisionCommitStatus.Recorded, first.Detail);
+        rig.Status(DoSignal).Should().Be(Open, "the close failed after the record, so the repair has a close to finish");
+        var writes = rig.Writes.ToList();
+        var closes = rig.SignalUpdates.Count;
+        rig.CallerNotMine.Add(ItemTodo);
+
+        var replay = await rig.CommitAsync(review, DoSignal);
+
+        replay.Status.Should().Be(DecisionCommitStatus.NotFound);
+        replay.Should().BeEquivalentTo(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId });
+        rig.Writes.Should().Equal(writes, "the repair closes nothing for an item that is no longer the caller's");
+        rig.SignalUpdates.Should().HaveCount(closes);
+        rig.Status(DoSignal).Should().Be(Open);
+
+        // And it stays a repair for the caller who still owns the item.
+        rig.CallerNotMine.Remove(ItemTodo);
+        var repaired = await rig.CommitAsync(review, DoSignal);
+        repaired.Status.Should().Be(DecisionCommitStatus.Recorded, repaired.Detail);
+        repaired.Replayed.Should().BeTrue();
+        rig.Status(DoSignal).Should().Be(Resolved);
     }
 
     [Fact]

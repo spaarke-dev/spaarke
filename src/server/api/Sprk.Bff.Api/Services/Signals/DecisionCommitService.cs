@@ -469,9 +469,11 @@ public sealed class DecisionCommitService
 
         // ---- (1b) D-141 (task 150): a Do item is the caller's own work, or the uniform 404, before any lock, ledger answer or write.
         // The one exception is THIS caller's own review of exactly this content already in the ledger: it passed this check on its
-        // first attempt, and the decision may since have reassigned the item (Reassign), so its stored outcome is returned or its
-        // failure resumed. Any other review id, or the same id with other content, is checked here, so a not-mine item never gets
-        // an in-progress, review-changed or replay answer an unreadable item would not.
+        // first attempt, and the decision may since have reassigned the item (Reassign), so its stored outcome is RETURNED (no
+        // write) or reported as in progress. The skip stops at the first write: a resume or a repair replay of that review checks
+        // "mine" again (CommitLeasedAsync) unless the review's own landed reassign step is what moved the item. Any other review
+        // id, or the same id with other content, is checked here, so a not-mine item never gets an in-progress, review-changed or
+        // replay answer an unreadable item would not.
         var mineConfirmed = !await IsSameReviewInLedgerAsync(tenantId, ledgerKey, hash, ct).ConfigureAwait(false);
         if (mineConfirmed && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
             return notMine;
@@ -576,6 +578,14 @@ public sealed class DecisionCommitService
         return null;
     }
 
+    /// <summary>Task 150 (pass 2 F): whether the review's own <c>reassign</c> step landed. That step moved the Do item away from the
+    /// caller, after the caller passed the "mine" check on the first attempt, so a resume or replay of this review is not judged by
+    /// whose item it is now.</summary>
+    private static bool OwnReassignLanded(DecisionCommitResult first) =>
+        first.Steps.Any(s => s.Code == ReassignActionCode && s.Status == nameof(DecisionActionStatus.Done));
+
+    private const string ReassignActionCode = "reassign";
+
     private static DecisionCommitResult InProgress(Guid reviewId) =>
         new()
         {
@@ -617,12 +627,19 @@ public sealed class DecisionCommitService
             // The same review id is the same review: the stored hash covers the Signal id and everything the review asks for.
             if (!string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
                 return Refused(review.ReviewId, DecisionCommitReasons.ReviewChanged, "This review id was already used for a different decision.");
+            // D-141 (task 150, pass 2 F): returning the stored outcome writes nothing, so it keeps the skipped "mine" check. A resume
+            // and a repair replay WRITE (as the caller, on a Do item someone else may own now), so unless the check already ran for
+            // this attempt they run it first; the one exception is a review whose own reassign step landed: that step is what moved
+            // the item, and the first attempt passed the check before it ran (task 150 review F1).
+            var mineNeeded = !mineConfirmed && !OwnReassignLanded(first);
             if (first.Status == DecisionCommitStatus.Recorded)
-                return await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey).ConfigureAwait(false);
+                return await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey, mineNeeded, ct).ConfigureAwait(false);
             if (!review.Retry || first.Status != DecisionCommitStatus.Failed)
                 return first with { Replayed = true };
             if (!first.Resumable)
                 return first with { Replayed = true, ReasonCode = DecisionCommitReasons.NotResumable };
+            if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMineOnResume)
+                return notMineOnResume;
             resume = first;
         }
 
@@ -722,15 +739,21 @@ public sealed class DecisionCommitService
     /// <remarks>K5: FR-51 is asked again, as the caller, before any repair (rights may have been revoked since the first run).
     /// When the caller may no longer decide, or it cannot be checked, nothing is closed: the stored outcome is returned with
     /// each still-open Signal listed as Unchanged and a warning saying why, and the stored outcome is left as it was so a later
-    /// repeat can try again. K6: a repair that dismisses runs suppression as a first run does.</remarks>
+    /// repeat can try again. K6: a repair that dismisses runs suppression as a first run does.
+    /// Task 150 (pass 2 F, D-141): when <paramref name="mineNeeded"/>, the Do-lane "mine" check runs before the first read or write
+    /// of a repair, and a not-mine answer is returned with nothing written; a replay with nothing to close writes nothing and skips it.</remarks>
     private async Task<DecisionCommitResult> ReplayRecordedAsync(
         DecisionCommitResult first, LedgerEntry prior, DateTimeOffset reviewStart, IReadOnlyList<Guid> ids,
-        IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http, string tenantId, string ledgerKey)
+        IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http, string tenantId, string ledgerKey,
+        bool mineNeeded, CancellationToken ct)
     {
         var closedAlready = first.Signals.Where(s => s.State != Unchanged).Select(s => s.SignalId).ToHashSet();
         var open = ids.Where(id => !closedAlready.Contains(id)).ToList();
         if (open.Count == 0 || first.DecisionRecordId is not { } recordId)
             return first with { Replayed = true };
+
+        if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
 
         Guid? confirmedBy;
         try
