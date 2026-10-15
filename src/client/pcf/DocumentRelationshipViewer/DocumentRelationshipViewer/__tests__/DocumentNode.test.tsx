@@ -49,7 +49,7 @@ const createNodeProps = (data: Partial<DocumentNodeData> = {}) => ({
 
 describe('DocumentNode', () => {
   describe('Source Node Rendering', () => {
-    it('renders source node with Source Document badge', () => {
+    it('renders source node with Source badge and caption', () => {
       const props = createNodeProps({ isSource: true });
 
       render(
@@ -58,7 +58,10 @@ describe('DocumentNode', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText('Source Document')).toBeInTheDocument();
+      // Source nodes show a "Source" caption in the header and a filled "Source" badge in the footer
+      const sourceLabels = screen.getAllByText('Source');
+      expect(sourceLabels).toHaveLength(2);
+      expect(sourceLabels.some(el => el.classList.contains('fui-Badge'))).toBe(true);
     });
 
     it('does not show similarity badge for source node', () => {
@@ -70,7 +73,8 @@ describe('DocumentNode', () => {
         </TestWrapper>
       );
 
-      expect(screen.queryByText('Similarity')).not.toBeInTheDocument();
+      // The tooltip only carries a "Similarity:" row for related nodes
+      expect(screen.queryByText('Similarity:')).not.toBeInTheDocument();
     });
   });
 
@@ -84,10 +88,12 @@ describe('DocumentNode', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText('Contract Agreement.docx')).toBeInTheDocument();
+      // Name appears in the card header and again as the title of the info tooltip
+      const nameElements = screen.getAllByText('Contract Agreement.docx');
+      expect(nameElements.some(el => el.classList.contains('fui-Body1Strong'))).toBe(true);
     });
 
-    it('displays similarity score for related nodes', () => {
+    it('displays similarity score for related nodes in the info tooltip', () => {
       const props = createNodeProps({ isSource: false, similarity: 0.85 });
 
       render(
@@ -96,7 +102,8 @@ describe('DocumentNode', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText('Similarity')).toBeInTheDocument();
+      // Similarity moved from a footer badge into the info tooltip (v1.0.24); the footer shows the relationship type
+      expect(screen.getByText('Similarity:')).toBeInTheDocument();
       expect(screen.getByText('85%')).toBeInTheDocument();
     });
 
@@ -226,7 +233,8 @@ describe('DocumentNode', () => {
 
       // The Card component receives the selected prop
       // Visual selection state is handled by Fluent UI
-      expect(screen.getByText('Test Document.pdf')).toBeInTheDocument();
+      const nameElements = screen.getAllByText('Test Document.pdf');
+      expect(nameElements.some(el => el.classList.contains('fui-Body1Strong'))).toBe(true);
     });
   });
 
@@ -276,7 +284,7 @@ describe('DocumentNode', () => {
       );
 
       expect(screen.queryByText('File only')).not.toBeInTheDocument();
-      expect(screen.getByText('Similarity')).toBeInTheDocument();
+      expect(screen.getByText('Similarity:')).toBeInTheDocument();
     });
 
     it('shows file type for orphan files', () => {
@@ -400,17 +408,30 @@ describe('DocumentNode', () => {
   });
 
   describe('Default Values', () => {
-    it('uses default fileType when undefined', () => {
-      const props = createNodeProps({ fileType: undefined });
+    it('uses the unknown-file icon and omits the Format row when fileType is undefined', () => {
+      const renderIcon = (fileType: string | undefined) => {
+        const { container, unmount } = render(
+          <TestWrapper>
+            <DocumentNode {...createNodeProps({ fileType })} />
+          </TestWrapper>
+        );
+        const iconPath = container.querySelector('.fui-CardHeader__image svg path')?.getAttribute('d');
+        const hasFormatRow = screen.queryByText('Format:') !== null;
+        unmount();
+        return { iconPath, hasFormatRow };
+      };
 
-      render(
-        <TestWrapper>
-          <DocumentNode {...props} />
-        </TestWrapper>
-      );
+      const undef = renderIcon(undefined);
+      const unknown = renderIcon('unknown');
+      const pdf = renderIcon('pdf');
 
-      // Should show UNKNOWN when fileType is undefined
-      expect(screen.getByText(/UNKNOWN/)).toBeInTheDocument();
+      // Falls back to the same icon as an explicit 'unknown' type, which differs from a real type's icon
+      expect(unknown.iconPath).toBeTruthy();
+      expect(undef.iconPath).toBe(unknown.iconPath);
+      expect(undef.iconPath).not.toBe(pdf.iconPath);
+      // The file type moved into the info tooltip (v1.0.24+); with no type there is no Format row
+      expect(undef.hasFormatRow).toBe(false);
+      expect(pdf.hasFormatRow).toBe(true);
     });
 
     it('shows zero similarity correctly', () => {
@@ -422,8 +443,8 @@ describe('DocumentNode', () => {
         </TestWrapper>
       );
 
-      // When similarity is 0, footer should not be shown for related nodes
-      expect(screen.queryByText('Similarity')).not.toBeInTheDocument();
+      // When similarity is 0, the tooltip omits the Similarity row
+      expect(screen.queryByText('Similarity:')).not.toBeInTheDocument();
     });
   });
 });
