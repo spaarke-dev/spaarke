@@ -1316,21 +1316,19 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     }
 
     /// <summary>
-    /// Ensures the registration carries every credential in <paramref name="specs"/>
-    /// (<see cref="PlanFederatedCredentials"/>), then performs an INDEPENDENT re-GET (never trusting the write call's own
-    /// echoed response) to confirm they persisted exactly as planned — see GOTCHA 2 in the file header for why a literal
-    /// OAuth2 exchange is not something L2 can perform for the stamp UAMI here (the Worker credential's first exchange is
-    /// H6's first token request). Returns null on success (the caller reports
-    /// <see cref="FicVerificationState.PendingPostAppServiceVerification"/> — the script exit-2 equivalent, NEVER
-    /// terminal success per SF-8), or a Failure outcome to propagate. The cross-tenant guard (SF-5) ran when the specs
-    /// were built, before any Graph call.
+    /// T186 L27: Graph's answer to a credential write it has not caught up with — 404 on the app, or 400 "duplicate
+    /// values" for a triple that is not in fact present (the plan re-read the collection before writing).
     /// </summary>
-    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialsAsync(
+    internal static bool IsFicWriteNotYetConsistent(ODataError ex) =>
+        ex.ResponseStatusCode == 404
+        || (ex.ResponseStatusCode == 400
+            && (ex.Error?.Message ?? ex.Message).Contains("duplicate values", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>One read → plan → delete/create pass (<see cref="PlanFederatedCredentials"/>); null, or a Failure.</summary>
+    private async Task<EntraAppRegOutcome?> ReconcileFederatedCredentialsOnceAsync(
         GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
         CancellationToken ct)
     {
-        try
-        {
             FederatedIdentityCredentialCollectionResponse? existing;
             using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -1375,6 +1373,37 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 _logger.LogInformation(
                     "H3 created FIC '{FicName}' (subject {Subject}) on appObjectId={AppObjectId} customerId={CustomerId}",
                     spec.Name, spec.Subject, appObjectId, request.CustomerId);
+            }
+
+            return null;
+        }
+
+    /// <summary>
+    /// Ensures the registration carries every credential in <paramref name="specs"/>
+    /// (<see cref="PlanFederatedCredentials"/>), then performs an INDEPENDENT re-GET (never trusting the write call's own
+    /// echoed response) to confirm they persisted exactly as planned — see GOTCHA 2 in the file header for why a literal
+    /// OAuth2 exchange is not something L2 can perform for the stamp UAMI here (the Worker credential's first exchange is
+    /// H6's first token request). Returns null on success (the caller reports
+    /// <see cref="FicVerificationState.PendingPostAppServiceVerification"/> — the script exit-2 equivalent, NEVER
+    /// terminal success per SF-8), or a Failure outcome to propagate. The cross-tenant guard (SF-5) ran when the specs
+    /// were built, before any Graph call.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialsAsync(
+        GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            // T186 L26/L27: a credential write straight after the app's creation, or straight after another
+            // credential write on the same app, can be refused while Graph replicates (404, or 400 "Request contains a
+            // property with duplicate values" — the first live H3 got the latter creating its second credential).
+            // Each attempt re-reads and re-plans, so a write that did land is never repeated.
+            var reconcileFailure = await RetryWhileReplicatingAsync(
+                attemptCt => ReconcileFederatedCredentialsOnceAsync(graph, appObjectId, specs, request, attemptCt),
+                IsFicWriteNotYetConsistent, "federated credential reconcile", ct).ConfigureAwait(false);
+            if (reconcileFailure is not null)
+            {
+                return reconcileFailure;
             }
         }
         catch (ODataError ex)

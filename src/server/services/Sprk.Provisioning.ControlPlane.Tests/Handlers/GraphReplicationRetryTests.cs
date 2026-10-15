@@ -69,4 +69,28 @@ public sealed class GraphReplicationRetryTests
     [InlineData(403, "Authorization_RequestDenied", "Insufficient privileges to complete the operation.", false)]
     public void IsNotYetReplicated_RecognisesOnlyReplicationLag(int status, string code, string message, bool expected)
         => GraphAppRegistrationProvisioner.IsNotYetReplicated(Error(status, code, message)).Should().Be(expected);
+
+    // T186 L27: the first live H3 created its stamp credential, then the Worker credential's POST got 400
+    // "Request contains a property with duplicate values" although no credential carried that triple.
+    [Theory]
+    [InlineData(400, "Request_BadRequest", "Request contains a property with duplicate values.", true)]
+    [InlineData(404, "Request_ResourceNotFound", "Resource 'x' does not exist.", true)]
+    [InlineData(400, "Request_BadRequest", "Property 'subject' is invalid.", false)]
+    [InlineData(403, "Authorization_RequestDenied", "Insufficient privileges to complete the operation.", false)]
+    public void IsFicWriteNotYetConsistent_RecognisesOnlyReplicationLag(int status, string code, string message, bool expected)
+        => GraphAppRegistrationProvisioner.IsFicWriteNotYetConsistent(Error(status, code, message)).Should().Be(expected);
+
+    [Fact]
+    public async Task DuplicateValuesWhileTheCredentialCollectionReplicates_IsRetried()
+    {
+        var calls = 0;
+
+        var result = await GraphAppRegistrationProvisioner.RetryWhileReplicatingAsync(
+            _ => ++calls < 2 ? throw Error(400, "Request_BadRequest", "Request contains a property with duplicate values.") : Task.FromResult(true),
+            GraphAppRegistrationProvisioner.IsFicWriteNotYetConsistent, 4, TimeSpan.FromMilliseconds(1),
+            TimeSpan.FromSeconds(5), NullLogger.Instance, "test", CancellationToken.None);
+
+        result.Should().BeTrue();
+        calls.Should().Be(2);
+    }
 }
