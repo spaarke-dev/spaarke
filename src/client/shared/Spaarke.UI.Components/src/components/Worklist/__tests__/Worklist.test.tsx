@@ -439,7 +439,11 @@ describe('ADR-021 and structure', () => {
 
   it('only MatterCard is exported as a row component (IssueLine is its part, not a second row component); WorklistWidget is the host that arranges cards (task 059)', async () => {
     const barrel = await import('..');
-    expect(Object.keys(barrel).filter(k => /^[A-Z]/.test(k))).toEqual(['MatterCard', 'WorklistWidget']);
+    // WorklistRequestError is the route client's error class (a value so hosts can use `instanceof`), not a component.
+    expect(Object.keys(barrel).filter(k => /^[A-Z]/.test(k) && k !== 'WorklistRequestError')).toEqual([
+      'MatterCard',
+      'WorklistWidget',
+    ]);
   });
 });
 

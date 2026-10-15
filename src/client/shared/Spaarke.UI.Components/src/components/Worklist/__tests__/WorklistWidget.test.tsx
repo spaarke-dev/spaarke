@@ -19,7 +19,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
-import { WorklistWidget, createWorklistService } from '..';
+import { WorklistRequestError, WorklistWidget, createWorklistService } from '..';
 import type { WorklistService } from '..';
 import type { DecisionWizardLaunchRequest } from '../../DecisionWizard';
 import {
@@ -130,6 +130,19 @@ describe('lanes', () => {
     expect(screen.getByTestId('lane-empty-Do')).toHaveTextContent('Nothing to do.');
     expect(screen.getByTestId('lane-start-Decide')).toBeDisabled();
     expect(screen.getByTestId('lane-start-Do')).toBeDisabled();
+  });
+
+  it('under the email aggregate row an empty Do lane says "No other items to do."', async () => {
+    renderWidget({
+      service: fakeService({ lanes: body('lanes', [], []) }),
+      aggregateRow: <div data-testid="agg">8 emails await a match confirmation</div>,
+    });
+    await ready();
+    expect(screen.getByTestId('agg')).toBeInTheDocument();
+    expect(screen.getByTestId('lane-empty-Do')).toHaveTextContent('No other items to do.');
+    expect(screen.getByTestId('lane-empty-Do')).not.toHaveTextContent('Nothing to do.');
+    // The Decide lane has no aggregate row and keeps its own wording.
+    expect(screen.getByTestId('lane-empty-Decide')).toHaveTextContent('Nothing to decide.');
   });
 
   it('reads sets lazily: lanes and closed today on mount, the other two when their disclosure opens', async () => {
@@ -461,6 +474,40 @@ describe('Closed today, Suppressed and Closed earlier', () => {
     expect(cleared.resolution?.resolutionType).toBe('ConditionCleared');
   });
 
+  it('a Closed today line opens the Closed today copy, even when the lanes still hold a stale open copy of the same Signal', async () => {
+    // After a decision a refresh can fail (503 keeps the last list) or still be in flight: the lanes then still hold C1 as open.
+    const staleLanes = body(
+      'lanes',
+      [group(matterCore, [routeItem(C1, 'Decide', { workType: 'askOutsideCounsel' })])],
+      []
+    );
+    const { launchWizard } = renderWidget({ service: fakeService({ ...ROUTE_BODIES, lanes: staleLanes }) });
+    await ready();
+    const today = await open('closedToday');
+    await waitFor(() => expect(within(today).getAllByTestId('issue-line').length).toBe(2));
+    await userEvent.click(within(today).getAllByTestId('issue-line')[0]);
+    const fromClosed = await launchWizard.mock.calls[0][0].loadItem!(C1);
+    expect(fromClosed.resolution).toMatchObject({ resolutionType: 'Acted' });
+    expect(fromClosed.row.status).toBe('Resolved');
+
+    // The same Signal launched from the lanes is still the open item ("To decide").
+    await userEvent.click(within(lane('Decide')).getAllByTestId('issue-line')[0]);
+    const fromLanes = await launchWizard.mock.calls[1][0].loadItem!(C1);
+    expect(fromLanes.resolution).toBeNull();
+  });
+
+  it('a lane line never opens a closed copy, and a disclosure line never opens an open one', async () => {
+    const { launchWizard } = renderWidget();
+    await ready();
+    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    const lanes = launchWizard.mock.calls[0][0].loadItem!;
+    await expect(lanes(C2)).rejects.toThrow(/no longer on the list/);
+    const today = await open('closedToday');
+    await waitFor(() => expect(within(today).getAllByTestId('issue-line').length).toBe(2));
+    await userEvent.click(within(today).getAllByTestId('issue-line')[0]);
+    await expect(launchWizard.mock.calls[1][0].loadItem!(A1)).rejects.toThrow(/no longer on the list/);
+  });
+
   it('a suppressed line opens read-only and the status note carries the until-date', async () => {
     const { launchWizard } = renderWidget();
     await ready();
@@ -563,6 +610,39 @@ describe('loading and failure', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await ready();
     expect(lineIds(lane('Decide'))).toEqual([A1, A2, A3]);
+  });
+
+  it('a 403 says the worklist is not available for the account, with no Try again and no technical text', async () => {
+    const service = fakeService();
+    service.read.mockImplementation(async () => {
+      throw new WorklistRequestError('The worklist could not be read (403).', 403);
+    });
+    renderWidget({ service });
+    const error = await screen.findByTestId('worklist-error');
+    expect(error).toHaveTextContent("Your worklist isn't available for your account. Contact your administrator.");
+    expect(error).not.toHaveTextContent('403');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('any other failure keeps its message and Try again (a 503 is worth another try)', async () => {
+    const service = fakeService();
+    service.read.mockImplementation(async () => {
+      throw new WorklistRequestError('The worklist could not be read. Try again.', 503);
+    });
+    renderWidget({ service });
+    expect(await screen.findByTestId('worklist-error')).toHaveTextContent('The worklist could not be read. Try again.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('a 200 body that is not a worklist answer shows the error state, not empty lanes', async () => {
+    const service = createWorklistService({
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ unexpected: true }) }) as unknown as Response,
+      baseUrl: 'https://bff.test',
+    });
+    renderWidget({ service });
+    expect(await screen.findByTestId('worklist-error')).toHaveTextContent('The worklist answer could not be read.');
+    expect(screen.queryByTestId('lane-empty-Do')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nothing to do.')).not.toBeInTheDocument();
   });
 
   it('keeps the last list on screen when a refresh fails', async () => {

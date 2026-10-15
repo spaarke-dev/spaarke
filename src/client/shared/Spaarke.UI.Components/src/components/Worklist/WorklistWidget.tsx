@@ -60,7 +60,6 @@ export interface WorklistWidgetProps {
 }
 
 const LANES: readonly WorklistLane[] = ['Decide', 'Do'];
-const ALL_SETS: readonly WorklistSetName[] = ['lanes', 'closedToday', 'suppressed', 'closedEarlier'];
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL, minWidth: 0 },
@@ -129,31 +128,34 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     });
   }, [views.Decide.filterKey, views.Do.filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadItem = React.useCallback<DecisionItemLoader>(
-    async signalId => {
-      for (const set of ALL_SETS) {
-        const data = latest.current[set].data;
-        if (!data) continue;
-        for (const lane of LANES) {
-          for (const group of data[lane]) {
-            const item = group.items.find(i => i.signalId === signalId);
-            if (item) return buildWizardItem({ item, group, set, today: new Date() });
+  // The loader is tied to the set the user launched from: a line in Closed today must open that set's (resolved, read-only) copy
+  // even when a stale copy of the same Signal is still in the lanes (a refresh after a decision can leave one behind). The wizard
+  // only asks for ids of the list it was given, so reading the source set alone is enough.
+  const loaderFor = React.useCallback(
+    (source: WorklistSetName): DecisionItemLoader =>
+      async signalId => {
+        const data = latest.current[source].data;
+        if (data) {
+          for (const lane of LANES) {
+            for (const group of data[lane]) {
+              const item = group.items.find(i => i.signalId === signalId);
+              if (item) return buildWizardItem({ item, group, set: source, today: new Date() });
+            }
           }
         }
-      }
-      throw new Error('This item is no longer on the list. Close the wizard and refresh the worklist.');
-    },
+        throw new Error('This item is no longer on the list. Close the wizard and refresh the worklist.');
+      },
     [latest]
   );
 
   const openWizard = React.useCallback(
-    async (event: OpenItemEvent) => {
+    async (event: OpenItemEvent, sourceSet: WorklistSetName) => {
       setNotice(null);
       let recorded = false;
       try {
         const result = await launchWizard({
           ...event,
-          loadItem,
+          loadItem: loaderFor(sourceSet),
           lookup,
           onRecorded: () => {
             recorded = true;
@@ -168,18 +170,21 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       // What was recorded has left the lanes: read them again once the wizard is closed.
       if (recorded) reload();
     },
-    [launchWizard, loadItem, lookup, reload]
+    [launchWizard, loaderFor, lookup, reload]
   );
 
   const startLane = (lane: WorklistLane) => {
     const view = views[lane];
     const first = view.groups[0];
     if (!first) return;
-    void openWizard({
-      itemId: view.visibleIds[0],
-      core: coreRef(first.group.core),
-      visibleList: [...view.visibleIds],
-    });
+    void openWizard(
+      {
+        itemId: view.visibleIds[0],
+        core: coreRef(first.group.core),
+        visibleList: [...view.visibleIds],
+      },
+      'lanes'
+    );
   };
 
   const doneToday = (lane: WorklistLane): number | undefined => {
@@ -190,15 +195,23 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
 
   if (!lanesData) {
     if (sets.lanes.status === 'error') {
+      // A 403 is the caller's access, not a fault: another try gives the same answer, so there is no button and no route text.
+      const forbidden = sets.lanes.httpStatus === 403;
       return (
         <div className={className}>
           <MessageBar intent="error" data-testid="worklist-error">
-            <MessageBarBody>{sets.lanes.error ?? 'The worklist could not be read.'}</MessageBarBody>
-            <MessageBarActions>
-              <Button size="small" onClick={() => retry('lanes')}>
-                Try again
-              </Button>
-            </MessageBarActions>
+            <MessageBarBody>
+              {forbidden
+                ? "Your worklist isn't available for your account. Contact your administrator."
+                : (sets.lanes.error ?? 'The worklist could not be read.')}
+            </MessageBarBody>
+            {!forbidden && (
+              <MessageBarActions>
+                <Button size="small" onClick={() => retry('lanes')}>
+                  Try again
+                </Button>
+              </MessageBarActions>
+            )}
           </MessageBar>
         </div>
       );
@@ -248,7 +261,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           doneToday={doneToday(lane)}
           today={today}
           onSelectKey={key => setFilters(prev => ({ ...prev, [lane]: key }))}
-          onOpenItem={event => void openWizard(event)}
+          onOpenItem={event => void openWizard(event, 'lanes')}
           onStart={() => startLane(lane)}
           aggregateRow={lane === 'Do' ? aggregateRow : undefined}
         />
@@ -263,7 +276,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
         today={today}
         onOpenSet={(set: DisclosureSetName) => ensure(set)}
         onRetry={(set: DisclosureSetName) => retry(set)}
-        onOpenItem={event => void openWizard(event)}
+        onOpenItem={(event, set) => void openWizard(event, set)}
       />
     </div>
   );

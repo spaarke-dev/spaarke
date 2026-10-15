@@ -82,15 +82,35 @@ describe('parseWorklistResponse', () => {
     expect(data.Do.map(g => g.items[0].signalId)).toEqual(['a', 'b']);
   });
 
-  it('anything not recognised is an empty lane, never a made-up row', () => {
-    for (const bad of [null, 'x', [], {}, { lanes: 'x' }, { lanes: [null, { lane: 'Other', groups: [] }] }]) {
-      expect(parseWorklistResponse(bad, 'lanes')).toEqual({ set: 'lanes', Decide: [], Do: [] });
+  it('a body that is not a worklist answer throws, never an empty list (no false "Nothing to do.")', () => {
+    const lanesOnly = (lane: 'Decide' | 'Do') => ({ lanes: [{ lane, groups: [] }] });
+    for (const bad of [
+      null,
+      'x',
+      [],
+      {},
+      { lanes: 'x' },
+      { lanes: [null, { lane: 'Other', groups: [] }] },
+      lanesOnly('Decide'),
+      lanesOnly('Do'),
+    ]) {
+      expect(() => parseWorklistResponse(bad, 'lanes')).toThrow('The worklist answer could not be read.');
     }
+    expect.assertions(8 + 1);
+    try {
+      parseWorklistResponse({}, 'lanes', 200);
+    } catch (err) {
+      expect(err).toMatchObject({ name: 'WorklistRequestError', httpStatus: 200 });
+    }
+  });
+
+  it('inside a readable answer, an unreadable item is skipped, never made up', () => {
     const data = parseWorklistResponse(
       body('lanes', [group(matterCore, [{ subjectName: 'no id' }, routeItem('ok', 'Decide')])], []),
       'lanes'
     );
     expect(data.Decide[0].items.map(i => i.signalId)).toEqual(['ok']);
+    expect(data.Do).toEqual([]);
   });
 });
 
@@ -153,6 +173,15 @@ describe('createWorklistService failures', () => {
       baseUrl: 'https://bff.test',
     });
     await expect(service.read('lanes')).rejects.toMatchObject({ message: 'The worklist answer could not be read.' });
+  });
+
+  it('a 200 whose body is not a worklist answer is an error, not an empty list', async () => {
+    const service = createWorklistService({ fetch: async () => ok({ unexpected: true }), baseUrl: 'https://bff.test' });
+    await expect(service.read('lanes')).rejects.toMatchObject({
+      name: 'WorklistRequestError',
+      httpStatus: 200,
+      message: 'The worklist answer could not be read.',
+    });
   });
 
   it('asks for each set by name and trims the base url', async () => {

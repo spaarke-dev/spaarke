@@ -65,9 +65,10 @@ Changes to shipped parts, each needed so a closed item the route returns renders
 - Pre-existing, not caused by this task: `DecisionWizard.test.tsx` "Escape and the backdrop never close ..." fails (the re-opened nested
   Discard dialog) only when the whole `src/components/DecisionWizard` folder runs; it passes alone and fails identically on the untouched
   task 058 worktree (058's K1 jsdom / tabster limit). Filed as an issue.
-- `tsc --noEmit` in UI.Components shows the same 9 errors as before (unresolved `@spaarke/auth`, `@spaarke/sdap-client`, one `unknown`
-  catch); AI.Widgets shows 31 errors, all unresolved sibling packages (`@spaarke/auth`, `@spaarke/ai-outputs`) and none in a file this task
-  touched.
+- `tsc --noEmit` in UI.Components shows 9 errors, none in a Worklist file (unresolved `@spaarke/auth`, `@spaarke/sdap-client`, and `unknown` catches in
+  `FileUploadService.ts`). AI.Widgets shows 31 errors, all unresolved sibling packages. Correction: this note first said none were in a touched file,
+  but `register-workspace-widgets.ts` (a file task 059 touched) has 7 pre-existing unresolved `@spaarke/ai-outputs/output-widgets/*` errors (lines 232-397);
+  none of them is on a line this task added.
 
 ## Tests
 - UI.Components jest (Worklist, ConsoleKit, DecisionWizard, WorkspaceShell): 343 tests, 342 pass, 1 fail (the pre-existing folder-run flake above; it passes alone).
@@ -86,3 +87,14 @@ Changes to shipped parts, each needed so a closed item the route returns renders
 ## Issues filed
 #1958 (D-111 picker blocked on route fields), #1959 (route gaps: sentence, Decision Record, Not filed last), #1960 (narrative wiring, task 062),
 #1961 (pre-existing DecisionWizard folder-run flake). Label `ontology-deferred`; DI numbers are for the main session to assign.
+
+## Review fixes (PR #1964 adversarial review)
+- Closed today / Suppressed / Closed earlier lines now open their own set's copy: the wizard's item loader is built per launch from the set the
+  line was in (lanes for a lane line or a start button) and reads that set only. A stale open copy in the lanes can no longer win. A lane line does not
+  open a closed copy either.
+- An unrecognised 200 body (not an object with a `lanes` array, or no Decide or no Do entry) now throws `WorklistRequestError('The worklist answer could
+  not be read.')`, so the widget shows its error state, not "Nothing to do.". Unreadable items or groups inside a readable lane are still skipped.
+- With the email aggregate row shown and the Do lane empty, the lane says "No other items to do.".
+- A 403 on the lanes read shows "Your worklist isn't available for your account. Contact your administrator." with no Try again.
+- `WorklistRequestError` is now a value export of the Worklist barrel (hosts can use `instanceof`).
+- Not in this round (tasks 154 / 155): Not filed ordering (the route's), the inquiry-outcome To Do's mark-complete (server side), the D-111 picker.

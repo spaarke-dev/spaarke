@@ -48,7 +48,8 @@ export interface WorklistDisclosuresProps {
   /** A disclosure was opened: the host loads its set if it has not been asked for. */
   onOpenSet: (set: DisclosureSetName) => void;
   onRetry: (set: DisclosureSetName) => void;
-  onOpenItem: (event: OpenItemEvent) => void;
+  /** A line was activated; `set` is the disclosure it is in, so the wizard opens that set's copy of the item. */
+  onOpenItem: (event: OpenItemEvent, set: DisclosureSetName) => void;
 }
 
 const useStyles = makeStyles({
@@ -126,7 +127,7 @@ export const WorklistDisclosures: React.FC<WorklistDisclosuresProps> = ({
                     core={c.group.core}
                     items={c.items}
                     visibleList={ids}
-                    onOpenItem={onOpenItem}
+                    onOpenItem={event => onOpenItem(event, set)}
                     today={today}
                   />
                 ))}

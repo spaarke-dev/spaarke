@@ -133,7 +133,8 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
         ))}
         {total === 0 && (
           <Text className={styles.muted} data-testid={`lane-empty-${lane}`}>
-            {copy.empty}
+            {/* The aggregate row above is not a Do item, so a bare "Nothing to do." would contradict it. */}
+            {lane === 'Do' && aggregateRow && !filtered ? 'No other items to do.' : copy.empty}
           </Text>
         )}
       </div>

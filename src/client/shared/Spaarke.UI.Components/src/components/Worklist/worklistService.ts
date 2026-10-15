@@ -143,15 +143,32 @@ function parseGroups(raw: unknown, lane: WorklistLane): WorklistGroupData[] {
   return groups;
 }
 
-/** Shape the route's JSON body. Anything not recognised is treated as an empty lane, never as a made-up row. */
-export function parseWorklistResponse(body: unknown, set: WorklistSetName): WorklistData {
+/**
+ * Shape the route's JSON body. A body that is not an object with a `lanes` array, or that lacks the Decide or the Do lane, is not
+ * an answer: it throws, so the widget shows its error state instead of "Nothing to do." (a false all-clear). Inside a lane, a
+ * group or item that cannot be read is skipped, never made up.
+ */
+export function parseWorklistResponse(
+  body: unknown,
+  set: WorklistSetName,
+  httpStatus: number | null = null
+): WorklistData {
+  const unreadable = () => new WorklistRequestError('The worklist answer could not be read.', httpStatus);
+  if (!isObject(body) || !Array.isArray(body.lanes)) throw unreadable();
   const data: WorklistData = { set, Decide: [], Do: [] };
-  if (!isObject(body) || !Array.isArray(body.lanes)) return data;
+  let seenDecide = false;
+  let seenDo = false;
   for (const l of body.lanes) {
     if (!isObject(l)) continue;
-    if (l.lane === 'Decide') data.Decide = parseGroups(l.groups, 'Decide');
-    else if (l.lane === 'Do') data.Do = parseGroups(l.groups, 'Do');
+    if (l.lane === 'Decide') {
+      data.Decide = parseGroups(l.groups, 'Decide');
+      seenDecide = true;
+    } else if (l.lane === 'Do') {
+      data.Do = parseGroups(l.groups, 'Do');
+      seenDo = true;
+    }
   }
+  if (!seenDecide || !seenDo) throw unreadable();
   return data;
 }
 
@@ -193,7 +210,7 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
       } catch {
         throw new WorklistRequestError('The worklist answer could not be read.', response.status);
       }
-      return parseWorklistResponse(body, set);
+      return parseWorklistResponse(body, set, response.status);
     },
   };
 }

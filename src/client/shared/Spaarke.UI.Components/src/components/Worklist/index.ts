@@ -13,11 +13,10 @@ export type { BuildLaneCountCardsOptions, LaneCountBucket, LaneFilterKey } from 
 // route (task 038). WorklistLanePanel and WorklistDisclosures are its parts and are not exported.
 export { WorklistWidget } from './WorklistWidget';
 export type { WorklistWidgetProps } from './WorklistWidget';
-export { createWorklistService, parseWorklistResponse } from './worklistService';
+export { WorklistRequestError, createWorklistService, parseWorklistResponse } from './worklistService';
 export type {
   WorklistData,
   WorklistGroupData,
-  WorklistRequestError,
   WorklistRouteItem,
   WorklistService,
   WorklistServiceOptions,

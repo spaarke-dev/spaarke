@@ -10,6 +10,7 @@
  */
 
 import * as React from 'react';
+import { WorklistRequestError } from './worklistService';
 import type { WorklistData, WorklistService, WorklistSetName } from './worklistService';
 
 export interface WorklistSetState {
@@ -17,6 +18,8 @@ export interface WorklistSetState {
   /** The last good answer, kept while a reload is in flight or after a reload failed. */
   data?: WorklistData;
   error?: string;
+  /** The HTTP status of the failed read, when an answer arrived (null otherwise). */
+  httpStatus?: number | null;
 }
 
 export type WorklistSets = Readonly<Record<WorklistSetName, WorklistSetState>>;
@@ -66,7 +69,12 @@ export function useWorklistData(service: WorklistService): UseWorklistData {
         },
         err => {
           if (alive.current && requests.current[set] === mine) {
-            commit(set, { status: 'error', data: latest.current[set].data, error: messageOf(err) });
+            commit(set, {
+              status: 'error',
+              data: latest.current[set].data,
+              error: messageOf(err),
+              httpStatus: err instanceof WorklistRequestError ? err.httpStatus : null,
+            });
           }
         }
       );
