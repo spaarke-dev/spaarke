@@ -4,7 +4,7 @@
     <title>Gate Decision Records: one per decision (idempotent on retry), written by an ADR-004 queue job after the gate acts (D-139)</title>
     <phase>4 Decision Record</phase>
     <gate>blocked: #1878 (task 042) merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves a secure-family record write onto a queue; changes a shipped consumer's behaviour; adds a job handler.</rigor-reason>
     <model-tier>sonnet</model-tier>
