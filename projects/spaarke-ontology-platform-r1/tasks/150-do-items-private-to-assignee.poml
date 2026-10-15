@@ -4,7 +4,7 @@
     <title>Do items are private to their assignee on the per-Signal routes (D-141)</title>
     <phase>3 Worklist</phase>
     <gate>038 merged (#1891)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization change on shipped BFF routes (decision plan, suppression, commit).</rigor-reason>
     <model-tier>opus</model-tier>

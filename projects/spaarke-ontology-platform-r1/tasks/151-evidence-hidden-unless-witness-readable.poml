@@ -4,7 +4,7 @@
     <title>Hide Signal evidence detail when the caller cannot read the witness (D-142)</title>
     <phase>3 Worklist</phase>
     <gate>038 merged (#1891), #1892 merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data-exposure rule on the Signal read path.</rigor-reason>
     <model-tier>opus</model-tier>
