@@ -56,6 +56,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
 - [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
 - [G-19: Sub-agent fan-out multiplies cost and exhausts memory](#g-19-sub-agent-fan-out-multiplies-cost-and-exhausts-memory)
+- [G-20: Deleting a worktree deletes through its junctions into another worktree](#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree)
 
 ---
 
@@ -1162,6 +1163,22 @@ every read that carries a value — and in-memory doubles that serialize the sha
 - `autoCompactWindow: 400000`.
 
 Cross-session concurrency is not enforceable by settings; it stays a practice.
+
+---
+
+### G-20: Deleting a worktree deletes through its junctions into another worktree
+
+> **Added 2026-10-15** by the procedure / code-quality cleanup session. **Class**: shared mutable state between parallel agents (the file system).
+
+**What happens.** To skip `npm install`, uac-r2 workflow agents replaced `<task-worktree>\src\client\shared\Spaarke.UI.Components
+ode_modules` with an NTFS junction to the uac-r2 worktree's real `node_modules`. On 2026-10-13 a bulk cleanup of 166 finished agent worktrees (`git worktree remove --force`, with an `rm -rf` fallback) deleted through two of those junctions. It emptied uac-r2's `node_modules`, and through npm's own `@spaarke/auth` and `@spaarke/sdap-client` junctions inside it, all 70 tracked files under uac-r2's `Spaarke.Auth` and `Spaarke.SdapClient`. The signature is a set of directories left in place but empty, all with the same modification time. Nothing reported an error. The uac-r2 session found it two days later as unexplained deletions in `git status`. A commit at that point would have deleted both packages from master.
+
+**Rule.**
+- Never link a `node_modules` (or any folder) into another worktree. Run `npm install --legacy-peer-deps --no-audit --no-fund` in the worktree that needs it.
+- Remove worktrees only with `pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path <root>` (`-Force` discards uncommitted changes, `-WhatIf` previews). It unlinks every junction and symlink as a link, without descending into it, then runs `git worktree remove`, and never falls back to a recursive delete.
+- Recovery: in the damaged worktree, `git restore -- <paths>` before any commit or merge, then reinstall and rebuild. Uncommitted edits in the emptied folders are not recoverable.
+
+**Enforced by:** the `PreToolUse` hook `scripts/quality/guard-worktree-links.py` on Bash/PowerShell (`.claude/settings.json`, root §16). It denies creating a junction or symlink whose target is in a different registered worktree, and a recursive delete or `git worktree remove` aimed exactly at a worktree root or `.claude/worktrees`. Controls: `scripts/quality/tests/test_guard_worktree_links.py` and `tests/scripts/Remove-WorktreeSafe.Tests.ps1`, both run by `ci-standalone-checks.yml` (`agent-guard-tests`). Links created by a script rather than a tool command are not seen by the hook; the safe-removal script covers them at removal time.
 
 ---
 
