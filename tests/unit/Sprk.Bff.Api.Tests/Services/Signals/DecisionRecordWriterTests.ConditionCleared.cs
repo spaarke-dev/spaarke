@@ -119,6 +119,7 @@ public sealed partial class DecisionRecordWriterTests
         {
             ["sprk_regardingtodo"] = new EntityReference("sprk_todo", TodoId),
             ["sprk_steps"] = $"{{\"reviewId\":\"{ConditionClearedRecordKey.IdOf(ClosedSignal, 1):D}\",\"steps\":[{{\"code\":\"mark-complete\"}}]}}",
+            ["createdby"] = new EntityReference("systemuser", WriterUser), // a review's record: the writer creates those too
         });
 
         var result = await h.Writer.WriteConditionClearedAsync(Cleared());

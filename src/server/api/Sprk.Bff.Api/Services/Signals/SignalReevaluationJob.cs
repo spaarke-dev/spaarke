@@ -552,6 +552,21 @@ public sealed class SignalReevaluationJob : IScheduledJob
             var subject = (signal.SubjectEntity, signal.SubjectId);
             if (hitSubjects.Contains(subject) || unjudged.Contains(subject))
             {
+                // Adversarial pass 2: a closure from an EARLIER pass that is still unlinked, inside the retry window and still its subject's
+                // latest episode, whose subject is a hit again: it leaves the retry set now (a new episode follows), so a record that was not
+                // written or linked is abandoned. Said once, on the pass the subject is a hit again (the next pass sees the new episode). A
+                // re-file's close is never this: its subject was a hit on the pass that closed it, so it is in closedNow, never here.
+                if (hitSubjects.Contains(subject)
+                    && !closedNow.ContainsKey(signal.Id)
+                    && IsUnlinkedConditionClearedClosureInWindow(signal, retryFrom)
+                    && latestEpisode[subject] == signal.Episode)
+                {
+                    _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                        "Policy {PolicyCode}: Signal {SignalId} (episode {Episode}) was closed as ConditionCleared but links no Decision Record, and its " +
+                        "subject is a hit again; its closure is no longer retried, so any record not yet written or linked is abandoned.",
+                        policy.Code, signal.Id, signal.Episode);
+                }
+
                 continue; // still a hit (a re-file), or not judged: the condition is not known to have cleared
             }
 
@@ -653,6 +668,17 @@ public sealed class SignalReevaluationJob : IScheduledJob
                         skipped++; // logged at Warning and metered by SignalWriter
                         await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
                         break;
+                    case SignalRecordLinkOutcome.NotApplicable when !result.AlreadyRecorded:
+                        // Adversarial pass 2 K1: a person's decision re-closed the Signal (with its own record) after this pass closed it and
+                        // before the record just written could be linked. The human decision wins; the record stays unlinked. A counted skip,
+                        // never retried (the Signal is no longer a condition-cleared closure).
+                        skipped++;
+                        _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                            "Policy {PolicyCode}: Decision Record {RecordId} of the closure of Signal {SignalId} was written but not linked (reason={Reason}): " +
+                            "a person's decision re-closed the Signal first. The record stays unlinked.",
+                            policy.Code, result.RecordId, signal.Id, OntologyWriterFailureReason.ClosureRecordSkippedSignalReclosed);
+                        OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedSignalReclosed);
+                        break;
                 }
             }
             catch (DecisionRecordRefusedException ex) when (DecisionRecordWriter.ConditionClearedSkipTag(ex.Reason) is not null)
@@ -693,14 +719,17 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <summary>
     /// Task 153 (adversarial pass 1 F2): of the closed Signals that link a Decision Record, those whose link is NOT their own closure record
     /// and that record existed before the close (a D-128 reminder or inquiry the item carried while it was open): their closure still needs
-    /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. A record that
-    /// is this closure's own, was created after the close, or cannot be found is left alone. A read fault propagates (the caller does not
-    /// guess).
+    /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. Adversarial pass
+    /// 2: the read returns only records the writer created (<c>createdby</c>), and a record is replaced only when it took nothing but actions
+    /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own, was created
+    /// after the close, was created by a person, is any other decision, or cannot be found is left alone. A read fault (the writer's identity
+    /// included) propagates (the caller does not guess).
     /// </summary>
     private async Task<List<(ExistingSignal Signal, Guid? PriorRecordId)>> RetriesReplacingAPriorLinkAsync(
         IReadOnlyList<ExistingSignal> linked, CancellationToken ct)
     {
         var records = new Dictionary<Guid, Entity>();
+        Guid? writerUserId = null;
         foreach (var chunk in linked.Select(s => s.DecisionRecordId!.Value).Distinct().Chunk(LinkedRecordReadChunk))
         {
             var query = new QueryExpression("sprk_decisionrecord")
@@ -709,6 +738,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            // Adversarial pass 2: only records the writer itself created. A record a person created is never a link this job replaces.
+            writerUserId ??= await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
+            query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId.Value);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
             {
@@ -726,7 +758,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 continue;
             }
 
-            if (record.GetAttributeValue<DateTime?>("createdon") is { } created
+            // Adversarial pass 2: and only a D-128 link: a record that took only actions leaving the item open (a reminder or an inquiry).
+            // Any other prior link (a person's own decision, a record a person re-linked) is foreign, whatever the skip marker says.
+            if (DecisionRecordWriter.IsNonResolvingReviewRecord(record.GetAttributeValue<string>("sprk_steps"))
+                && record.GetAttributeValue<DateTime?>("createdon") is { } created
                 && DateTime.SpecifyKind(created, DateTimeKind.Utc) < DateTime.SpecifyKind(signal.ResolvedOn!.Value, DateTimeKind.Utc))
             {
                 retries.Add((signal, prior));
@@ -735,6 +770,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         return retries;
     }
+
+    /// <summary>Adversarial pass 2: a Signal closed as ConditionCleared within the retry window that links no Decision Record.</summary>
+    private static bool IsUnlinkedConditionClearedClosureInWindow(ExistingSignal signal, DateTime retryFrom) =>
+        signal.IsResolved
+        && signal.Resolution == SignalWriter.ResolutionConditionCleared
+        && signal.DecisionRecordId is null
+        && signal.ResolvedOn is { } resolvedOn
+        && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= retryFrom;
 
     /// <summary>Task 153: the table a core record type names (<c>sprk_recordtype_ref.sprk_recordlogicalname</c>), or null when the type row
     /// names none or no longer exists (F1: a permanent condition, not a fault). Any other fault propagates.</summary>

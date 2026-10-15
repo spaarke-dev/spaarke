@@ -280,7 +280,8 @@ public partial class SignalReevaluationJobTests
             ["sprk_recordclass"] = new OptionSetValue((int)RecordedDecisionClass.Routine),
             ["sprk_decidedon"] = RunAt.UtcDateTime.AddDays(-2),
             ["createdon"] = RunAt.UtcDateTime.AddDays(-2),
-            ["sprk_steps"] = "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"steps\":[{\"code\":\"send-reminder\"}]}",
+            ["createdby"] = new EntityReference("systemuser", WriterOrg.WriterUserId), // the commit route writes through the writer
+            ["sprk_steps"] = "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"steps\":[{\"code\":\"send-reminder\",\"taken\":true}]}",
         };
         h.Org.Rows[signalId]["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusAcknowledged);
         h.Org.Rows[signalId]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", reminderId);
@@ -310,6 +311,9 @@ public partial class SignalReevaluationJobTests
     {
         var (h, signalId) = ToDoCompletedByAColleague();
         var foreign = Guid.NewGuid();
+        // Adversarial pass 2 F3: the foreign record EXISTS, was created by the writer before the close and is a D-128 reminder, so every
+        // other retry test passes on night 2 and only the skip marker keeps it from being replaced.
+        h.Sysadmin.DecisionRecords[foreign] = ForeignReminderRecord(foreign, createdBy: WriterOrg.WriterUserId);
         // Between the job's read and its link, another writer links the Signal to some other record.
         h.Org.CreateFaultFor = entity =>
         {

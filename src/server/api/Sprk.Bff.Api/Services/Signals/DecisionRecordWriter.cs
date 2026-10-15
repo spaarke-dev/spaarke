@@ -646,6 +646,9 @@ public sealed class DecisionRecordWriter
             // A gate record never sets sprk_confirmedby; a human review's record always does. A review commit can carry a client-chosen
             // review id equal to this key, so without this condition it would count as the gate record and the gate's record would never be written.
             query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Null);
+            // Task 153 (adversarial pass 2 F1): and only a record the writer itself created. A Console user may create a Decision Record
+            // (Deep create) carrying this key and no confirmer; without this condition it would stop the gate's record being written.
+            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty ? row.Id : null;
         }
@@ -660,6 +663,17 @@ public sealed class DecisionRecordWriter
 
     /// <summary>The table a gate decision's Decision Record is filed under.</summary>
     private const string GateSubjectEntity = "sprk_communication";
+
+    /// <summary>Task 153 (adversarial pass 2 F1): the column Dataverse stamps with the identity that created a row.</summary>
+    internal const string CreatedByColumn = "createdby";
+
+    /// <summary>
+    /// Task 153 (adversarial pass 2 F1): the ontology writer's own <c>systemuserid</c> (WhoAmI on its dedicated connection, cached by
+    /// <see cref="OntologyWriterDataverseClient.GetWriterUserIdAsync"/>). The writer creates every Decision Record through that connection
+    /// with no impersonation, so it is the <c>createdby</c> of every record it wrote; a row a person created is never the writer's. A fault
+    /// propagates: the lookups that use it then refuse (fail closed) rather than match on anything weaker.
+    /// </summary>
+    internal Task<Guid> WriterUserIdAsync(CancellationToken ct) => _writerClient.GetWriterUserIdAsync(ct);
 
     /// <summary>The decider recorded in the fact snapshot for a gate decision: a system, not a person.</summary>
     private const string GateDeciderRole = "automated: communications policy gate";
@@ -792,6 +806,47 @@ public sealed class DecisionRecordWriter
         && steps.Contains($"\"reviewId\":\"{ConditionClearedRecordKey.IdOf(signalId, episode):D}\"", StringComparison.Ordinal)
         && steps.Contains($"\"code\":\"{ConditionClearedStepCode}\"", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Task 153 (adversarial pass 2): true when a Decision Record's <c>sprk_steps</c> took only actions that leave the item open (the catalog's
+    /// <see cref="DecisionActionDefinition.ResolvesSignal"/> false: D-119's budget inquiry, D-128 Q18's Do-lane reminder), and at least one:
+    /// the record a review leaves the Signal Acknowledged and linked to (<c>DecisionCommitService</c>'s InquirySent, decided by the same
+    /// catalog flag). Only such a record's link is the one a condition-cleared closure's record replaces on a retry. Unreadable steps are not.
+    /// </summary>
+    internal static bool IsNonResolvingReviewRecord(string? steps)
+    {
+        if (string.IsNullOrWhiteSpace(steps)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(steps);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("steps", out var list)
+                || list.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var taken = 0;
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object
+                    || !step.TryGetProperty("taken", out var isTaken) || isTaken.ValueKind != JsonValueKind.True)
+                {
+                    continue;
+                }
+
+                var code = step.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                if (!DecisionActionCatalog.TryGet(code, out var definition) || definition.ResolvesSignal) return false;
+                taken++;
+            }
+
+            return taken > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Task 153: the one step of a condition-cleared record. Not a catalog code (a review can never carry it: <see cref="Validate"/>
     /// refuses any code the catalog does not know), so the lookup below can require it. No '_' or '%' (it is matched with LIKE).</summary>
     internal const string ConditionClearedStepCode = "condition-cleared";
@@ -835,8 +890,9 @@ public sealed class DecisionRecordWriter
     /// <summary>
     /// Task 153 (D-139): the condition-cleared record already written for this key, with its <c>sprk_confirmedby</c>, or null. Narrowed by the
     /// subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c> and by the step code only this entry point writes (a review's
-    /// record cannot carry it, so a client-chosen review id equal to the key cannot hide this record). Read through the shared sysadmin reader,
-    /// so a record owned by any team is found.
+    /// record cannot carry it, so a client-chosen review id equal to the key cannot hide this record), and only among records the writer itself
+    /// created (<c>createdby</c>, adversarial pass 2 F1: a user's row carrying the key and the code is not this record). Read through the shared
+    /// sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ConditionClearedLookupFailed"/>: the lookup
     /// faulted. Nothing is written: guessing "none" would risk a second record; the next pass retries.</exception>
@@ -853,6 +909,10 @@ public sealed class DecisionRecordWriter
             query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
             query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
             query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"code\":\"{ConditionClearedStepCode}\"%");
+            // Adversarial pass 2 F1: and only a record the writer itself created. The key is computable from the Signal id and episode, and a
+            // Console user may create a Decision Record (Deep create): a user's row with this key, this code and a confirmer of their choosing
+            // would otherwise be taken as the closure's record, and its confirmer copied to the Signal's sprk_resolvedby.
+            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty
                 ? (row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id)

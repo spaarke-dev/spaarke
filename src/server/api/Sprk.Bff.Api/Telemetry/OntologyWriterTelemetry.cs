@@ -356,6 +356,11 @@ public static class OntologyWriterFailureReason
     /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
     public const string ClosureRecordSkippedForeignLink = "cleared_dr_skipped_foreign_link";
 
+    /// <summary>Ontology task 153 (adversarial pass 2 K1): a Do-lane condition-cleared closure's Decision Record was written, but before the
+    /// job could link it a person's decision re-closed the Signal (with its own record). The human decision wins and the closure's record is
+    /// left unlinked; a counted skip, logged at Warning, never retried.</summary>
+    public const string ClosureRecordSkippedSignalReclosed = "cleared_dr_skipped_signal_reclosed";
+
     /// <summary>Task 031 (D-13): a <c>sprk_signal.sprk_dedupekey</c> under a policy is not
     /// <c>{policycode}|{type}|{id}|{episode}</c>, so its episode cannot be read and the subject is not re-raised.</summary>
     public const string DedupeKeyUnparseable = "dedupe_key_unparseable";

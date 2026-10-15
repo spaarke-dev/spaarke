@@ -39,6 +39,7 @@ public sealed partial class DecisionRecordWriterTests
     {
         ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", communication),
         ["sprk_steps"] = $"{{\"reviewId\":\"{key:D}\",\"resolvedSignalIds\":[],\"steps\":[]}}",
+        ["createdby"] = new EntityReference("systemuser", WriterUser), // the writer created it (adversarial pass 2 F1)
     };
 
     [Fact]
@@ -117,7 +118,10 @@ public sealed partial class DecisionRecordWriterTests
             "and by the key in sprk_steps, the way DecisionCommitService finds a review's record");
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_confirmedby" && c.Operator == ConditionOperator.Null,
             "and only a record no person confirmed: a gate record has no confirmer, a human review's always does");
-        query.Criteria.Conditions.Should().HaveCount(3);
+        query.Criteria.Conditions.Should().Contain(c =>
+            c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal && c.Values.Single().Equals(WriterUser),
+            "adversarial pass 2 F1: and only a record the writer itself created");
+        query.Criteria.Conditions.Should().HaveCount(4);
     }
 
     [Fact]

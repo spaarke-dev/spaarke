@@ -71,7 +71,9 @@ public class DecisionRecordContextImmutabilityTests
     /// <summary>(a) the field declaration (checked inline, preceded by the type) and (b) the constructor assignment: the only other sanctioned mentions.</summary>
     private static readonly Regex EntitiesCtorAssignment = new(@"\G_entities\s*=(?![=>])\s*entities\b[^;]*;", RegexOptions.Compiled);
 
-    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
+    /// <remarks>Task 153 (adversarial pass 2 F1): <c>GetWriterUserIdAsync</c> is WhoAmI on the writer's own connection (a read of its
+    /// identity, so the "already recorded" lookups match only rows the writer created); it writes nothing.</remarks>
+    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync", "GetWriterUserIdAsync" };
 
     /// <summary>A Decision Record row addressed for an update through a string literal: a Web API path to one row
     /// (<c>"sprk_decisionrecords(…"</c>), an update/upsert/patch call naming the table or its entity set as its first argument,

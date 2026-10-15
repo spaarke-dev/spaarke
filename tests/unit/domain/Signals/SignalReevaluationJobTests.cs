@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.ServiceModel;
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -3100,9 +3101,13 @@ public partial class SignalReevaluationJobTests
                 // #1661 round 3 F-T1: the Decision Records the Signals cite, for both reads of them (the lineage walk's, with the lookup
                 // columns, and the suppression pass's facts: class, reason, decided-on). A record not stubbed is absent, as in Dataverse.
                 case "sprk_decisionrecord":
-                    var wanted = query.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                    var wanted = query.Criteria.Conditions.Where(c => c.AttributeName == "sprk_decisionrecordid")
+                        .SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                    // Adversarial pass 2: a createdby condition is evaluated (a row with no createdby was not created by that user).
+                    var creator = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby")?.Values.Single();
                     // Task 153: and the records the writer created (a condition-cleared closure's, once linked).
-                    foreach (var record in DecisionRecords.Values.Concat(Org.DecisionRecordRows.Values).Where(r => wanted.Contains(r.Id)))
+                    foreach (var record in DecisionRecords.Values.Concat(Org.DecisionRecordRows.Values).Where(r => wanted.Contains(r.Id)
+                                 && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))))
                     {
                         var copy = new Entity("sprk_decisionrecord", record.Id);
                         foreach (var attribute in record.Attributes) copy[attribute.Key] = attribute.Value;
@@ -3288,6 +3293,10 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 153: the Decision Records created through the writer's client, by id (kept apart from the Signal rows, whose
         /// counts and alternate key they do not touch).</summary>
         public readonly Dictionary<Guid, Entity> DecisionRecordRows = new();
+
+        /// <summary>Adversarial pass 2 F1: the ontology writer's own application user, as WhoAmI on its connection answers. Dataverse stamps
+        /// it in <c>createdby</c> on every row the writer creates.</summary>
+        public static readonly Guid WriterUserId = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
         private readonly Dictionary<string, Guid> _byKey = new(StringComparer.Ordinal);
         private readonly Dictionary<Guid, long> _versions = new();
 
@@ -3406,6 +3415,7 @@ public partial class SignalReevaluationJobTests
                 var record = new Entity("sprk_decisionrecord", Guid.NewGuid());
                 foreach (var attribute in entity.Attributes) record[attribute.Key] = attribute.Value;
                 if (Now is { } now) record["createdon"] = now(); // Dataverse stamps it
+                record["createdby"] = new EntityReference("systemuser", WriterUserId); // and the creator: the writer, no impersonation
                 if (record.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "team" } recordTeam)
                     record["owningteam"] = new EntityReference("team", recordTeam.Id);
                 DecisionRecordRows[record.Id] = record;
@@ -3455,6 +3465,8 @@ public partial class SignalReevaluationJobTests
         {
             switch (request)
             {
+                case WhoAmIRequest:
+                    return Task.FromResult<OrganizationResponse>(new WhoAmIResponse { Results = { ["UserId"] = WriterUserId } });
                 case RetrieveRequest retrieve:
                     var response = new RetrieveResponse();
                     response.Results["Entity"] = Rows[_byKey[(string)retrieve.Target.KeyAttributes["sprk_dedupekey"]]];
