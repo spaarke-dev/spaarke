@@ -60,6 +60,11 @@ public class DecisionRecordContextImmutabilityTests
     /// <summary>A call on the Decision Record writer's Dataverse client.</summary>
     private static readonly Regex WriterClientCall = new(@"\b_writerClient\s*\.\s*(?<method>\w+)\s*\(", RegexOptions.Compiled);
 
+    /// <summary>A call on the writer's shared sysadmin reader (<c>IGenericEntityService</c>, which CAN create and update): task 149's gate-record lookup only.</summary>
+    private static readonly Regex EntitiesCall = new(@"\b_entities\s*\.\s*(?<method>\w+)\s*\(", RegexOptions.Compiled);
+
+    private static readonly HashSet<string> AllowedEntitiesCalls = new(StringComparer.Ordinal) { "RetrieveMultipleAsync" };
+
     private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
 
     /// <summary>A Decision Record row addressed for an update through a string literal: a Web API path to one row
@@ -105,6 +110,41 @@ public class DecisionRecordContextImmutabilityTests
         var others = calls.Where(c => !AllowedWriterClientCalls.Contains(c)).Distinct().ToList();
         Assert.True(others.Count == 0,
             "D-34: DecisionRecordWriter is create-only (a Decision Record is append-only except the live stamp columns, task 144 C2); it calls its Dataverse client for: " + string.Join(", ", others));
+
+        // Task 149: the shared sysadmin reader the gate lookup uses can also create and update, so it is held to the one read.
+        var entityOthers = EntitiesCalls(code);
+        Assert.True(entityOthers.Count == 0,
+            "D-34: DecisionRecordWriter may call the shared entity service for RetrieveMultipleAsync only (the gate record lookup); it calls: " + string.Join(", ", entityOthers));
+    }
+
+    private static List<string> EntitiesCalls(string code) => EntitiesCall.Matches(code)
+        .Select(m => m.Groups["method"].Value)
+        .Where(c => !AllowedEntitiesCalls.Contains(c))
+        .Distinct()
+        .ToList();
+
+    [Fact(DisplayName = "Task 149 / D-34: shared-entity-service detector controls — a create through it fires, the lookup read does not")]
+    public void EntitiesCall_Controls()
+    {
+        // Must fire: a create (or any write) through the shared sysadmin service.
+        Assert.Equal(new[] { "CreateAsync" }, EntitiesCalls(SourceScan.CodeText(new[]
+        {
+            "private async Task Other(Entity e)",
+            "{",
+            "    await _entities.CreateAsync(e, CancellationToken.None);",
+            "}",
+        })));
+
+        // Must NOT fire: the sanctioned lookup read, on one line or split across lines.
+        Assert.Empty(EntitiesCalls(SourceScan.CodeText(new[]
+        {
+            "private async Task<Guid?> Find(QueryExpression q, CancellationToken ct)",
+            "{",
+            "    var rows = await _entities.RetrieveMultipleAsync(q, ct).ConfigureAwait(false);",
+            "    var more = await _entities",
+            "        .RetrieveMultipleAsync(q, ct);",
+            "}",
+        })));
     }
 
     /// <summary>The entry points that create a Decision Record (public members of the writer), each of which must reach <see cref="SharedCreate"/>.</summary>

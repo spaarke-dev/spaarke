@@ -545,7 +545,9 @@ public sealed class DecisionRecordWriter
     /// <summary>
     /// Task 149 (D-139): the Decision Record already written for this gate decision, or null. Narrowed by the communication's regarding
     /// lookup (the indexed column the writer files the record under, so Dataverse never scans every record's <c>sprk_steps</c> memo), then
-    /// by the decision key stored in <c>sprk_steps</c> -- the lookup <c>DecisionCommitService</c> already makes for a review id. Read through
+    /// by the decision key stored in <c>sprk_steps</c> -- the lookup <c>DecisionCommitService</c> already makes for a review id -- and only among
+    /// records with no <c>sprk_confirmedby</c> (a gate record has none; a human review's always does, so a client-chosen review id equal to the
+    /// key cannot hide the gate's record). Read through
     /// the shared sysadmin reader, so a record owned by any team (a business-unit or secure team) is found.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.GateRecordLookupFailed"/>: the lookup faulted.
@@ -562,6 +564,9 @@ public sealed class DecisionRecordWriter
             };
             query.Criteria.AddCondition(SubjectLookupByEntity[GateSubjectEntity], ConditionOperator.Equal, communicationId);
             query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{decisionKey:D}\"%");
+            // A gate record never sets sprk_confirmedby; a human review's record always does. A review commit can carry a client-chosen
+            // review id equal to this key, so without this condition it would count as the gate record and the gate's record would never be written.
+            query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Null);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty ? row.Id : null;
         }

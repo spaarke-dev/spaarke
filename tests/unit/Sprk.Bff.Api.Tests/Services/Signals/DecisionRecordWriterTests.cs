@@ -88,10 +88,15 @@ public sealed partial class DecisionRecordWriterTests
             return copy;
         }
 
-        /// <summary>The query's conditions, evaluated on a row: an equality on a lookup or a value, and a LIKE with a leading and trailing %.</summary>
+        /// <summary>The query's conditions, evaluated on a row: an equality on a lookup or a value, a null test, and a LIKE with a leading and trailing %.</summary>
         private static bool Satisfies(QueryExpression query, Entity row) => query.Criteria.Conditions.All(condition =>
         {
             var actual = row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+            if (condition.Operator == ConditionOperator.Null)
+            {
+                return actual is null;
+            }
+
             var expected = condition.Values.Single();
             return condition.Operator switch
             {

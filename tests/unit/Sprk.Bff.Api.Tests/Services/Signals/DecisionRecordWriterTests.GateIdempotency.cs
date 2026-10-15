@@ -115,7 +115,9 @@ public sealed partial class DecisionRecordWriterTests
             c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like
             && ((string)c.Values.Single()).Contains($"\"reviewId\":\"{GateDecisionKey.IdOf(CommunicationId, true):D}\""),
             "and by the key in sprk_steps, the way DecisionCommitService finds a review's record");
-        query.Criteria.Conditions.Should().HaveCount(2);
+        query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_confirmedby" && c.Operator == ConditionOperator.Null,
+            "and only a record no person confirmed: a gate record has no confirmer, a human review's always does");
+        query.Criteria.Conditions.Should().HaveCount(3);
     }
 
     [Fact]
@@ -138,14 +140,26 @@ public sealed partial class DecisionRecordWriterTests
     [Theory]
     [InlineData("otherCommunication")]
     [InlineData("otherOutcome")]
+    [InlineData("reviewWithTheSameKey")]
     public async Task Gate_ARecordForAnotherCommunicationOrAnotherOutcome_IsNotThisDecisionsRecord(string which)
     {
         // Both halves of the key matter: a record keyed for the other outcome, or filed under another communication, does not satisfy
-        // this decision (a lookup that dropped either condition would call it a duplicate and lose the record).
+        // this decision (a lookup that dropped either condition would call it a duplicate and lose the record). Nor does a human
+        // review's record that carries a client-chosen review id equal to the key: it has a confirmer, a gate record never does.
         var h = MatterFiledCommunication();
-        h.Seeded.Add(which == "otherCommunication"
-            ? ExistingRecord(Guid.NewGuid(), Guid.NewGuid(), GateDecisionKey.IdOf(CommunicationId, authorize: true))
-            : ExistingRecord(Guid.NewGuid(), CommunicationId, GateDecisionKey.IdOf(CommunicationId, authorize: false)));
+        var key = GateDecisionKey.IdOf(CommunicationId, authorize: true);
+        var seeded = which switch
+        {
+            "otherCommunication" => ExistingRecord(Guid.NewGuid(), Guid.NewGuid(), key),
+            "otherOutcome" => ExistingRecord(Guid.NewGuid(), CommunicationId, GateDecisionKey.IdOf(CommunicationId, authorize: false)),
+            _ => ExistingRecord(Guid.NewGuid(), CommunicationId, key),
+        };
+        if (which == "reviewWithTheSameKey")
+        {
+            seeded["sprk_confirmedby"] = new EntityReference("systemuser", Guid.NewGuid());
+        }
+
+        h.Seeded.Add(seeded);
 
         var result = await h.Writer.WriteGateDecisionAsync(Gate(authorize: true));
 
