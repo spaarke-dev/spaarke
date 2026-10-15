@@ -21,14 +21,7 @@
 |---|---|---|---|---|
 | 059 worklist widget | #1964 | `d8ff6491c` | `C:\wts-059` | Built. The D-111 picker escalated and was split into 154 and 155. Opus adversarial review running. |
 | 154 worklist route fields + inquiry lookup | — | — | `C:\wts-154` | Opus/high implementer running. Gates 055. |
-| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `672cb8f58` | `C:\wts-153` | Pass 1 fixed in `b68f4ac2b`:
-  - F1: a permanent refusal is a skip, with an 8-day cache marker, and closure-record failures are out of `IsSuccess`.
-  - F2: the closing record replaces the link the job read before the close.
-  - F3: `Plan.NoRequester`.
-  - K4.
-  - 531/531 filtered tests and 1046 ArchTests pass.
-
-The gate lookup is untouched. Adversarial pass 2 is running (focus: the retry pass, the cache marker, link races, skip misclassification). Next: uac-r2, with F3 called out for them. |
+| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `672cb8f58` → fix | `C:\wts-153` | Pass 2 found F1 (security): Console User's Deep Create on DRs plus computable keys mean a forged keyed DR suppresses the genuine record. The merged 149 `FindGateRecordAsync` has the same hole. Opus fix round: both lookups also require createdby = the writer; plus the F3 test, the foreign-link hardening (D-128 code), and Warnings on silent orphan and abandon paths. uac-r2 was told the gate lookup changes. |
 | 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | R3 redeployed dev with `c20bff283` (`e276357a7`) and restarted at 20:16-20:18Z; the writer setting survived. A third re-run of items 1, 2, 3, 9, 11 started at 20:33Z (fresh Sonnet agent). |
 
 Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
@@ -53,6 +46,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Open owner questions
 
+- Remove Console User `prvCreatesprk_DecisionRecord` (Deep) as part of task 049, after 055. Every legitimate DR is created by the writer; the role grant is what lets a user forge keyed DRs. Asked uac-r2 for any human-create surface.
 - None open. The owner approved R3's redeploy of `c20bff283` (2026-10-15), and ontology cleared it with the window open now. Wait for R3's SHA, healthz and restart time, then re-run 146 about 15 minutes later. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
 
 ## Peers (current session names)
