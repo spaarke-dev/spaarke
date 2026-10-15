@@ -17,7 +17,7 @@
 //   4. tldr-abstraction       — a TL;DR anchor that resolves to no real item is DROPPED, not warned.
 //
 // [Trait("Category","GoldenUtteranceEval")] enrolls this suite in the dedicated eval-gate CI job
-// (.github/workflows/sdap-ci.yml: dotnet test --filter "Category=GoldenUtteranceEval", NO
+// (.github/workflows/ci-tier1-blocking.yml: dotnet test --filter "Category=GoldenUtteranceEval", NO
 // continue-on-error) — a red accuracy case fails the merge, satisfying NFR-02 with no CI edit.
 
 using System.Text.Json;

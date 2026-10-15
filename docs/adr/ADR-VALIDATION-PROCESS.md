@@ -1,6 +1,6 @@
 # ADR Validation Process
 
-**Last Updated:** December 12, 2025
+**Last Updated:** October 14, 2026 (CI section updated for the 2026-10-14 `sdap-ci.yml` retirement)
 **Status:** Active
 
 ## Overview
@@ -57,32 +57,24 @@ dotnet test tests/Spaarke.ArchTests/
 
 ### Automatic Triggers (CI/CD)
 
-**GitHub Actions Workflow:** `.github/workflows/sdap-ci.yml`
+**GitHub Actions Workflows:** `.github/workflows/ci-router.yml` (required check `Router`) calling `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml`. The former `sdap-ci.yml` was retired 2026-10-14 and archived at `docs/archive/workflows/sdap-ci.yml`.
 
 Validation runs automatically on:
 - Every pull request
 - Every push to `master` branch
 
 **Execution Flow:**
-1. Code Quality job restores dependencies
-2. Runs `dotnet format` verification
-3. Runs legacy PowerShell script (continue-on-error: true)
-4. **Runs NetArchTest** (continue-on-error: true)
-   - ⚠️ Violations do NOT block PR merge
+1. **Tier 1 `arch-tests` (`ci-tier1-blocking.yml`) runs the full NetArchTest suite** (`tests/Spaarke.ArchTests/`)
+   - Blocking: a violation fails `Router` and blocks the merge
+2. **Tier 2 `adr-compliance` (`ci-tier2-advisory.yml`) runs the same suite again, advisory**
    - Results uploaded as artifacts
-   - Violations reported via PR comment (see below)
-5. **Posts ADR Violations Report as PR comment**
-   - Summarizes pass/fail status
-   - Lists violations with file locations
-   - Links to relevant ADR documents
-   - Updates on each push to PR
+   - Reported in the Tier 2 PR comment ("Tier 2 Advisory Report"), updated on each push to the PR
+3. Tier 2 `format` runs `dotnet format` verification (advisory)
 
-**CI/CD Configuration:**
+**CI/CD Configuration (Tier 2 `adr-compliance`, abridged):**
 ```yaml
-- name: ADR architecture tests (NetArchTest)
-  id: adr-tests
-  run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-restore --logger "trx;LogFileName=adr-results.trx" --results-directory ./TestResults
-  continue-on-error: true  # Don't block PR - violations reported via comment
+- name: NetArchTest full suite
+  run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj ...
 ```
 
 **PR Comment Example:**
@@ -122,7 +114,7 @@ dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~ADR007"
 ### Result Reporting
 
 **CI/CD Results:**
-- Test results logged in GitHub Actions "Code Quality" job
+- Test results logged in the Tier 1 "Arch Tests (full suite, blocking)" and Tier 2 "ADR Compliance (NetArchTest)" jobs
 - Failed tests show violation details with file paths
 - Test artifacts uploaded for download (`.trx` files)
 - Build status displayed on PR
@@ -513,6 +505,6 @@ dotnet test tests/Spaarke.ArchTests/
 - **ADR Documents:** `docs/reference/adr/ADR-*.md`
 - **Test Project:** `tests/Spaarke.ArchTests/`
 - **Claude Skill:** `.claude/skills/adr-check.md`
-- **CI/CD Workflow:** `.github/workflows/sdap-ci.yml`
+- **CI/CD Workflows:** `.github/workflows/ci-tier1-blocking.yml` (`arch-tests`), `.github/workflows/ci-tier2-advisory.yml` (`adr-compliance`)
 - **PR Template:** `.github/pull_request_template.md`
 - **NetArchTest Docs:** https://github.com/BenMorris/NetArchTest

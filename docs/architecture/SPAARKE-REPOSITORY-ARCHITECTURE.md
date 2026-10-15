@@ -349,7 +349,8 @@ Before submitting code:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `sdap-ci.yml` | PR to main | Build, test, lint |
+| `ci-router.yml` (+ `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml`) | PR / push to master | Required `Router` check: compile, arch tests, eval gate (Tier 1, blocking); format, lint, unit tests (Tier 2, advisory). Replaced the retired `sdap-ci.yml` (2026-10-14) |
+| `ci-standalone-checks.yml` | PR / push to master | Dependency audit, Release build + BFF publish, Compose client gate, shared-lib `tsc` (not required) |
 | `deploy-staging.yml` | Push to main | Deploy to staging |
 | `deploy-to-azure.yml` | Manual | Production deployment |
 | `adr-audit.yml` | PR with ADR changes | Validate ADR format |

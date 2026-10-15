@@ -1,7 +1,7 @@
 # CI/CD Architecture
 
-> **Last Updated**: 2026-09-30
-> **Last Reviewed**: 2026-09-30
+> **Last Updated**: 2026-10-14
+> **Last Reviewed**: 2026-10-14
 > **Reviewed By**: customer-provisioning-orchestration-r1 (doc-drift fix — workflow inventory reconciled against `.github/workflows/` after the 2026-05-26 `claude-code-review.yml` removal and the 2026-06-01 Wave C workflow-rationalization deletions)
 > **Status**: Current
 > **Purpose**: Describes the GitHub Actions workflow system, deployment strategies, quality gates, and promotion pipeline for the SDAP platform.
@@ -20,10 +20,13 @@ The key design decision is separating the PR gate from deployment and from provi
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **CI Router** | `ci-router.yml` | PR → master, push → master, merge_group | The single required status check (`CI / Router`): classifies the diff, dispatches a blocking Tier 1 + an advisory Tier 2, and aggregates the result (Tier 2 is excluded from adjudication by construction, so it can never redden the gate) |
+| **CI Router** | `ci-router.yml` | PR → master, push → master, merge_group | A required status check (`CI / Router`; the ruleset also requires `Client lint (type-aware ratchet)`): classifies the diff, dispatches a blocking Tier 1 + an advisory Tier 2, and aggregates the result (Tier 2 is excluded from adjudication by construction, so it can never redden the gate) |
 | **CI Tier 1 (Blocking)** | `ci-tier1-blocking.yml` | `workflow_call` from the router | Compile (whole solution), full NetArchTest ArchTest suite, changed-surface smoke, auth smoke, golden-utterance eval gate, I1–I5 tenant-isolation invariants, Compose fidelity corpus round-trip |
 | **CI Tier 2 (Advisory)** | `ci-tier2-advisory.yml` | `workflow_call` from the router | Format, lint, full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, plugin size; every job is `continue-on-error: true` |
-| **SDAP CI** (legacy) | `sdap-ci.yml` | Push to master, PRs (`paths-ignore`: `docs/**`, `.claude/**`, …) | Original monolithic pipeline (security scan, build/test, client+code quality, ADR PR comment, tenant isolation, Compose fidelity). No longer the required check — superseded by `CI / Router` — and pending deletion by another project |
+| **CI Standalone Checks** | `ci-standalone-checks.yml` | PR → master (`paths-ignore`: docs-only), push → master, `workflow_dispatch` | NOT required. Checks with no Router equivalent: dependency audit, Release build + BFF publish (uploads `deployment-packages` on master pushes), Compose client gate, shared-lib / `Spaarke.AI.Widgets` `tsc`. On master each failing job raises a `ci-standalone/<job>` quality alert |
+| **Master CI Alert** | `master-ci-alert.yml` | `workflow_run` on `CI` (master) | Raises/clears the `router-master` and `tier2-master/full-unit-tests` quality alerts so a red master is never silent |
+
+> **`sdap-ci.yml` ("SDAP CI") and `sdap-ci-docs-only.yml` retired 2026-10-14** (task CICD-077). Both were moved to `docs/archive/workflows/` and no longer run. Their jobs went to Tier 1 / Tier 2, `ci-standalone-checks.yml` and `nightly-health.yml` (Trivy fs scan, coverage); the job-by-job map is `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`.
 
 > **`claude-code-review.yml` removed** 2026-05-26 (commit `4edce041ef`, "remove claude-code-review workflow"). It required a missing `ANTHROPIC_API_KEY` secret (so it could never complete a review) and duplicated ADR coverage already enforced by the `code-review` / `adr-check` skills at `task-execute` Step 9.5. No GitHub Actions workflow runs AI PR review today — CodeRabbit (a separate third-party GitHub App, not an Actions workflow) still reviews every PR, advisory-only.
 
@@ -104,7 +107,7 @@ The BFF API uses Azure App Service deployment slots for zero-downtime deployment
 
 ### Promotion Path
 
-`deploy-promote.yml` is **direct-target** (2026-06-02, D-12 refactor) and **`workflow_dispatch`-only** — the earlier automatic `workflow_run` trigger (dev auto-promote after "SDAP CI" on master) was removed 2026-08-11 (dotnet-10-upgrade-r1). There is no sequential dev → staging → prod chain; each dispatch deploys to exactly the `target_environment` requested:
+`deploy-promote.yml` is **direct-target** (2026-06-02, D-12 refactor) and **`workflow_dispatch`-only** — the earlier automatic `workflow_run` trigger (dev auto-promote after the former "SDAP CI" on master; that workflow was retired 2026-10-14) was removed 2026-08-11 (dotnet-10-upgrade-r1). There is no sequential dev → staging → prod chain; each dispatch deploys to exactly the `target_environment` requested:
 
 ```
 dispatch(target_environment=dev)        ──> Dev        (smoke tests: /ping, /healthz)
@@ -131,7 +134,7 @@ Each target is an operationally independent App Service in its own resource grou
 | Compose fidelity corpus round-trip | Yes (Tier 1) | Over every `.docx` under `tests/fixtures/compose-corpus/` |
 | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size | No (Tier 2, advisory) | Every job is `continue-on-error: true`; posted as one deduplicated PR comment |
 
-`CI / Router` is the **only** required status check on `master` (verified 2026-09-30). The legacy `sdap-ci.yml` (Trivy scan, Debug+Release build/test matrix, Prettier/ESLint, `dotnet format`, ADR NetArchTest suite, dependency audit) still runs on PRs but is no longer required and is pending deletion by another project. `claude-code-review.yml` (the one AI-review gate this table used to list) was removed 2026-05-26 — see the Workflow Inventory note above.
+`CI / Router` and `Client lint (type-aware ratchet)` are the required status checks on `master` (verified 2026-10-14). The legacy `sdap-ci.yml` (Trivy scan, Debug+Release build/test matrix, Prettier/ESLint, `dotnet format`, ADR NetArchTest suite, dependency audit) was retired 2026-10-14 and archived at `docs/archive/workflows/sdap-ci.yml`; `Client lint (type-aware ratchet)` (`client-lint.yml`) is also required. `claude-code-review.yml` (the one AI-review gate this table used to list) was removed 2026-05-26 — see the Workflow Inventory note above.
 
 ### Nightly (nightly-health.yml)
 
@@ -187,8 +190,8 @@ Iterates every `.github/workflows/*.yml`, queries each workflow's 7-day run hist
 ## Known Pitfalls
 
 - **Slot warm-up timing**: The 15-30s sleep after staging deployment is a heuristic; .NET DI container initialization on first request may take longer under cold start
-- **Artifact cross-workflow downloads**: `deploy-promote.yml` uses `dawidd6/action-download-artifact` to pull artifacts from `sdap-ci.yml` runs; this requires `actions: read` permission and correct artifact naming
-- **ADR PR comment deduplication — two independent bots now**: `sdap-ci.yml`'s legacy comment searches for `"ADR Architecture Validation Report"`; `ci-tier2-advisory.yml`'s `tier2-pr-comment` job searches for `"Tier 2 Advisory Report"` instead (deliberately different marker text so the two never collide). Changing either string breaks that workflow's update-in-place behavior
+- **Artifact cross-workflow downloads**: `deploy-promote.yml` uses `dawidd6/action-download-artifact` to pull the `deployment-packages` artifact from `ci-standalone-checks.yml` runs (master pushes only); this requires `actions: read` permission and correct artifact naming
+- **ADR PR comment deduplication**: `ci-tier2-advisory.yml`'s `tier2-pr-comment` job searches for `"Tier 2 Advisory Report"` to update its comment in place; changing that string breaks the update-in-place behavior. (The retired `sdap-ci.yml` used a separate `"ADR Architecture Validation Report"` marker; it was not carried over.)
 - **`config/coverlet-nightly.runsettings` is currently orphaned**: it was written for the deleted `nightly-quality.yml` (SonarCloud opencover output); no workflow references it today
 
 ## Related

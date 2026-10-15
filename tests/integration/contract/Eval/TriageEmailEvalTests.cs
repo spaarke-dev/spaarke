@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Eval.EmailTriage;
 /// <para>
 /// <b>Merge-gate wiring</b> (identical pattern to every sibling family in this directory):
 /// <c>[Trait("Category", "GoldenUtteranceEval")]</c> joins this class to the dedicated <c>eval-gate</c> job
-/// in <c>.github/workflows/sdap-ci.yml</c> (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>, NO
+/// in <c>.github/workflows/ci-tier1-blocking.yml</c> (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>, NO
 /// <c>continue-on-error</c>) with ZERO CI-YAML change. This suite does NOT touch the shared
 /// <c>golden-utterances.json</c> — a net-new family is the established way a project adds gate coverage.
 /// </para>

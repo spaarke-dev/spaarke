@@ -13,7 +13,7 @@
 ## Promotion Flow
 
 ```
-SDAP CI (master) ──success──► dev ──auto──► staging ──approval──► prod
+deployment-packages (master) ──dispatch──► dev ──auto──► staging ──approval──► prod
                                 │              │                    │
                                 ▼              ▼                    ▼
                            smoke tests    smoke tests +       smoke tests
@@ -112,14 +112,14 @@ gh workflow run deploy-promote.yml -f target_environment=prod
 |-------|----------|
 | OIDC login fails | Verify federated credential subject matches `repo:{owner}/{repo}:environment:{env}` |
 | Approval not requested | Ensure `prod` environment has "Required reviewers" configured |
-| Artifact download fails | Verify SDAP CI workflow produces `deployment-packages` artifact |
+| Artifact download fails | Verify `ci-standalone-checks.yml` (`release-build` job) produced `deployment-packages` on a master push; the artifact is not uploaded for PR runs |
 | Smoke tests fail | Check App Service is running and `/ping`, `/healthz` endpoints are accessible |
 
 ## Related Workflows
 
 | Workflow | Purpose |
 |----------|---------|
-| `sdap-ci.yml` | Build, test, produce deployment artifacts |
+| `ci-standalone-checks.yml` | `release-build` job: Release build + BFF publish, produces the `deployment-packages` artifact on master pushes (replaces the retired `sdap-ci.yml`, 2026-10-14) |
 | `deploy-infrastructure.yml` | "Validate Bicep Infrastructure" — lint + compile only; uses no GitHub Environment and deploys nothing (customer stamps are deployed by the L2 control plane, H2a) |
 | `deploy-promote.yml` | Environment promotion (this pipeline) |
 | `deploy-staging.yml` | Legacy staging deployment (superseded by deploy-promote.yml) |

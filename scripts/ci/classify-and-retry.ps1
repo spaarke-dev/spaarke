@@ -1,7 +1,8 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Two-pass test runner classifier for SDAP CI.
+    Two-pass test runner classifier used by the Tier 2 Full Unit Tests (Debug)
+    shards (.github/workflows/ci-tier2-advisory.yml).
 
 .DESCRIPTION
     Reads pass-1 TRX files, identifies failed tests, and emits a retry decision

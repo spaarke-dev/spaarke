@@ -48,9 +48,10 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// documented no-op — see <c>ContainerLifecycleLiveTests.ContainerTypeOwnerGrant_RoleFlow_*</c>.
 /// </para>
 /// <para>
-/// <b>Skip-via-return, not <c>[Trait("Category","Live")]</c> CI filtering.</b> The default
-/// <c>sdap-ci.yml</c> test job runs <c>dotnet test</c> with no <c>--filter</c> at all (every test
-/// project's full suite executes), so a category trait alone would not stop this suite from trying
+/// <b>Skip-via-return, not <c>[Trait("Category","Live")]</c> CI filtering.</b> The
+/// Tier 2 <c>Full Unit Tests (Debug)</c> shards (<c>.github/workflows/ci-tier2-advisory.yml</c>) run
+/// <c>dotnet test</c> with only namespace <c>--filter</c>s and no <c>Category</c> filter at all (every test
+/// in each shard's namespaces executes), so a category trait alone would not stop this suite from trying
 /// to reach a live tenant in CI. The repo's own established answer to that —
 /// <c>tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/Phase2EndToEndTests.cs</c>'s
 /// <c>LiveMode_*</c> tests — is an env-var presence check at the top of each test that returns
