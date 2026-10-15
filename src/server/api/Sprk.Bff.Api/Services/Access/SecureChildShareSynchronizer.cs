@@ -713,9 +713,14 @@ public sealed class SecureChildShareSynchronizer
     /// <remarks>Ontology task 038 (component justification, CLAUDE.md section 11). Existing: <see cref="SecureRootsAboveAsync"/>,
     /// whose run already caches reads. Extension: that method answers one union per call, so a caller that needs one answer per
     /// group calls it per group and re-reads every shared parent in a fresh run. Cost of doing nothing: the worklist's read-time
-    /// witness rule (D-123) would walk each Signal's and each witness's lineage in its own run on every page load.</remarks>
+    /// witness rule (D-123) would walk each Signal's and each witness's lineage in its own run on every page load.
+    /// <para>uac-r2 K1 on ontology #1891: the parents and roots are read ahead level by level, one query per table per level
+    /// (<see cref="Run.PrefetchLineagesAsync"/>), and <paramref name="readRows"/> (optional) are child rows the caller has ALREADY
+    /// read, each with the column set it was read with: a row read with every column the walk reads is used instead of reading
+    /// it again; any other is ignored (read as usual). The answers are those of the row-by-row walk.</para></remarks>
     internal async Task<IReadOnlyList<SecureRootsAbove>> SecureRootsAboveEachAsync(
-        IReadOnlyList<IReadOnlyCollection<Entity>> groups, Guid secureTeamId, CancellationToken ct)
+        IReadOnlyList<IReadOnlyCollection<Entity>> groups, Guid secureTeamId, CancellationToken ct,
+        IReadOnlyCollection<(Entity Row, ColumnSet ReadWith)>? readRows = null)
     {
         ArgumentNullException.ThrowIfNull(groups);
         foreach (var row in groups.SelectMany(g => g))
@@ -725,6 +730,10 @@ public sealed class SecureChildShareSynchronizer
         }
 
         var run = new Run(this, secureTeamId, ct);
+        if (readRows is not null)
+            run.Seed(readRows);
+        await run.PrefetchLineagesAsync(groups.SelectMany(g => g)).ConfigureAwait(false);
+
         var answers = new List<SecureRootsAbove>(groups.Count);
         foreach (var group in groups)
         {
@@ -1273,7 +1282,13 @@ public sealed class SecureChildShareSynchronizer
         };
         query.Criteria.AddCondition(root.Table + "id", ConditionOperator.Equal, root.Id);
         var entity = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return RootFactsOf(entity);
+    }
 
+    /// <summary>A root's facts from its row as read with <see cref="OwningTeamColumn"/> and <see cref="IsSecureColumn"/>, or
+    /// <c>null</c> when there is no row.</summary>
+    private static RootFacts? RootFactsOf(Entity? entity)
+    {
         // An EMPTY sprk_issecure fails CLOSED (task 150, round 17 item 3), as in the ownership resolver: since the task 150
         // backfill every row holds true or false and the column is field-secured, so empty means this identity lost its
         // field-level Read and the real value was masked. Read as flagged: a root that is not isolated then leaves its
@@ -1470,6 +1485,93 @@ public sealed class SecureChildShareSynchronizer
         /// <summary>Seeds the run's cache with a root already read (the scoped run's own root).</summary>
         public void Remember(RowRef root, RootFacts? facts) => _roots[root] = facts;
 
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: seeds the run's cache with child rows the caller has already read. A row is used only
+        /// when it was read with every column the walk reads (<see cref="WalkColumns"/>); a row read with fewer is ignored and
+        /// read as usual, so a column the caller did not select never reads as absent.
+        /// </summary>
+        public void Seed(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
+        {
+            foreach (var (entity, readWith) in rows)
+            {
+                if (entity.Id == Guid.Empty || !SecureChildLineage.Children.TryGetValue(entity.LogicalName, out var table))
+                    continue;
+                if (!readWith.AllColumns
+                    && !WalkColumns(table).All(c => readWith.Columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+                    continue;
+
+                var row = ToRow(table, entity);
+                _otherRows.TryAdd(row.Ref, row);
+            }
+        }
+
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: reads ahead, in batches, every parent and root the upward walks from
+        /// <paramref name="entities"/> will ask for, so the walks themselves are answered from the run's cache. Each round walks
+        /// every row against the cache only (<see cref="LineageOfAsync"/> collecting its misses), which yields exactly the reads
+        /// the walk would make next, then reads them one query per table (<see cref="ReadManyAsync"/>). Each round reaches one
+        /// level further, so the rounds are bounded by the lineage depth; anything still missing after them is read row by
+        /// row by the walk itself. A fault propagates.
+        /// </summary>
+        public async Task PrefetchLineagesAsync(IEnumerable<Entity> entities)
+        {
+            var rows = entities
+                .DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id))
+                .Select(e => ToRow(SecureChildLineage.Children[e.LogicalName], e))
+                .ToList();
+            for (var round = 0; round <= MaxLineageDepth; round++)
+            {
+                var misses = new HashSet<RowRef>();
+                foreach (var row in rows)
+                    await LineageOfAsync(row, misses).ConfigureAwait(false);
+                if (misses.Count == 0)
+                    return;
+
+                await ReadManyAsync(misses).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// uac-r2 K1 on ontology #1891: the rows named, read one query per table (an id <c>In</c> list, at most
+        /// <see cref="DescendantConditionsPerQuery"/> ids each) with the columns of the single reads (<see cref="RootAsync"/>,
+        /// <see cref="OtherRowAsync"/>), and cached as they would cache them: a row not returned is cached as absent. A
+        /// fault propagates.
+        /// </summary>
+        private async Task ReadManyAsync(IEnumerable<RowRef> references)
+        {
+            foreach (var group in references.GroupBy(r => r.Table, StringComparer.Ordinal))
+            {
+                var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
+                foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
+                {
+                    var ids = chunk.Select(r => r.Id).ToHashSet();
+                    var query = new QueryExpression(group.Key)
+                    {
+                        ColumnSet = table is null ? new ColumnSet(OwningTeamColumn, IsSecureColumn) : new ColumnSet(WalkColumns(table)),
+                        NoLock = true,
+                    };
+                    query.Criteria.AddCondition(
+                        table is null ? group.Key + "id" : table.IdColumn, ConditionOperator.In, ids.Cast<object>().ToArray());
+
+                    var found = new Dictionary<Guid, Entity>();
+                    foreach (var entity in (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities)
+                    {
+                        if (ids.Contains(entity.Id))
+                            found[entity.Id] = entity; // a row for any other id is not an answer about these
+                    }
+
+                    foreach (var reference in chunk)
+                    {
+                        var entity = found.GetValueOrDefault(reference.Id);
+                        if (table is null)
+                            _roots[reference] = RootFactsOf(entity);
+                        else
+                            _otherRows[reference] = entity is null ? null : ToRow(table, entity);
+                    }
+                }
+            }
+        }
+
         /// <summary>A root's owner and flag, or <c>null</c> when the row does not exist. A fault propagates.</summary>
         public async Task<RootFacts?> RootAsync(RowRef root)
         {
@@ -1491,7 +1593,7 @@ public sealed class SecureChildShareSynchronizer
             var table = SecureChildLineage.Children[reference.Table];
             var query = new QueryExpression(table.LogicalName)
             {
-                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                ColumnSet = new ColumnSet(WalkColumns(table)),
                 TopCount = 1,
                 NoLock = true,
             };
@@ -1502,6 +1604,10 @@ public sealed class SecureChildShareSynchronizer
             _otherRows[reference] = row;
             return row;
         }
+
+        /// <summary>The columns the walk reads of a child row: its lineage lookups and its owner.</summary>
+        private static string[] WalkColumns(SecureChildLineage.Table table) =>
+            table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
 
         private static Row ToRow(SecureChildLineage.Table table, Entity entity)
         {
@@ -1533,8 +1639,10 @@ public sealed class SecureChildShareSynchronizer
             return (row.Ref, await LineageOfAsync(row).ConfigureAwait(false));
         }
 
-        /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).</summary>
-        private async Task<Lineage> LineageOfAsync(Row row)
+        /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).
+        /// <paramref name="misses"/> (uac-r2 K1 on ontology #1891, <see cref="PrefetchLineagesAsync"/>): walk the cache only;
+        /// a parent or root the run does not hold yet is added to it and not followed, and nothing is read.</summary>
+        private async Task<Lineage> LineageOfAsync(Row row, HashSet<RowRef>? misses = null)
         {
             var roots = new HashSet<RowRef>();
             string? undetermined = null;
@@ -1550,6 +1658,12 @@ public sealed class SecureChildShareSynchronizer
 
                     if (SecureChildLineage.IsRoot(parent.Table))
                     {
+                        if (misses is not null && !_roots.ContainsKey(parent))
+                        {
+                            misses.Add(parent);
+                            continue;
+                        }
+
                         var facts = await RootAsync(parent).ConfigureAwait(false);
                         if (facts is null)
                             undetermined ??= $"its parent {parent} does not exist";
@@ -1563,6 +1677,12 @@ public sealed class SecureChildShareSynchronizer
                     if (depth + 1 >= MaxLineageDepth)
                     {
                         undetermined ??= $"its filing runs deeper than {MaxLineageDepth} levels";
+                        continue;
+                    }
+
+                    if (misses is not null && !_secureChildren.ContainsKey(parent) && !_otherRows.ContainsKey(parent))
+                    {
+                        misses.Add(parent);
                         continue;
                     }
 

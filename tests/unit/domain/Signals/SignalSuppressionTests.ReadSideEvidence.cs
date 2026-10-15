@@ -138,6 +138,59 @@ public partial class SignalSuppressionTests
         few.Should().BeLessThan(30); // measured 2026-10-14: few=14, many=54 (one run); the per-lineage walk gave 52 and 272
     }
 
+    /// <summary>uac-r2 K1 on ontology #1891: the worklist's shape. Each Signal is filed through its subject, a user-owned communication
+    /// (walked through) under the matter and under a work assignment of its own; the subject is also the Signal's witness.</summary>
+    private static (Store Store, List<(Guid, IReadOnlyList<string>)> Batch) WorklistOf(int signals)
+    {
+        var s = new Store();
+        var batch = new List<(Guid, IReadOnlyList<string>)>();
+        for (var i = 0; i < signals; i++)
+        {
+            var assignment = Guid.NewGuid();
+            s.Others.Add(new Entity("sprk_workassignment", assignment)
+            {
+                ["sprk_issecure"] = false,
+                ["owninguser"] = new EntityReference("systemuser", Guid.NewGuid()),
+            });
+            var subject = ReadSideCommunication(s, MatterId, owner: Store.User);
+            s.Others.Single(r => r.Id == subject)["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", assignment);
+            var signal = s.Open(MatterId, subject, secure: false, subjectEntity: "sprk_communication");
+            batch.Add((signal, [WitnessRef(subject)]));
+        }
+
+        return (s, batch);
+    }
+
+    [Fact]
+    public async Task K1_TheWorklistsWitnessReads_DoNotGrowWithTheNumberOfSignals()
+    {
+        // uac-r2 K1 on ontology #1891: the subjects (and witnesses) already read are handed to the walker, and its parent reads are
+        // one query per table per level. Before: each Signal's subject and work assignment were read one row at a time.
+        async Task<int> QueriesFor(int signals)
+        {
+            var (s, batch) = WorklistOf(signals);
+            var before = s.Queries;
+            var shown = await s.Service.WitnessDetailShownOnReadAsync(batch, default);
+            shown.Should().NotBeNull();
+            shown!.Values.Should().OnlyContain(v => v.Count == 1, "every Signal and its witness are ordinary: the detail is shown");
+            return s.Queries - before;
+        }
+
+        var few = await QueriesFor(4);
+        var many = await QueriesFor(24);
+        many.Should().Be(few, $"the reads are per table, not per Signal (few={few}, many={many})");
+        many.Should().BeLessThanOrEqualTo(8); // measured 2026-10-14: 7 for 4 and for 24 Signals; before the fix 14 and 54
+    }
+
+    [Fact]
+    public async Task K1_AFaultInTheWalkersBatchedRead_ReturnsNull_SoTheRouteWithholdsEverything()
+    {
+        var (s, batch) = WorklistOf(3);
+        s.FailReadsOf = "sprk_workassignment"; // read only by the walker, in its batched parent read
+
+        (await s.Service.WitnessDetailShownOnReadAsync(batch, default)).Should().BeNull();
+    }
+
     [Fact]
     public async Task T038_AFault_ReturnsNull_SoTheRouteWithholdsEverything()
     {
