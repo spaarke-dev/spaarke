@@ -99,7 +99,8 @@ public sealed class SecretClientKvWriterTests
         RotateExisting: rotate,
         OmitCanonicalNames: omitCanonicalNames);
 
-    private static SecretClientKvWriter NewWriter(FakeSecretsHandler handler, IKvSecretValueResolver? resolver = null)
+    private static SecretClientKvWriter NewWriter(
+        FakeSecretsHandler handler, IKvSecretValueResolver? resolver = null, KvSecretsPopulationOptions? options = null)
     {
         // Both the ArmClient (preflight probe) and the SecretClient (KV ops)
         // are built against the SAME fake HttpMessageHandler instance so a
@@ -116,8 +117,57 @@ public sealed class SecretClientKvWriterTests
             armClient,
             secretClientOptions,
             resolver ?? new FakeValueResolver(),
-            Options.Create(NewOptions()),
+            Options.Create(options ?? NewOptions()),
             NullLogger<SecretClientKvWriter>.Instance);
+    }
+
+    // ---------- T186 L24: the Secrets Officer grant H4 makes just before writing takes minutes to propagate ----------
+
+    [Fact]
+    public async Task WriteAsync_KeyVaultDeniesUntilTheRoleGrantPropagates_RetriesAndWritesEveryEntry()
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId) { RbacDenialsRemaining = 3 };
+        var writer = NewWriter(handler, options: new KvSecretsPopulationOptions
+        {
+            RbacPropagationTimeout = TimeSpan.FromSeconds(30),
+            RbacPropagationRetryInterval = TimeSpan.FromMilliseconds(1),
+        });
+        var entries = new List<KvSecretEntry>
+        {
+            new("AiSearch-Endpoint", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+            new("Redis-Endpoint", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+        };
+
+        var outcome = await writer.WriteAsync(NewRequest(entries), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<KvSecretsWriteOutcome.Success>().Subject;
+        success.Results.Should().OnlyContain(r => r.Action == KvSecretWriteAction.Wrote,
+            "a 403 right after H4's role grant is propagation delay, not a failure (T186 L24)");
+        handler.RbacDenialsRemaining.Should().Be(0, "all three denials were seen and retried");
+        handler.PutMethods.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task WriteAsync_KeyVaultKeepsDenyingPastTheTimeout_FailsTheEntryNamingThePropagationWait()
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId) { RbacDenialsRemaining = int.MaxValue };
+        var writer = NewWriter(handler, options: new KvSecretsPopulationOptions
+        {
+            RbacPropagationTimeout = TimeSpan.FromMilliseconds(200),
+            RbacPropagationRetryInterval = TimeSpan.FromMilliseconds(20),
+        });
+        var entries = new List<KvSecretEntry>
+        {
+            new("AiSearch-Endpoint", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+            new("Redis-Endpoint", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+        };
+
+        var outcome = await writer.WriteAsync(NewRequest(entries), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<KvSecretsWriteOutcome.Success>().Subject;
+        success.Results.Should().OnlyContain(r => r.Action == KvSecretWriteAction.Failed);
+        success.Results[0].ErrorMessage.Should().Contain("grant to propagate").And.Contain("403");
+        handler.PutMethods.Should().BeEmpty();
     }
 
     // ---------- T1 happy path (incl. FR-39 no-special-casing) ----------
@@ -373,6 +423,9 @@ public sealed class SecretClientKvWriterTests
         public bool PreflightForbidden { get; init; }
         public string? FailPutForName { get; init; }
 
+        /// <summary>Key Vault (not ARM) requests answered 403 ForbiddenByRbac before access is allowed (T186 L24).</summary>
+        public int RbacDenialsRemaining { get; set; }
+
         public List<Uri> RequestedUris { get; } = new();
         public List<Uri> PutMethods { get; } = new();
         public List<Uri> DeleteMethods { get; } = new();
@@ -407,6 +460,17 @@ public sealed class SecretClientKvWriterTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            if (RbacDenialsRemaining > 0)
+            {
+                RbacDenialsRemaining--;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent(
+                        """{"error":{"code":"Forbidden","message":"Caller is not authorized to perform action on resource. Assignment: (not found)","innererror":{"code":"ForbiddenByRbac"}}}""",
+                        System.Text.Encoding.UTF8, "application/json"),
                 });
             }
 
