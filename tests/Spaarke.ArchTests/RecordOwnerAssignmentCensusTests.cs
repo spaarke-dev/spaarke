@@ -2136,7 +2136,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
-        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person)"),
+        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person) or a condition-cleared closure (task 153: the nightly job asks for nobody)"),
         new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),

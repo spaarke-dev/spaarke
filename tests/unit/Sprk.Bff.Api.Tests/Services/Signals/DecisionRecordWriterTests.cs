@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
@@ -46,6 +47,10 @@ public sealed partial class DecisionRecordWriterTests
 
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>Adversarial pass 2 F1: the ontology writer's own application user, as WhoAmI on its connection answers. Dataverse stamps it in
+    /// <c>createdby</c> on every row the writer creates.</summary>
+    internal static readonly Guid WriterUser = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+
     internal sealed class Harness
     {
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
@@ -79,6 +84,20 @@ public sealed partial class DecisionRecordWriterTests
 
         /// <summary>Task 149: when set, the lookup throws it (a Dataverse fault on the read).</summary>
         public Exception? LookupFault { get; set; }
+
+        /// <summary>Adversarial pass 2 F1: when set, WhoAmI on the writer's connection throws it.</summary>
+        public Exception? WhoAmIFault { get; set; }
+
+        /// <summary>Adversarial pass 2 F1: how many times WhoAmI was asked on the writer's connection.</summary>
+        public int WhoAmICalls;
+
+        /// <summary>A row the writer created, as Dataverse stores it: <c>createdby</c> is the writer's own user (no impersonation).</summary>
+        private static Entity AsStoredByTheWriter(Entity created, Guid id)
+        {
+            var stored = Clone(created, id);
+            stored["createdby"] = new EntityReference("systemuser", WriterUser);
+            return stored;
+        }
 
         private static Entity Clone(Entity source, Guid id)
         {
@@ -116,6 +135,14 @@ public sealed partial class DecisionRecordWriterTests
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Callback<Entity, CancellationToken>((e, _) => Created.Add(e))
                 .ReturnsAsync(NewId);
+            Org.Setup(o => o.ExecuteAsync(It.IsAny<WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+                .Returns(() =>
+                {
+                    Interlocked.Increment(ref WhoAmICalls);
+                    return WhoAmIFault is { } fault
+                        ? Task.FromException<OrganizationResponse>(fault)
+                        : Task.FromResult<OrganizationResponse>(new WhoAmIResponse { Results = { ["UserId"] = WriterUser } });
+                });
             Org.Setup(o => o.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new Entity("sprk_decisionrecord")
                 {
@@ -141,7 +168,7 @@ public sealed partial class DecisionRecordWriterTests
                     }
 
                     var stored = Created
-                        .Select(c => c.Id == Guid.Empty ? Clone(c, NewId) : c)
+                        .Select(c => AsStoredByTheWriter(c, c.Id == Guid.Empty ? NewId : c.Id))
                         .Concat(Seeded)
                         .Concat(Rows.Values)
                         .Where(row => row.LogicalName == query.EntityName && Satisfies(query, row))

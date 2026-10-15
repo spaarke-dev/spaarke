@@ -120,9 +120,58 @@ public sealed record DecisionRecordWriteResult(
     public Guid? SecureOwnerTeamId { get; init; }
 
     /// <summary>Task 149 (D-139): true when <see cref="DecisionRecordWriter.WriteGateDecisionAsync"/> found the gate decision's record
-    /// already written and created nothing; <see cref="RecordId"/> is then the existing record's id.</summary>
+    /// already written and created nothing; <see cref="RecordId"/> is then the existing record's id. Task 153: the same for
+    /// <see cref="DecisionRecordWriter.WriteConditionClearedAsync"/>.</summary>
     public bool AlreadyRecorded { get; init; }
+
+    /// <summary>Task 153 (D-145b): the record's <c>sprk_confirmedby</c> as written (or, when <see cref="AlreadyRecorded"/>, as stored);
+    /// null when it names nobody. The job copies it to the Signal's <c>sprk_resolvedby</c>.</summary>
+    public Guid? ConfirmedByUserId { get; init; }
 }
+
+/// <summary>
+/// Task 153 (D-145b, D-139): the ONE idempotency key of the Routine Decision Record written when the nightly pass closes a Do-lane
+/// Signal as ConditionCleared, deterministic from the Signal and its episode. Stored as the record's review id in <c>sprk_steps</c>, as
+/// <see cref="GateDecisionKey"/> is; its prefix (<c>cleared-dr-</c>) differs from the gate's (<c>gate-dr-</c>), so neither key can hash to
+/// the other's value.
+/// </summary>
+public static class ConditionClearedRecordKey
+{
+    /// <summary>The key as the log carries it: <c>cleared-dr-{signalId}-{episode}</c>.</summary>
+    public static string Of(Guid signalId, int episode) =>
+        $"cleared-dr-{signalId.ToString("D", CultureInfo.InvariantCulture)}-{episode.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>The key as a <see cref="Guid"/> (the first 16 bytes of its SHA-256), the form <c>sprk_steps</c> keeps a review id in.</summary>
+    public static Guid IdOf(Guid signalId, int episode) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(Of(signalId, episode))).AsSpan(0, 16));
+}
+
+/// <summary>
+/// Task 153 (D-145b): a Do-lane Signal the nightly pass closed as ConditionCleared (its subject is no longer a hit), for
+/// <see cref="DecisionRecordWriter.WriteConditionClearedAsync"/>.
+/// </summary>
+/// <param name="SignalId">The closed Signal (the record's one resolved Signal).</param>
+/// <param name="Episode">Its episode (with <paramref name="SignalId"/>, the record's key).</param>
+/// <param name="PolicyCode">The policy, for the fact snapshot.</param>
+/// <param name="PolicyVersionId">The Signal's <c>sprk_policyversion</c> (copied, D-34); <see cref="Guid.Empty"/> when it has none.</param>
+/// <param name="Subject">The Signal's subject (a To Do, an event or a work assignment): the record is filed under it, and the person who
+/// last changed it is the attribution.</param>
+/// <param name="Core">The Signal's core record (D-34, D-36); null for a no-core item.</param>
+/// <param name="ClosedOn">When the Signal was closed (its <c>sprk_resolvedon</c>, or the time the job closed it).</param>
+/// <param name="SignalRaisedOn">When the Signal was raised (its <c>createdon</c>); null when unknown.</param>
+/// <param name="AssigneeSystemUserId">D-134: for a no-core PERSONAL To Do, the one enabled user its Assigned To names; null otherwise.</param>
+/// <param name="PrivilegeFlagged">Copied forward from the Signal (ADR-015).</param>
+public sealed record ConditionClearedRecordRequest(
+    Guid SignalId,
+    int Episode,
+    string PolicyCode,
+    Guid PolicyVersionId,
+    DecisionRecordRef Subject,
+    DecisionRecordCore? Core,
+    DateTime ClosedOn,
+    DateTime? SignalRaisedOn,
+    Guid? AssigneeSystemUserId = null,
+    bool PrivilegeFlagged = false);
 
 /// <summary>
 /// Task 149 (D-139): the ONE idempotency key of a communications-gate Decision Record, deterministic from the pair (communication,
@@ -215,6 +264,14 @@ public static class DecisionRecordRefusalReason
     public const string DataverseAccessDenied = "decision_dataverse_access_denied";
     public const string SecureOwnerMismatch = "decision_secure_owner_mismatch";
 
+    /// <summary>Task 153 (D-139, D-145b): whether a condition-cleared closure's Decision Record already exists could not be checked (a
+    /// Dataverse fault on the lookup), so nothing was written rather than risk a second record. The next pass retries.</summary>
+    public const string ConditionClearedLookupFailed = "decision_cleared_lookup_failed";
+
+    /// <summary>Task 153 (adversarial pass 1 F1): the closed Signal's subject no longer exists (the attribution read by id found no row), so
+    /// the closure cannot be filed. Permanent: a counted skip (<see cref="DecisionRecordWriter.ConditionClearedSkipTag"/>), never retried.</summary>
+    public const string ConditionClearedSubjectMissing = "decision_cleared_subject_missing";
+
     /// <summary>Task 142: the record's subject is a table the Decision Record has no subject lookup for (contract C1). No I/O.</summary>
     public const string SubjectUnsupported = "decision_subject_unsupported";
 
@@ -302,6 +359,11 @@ public static class DecisionRecordEvents
     /// <summary>Warning (task 149, D-144 as amended, uac-r2 K2): a gate decision about an unfiled communication is not recorded because the
     /// communication's owning user is disabled (<see cref="DecisionRecordRefusalReason.GateSkippedOwnerDisabled"/>). Ids only.</summary>
     public static readonly EventId GateDecisionSkippedOwnerDisabled = new(50314, nameof(GateDecisionSkippedOwnerDisabled));
+
+    /// <summary>Warning (task 153, adversarial pass 1 F1): a Do-lane condition-cleared closure is not recorded because its record can never be
+    /// written (the subject no longer exists, cannot be filed or is not a table a record can be filed under). Counted on
+    /// <c>ontology.writer.skips</c>, not retried. Ids and the reason only.</summary>
+    public static readonly EventId ConditionClearedSkipped = new(50315, nameof(ConditionClearedSkipped));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -584,6 +646,9 @@ public sealed class DecisionRecordWriter
             // A gate record never sets sprk_confirmedby; a human review's record always does. A review commit can carry a client-chosen
             // review id equal to this key, so without this condition it would count as the gate record and the gate's record would never be written.
             query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Null);
+            // Task 153 (adversarial pass 2 F1): and only a record the writer itself created. A Console user may create a Decision Record
+            // (Deep create) carrying this key and no confirmer; without this condition it would stop the gate's record being written.
+            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty ? row.Id : null;
         }
@@ -599,11 +664,368 @@ public sealed class DecisionRecordWriter
     /// <summary>The table a gate decision's Decision Record is filed under.</summary>
     private const string GateSubjectEntity = "sprk_communication";
 
+    /// <summary>Task 153 (adversarial pass 2 F1): the column Dataverse stamps with the identity that created a row.</summary>
+    internal const string CreatedByColumn = "createdby";
+
+    /// <summary>
+    /// Task 153 (adversarial pass 2 F1): the ontology writer's own <c>systemuserid</c> (WhoAmI on its dedicated connection, cached by
+    /// <see cref="OntologyWriterDataverseClient.GetWriterUserIdAsync"/>). The writer creates every Decision Record through that connection
+    /// with no impersonation, so it is the <c>createdby</c> of every record it wrote; a row a person created is never the writer's. A fault
+    /// propagates: the lookups that use it then refuse (fail closed) rather than match on anything weaker.
+    /// </summary>
+    internal Task<Guid> WriterUserIdAsync(CancellationToken ct) => _writerClient.GetWriterUserIdAsync(ct);
+
     /// <summary>The decider recorded in the fact snapshot for a gate decision: a system, not a person.</summary>
     private const string GateDeciderRole = "automated: communications policy gate";
 
     private const int AuthorizedOutcome = 100000000;
     private const int DeniedOutcome = 100000001;
+
+    /// <summary>
+    /// Task 153 (D-145b): writes the ONE Routine Decision Record of a Do-lane Signal the nightly pass closed as ConditionCleared: the item's
+    /// work was done outside the decision route (a colleague completed the To Do on its form, recorded the response). An additive entry
+    /// point beside <see cref="WriteGateDecisionAsync"/>: below the request it is the SAME code, <see cref="Content"/> (D-34 context),
+    /// <see cref="FiledAndOwnedAsync"/> (filed under the Signal's subject through the shared regarding builder, the core-ancestor stamp, uac-r2's
+    /// owner answer over EVERY parent, secure-if-any, D-134's assignee for a personal To Do) and the one <see cref="CreateAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Closed field semantics.</b> Class Routine, outcome Authorized (the work was done), one taken step <c>condition-cleared</c>
+    /// (not a catalog action: <c>sprk_action</c> stays null), the Signal's policy version and core copied (D-34), the Signal named in
+    /// <c>sprk_steps.resolvedSignalIds</c>. <b>Attribution, best effort (D-145b, D-129)</b>: <c>sprk_confirmedby</c> is the user in the
+    /// subject's <c>modifiedby</c>, read here by the closing pass, ONLY when that user is a person (enabled, interactive, not an application
+    /// user such as the Spaarke service identity, not flagged external: the one eligibility rule,
+    /// <c>InternalShareEndpoints.ClassifyEligibility</c>) AND the change falls while the Signal was open (after it was raised, not after it
+    /// was closed). Otherwise, or when the read fails, the record is still written, with <c>sprk_confirmedby</c> null and a reason saying the
+    /// person is unknown and why. Never the assignee, never the owner: nobody is guessed.</para>
+    /// <para><b>One record per closure (D-139).</b> Keyed by <see cref="ConditionClearedRecordKey"/> (Signal, episode), stored as the review
+    /// id in <c>sprk_steps</c> and looked up first, so a re-run of the pass writes nothing new and a failed write is retried on the next pass.
+    /// The gate's lookup cannot match this record: it is filed under a communication and keyed <c>gate-dr-</c>.</para>
+    /// </remarks>
+    /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the lookup faulted
+    /// (<see cref="DecisionRecordRefusalReason.ConditionClearedLookupFailed"/>), the subject cannot be filed, the owner was refused, or the
+    /// create failed. Logged and metered on <c>ontology.writer.failures</c> here; a permanent refusal (the subject no longer exists, cannot be
+    /// filed or is unsupported: <see cref="ConditionClearedSkipTag"/>) is logged at Warning and metered on <c>ontology.writer.skips</c>
+    /// instead.</exception>
+    public async Task<DecisionRecordWriteResult> WriteConditionClearedAsync(ConditionClearedRecordRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var key = ConditionClearedRecordKey.IdOf(request.SignalId, request.Episode);
+
+        try
+        {
+            var plan = ValidateConditionCleared(request);
+            if (await FindConditionClearedRecordAsync(request.Subject, key, ct).ConfigureAwait(false) is { } existing)
+            {
+                _logger.LogInformation(
+                    "Signal {SignalId} (episode {Episode}): its condition-cleared closure is already recorded as Decision Record {RecordId}; nothing written.",
+                    request.SignalId, request.Episode, existing.Id);
+                return new DecisionRecordWriteResult(existing.Id, RecordedDecisionClass.Routine, [request.SignalId])
+                {
+                    AlreadyRecorded = true,
+                    ConfirmedByUserId = existing.ConfirmedBy,
+                };
+            }
+
+            var (person, unknownWhy, changedOn) = await ReadChangedByAsync(request, ct).ConfigureAwait(false);
+            var subjectLabel = request.Subject.Entity;
+            var reason = person is not null
+                ? $"condition_cleared - The {subjectLabel} was changed and the item's condition no longer holds; Confirmed By is the person who last changed it before the nightly pass closed the item."
+                : $"condition_cleared_person_unknown - The item's condition no longer holds, but the person who changed the {subjectLabel} is unknown ({unknownWhy}).";
+            var facts = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["signalId"] = request.SignalId.ToString("D", CultureInfo.InvariantCulture),
+                ["episode"] = request.Episode,
+                ["policyCode"] = request.PolicyCode,
+                ["subjectEntity"] = request.Subject.Entity,
+                ["subjectId"] = request.Subject.Id.ToString("D", CultureInfo.InvariantCulture),
+                ["resolution"] = "ConditionCleared",
+                ["closedOn"] = request.ClosedOn,
+                ["changedOn"] = changedOn,
+                ["attribution"] = person is not null ? "modifiedby" : "unknown",
+                ["attributionUnknownReason"] = unknownWhy,
+            };
+
+            var review = new DecisionRecordRequest(
+                ReviewId: key,
+                PolicyVersionId: request.PolicyVersionId,
+                Core: request.Core,
+                ItemSubject: request.Subject,
+                ConfirmedByUserId: person ?? Guid.Empty,
+                DecidedOn: new DateTimeOffset(DateTime.SpecifyKind(request.ClosedOn, DateTimeKind.Utc)),
+                Steps: plan.Steps.Select(s => s.Step).ToList(),
+                FollowOns: [],
+                GateTier: null,
+                ResolvedSignalIds: [request.SignalId],
+                FactValues: facts,
+                DeciderRole: ConditionClearedDeciderRole,
+                Because: null,
+                Reason: reason,
+                PrivilegeFlagged: request.PrivilegeFlagged,
+                SignalSubjects: [request.Subject],
+                AssigneeSystemUserId: request.AssigneeSystemUserId);
+            var written = await CreateAsync(review, plan, resolvedOwner: null, ct).ConfigureAwait(false);
+            return written with { ConfirmedByUserId = person };
+        }
+        catch (DecisionRecordRefusedException ex) when (ConditionClearedSkipTag(ex.Reason) is { } skip)
+        {
+            // Adversarial pass 1 F1: a record that can never be written (the subject is gone, cannot be filed, or is not a filing table) is
+            // a counted SKIP, never ontology.writer.failures (which pages). Warning, so an operator can see the unrecorded closure.
+            _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                "Signal {SignalId} (episode {Episode}): its condition-cleared closure cannot be recorded (reason={Reason}); nothing was written and it is not retried.",
+                request.SignalId, request.Episode, skip);
+            OntologyWriterTelemetry.RecordSkip(skip);
+            throw;
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            LogRefusal(key, ex);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Task 153 (adversarial pass 1 F1): the <c>ontology.writer.skips</c> tag of a <see cref="WriteConditionClearedAsync"/> refusal that is
+    /// permanent (a retry is refused the same way), or null for a refusal a later pass can still succeed at. The writer meters the skip; the
+    /// job counts it and does not retry it.
+    /// </summary>
+    internal static string? ConditionClearedSkipTag(string reason) => reason switch
+    {
+        DecisionRecordRefusalReason.ConditionClearedSubjectMissing => OntologyWriterFailureReason.ClosureRecordSkippedSubjectMissing,
+        DecisionRecordRefusalReason.SubjectUnfileable => OntologyWriterFailureReason.ClosureRecordSkippedSubjectUnfileable,
+        DecisionRecordRefusalReason.SubjectUnsupported => OntologyWriterFailureReason.ClosureRecordSkippedSubjectUnsupported,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Task 153 (adversarial pass 1 F2): true when a Decision Record's <c>sprk_steps</c> is the condition-cleared record of this Signal and
+    /// episode: the same two tests <see cref="FindConditionClearedRecordAsync"/> makes in Dataverse (the key as the review id, and the step
+    /// code only this entry point writes). The job uses it on a closed Signal's link, so a closure already linked to its record is not retried.
+    /// </summary>
+    internal static bool IsConditionClearedRecordFor(string? steps, Guid signalId, int episode) =>
+        steps is not null
+        && steps.Contains($"\"reviewId\":\"{ConditionClearedRecordKey.IdOf(signalId, episode):D}\"", StringComparison.Ordinal)
+        && steps.Contains($"\"code\":\"{ConditionClearedStepCode}\"", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Task 153 (uac-r2 re-check K2): THE rule for whether a review's record leaves its Signals open: something was done (an action taken or a
+    /// Next step created) and none of the taken actions resolves the Signal (the catalog's <see cref="DecisionActionDefinition.ResolvesSignal"/>;
+    /// D-119's budget inquiry, D-128 Q18's Do-lane reminder, or a review that only created Next steps). <c>DecisionCommitService</c>'s
+    /// <c>RecordedResolution</c> (InquirySent) and <see cref="IsNonResolvingReviewRecord"/> (the job's retry) both derive from it, so a record
+    /// the commit leaves a Signal Acknowledged and linked to is the same record the closure retry may replace.
+    /// </summary>
+    internal static bool LeavesSignalOpen(IReadOnlyCollection<string> takenCodes, int followOnCount) =>
+        (takenCodes.Count > 0 || followOnCount > 0)
+        && !takenCodes.Any(code => DecisionActionCatalog.TryGet(code, out var definition) && definition.ResolvesSignal);
+
+    /// <summary>
+    /// Task 153 (adversarial pass 2; uac-r2 re-check K2): true when a Decision Record (its <c>sprk_steps</c> and <c>sprk_followons</c>) is one
+    /// that <see cref="LeavesSignalOpen"/> says leaves the item open: the record a review leaves the Signal Acknowledged and linked to
+    /// (<c>DecisionCommitService</c>'s InquirySent). Only such a record's link is the one a condition-cleared closure's record replaces on a
+    /// retry. Narrower than the commit's rule in one respect: a taken code the catalog does not know makes it false (such a record is no D-128
+    /// link; the job logs and meters the drop). Unreadable steps or follow-ons are false.
+    /// </summary>
+    internal static bool IsNonResolvingReviewRecord(string? steps, string? followOns)
+    {
+        if (string.IsNullOrWhiteSpace(steps)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(steps);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("steps", out var list)
+                || list.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var taken = new List<string>();
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object
+                    || !step.TryGetProperty("taken", out var isTaken) || isTaken.ValueKind != JsonValueKind.True)
+                {
+                    continue;
+                }
+
+                var code = step.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                if (!DecisionActionCatalog.TryGet(code, out _)) return false;
+                taken.Add(code!);
+            }
+
+            var followOnCount = 0;
+            if (!string.IsNullOrWhiteSpace(followOns))
+            {
+                using var next = JsonDocument.Parse(followOns);
+                if (next.RootElement.ValueKind != JsonValueKind.Array) return false;
+                followOnCount = next.RootElement.GetArrayLength();
+            }
+
+            return LeavesSignalOpen(taken, followOnCount);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Task 153: the one step of a condition-cleared record. Not a catalog code (a review can never carry it: <see cref="Validate"/>
+    /// refuses any code the catalog does not know), so the lookup below can require it. No '_' or '%' (it is matched with LIKE).</summary>
+    internal const string ConditionClearedStepCode = "condition-cleared";
+
+    /// <summary>The decider recorded in the fact snapshot for a condition-cleared closure: the nightly pass, not a person.</summary>
+    private const string ConditionClearedDeciderRole = "automated: nightly pass (condition cleared)";
+
+    /// <summary>The alias of the modifying user's <c>systemuser</c> link in <see cref="ReadChangedByAsync"/>.</summary>
+    private const string ChangedByAlias = "changedby";
+
+    /// <summary>Task 153: the condition-cleared request's checks, with no I/O, and the plan its record is built from.</summary>
+    private static Plan ValidateConditionCleared(ConditionClearedRecordRequest r)
+    {
+        static DecisionRecordRefusedException Invalid(string message) => new(DecisionRecordRefusalReason.ReviewInvalid, message);
+
+        if (r.SignalId == Guid.Empty) throw Invalid("SignalId is required.");
+        if (r.Episode < 1) throw Invalid("Episode must be 1 or more.");
+        if (r.Subject is null || string.IsNullOrWhiteSpace(r.Subject.Entity) || r.Subject.Id == Guid.Empty) throw Invalid("Subject is required.");
+        if (!SubjectLookupByEntity.ContainsKey(r.Subject.Entity))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.SubjectUnsupported,
+                "The closed Signal's subject is not a record a Decision Record can be filed under; nothing was written.");
+        }
+
+        var definition = new DecisionActionDefinition(
+            ConditionClearedStepCode, "Done outside the decision route (condition cleared)", PlanLane: null, IsNextStep: false, WorkType: null,
+            Parameters: [], EffectLines: [], Excludes: [], DecisionRecordClass.Routine);
+        var step = new DecisionRecordStep(ConditionClearedStepCode, Taken: true, Values: null, Outcome: "ConditionCleared");
+        var steps = new List<(DecisionRecordStep Step, DecisionActionDefinition Def)> { (step, definition) };
+
+        return new Plan(
+            RecordedDecisionClass.Routine,
+            AuthorizedOutcome,
+            steps,
+            steps,
+            Name: $"{RecordedDecisionClass.Routine}: condition cleared",
+            NoRequester: true);
+    }
+
+    /// <summary>
+    /// Task 153 (D-139): the condition-cleared record already written for this key, with its <c>sprk_confirmedby</c>, or null. Narrowed by the
+    /// subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c> and by the step code only this entry point writes (a review's
+    /// record cannot carry it, so a client-chosen review id equal to the key cannot hide this record), and only among records the writer itself
+    /// created (<c>createdby</c>, adversarial pass 2 F1: a user's row carrying the key and the code is not this record). Read through the shared
+    /// sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ConditionClearedLookupFailed"/>: the lookup
+    /// faulted. Nothing is written: guessing "none" would risk a second record; the next pass retries.</exception>
+    private async Task<(Guid Id, Guid? ConfirmedBy)?> FindConditionClearedRecordAsync(DecisionRecordRef subject, Guid key, CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression(Table)
+            {
+                ColumnSet = new ColumnSet("sprk_confirmedby"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
+            query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
+            query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"code\":\"{ConditionClearedStepCode}\"%");
+            // Adversarial pass 2 F1: and only a record the writer itself created. The key is computable from the Signal id and episode, and a
+            // Console user may create a Decision Record (Deep create): a user's row with this key, this code and a confirmer of their choosing
+            // would otherwise be taken as the closure's record, and its confirmer copied to the Signal's sprk_resolvedby.
+            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty
+                ? (row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id)
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ConditionClearedLookupFailed,
+                "Whether the closure's Decision Record already exists could not be checked, so nothing was written.",
+                innerException: ex);
+        }
+    }
+
+    /// <summary>
+    /// Task 153 (D-145b, D-129): the person who last changed the closed Signal's subject, from its <c>modifiedby</c> as read now (one read: the
+    /// user's eligibility columns come with it through a left outer link), or null with the reason the person is unknown. A read that faults
+    /// is "unknown", and the record is still written.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ConditionClearedSubjectMissing"/>: the read
+    /// answered and found no row (the subject was deleted).</exception>
+    private async Task<(Guid? Person, string? UnknownWhy, DateTime? ChangedOn)> ReadChangedByAsync(
+        ConditionClearedRecordRequest request, CancellationToken ct)
+    {
+        Entity? row;
+        try
+        {
+            var query = new QueryExpression(request.Subject.Entity)
+            {
+                ColumnSet = new ColumnSet("modifiedby", "modifiedon"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition($"{request.Subject.Entity}id", ConditionOperator.Equal, request.Subject.Id);
+            var link = query.AddLink("systemuser", "modifiedby", "systemuserid", JoinOperator.LeftOuter);
+            link.EntityAlias = ChangedByAlias;
+            link.Columns = new ColumnSet("isdisabled", "accessmode", "applicationid", "sprk_isexternal");
+            row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities?.FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Signal {SignalId}: the {SubjectEntity} it was about could not be read for its last change ({ExceptionType}); the closure is recorded with the person unknown.",
+                request.SignalId, request.Subject.Entity, ex.GetType().Name);
+            return (null, "the change could not be read", null);
+        }
+
+        if (row is null)
+        {
+            // Adversarial pass 1 F1: a by-id read through the sysadmin reader that finds no row means the subject was deleted. The record
+            // could never be filed under it (the stamp read would fail the same way on every pass), so this is a permanent refusal.
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ConditionClearedSubjectMissing,
+                "The closed Signal's subject no longer exists, so its closure cannot be filed; nothing was written.");
+        }
+
+        var changedOn = row.GetAttributeValue<DateTime?>("modifiedon");
+        if (row.GetAttributeValue<EntityReference>("modifiedby") is not { LogicalName: "systemuser", Id: var userId } || userId == Guid.Empty)
+        {
+            return (null, "the record names no user who changed it", changedOn);
+        }
+
+        // An unreadable (absent) value is passed as null: ClassifyEligibility reads a null as "not enabled" / "not a person" (fail closed).
+        object? Aliased(string column) => row.GetAttributeValue<AliasedValue>($"{ChangedByAlias}.{column}")?.Value;
+        var eligibility = Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ClassifyEligibility(
+            Aliased("isdisabled") is bool disabled ? disabled : null,
+            Aliased("accessmode") switch { OptionSetValue o => o.Value, int i => i, _ => null },
+            Aliased("applicationid") is Guid app && app != Guid.Empty ? app : null,
+            Aliased("sprk_isexternal") is bool external ? external : null,
+            rootIsRestricted: null);
+        if (eligibility != Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ShareEligibility.Eligible)
+        {
+            return (null, "it was last changed by an application, service, disabled or external account", changedOn);
+        }
+
+        if (changedOn is not { } on)
+        {
+            return (null, "the time of the last change is unknown", null);
+        }
+
+        var onUtc = DateTime.SpecifyKind(on, DateTimeKind.Utc);
+        if (onUtc > DateTime.SpecifyKind(request.ClosedOn, DateTimeKind.Utc))
+        {
+            return (null, "it was changed again after the item was closed", changedOn);
+        }
+
+        if (request.SignalRaisedOn is not { } raised || onUtc <= DateTime.SpecifyKind(raised, DateTimeKind.Utc))
+        {
+            return (null, "it was not changed while the item was open", changedOn);
+        }
+
+        return (userId, null, changedOn);
+    }
 
     /// <summary>
     /// The gate request's checks, with no I/O, and the plan its record is built from. The one step is the gate's proposed action
@@ -642,7 +1064,8 @@ public sealed class DecisionRecordWriter
             steps,
             g.Authorize ? steps : [],
             Name: g.Authorize ? null : $"{RecordedDecisionClass.Judgement}: denied ({g.Reason})",
-            SkippedOutcome: "Denied");
+            SkippedOutcome: "Denied",
+            IsGate: true);
     }
 
     /// <summary>
@@ -753,8 +1176,9 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// THE record's one create, for every entry point (<see cref="WriteAsync(DecisionRecordRequest, DecisionRecordOwner?, CancellationToken)"/>
-    /// and <see cref="WriteGateDecisionAsync"/>): the content (<see cref="Content"/>), the filing and owner (<see cref="FiledAndOwnedAsync"/>),
+    /// THE record's one create, for every entry point (<see cref="WriteAsync(DecisionRecordRequest, DecisionRecordOwner?, CancellationToken)"/>,
+    /// <see cref="WriteGateDecisionAsync"/> and, task 153, <see cref="WriteConditionClearedAsync"/>): the content (<see cref="Content"/>), the
+    /// filing and owner (<see cref="FiledAndOwnedAsync"/>),
     /// the one <c>CreateAsync</c>, and the secure-owner read-back. A second create site is pinned out by
     /// <c>DecisionRecordContextImmutabilityTests</c>.
     /// </summary>
@@ -763,7 +1187,8 @@ public sealed class DecisionRecordWriter
     {
         var content = Content(request, plan);
         // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
-        var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct, plan.AlreadyDerived).ConfigureAwait(false);
+        var (entity, recordOwner) = await FiledAndOwnedAsync(
+            request, resolvedOwner, ct, plan.AlreadyDerived, plan.IsGate, plan.NoRequester).ConfigureAwait(false);
         var owner = recordOwner.Resolution;
         foreach (var (column, value) in content)
         {
@@ -864,9 +1289,12 @@ public sealed class DecisionRecordWriter
     /// <see cref="ResolveRequestOwnerAsync"/>, and only when it is ordinary). A parent whose table is not an ownership parent is
     /// ignored by the resolver itself, as for every other writer. The deciding user is the person who asked
     /// (<see cref="RecordOwnershipContext.RequestedBy"/>, #1783 / D-135): stamped as <c>sprk_createdbyperson</c>, deciding nothing
-    /// about the owner.
+    /// about the owner. Task 153 (adversarial pass 1 F3): with <paramref name="noRequester"/> (a condition-cleared closure, written by the
+    /// nightly job for nobody) no person is the requester, so <c>sprk_createdbyperson</c> stays empty as for every background-job writer
+    /// (<see cref="RecordCreatorPerson"/>); the person who did the work is named only in <c>sprk_confirmedby</c>.
     /// </summary>
-    internal static RecordOwnershipContext OwnershipContextOf(DecisionRecordRequest request, IReadOnlyList<CoreAncestorStamp> derivedCores)
+    internal static RecordOwnershipContext OwnershipContextOf(
+        DecisionRecordRequest request, IReadOnlyList<CoreAncestorStamp> derivedCores, bool noRequester = false)
     {
         ArgumentNullException.ThrowIfNull(derivedCores);
         var subject = SubjectOf(request);
@@ -888,12 +1316,11 @@ public sealed class DecisionRecordWriter
             parents.Add(new RecordOwnershipParent(signalSubject.Entity, signalSubject.Id));
         }
 
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = RecordRequester.Of(request.ConfirmedByUserId) };
+        return RecordOwnershipContext.ForParents(parents) with
+        {
+            RequestedBy = noRequester ? null : RecordRequester.Of(request.ConfirmedByUserId),
+        };
     }
-
-    /// <summary>A gate decision (<see cref="WriteGateDecisionAsync"/>) is the only request with no deciding person: a review always has one
-    /// (<see cref="Validate"/> refuses an empty <see cref="DecisionRecordRequest.ConfirmedByUserId"/>).</summary>
-    private static bool IsGateDecision(DecisionRecordRequest request) => request.ConfirmedByUserId == Guid.Empty;
 
     /// <summary>
     /// Task 142 (contract C1): the record the Decision Record is filed under: <see cref="DecisionRecordRequest.ItemSubject"/>, else the
@@ -934,7 +1361,8 @@ public sealed class DecisionRecordWriter
     /// assignee; otherwise it is asked again.
     /// </summary>
     private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
-        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null)
+        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct, CoreAncestorResult? alreadyDerived = null, bool gate = false,
+        bool noRequester = false)
     {
         var subject = SubjectOf(request);
         var entity = new Entity(Table);
@@ -966,8 +1394,10 @@ public sealed class DecisionRecordWriter
         // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's resolver
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
-        var context = OwnershipContextOf(request, filing.DerivedCores);
-        if (IsGateDecision(request))
+        var context = OwnershipContextOf(request, filing.DerivedCores, noRequester);
+        // Task 153: the gate is named by its plan (ValidateGate), not by an empty confirmer: a condition-cleared record whose person is
+        // unknown also has no confirmer, and must be owned like a review, never through the gate's unfiled-communication rule.
+        if (gate)
         {
             // Task 042 (security fails closed): the gate asks as the CONTENT of a communication (uac-r2's ContentOf shape). The resolver
             // applies KeepCreatorUnlessTargetIsTeamOwned to the FIRST parent it is asked about, which is the core when the communication has
@@ -1318,6 +1748,11 @@ public sealed class DecisionRecordWriter
     /// "Denied" for a gate deny).</param>
     /// <param name="AlreadyDerived">Task 042 (K2): the subject's stamps the gate path already derived to find the core, handed to the filing
     /// step so the derivation is not paid for twice; null derives there.</param>
+    /// <param name="IsGate">Task 153: true only for a communications-gate decision (<see cref="ValidateGate"/>), the one record whose owner
+    /// question is asked as the content of a communication (<see cref="FiledAndOwnedAsync"/>).</param>
+    /// <param name="NoRequester">Task 153 (adversarial pass 1 F3): true only for a condition-cleared closure
+    /// (<see cref="ValidateConditionCleared"/>): the nightly job writes it for nobody, so the owner question names no requester and
+    /// <c>sprk_createdbyperson</c> stays empty (<see cref="OwnershipContextOf"/>).</param>
     private sealed record Plan(
         RecordedDecisionClass Class,
         int Outcome,
@@ -1325,7 +1760,9 @@ public sealed class DecisionRecordWriter
         IReadOnlyList<(DecisionRecordStep Step, DecisionActionDefinition Def)> Taken,
         string? Name = null,
         string SkippedOutcome = "Skipped",
-        CoreAncestorResult? AlreadyDerived = null);
+        CoreAncestorResult? AlreadyDerived = null,
+        bool IsGate = false,
+        bool NoRequester = false);
 
     private static Plan Validate(DecisionRecordRequest r)
     {

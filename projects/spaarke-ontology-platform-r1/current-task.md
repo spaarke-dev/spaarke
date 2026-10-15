@@ -4,33 +4,24 @@
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-145; D-144 amended). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-93**).
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-101**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | 059 worklist widget (lane running); 153 (#1953) adversarial pass 1; 146 waits for R3's c20bff283 redeploy. |
+| **Task** | Running: 154 implementer, 146 record fix round, and uac-r2's re-check of #1953. 059 merged. |
 | **Blocker** | None. |
-| **Next Action** | (1) 059 agent returns a PR, then one adversarial review, a fix round and a re-check, then merge. (2) 153 pass 2 returns, then a fix round if needed, then uac-r2, then merge. (3) R3 reports the c20bff283 deploy (SHA, healthz, writer setting); about 15 minutes later, resume the 146 agent for items 1, 2, 3, 9, 11. |
+| **Next Action** | (1) uac-r2 verdict on #1953, then merge on green. (2) 154 PR, then Opus review, a fix round, uac-r2, and merge; then launch 155. (3) 146 fix round, then a re-check, then merge #1933; then decide on K-1 (a possible suppression defect) and the 144/148 report-only pass. (4) Docs branch to master, then 055 (needs 154). |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 059 worklist widget | — | — | `C:\wts-059` | Sonnet/high implementer running through task-execute. Branch `task/ontology-059-worklist-widget` from `7fc51a796`. On the path to 055 (Console deploy). |
-| 153 satisfied close writes a Routine DR (D-145b) | #1953 | `672cb8f58` | `C:\wts-153` | Pass 1 fixed in `b68f4ac2b`:
-  - F1: a permanent refusal is a skip, with an 8-day cache marker, and closure-record failures are out of `IsSuccess`.
-  - F2: the closing record replaces the link the job read before the close.
-  - F3: `Plan.NoRequester`.
-  - K4.
-  - 531/531 filtered tests and 1046 ArchTests pass.
+| 154 worklist route fields + inquiry lookup | #1982 | `954faa8b3` → fix | `C:\wts-154` | Pass 1 found three fix-now defects in the guard: (1) it ignores a closed inquiry, leaving the item stuck; (2) the hint is accepted only on the first line; (3) a for-todo timeout gives 500. Also the Not filed test gap, plus K2 and K3. Opus fix round running. Pre-existing problems filed: DI-99 #1984 (TodoDetail Complete bypass) and DI-100 #1985 (predictable To Do id). Next: pass 2, then uac-r2. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1` (WhatIf, then Verify for drift, then apply, then Verify). |
 
-The gate lookup is untouched. Adversarial pass 2 is running (focus: the retry pass, the cache marker, link races, skip misclassification). Next: uac-r2, with F3 called out for them. |
-| 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | Docs only. Items 5, 6, 7, 10 pass; 4 and 9 are partial; 8 is the UAC known limit. Items 1, 2, 3, 9, 11 are refused because the BFF connection still caches the writer's privileges after the AppendTo-contact grant (`RetrievePrincipalAccess` flipped at 17:51Z). All test data is deleted. |
-
-Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
+Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`), #1933 (146, `495faf82c`), #1953 (153, `53f19f0a2`).
 
 ## Dev state (spaarke-bff-dev)
 
@@ -39,7 +30,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Next, in order
 
-1. Merge 153 (needs uac-r2 sign-off) and 059.
+1. Merge 153 (uac-r2 re-check running) and 154; then launch 155 (needs 154).
 2. 146 re-run → merge #1933 → 144/148 report-only pass → uac-r2 → enable writes.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
 4. Docs branch → master merge (tell uac-r2), then the **055** Console deploy, then 049, 064, 105.
@@ -52,6 +43,8 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Open owner questions
 
+- **Enable the five dev policies?** (4 Do: 6101, 6102, 6103, 6104; 1 Decide: `4d204810…`). Dev has 0 Signals and 1 DR, so the 144/148 report-only pass has nothing to check until the evaluator creates real Signals. The pass is also needed for 055's real-data verification and for UAT. Recommendation: enable all five on dev, run one nightly-equivalent evaluator pass, then the report-only pass, then uac-r2.
+- Remove `prvCreatesprk_DecisionRecord` (Deep) from **Console User** (`Roles/Spaarke Console User.xml:17`) and **Ontology Administrator** (`:20`) as part of task 049, after 055. Only Ontology Service needs it (Global). uac-r2 confirmed on master that no client, OBO, flow or UAC code creates a DR as a human.
 - None open. The owner approved R3's redeploy of `c20bff283` (2026-10-15), and ontology cleared it with the window open now. Wait for R3's SHA, healthz and restart time, then re-run 146 about 15 minutes later. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
 
 ## Peers (current session names)

@@ -69,9 +69,15 @@ function scopeOfStep(stepId: string): StepScope | null {
   return null;
 }
 
-/** A closed item that a person decided has a record to replay; one that closed itself (superseded, cleared) does not. */
+/**
+ * A closed item that a person decided has a record to replay; one that closed itself (superseded, cleared) does not. A decided
+ * item whose record was not supplied (`steps` absent: the worklist's closed sets, task 059, come from the Signal read route, which
+ * does not return the record) has nothing to replay either, and replaying it would show every action as Skipped.
+ */
 export function hasRecordedDecision(resolution: DecisionResolution | null | undefined): boolean {
-  return resolution?.resolutionType === 'Acted' || resolution?.resolutionType === 'Dismissed';
+  return (
+    (resolution?.resolutionType === 'Acted' || resolution?.resolutionType === 'Dismissed') && resolution.steps != null
+  );
 }
 
 export interface DecisionItemWizardProps {
@@ -386,7 +392,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
     <StatusBar
       ref={statusBarRef}
       state={resolution.leftOpen ? 'Open' : resolveConsoleState(resolution.resolutionType, resolution.recordClass)}
-      note={resolution.leftOpen ? 'Inquiry sent, still open' : undefined}
+      note={resolution.leftOpen ? (resolution.note ?? 'Inquiry sent, still open') : undefined}
       recordId={resolution.recordNumber ?? undefined}
       recordClass={resolution.recordClass ?? undefined}
       decidedBy={resolution.decidedByName}

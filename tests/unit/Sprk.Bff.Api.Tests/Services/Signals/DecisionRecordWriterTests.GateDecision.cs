@@ -253,9 +253,10 @@ public sealed partial class DecisionRecordWriterTests
         owner.Id.Should().Be(CommunicationOwner).And.NotBe(BasicColleague);
         owner.Id.Should().NotBe(ChildTeam, "the colleague's team (the unit's default team) is not the owner either");
         h.Created.Should().ContainSingle("one record is written; nothing is created for a share or an access row");
-        h.Org.Invocations.Select(i => i.Method.Name).Distinct().Should().OnlyContain(
+        h.Org.Invocations.Where(i => !(i.Method.Name == "ExecuteAsync" && i.Arguments[0] is Microsoft.Crm.Sdk.Messages.WhoAmIRequest))
+            .Select(i => i.Method.Name).Distinct().Should().OnlyContain(
             name => name == "CreateAsync" || name == "RetrieveAsync",
-            "no GrantAccess / ModifyAccess / Assign / Associate / Execute: the colleague gets no share");
+            "no GrantAccess / ModifyAccess / Assign / Associate / Execute: the colleague gets no share (WhoAmI, adversarial pass 2 F1, only reads the writer's own identity)");
 
         // The shared sysadmin service (h.Entities) is the other way a share or grant could be made: it is only ever READ through.
         h.Entities.Invocations.Select(i => i.Method.Name).Distinct().Should().OnlyContain(
