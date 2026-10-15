@@ -4,7 +4,7 @@
     <title>Worklist route: subject id/type on Do rows, rule sentence, Not filed last; inquiry lookup for a To Do</title>
     <phase>5 The worklist surface</phase>
     <gate>none (BFF only; independent of 059's review)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the Signal read route's response and adds a caller-scoped read endpoint (bff-api, access model).</rigor-reason>
     <model-tier>opus</model-tier>
