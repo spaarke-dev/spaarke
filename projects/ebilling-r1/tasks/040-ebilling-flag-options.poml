@@ -4,7 +4,7 @@
     <title>eBilling feature flag, options and null-object fallbacks</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New options class and one endpoint filter with a clear reference (FeatureDisabledResults); no business logic, no auth decision.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,7 +114,10 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append points touched: FinanceModule.cs (options + comment) and appsettings.template.json ("Ebilling" section) — re-read immediately before editing, add only these lines. Every later eBilling route (044, 048 and WP3–WP6) chains RequireEbillingEnabled() after its authorization filter; job handlers (049) check EbillingOptions.Enabled themselves (ADR-018 MUST). The SPA learns the flag state from the 503 on a read route (task 051 decides the probe). Spec: FR-45, Assumptions (25 MB).</notes>
+  <notes>Shared append points touched: FinanceModule.cs (options + comment) and appsettings.template.json ("Ebilling" section) — re-read immediately before editing, add only these lines. Every later eBilling route (044, 048 and WP3–WP6) chains RequireEbillingEnabled() after its authorization filter; job handlers (049) check EbillingOptions.Enabled themselves (ADR-018 MUST). The SPA learns the flag state from the 503 on a read route (task 051 decides the probe). Spec: FR-45, Assumptions (25 MB).
+
+COMPLETION 2026-10-15: EbillingOptions, EbillingEnabledFilter (+ RequireEbillingEnabled), options registration and flag-off registration-rule comment in FinanceModule, "Ebilling" template section, 13 tests. Escalation trigger checked and did not fire (no existing flag covers the Finance route family). Publish delta +0.001 MB (Release linux-x64 framework-dependent, Compress-Archive Optimal, incl. PDBs: 37.098 -> 37.099 MB vs base 5ebd41523); no vulnerable packages. ADR-018 Current Flags row for the main session and full evidence: notes/040-ebilling-flag.md. TASK-INDEX.md left to the main session.
+rework: none task 040</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

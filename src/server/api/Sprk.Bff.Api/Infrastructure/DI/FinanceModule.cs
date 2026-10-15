@@ -30,6 +30,25 @@ public static class FinanceModule
             .ValidateOnStart();
 
         // ============================================================================
+        // eBilling flag (ebilling-r1 task 040, FR-45, ADR-018 rule 2, ADR-032)
+        // ============================================================================
+        // ONE flag for the whole capability: Ebilling:Enabled (default false). No per-service flags.
+        // FLAG-OFF REGISTRATION RULE (every later eBilling task follows this):
+        //   * eBilling services register UNCONDITIONALLY - no `if (ebillingEnabled)` registration gates.
+        //   * The kill switch is the endpoint filter (chain RequireEbillingEnabled() AFTER each eBilling
+        //     route's authorization filter; it returns 503 `ebilling.disabled`) plus the job-handler check
+        //     (an eBilling IJobHandler reads EbillingOptions.Enabled itself - ADR-018 "same flag in
+        //     endpoints and async handlers").
+        //   * A Null-Object peer (ADR-032) is needed ONLY where an eBilling service depends on something
+        //     that is itself conditionally registered - e.g. the AI facade IInvoiceAi, which already has
+        //     NullInvoiceAi. Do not add a Null peer for a service just because eBilling is off.
+        //   * The flag never bypasses or replaces authorization.
+        services.AddOptions<EbillingOptions>()
+            .Bind(configuration.GetSection(EbillingOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
         // Scoped: loads playbook prompts per-request, calls OpenAI structured output
