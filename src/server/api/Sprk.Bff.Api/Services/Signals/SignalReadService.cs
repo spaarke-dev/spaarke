@@ -242,41 +242,15 @@ public sealed class SignalReadService
     /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
     public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
     {
-        // (1) Who the caller is, as Dataverse sees them (the identity every later caller read runs as).
-        var who = await _user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
-        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
+        var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
+        if (caller.Failure is { } callerFailure)
         {
-            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
-            {
-                _logger.LogWarning("Signal read: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
-                return SignalReadResult.CallerUnresolved;
-            }
-
-            _logger.LogWarning("Signal read: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
-            return SignalReadResult.Unavailable("caller_identity_fault");
+            return callerFailure;
         }
 
-        // (2) The caller's linked contact (the person columns are contact lookups). Under D-129 records are team-owned, so most of
-        // the caller's own work matches only on an assignee column: a contact that cannot be READ (a fault, as opposed to a user
-        // with no linked contact) is 503, never a Do lane silently missing that work.
-        Guid? contactId;
-        try
-        {
-            var person = await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
-            if (person.ContactUnreadable)
-            {
-                _logger.LogWarning("Signal read: the caller's linked contact could not be read; unavailable.");
-                return SignalReadResult.Unavailable("caller_contact_fault");
-            }
-
-            contactId = person.ContactId is { } c && c != Guid.Empty ? c : null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
-                ex.GetType().Name);
-            return SignalReadResult.Unavailable("caller_contact_fault");
-        }
+        var callerId = caller.CallerId;
+        var contactId = caller.ContactId;
 
         try
         {
@@ -725,12 +699,10 @@ public sealed class SignalReadService
 
             var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
             var pk = $"{rule.Table}id";
-            var mineFilter = MineFilter(rule, callerId, contactId);
-            var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
             foreach (var chunk in ids.Chunk(IdChunk))
             {
                 var response = await _user.GetAsync(
-                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)} and ({mineFilter})", ct).ConfigureAwait(false);
+                    MineSubjectQuery(rule, entitySet, chunk, callerId, contactId), ct).ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Do-lane subject");
                 if (result.Outcome is { } failure)
                 {
@@ -790,6 +762,69 @@ public sealed class SignalReadService
     /// <summary>The subject's table from its <c>sprk_regardingrecordtype</c> catalog row; null when untyped or not cataloged.</summary>
     private static string? SubjectTable(SignalRow row, IReadOnlyDictionary<Guid, CatalogRow> catalog) =>
         row.SubjectTypeId is { } t && catalog.TryGetValue(t, out var type) ? type.LogicalName : null;
+
+    /// <summary>The caller and their linked contact, as the Do-lane "mine" rule compares them; or why they could not be resolved.</summary>
+    /// <param name="Failure">Null when resolved; otherwise the single 403 (<see cref="SignalReadOutcome.CallerUnresolved"/>) or a
+    /// 503 (<see cref="SignalReadOutcome.Unavailable"/>).</param>
+    /// <param name="CallerId">The caller's <c>systemuserid</c>; set only when resolved.</param>
+    /// <param name="ContactId">The caller's linked contact, or null when they have none (never null because a read faulted).</param>
+    internal sealed record MineCaller(SignalReadResult? Failure, Guid CallerId, Guid? ContactId);
+
+    /// <summary>
+    /// The inputs of the Do-lane "mine" rule, read AS THE CALLER: who they are (<c>WhoAmI</c>) and their linked contact (the person
+    /// columns are contact lookups). Shared by the worklist and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, task 150,
+    /// D-141) so both resolve "the caller" the same way. An unresolvable caller is the single 403; a fault reading their identity or
+    /// contact is 503 (under D-129 records are team-owned, so most of the caller's own work matches only on an assignee column: a
+    /// contact that cannot be READ, as opposed to a user with no linked contact, never reads as "no contact").
+    /// </summary>
+    internal static async Task<MineCaller> ResolveMineCallerAsync(
+        IDataverseUserClient user, IIdentityNormalizationService identity, ILogger logger, CancellationToken ct)
+    {
+        var who = await user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
+        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        {
+            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                logger.LogWarning("Do-lane mine: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
+                return new MineCaller(SignalReadResult.CallerUnresolved, Guid.Empty, null);
+            }
+
+            logger.LogWarning("Do-lane mine: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
+            return new MineCaller(SignalReadResult.Unavailable("caller_identity_fault"), Guid.Empty, null);
+        }
+
+        try
+        {
+            var person = await identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
+            if (person.ContactUnreadable)
+            {
+                logger.LogWarning("Do-lane mine: the caller's linked contact could not be read; unavailable.");
+                return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+            }
+
+            return new MineCaller(null, callerId, person.ContactId is { } c && c != Guid.Empty ? c : null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Do-lane mine: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
+                ex.GetType().Name);
+            return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+        }
+    }
+
+    /// <summary>
+    /// THE Do-lane "mine" read (task 150, D-141): the caller's own read of <paramref name="ids"/> in <paramref name="rule"/>'s table,
+    /// filtered to the rows <see cref="MineFilter"/> admits. A row comes back only when the caller can read it AND it is their own
+    /// work. The worklist (a chunk of ids) and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, one id) both send this
+    /// request; neither builds the predicate itself.
+    /// </summary>
+    internal static string MineSubjectQuery(
+        DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId)
+    {
+        var pk = $"{rule.Table}id";
+        var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
+        return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
+    }
 
     /// <summary>The OData "mine" clause: the rule's parts OR-ed, each compared with the caller (never widened, only narrowed).</summary>
     internal static string MineFilter(DoLaneMineRule rule, Guid callerId, Guid? contactId)

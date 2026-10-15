@@ -603,7 +603,7 @@ public partial class SignalSuppressionTests
             .ThrowsAsync(new TaskCanceledException("timeout"));
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(SignalRow()));
-        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance);
 
         var result = await Route(signal, s, (access, users.Object));
 
@@ -633,7 +633,7 @@ public partial class SignalSuppressionTests
             }));
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Fail(500, DataverseUserClientErrorCodes.ServiceError));
-        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance);
 
         var result = await Route(signal, s, (access, users.Object));
 
@@ -1652,7 +1652,7 @@ public partial class SignalSuppressionTests
             });
         users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>())).ReturnsAsync(core);
         users.Setup(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>())).ReturnsAsync(Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
-        return (new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance), users.Object);
+        return (new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance), users.Object);
     }
 
     private static DataverseUserResponse Ok(object body) => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(body));
