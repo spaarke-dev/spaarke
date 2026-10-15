@@ -95,8 +95,9 @@ public static class SuppressionEvents
     /// <summary>Information: stamps a partition's own dismissals no longer justify were lowered or cleared (#1661 F1).</summary>
     public static readonly EventId Withdrawn = new(50352, nameof(Withdrawn));
 
-    /// <summary>Warning: the read-time witness rule (task 038, D-123) could not place the families, so every detail on the worklist page
-    /// is withheld (fail closed). Properties: Signal count, exception type.</summary>
+    /// <summary>Warning: the read-time witness rule (task 038, D-123) could not place the families, or the caller's own read of the
+    /// witness rows failed (task 151, D-142), so every detail on the worklist page is withheld (fail closed). Properties: Signal count
+    /// and exception type, or the witness table and error code.</summary>
     public static readonly EventId WitnessReadFailed = new(50353, nameof(WitnessReadFailed));
 }
 
@@ -692,8 +693,9 @@ public sealed class SignalSuppressionService
         && witnessFamily == signalFamily;
 
     /// <summary>The (table, id) a witness line's <see cref="SignalEvidenceRef.Ref"/> (<c>{table}:{id}</c>, as the evaluator writes it)
-    /// names, when the table is a lineage child the walk can start from; otherwise null (its detail is then never kept).</summary>
-    private static (string Table, Guid Id)? WitnessOf(string? reference)
+    /// names, when the table is a lineage child the walk can start from; otherwise null (its detail is then never kept). The table is
+    /// lower-cased. The Signal read route's caller read (task 151, D-142) keys its answer by this same pair.</summary>
+    internal static (string Table, Guid Id)? WitnessOf(string? reference)
     {
         var separator = reference?.IndexOf(':', StringComparison.Ordinal) ?? -1;
         if (separator <= 0) return null;
@@ -1269,8 +1271,13 @@ public sealed class SignalSuppressionService
     /// owner, and every lineage is placed in ONE call (the Secure team identified once, one walker run, so the reads are bounded by
     /// the distinct rows and parents). A reference that names no lineage child, a witness or Signal row that cannot be read, or an
     /// undetermined family on either side keeps nothing. No Secure Record owner team in this environment: every family is ordinary
-    /// and every reference keeps its detail. A fault (an ambiguous team, a walk that does not complete, a read failure) returns null,
-    /// logged at Warning (<see cref="SuppressionEvents.WitnessReadFailed"/>): the caller then withholds every line's detail.
+    /// and every reference the caller reads keeps its detail. A fault (an ambiguous team, a walk that does not complete, a read
+    /// failure) returns null, logged at Warning (<see cref="SuppressionEvents.WitnessReadFailed"/>): the caller then withholds every
+    /// line's detail.
+    /// <para><b>Both rules must keep (task 151, D-142).</b> A reference keeps its detail only when the caller's own read admitted its
+    /// witness row as well: <paramref name="readableByCaller"/> holds the witnesses (<see cref="WitnessOf"/>) the caller's batched
+    /// read returned. A reference whose witness is not in it keeps nothing, and is never placed (no app-only read of a row the
+    /// caller cannot read). The secure-family rule above is unchanged and applies to the rest.</para>
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> (the one partition truth) and
     /// <see cref="ReadSubjectRowsAsync"/>; <see cref="EvidenceWithinPartitionAsync"/> / <see cref="StoredEvidenceToRedactAsync"/> (task
@@ -1279,12 +1286,20 @@ public sealed class SignalSuppressionService
     /// placed in one call (one rule, one helper; DI-87, #1890). Cost of doing nothing: until the job's next pass, a matter's readers
     /// see the subject and sender of a communication that has since been filed under another secure family (D-123).</remarks>
     internal async Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> WitnessDetailShownOnReadAsync(
-        IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals, CancellationToken ct)
+        IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals,
+        IReadOnlySet<(string Table, Guid Id)> readableByCaller,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(signals);
+        ArgumentNullException.ThrowIfNull(readableByCaller);
         var shown = new Dictionary<Guid, IReadOnlySet<string>>();
-        var wanted = signals.Where(s => s.References.Count > 0).GroupBy(s => s.SignalId)
-            .Select(g => (SignalId: g.Key, References: g.SelectMany(s => s.References).Distinct(StringComparer.Ordinal).ToList()))
+
+        // D-142: only a reference whose witness the caller's own read returned is judged at all; every other keeps nothing.
+        var wanted = signals.GroupBy(s => s.SignalId)
+            .Select(g => (SignalId: g.Key, References: g.SelectMany(s => s.References)
+                .Where(r => WitnessOf(r) is { } witness && readableByCaller.Contains(witness))
+                .Distinct(StringComparer.Ordinal).ToList()))
+            .Where(w => w.References.Count > 0)
             .ToList();
         if (wanted.Count == 0) return shown;
 
