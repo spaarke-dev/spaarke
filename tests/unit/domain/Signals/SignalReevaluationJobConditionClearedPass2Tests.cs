@@ -204,4 +204,37 @@ public partial class SignalReevaluationJobTests
             .Which.Level.Should().Be(LogLevel.Warning);
         metrics.Counter("ontology.writer.skips", "reason", OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink).Should().BeGreaterThanOrEqualTo(1);
     }
+
+    [Fact]
+    public async Task Run_AForeignPriorLinkOnAClosuresRetry_WarnsAndMetersOnce_NotOnEveryNightlyPass()
+    {
+        // uac-r2 re-check 2 (K): the foreign-link skip sets the closure-skip marker (like the other permanent skips) and counts in the policy
+        // summary, so the nights that follow stay quiet while the marker holds.
+        var (h, signalId) = ToDoCompletedByAColleague();
+        var prior = Guid.NewGuid();
+        h.Sysadmin.DecisionRecords[prior] = ForeignReminderRecord(prior, createdBy: ConsoleUserId);
+        h.Org.CreateFaultFor = entity =>
+        {
+            if (entity.LogicalName == "sprk_decisionrecord") h.Org.Rows[signalId]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", prior);
+            return null;
+        };
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.CreateFaultFor = null;
+        await h.Cache.RemoveAsync(SignalReevaluationJob.ClosureRecordSkippedCacheKey(signalId, 1)); // no marker held for this closure yet
+        h.Org.ResetCounts();
+        h.Log.Clear();
+
+        using var metrics = new MetricCapture();
+        h.Clock.Advance(TimeSpan.FromDays(1));
+        var night1 = await h.RunAsync();
+        h.Clock.Advance(TimeSpan.FromDays(1));
+        var night2 = await h.RunAsync();
+
+        night1.ResultJson.Should().Contain("\"closureRecordSkips\":1", "the skip is in the policy summary");
+        night2.ResultJson.Should().Contain("\"closureRecordSkips\":0", "and is not counted again");
+        h.Org.WriteCalls.Should().Be(0);
+        h.Log.Where(e => e.Message.Contains(OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink)).Should().ContainSingle(
+            "one warning across both nights").Which.Level.Should().Be(LogLevel.Warning);
+        metrics.Counter("ontology.writer.skips", "reason", OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink).Should().Be(1);
+    }
 }

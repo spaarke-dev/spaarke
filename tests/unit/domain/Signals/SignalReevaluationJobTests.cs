@@ -3110,7 +3110,9 @@ public partial class SignalReevaluationJobTests
                                  && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))))
                     {
                         var copy = new Entity("sprk_decisionrecord", record.Id);
-                        foreach (var attribute in record.Attributes) copy[attribute.Key] = attribute.Value;
+                        // uac-r2 re-check 2 F3-2: only the selected columns come back, as in Dataverse (a column the query leaves out is absent).
+                        foreach (var attribute in record.Attributes.Where(a => query.ColumnSet.AllColumns || query.ColumnSet.Columns.Contains(a.Key)))
+                            copy[attribute.Key] = attribute.Value;
                         result.Entities.Add(copy);
                     }
 

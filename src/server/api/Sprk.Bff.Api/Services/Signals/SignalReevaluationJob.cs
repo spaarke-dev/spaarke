@@ -590,7 +590,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             try
             {
-                retries.AddRange(await RetriesReplacingAPriorLinkAsync(linkedRetries, ct).ConfigureAwait(false));
+                var (replacing, skippedForeign) = await RetriesReplacingAPriorLinkAsync(linkedRetries, ct).ConfigureAwait(false);
+                retries.AddRange(replacing);
+                skipped += skippedForeign;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -706,7 +708,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
         }
 
-        if (candidates.Count == 0 && failed == 0) return;
+        if (candidates.Count == 0 && failed == 0 && skipped == 0) return;
 
         counts.ClosureRecorded += recorded;
         counts.ClosureRecordFailures += failed;
@@ -726,7 +728,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// (<see cref="OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink"/>). A read fault (the writer's identity
     /// included) propagates (the caller does not guess).
     /// </summary>
-    private async Task<List<(ExistingSignal Signal, Guid? PriorRecordId)>> RetriesReplacingAPriorLinkAsync(
+    private async Task<(List<(ExistingSignal Signal, Guid? PriorRecordId)> Retries, int Skipped)> RetriesReplacingAPriorLinkAsync(
         IReadOnlyList<ExistingSignal> linked, CancellationToken ct)
     {
         var records = new Dictionary<Guid, Entity>();
@@ -750,6 +752,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         var retries = new List<(ExistingSignal, Guid?)>();
+        var skipped = 0;
         foreach (var signal in linked)
         {
             var prior = signal.DecisionRecordId!.Value;
@@ -772,7 +775,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 continue;
             }
 
-            // uac-r2 re-check K2: never silent. This closure's record is not retried; say so, and count it.
+            // uac-r2 re-check K2: never silent. This closure's record is not retried; say so, and count it. uac-r2 re-check 2 (K): said once, like the
+            // other permanent skips: the closure-skip marker is checked first (a later pass stays quiet while it holds), and set before the warning.
+            if (await IsClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
+            skipped++;
             _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
                 "Signal {SignalId} (episode {Episode}) was closed as ConditionCleared and links Decision Record {RecordId}, which is not one of the " +
                 "writer's own records that left the item open (reason={Reason}); its closure's record is not retried.",
@@ -780,7 +791,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink);
         }
 
-        return retries;
+        return (retries, skipped);
     }
 
     /// <summary>Adversarial pass 2: a Signal closed as ConditionCleared within the retry window that links no Decision Record.</summary>
