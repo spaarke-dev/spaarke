@@ -4,7 +4,7 @@
     <title>Invoice lifecycle transition service</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF service and DI registration on the write path (tags bff, write-path).</rigor-reason>
     <model-tier>sonnet</model-tier>
