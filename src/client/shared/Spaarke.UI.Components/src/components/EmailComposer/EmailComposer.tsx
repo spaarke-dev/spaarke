@@ -1323,11 +1323,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         </div>
       )}
 
-      {/* "Internal Only" (task 068; owner 2026-10-14) — one switch, off by default; on for a reply/forward of an
-          internal source, and on + disabled when the host knows the target thread is Private. Hidden in
-          read-only (view) mode — there is nothing to send. */}
+      {/* "External" | "Internal Only" tags (task 068; owner 2026-10-14) — External by default; Internal Only for a
+          reply/forward of an internal source, and Internal Only locked when the host knows the target thread is
+          Private. Hidden in read-only (view) mode — there is nothing to send. */}
       {!state.readOnly && (
         <InternalOnlySwitch
+          variant="tags"
           checked={state.isInternalOnly}
           locked={props.threadIsPrivate === true}
           disabled={state.isSending}

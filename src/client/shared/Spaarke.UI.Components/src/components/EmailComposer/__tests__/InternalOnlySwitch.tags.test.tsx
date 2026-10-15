@@ -35,3 +35,11 @@ describe('InternalOnlySwitch - tags variant', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('InternalOnlySwitch - tags variant hint', () => {
+  it('hovering Internal Only shows the owner helper text as its tooltip', async () => {
+    renderTags();
+    await userEvent.hover(screen.getByRole('radio', { name: 'Internal Only' }));
+    expect(await screen.findByText('Only people in your organization can see this')).toBeInTheDocument();
+  });
+});

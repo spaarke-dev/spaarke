@@ -1,9 +1,9 @@
 /**
  * EmailComposer.internalOnly.test.tsx (task 068; owner 2026-10-14)
  *
- * The "Internal Only" switch on the email composer: one switch labelled exactly "Internal Only", off by
+ * The "External" | "Internal Only" tags on the email composer (owner 2026-10-14): one choice, External by
  * default, its value reaches POST /api/communications/send as an explicit boolean, a reply/forward whose
- * source is known internal-only starts on, and a thread the host knows is Private shows it on and disabled.
+ * source is known internal-only starts on Internal Only, and a thread the host knows is Private locks it there.
  * Mocking is at the network boundary only (`authenticatedFetch`).
  */
 import * as React from 'react';
@@ -57,12 +57,12 @@ async function sentBody(ref: React.RefObject<IEmailComposerHandle>, authenticate
   return JSON.parse(init.body as string) as Record<string, unknown>;
 }
 
-describe('EmailComposer - Internal Only switch', () => {
-  it('renders exactly one switch labelled "Internal Only", off by default, with the owner helper text', () => {
+describe('EmailComposer - External / Internal Only tags', () => {
+  it('renders exactly one External / Internal Only choice, External selected by default', () => {
     renderComposer();
-    expect(screen.getAllByRole('switch')).toHaveLength(1);
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
-    expect(screen.getByText('Only people in your organization can see this')).toBeInTheDocument();
+    expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: 'External' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).not.toBeChecked();
   });
 
   it('a compose sends isInternalOnly: false when the switch is left off (an explicit false, never omitted)', async () => {
@@ -73,32 +73,32 @@ describe('EmailComposer - Internal Only switch', () => {
 
   it('sends isInternalOnly: true after the user switches it on', async () => {
     const { ref, authenticatedFetch } = renderComposer();
-    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
-    fireEvent.click(toggle);
-    expect(toggle).toBeChecked();
+    const internal = screen.getByRole('radio', { name: 'Internal Only' });
+    fireEvent.click(internal);
+    expect(internal).toBeChecked();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', true);
   });
 
-  it('a reply whose source is internal-only starts with the switch on and sends true', async () => {
+  it('a reply whose source is internal-only starts with Internal Only selected and sends true', async () => {
     const { ref, authenticatedFetch } = renderComposer({
       mode: 'reply',
       communicationId: 'src-1',
       sourceIsInternalOnly: true,
     });
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).toBeChecked();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', true);
   });
 
-  it('a forward whose source is internal-only starts with the switch on', () => {
+  it('a forward whose source is internal-only starts with Internal Only selected', () => {
     renderComposer({ mode: 'forward', communicationId: 'src-1', sourceIsInternalOnly: true });
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).toBeChecked();
   });
 
   it('a reply whose source is NOT known internal starts off', () => {
     renderComposer({ mode: 'reply', communicationId: 'src-1' });
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).not.toBeChecked();
   });
 
   // Fix round 1 (F1): the BFF honours an explicit false over its reply/forward raise, so an untouched reply or
@@ -112,21 +112,21 @@ describe('EmailComposer - Internal Only switch', () => {
 
   it('the same reply after the user toggles off then on sends an explicit true', async () => {
     const { ref, authenticatedFetch } = renderComposer({ mode: 'reply', communicationId: 'src-1' });
-    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
-    fireEvent.click(toggle); // on
-    fireEvent.click(toggle); // off
-    fireEvent.click(toggle); // on
-    expect(toggle).toBeChecked();
+    const internal = screen.getByRole('radio', { name: 'Internal Only' });
+    fireEvent.click(internal); // on
+    fireEvent.click(screen.getByRole('radio', { name: 'External' })); // off
+    fireEvent.click(internal); // on
+    expect(internal).toBeChecked();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', true);
   });
 
   it('the same reply after the user toggles on then off sends an explicit false (the sender chose it)', async () => {
     const { ref, authenticatedFetch } = renderComposer({ mode: 'reply', communicationId: 'src-1' });
-    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
-    fireEvent.click(toggle); // on
-    fireEvent.click(toggle); // off
-    expect(toggle).not.toBeChecked();
+    const internal = screen.getByRole('radio', { name: 'Internal Only' });
+    fireEvent.click(internal); // on
+    fireEvent.click(screen.getByRole('radio', { name: 'External' })); // off
+    expect(internal).not.toBeChecked();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', false);
   });
@@ -143,7 +143,7 @@ describe('EmailComposer - Internal Only switch', () => {
       communicationId: 'src-1',
       sourceIsInternalOnly: false,
     });
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).not.toBeChecked();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', false);
   });
@@ -158,18 +158,17 @@ describe('EmailComposer - Internal Only switch', () => {
     expect(body).toHaveProperty('isInternalOnly', true);
   });
 
-  it('a host that knows the thread is Private gets the switch on and disabled, and send carries true', async () => {
+  it('a host that knows the thread is Private gets Internal Only selected and External unavailable, and send carries true', async () => {
     const { ref, authenticatedFetch } = renderComposer({ threadIsPrivate: true });
-    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
-    expect(toggle).toBeChecked();
-    expect(toggle).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'External' })).toHaveAttribute('aria-disabled', 'true');
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', true);
   });
 
   it('a new compose never starts on by itself, even when sourceIsInternalOnly is passed', () => {
     renderComposer({ mode: 'compose', sourceIsInternalOnly: true });
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).not.toBeChecked();
   });
 
   it('the SendEmailPage wrapper (CommunicationActions PCF) forwards sourceIsInternalOnly so a reply starts on', () => {
@@ -185,10 +184,10 @@ describe('EmailComposer - Internal Only switch', () => {
         bffBaseUrl="https://bff.example.com"
       />
     );
-    expect(screen.getByRole('switch', { name: 'Internal Only' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).toBeChecked();
   });
 
-  it('view mode (read-only) shows no switch', () => {
+  it('view mode (read-only) shows no External / Internal Only choice', () => {
     renderComposer({
       mode: 'view',
       communicationId: 'src-1',
@@ -201,7 +200,7 @@ describe('EmailComposer - Internal Only switch', () => {
         bodyFormat: 'HTML',
       },
     });
-    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 });
 
