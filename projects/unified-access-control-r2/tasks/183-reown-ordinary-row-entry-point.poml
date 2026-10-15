@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="183" project="unified-access-control-r2">
+  <metadata>
+    <title>A narrow re-own entry point for ordinary Decision Record and Signal rows (SecureChildReconciler.ReownOrdinaryRowAsync), for ontology task 148's follow-the-assignee reconciler (D-135), landed on the ontology integration branch</title>
+    <phase>Session 28 — UAC (owner round 96, 2026-10-12)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New owner-write surface in the secure reconciler. It re-owns rows with the application identity, so security and tenant isolation apply.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant owner write. The guard must make it impossible for this path to move a row into or out of the Secure Record business unit.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Separate worktree on the ontology branch. One UAC file plus tests.</parallel-reason>
+    <deps>#1780 (task 182) merged into docs/ontology-platform-design</deps>
+    <tags>bff-api, security, tenant-isolation, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <origin>Owner round 96 (2026-10-12): D-134/D-135 "follow the assignee" (notes/session27-owner-decisions-and-research.md, Round 96). The owner approved "UAC adds one narrow re-own method (decision records and Signals only; refuses to move anything into or out of the Secure team)". Consumer: ontology task 148 (TodoAssigneeOwnerReconciliationJob), which re-owns both Signals and DRs through this one entry point. Decision Records are append-only by privilege, so no identity gains Write on them.</origin>
+  </metadata>
+
+  <prompt>Add ONE narrow internal entry point to SecureChildReconciler that re-owns an ordinary Decision Record or Signal row to an ordinary team, reusing the reconciler's existing assign, evict and read-back sequence. Open a PR INTO `docs/ontology-platform-design`, not master. Do not write ontology task 148's job.</prompt>
+
+  <goal>(1) BRANCH. Create a fresh worktree from `origin/docs/ontology-platform-design` on a new branch `uac/183-reown-ordinary-row`. The PR's base is `docs/ontology-platform-design`. The ontology main session merges it; you never merge it.
+
+(2) ENTRY POINT. In `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs`, add:
+`Task&lt;string?&gt; ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct)`
+It returns `null` on success, or a refusal or failure description. Contract:
+- (a) `table` must be `sprk_decisionrecord` or `sprk_signal`; anything else throws `ArgumentException`. A `Guid.Empty` id or team also throws.
+- (b) REFUSE without writing when the row's CURRENT owner is a team in the Secure Record business unit, when `teamId` is a team in the Secure Record business unit, or when either cannot be read. Read the row's ownerid and the target team's businessunitid fresh. Identify the Secure Record BU the same way `RecordOwnershipResolver` does (`ResolveSecureBusinessUnitAsync` semantics; ambiguous means refuse), so the guard also holds once task 178 adds one owner team per secure family.
+- (c) REFUSE without writing when the row's current owner is a user rather than a team.
+- (d) If the row is already owned by `teamId`, return success without writing.
+- (e) Otherwise do exactly what the private pass `AssignAsync` does: an owner-only update, `EvictOwnerChangeAsync` once per write attempt, then the read-back decides. Factor the shared write, evict and read-back into one private helper, so the two callers cannot drift. Do not duplicate it.
+- (f) A refusal is distinguishable from a fault: give the result a typed outcome (Reowned / AlreadyOwned / RefusedSecure / RefusedNotTeamOwned / Failed), not a free string, so 148 can count RefusedSecure as `SkippedSecure`. Adjust the signature accordingly and record the change in the PR.
+- (g) A Dataverse fault on the reads propagates or returns Failed. Never treat it as "not secure".
+
+(3) CENSUS. Add the owner-write census entry for the new write site in `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs`, following the file's maintenance procedure.
+
+(4) PR BODY. Include the CLAUDE.md §11 three answers:
+- Existing: the private `AssignAsync` and `SignalWriter.ReassignNoCoreOwnerAsync`.
+- Extension: this IS the extension, a guarded entry point over the existing assign sequence.
+- Cost of doing nothing: D-135 item 2 cannot re-own DRs, because no identity may get Write on them, and the Secure guard would otherwise live in two places.</goal>
+
+  <constraints>
+    <constraint source="owner round 96">This path never moves a row into or out of the Secure Record business unit. That remains the secure reconciler's own pass.</constraint>
+    <constraint source="ADR-028 / §9">No new identity, credential or privilege. Use the reconciler's existing Dataverse client.</constraint>
+    <constraint source="CLAUDE.md §11">One shared private assign, evict and read-back helper. No new service, interface or DI registration.</constraint>
+    <constraint source="git">Stage explicit paths only. Never force-push, never bare `git stash`, never `--no-verify`. Do not merge the PR, and do not touch master.</constraint>
+    <constraint source="machine">The machine is shared and loaded. Kill only your own PIDs, never by image name.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs (AssignAsync ~:1134, EvictOwnerChangeAsync, ReadBackAsync)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveSecureBusinessUnitAsync, ResolveNamedSecureOwnerTeamAsync)</file>
+      <file>tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (maintenance procedure in the header comment)</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md (Round 96)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Worktree from origin/docs/ontology-platform-design. Read AssignAsync, its read-back, and the resolver's Secure BU resolution.</step>
+    <step>Factor the shared private helper; add ReownOrdinaryRowAsync with its guards and typed outcome; add the census entry.</step>
+    <step>Unit tests. Mutation proofs: remove each Secure guard once and remove the table check once, and the matching tests fail.</step>
+    <step>Build the BFF; run the full Spaarke.ArchTests and the SecureChildReconciler and SecureChildReconciliationJob unit tests. Open the PR into docs/ontology-platform-design and report counts.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The Secure Record BU cannot be identified without changing RecordOwnershipResolver: STOP and report the needed shape.</trigger>
+    <trigger>AssignAsync's sequence cannot be shared without changing the secure pass's behaviour: STOP and report it.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>An ordinary DR or Signal owned by ordinary team A is re-owned to ordinary team B, and the read-back confirms it: Reowned, with evict called once.</criterion>
+    <criterion>Already owned by B: AlreadyOwned, and no write.</criterion>
+    <criterion>Current owner in the Secure Record BU: RefusedSecure, no write, no evict.</criterion>
+    <criterion>Target team in the Secure Record BU: RefusedSecure, no write.</criterion>
+    <criterion>The Secure BU is ambiguous or unreadable: refused, no write.</criterion>
+    <criterion>The row is user-owned: RefusedNotTeamOwned, no write.</criterion>
+    <criterion>Any other table, Guid.Empty id or Guid.Empty team: ArgumentException.</criterion>
+    <criterion>A write that faults but landed is decided by the read-back, the same as AssignAsync.</criterion>
+    <criterion>The secure pass's existing tests are unchanged and green after the helper is factored out.</criterion>
+    <criterion>Mutation proofs: each Secure guard removed makes its test fail, and the table check removed makes its test fail.</criterion>
+    <criterion>Spaarke.ArchTests all pass, including the census entry. The BFF build has 0 errors. The PR targets docs/ontology-platform-design.</criterion>
+    <criterion>Test scope: the cases named above. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+</task>

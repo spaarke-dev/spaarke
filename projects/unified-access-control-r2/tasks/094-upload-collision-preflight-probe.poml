@@ -3,7 +3,7 @@
   <metadata>
     <title>Upload collision: ask BEFORE the bytes move (pre-flight probe), and add "Use existing"</title>
     <phase>0c Secure Documents — upload path decomposition</phase>
-    <status>pending</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches the live upload path and the shipped collision dialog; a regression here silently restores data loss or breaks a working user choice.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -131,4 +131,8 @@ see `requestOrThrow`. Any new probe call must go through it, or its failures wil
   </acceptance-criteria>
 
   <notes>NOT STARTED. ⚠️ Scope is MUCH smaller than the plan note implies — see the background block.</notes>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 094)">
+    <verdict>DEFERRED TO A NEW PROJECT by owner round 59 item 2. Status set to deferred. Tracked by GitHub issue #1305. This is a new capability, not a defect, so it is not built in UAC-r2.</verdict>
+    <amendment n="1" title="Why">A speed-up, not a defect: the server refuses duplicates (93d5e673e) and a 409 dialog exists (09025ab39), so no data is lost. It needs a new record-keyed endpoint.</amendment>
+  </amendments>
 </task>

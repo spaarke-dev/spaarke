@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="185" project="unified-access-control-r2">
+  <metadata>
+    <title>Invite-code proof for E11: binding a CIAM sign-in by email requires the single-use code from this environment's own invite email, which closes account squatting</title>
+    <phase>Session 28 — UAC (owner round 97, 2026-10-13)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Identity binding and cross-customer tenant isolation, plus a new secret-bearing column and an External SPA sign-in change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and tenant-isolation code. A wrong bind gives one customer's records to another customer's sign-in.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on task 184 (#1801), which must be merged first. It touches the same files: ContactBindingDecision, ContactIdentityStore and InviteExternalUserEndpoint.</parallel-reason>
+    <deps>184 (#1801) merged</deps>
+    <tags>bff-api, auth, security, tenant-isolation, external-spa, dataverse-schema, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>
+      Provisioning's cross-customer review of #1801, finding F1 (2026-10-13), account squatting:
+      - CIAM local accounts are created with Graph `POST /users`, and nothing verifies that the creator owns the email.
+      - Every stamp holds User.Create in spaarkeextid, and the dev provisioner holds User.ReadWrite.All.
+      - So anyone with that right (a compromised stamp, a misused provisioner, or a spaarkeextid admin) can pre-create `victim@acme` with a password they know.
+      - When customer Y invites that person, Y's create returns ObjectConflict and the outcome is ExistingAccount: the marker is set and the squatter's first sign-in binds to Y's contact.
+      - The grant-only leg has the same root: a typed-in contact that holds a grant binds whoever has, or squats, a CIAM account for that email.
+
+      Owner round 97 (2026-10-13): merge #1801 now as the interim narrowing (master binds ANY matching email with no intent at all), and do the invite-code proof as this follow-up.
+      Provisioning records this task as a T240d PRODUCTION GATE: no production customer onboards external contacts until it is done.
+      Provisioning's F2 (the marker never expires) is handled in #1801 by owner decision: a 30-day window, refreshed by a re-invite.
+    </origin>
+  </metadata>
+
+  <prompt>Design first: write the design note (notes/185-invite-code-design.md) and get it through owner review before any code. Then implement it on a branch from master, with a PR into master. Read task 184's PR #1801 (its marker leg, grant leg, ExistingAccount branch and 30-day window) and task 141's binding model first.</prompt>
+
+  <goal>Proof of email ownership that comes from THIS environment's own invite.
+
+(1) INVITE CODE.
+- Every invite email, both onboarding and "sign in with your existing account", carries a single-use, high-entropy invite code. Use at least 128 bits from a CSPRNG, URL-safe, in the portal link.
+- The contact stores ONLY a hash of the code, never the code itself. Use a keyed hash (HMAC with a Key Vault-held key) or a salted SHA-256. Decide which in the design note, and include the ADR-028 / §9 assessment.
+- The column holding the hash is field-secured with the existing BFF-Managed profiles: Readers get NO read on the hash, Writers get read/create/update. It is added to SpaarkeMaster and SpaarkeCore through a schema script in the pattern of `Set-ExternalInviteMarkerSchema.ps1`.
+- A re-invite replaces the code. The code expires with the marker window (30 days).
+
+(2) E11 MARKER LEG REQUIRES THE CODE.
+- The External SPA passes the code from the invite link through its first sign-in; the design note defines how: query string, then sessionStorage across the MSAL redirect, then a header or body on the binding call.
+- On the CIAM plane, E11 binds through the marker leg only when the presented code's hash matches the contact's stored hash within the window. It then CONSUMES the code (clears the hash) in the same write as the oid bind.
+- Use a constant-time comparison.
+- A missing or wrong code is denied with `contact_not_invited`. No attempt counter is needed, given 128-bit entropy; state this in the design.
+
+(3) GRANT-ONLY LEG. Decide in the design note, with a recommendation, between:
+- (a) the grant leg also requires a code, so a grant with no invite sends nothing to bind until an invite is sent; or
+- (b) the grant leg stops being a bind leg at all, and only invites bind.
+Either way, a typed-in contact with a grant can no longer be bound by an unproven account.
+
+(3b) OWNER ROUND 98 (BINDING, supersedes (3)): option (c), "granting sends the invite". The grant leg stops being a bind leg. Every grant flow that grants access to an UNBOUND contact with an email sends the invite (code included) automatically. Bound contacts are unchanged. Details: notes/185-invite-code-design.md section 11.
+
+(3c) OWNER ROUND 98: a "system mail" send option in CommunicationService, set by RegistrationEmailService on both invite sends: skip AI enrichment, store the body with the invite link removed, and do not save to Sent Items. Coordinate with the email-communication project.
+
+(3d) PROVISIONING R2: a design precondition that spaarkeextid sign-in stays email + password only. The ExistingAccount email adds the "Forgot password" guidance.
+
+(4) NEW-ACCOUNT PATH. When the BFF creates the CIAM account and binds its oid in the same request, it needs no code. Keep that path unchanged.
+
+(5) WORKFORCE PLANE. Unchanged. It is under the separate Model 1 discussion.
+
+(6) MIGRATION. Contacts with a pending marker and no hash, i.e. invites made before this task, bind on the CIAM plane only after a re-invite. Make this a release-note step, and count those contacts on dev with a read-only query.</goal>
+
+  <constraints>
+    <constraint source="owner round 97">Design note and owner review before any code.</constraint>
+    <constraint source="ADR-028 / §9">No new identity or credential. Use the existing Key Vault and BFF managed identity if HMAC is chosen. Auth code: the owner signs off.</constraint>
+    <constraint source="task 141">E10 collisions, oid-first resolution and "never clear or re-point a link" stay exactly as they are.</constraint>
+    <constraint source="§9">Never log the code or its hash.</constraint>
+    <constraint source="git">Stage explicit paths only. Never force-push, never bare stash, never --no-verify. Do not merge.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>A squatted CIAM account (created by anyone other than this invite) whose email matches a contact with a pending marker is DENIED, because it presents no valid code.</criterion>
+    <criterion>The invited person following the invite link binds, and the code is consumed. Replaying the same code (for example from another account) is denied.</criterion>
+    <criterion>A wrong code, an expired code (more than 30 days) and a code from a superseded invite are each denied.</criterion>
+    <criterion>The hash column cannot be read by the Readers profile, and only the BFF can write it (the script's -Verify passes on dev).</criterion>
+    <criterion>The grant-only leg follows the owner's choice from the design note, and a typed-in contact with a grant cannot be bound by an unproven account.</criterion>
+    <criterion>The new-account path and the workforce plane are unchanged. The task 141 tests are unchanged apart from seeds. The task 184 tests are unchanged apart from seeds, except the grant-leg tests listed in the design note section 6, whose expectation changes the owner accepted in round 98.</criterion>
+    <criterion>Each grant flow sends the invite to an unbound contact that has an email, and sends no invite to an unbound contact without an email or to a bound contact.</criterion>
+    <criterion>Invite sends skip enrichment, persist no invite link, and are not saved to Sent Items. Other sends are unchanged.</criterion>
+    <criterion>Mutation proofs: dropping the code check, a non-constant-time comparison (review only), not consuming the code, and ignoring the window each fail a test.</criterion>
+    <criterion>BFF build 0 errors, full ArchTests green, and External SPA build:prod green. Provisioning reviews the PR, and this task is their T240d production gate.</criterion>
+  </acceptance-criteria>
+</task>
