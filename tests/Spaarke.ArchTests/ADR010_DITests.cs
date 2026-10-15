@@ -333,7 +333,14 @@ public class ADR010_DITests
         // line-decision, adjustment and approval operations (100-102) are each proven by a Moq double that returns a calculation or a
         // refusal (FR-32), not by standing up the Dataverse read-compute-conditional-write behind it. Same category as
         // IEbillingSettingsReader above. Falsifiable: if no caller fakes it by 102, register the concrete and drop this back to 160.
-        const int knownOneToOneCeiling = 161;
+        // ───────── Ceiling raised 161 → 162, 2026-10-15 (ebilling-r1 task 014) ─────────
+        // IInvoiceLifecycleService -> InvoiceLifecycleService. SEAM JUSTIFICATION: it is the single server-side owner of invoice status
+        // (FR-06, ADR-002) and the module boundary of four later write-path callers: approve (103), reject / return (104), send to AP (150)
+        // and mark paid (151). Each of their tests must prove what the caller does with every outcome (Transitioned, AlreadyInTarget,
+        // Refused with a reason) by feeding it that InvoiceTransitionResult through a Moq double; without the interface each caller's test
+        // would stand up the Dataverse conditional-write plumbing (versionnumber reads, If-Match, retry) behind a concrete. The service has
+        // exactly one implementation, so it is a 1:1 mapping, accepted on the same grounds as IEbillingSettingsReader above.
+        const int knownOneToOneCeiling = 162;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

@@ -57,6 +57,10 @@ public static class FinanceModule
         // Adjustment-line amounts. Scoped: stateless, holds only the (singleton) Dataverse clients. Unconditional (flag rule above).
         services.AddScoped<IInvoiceTotalsService, InvoiceTotalsService>();
 
+        // Invoice lifecycle (ebilling-r1 task 014, FR-06, I-6, ADR-002): the single server-side owner of sprk_invoice
+        // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
+        services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
