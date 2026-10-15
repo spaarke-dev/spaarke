@@ -1273,7 +1273,10 @@ public sealed class DecisionCommitService
         // (ResolvedDecisionPlan.WithoutMarkComplete); this route applies the same reduction and refuses a Mark complete that is taken.
         // Read AS THE CALLER, only when the plan offers Mark complete on a To Do: the To Do, then the hinted inquiry or (no usable
         // hint) the matter's open inquiries, the for-todo lookup's own identification.
-        if (lane == DecisionLane.Do && string.Equals(primary.SubjectEntity, "sprk_todo", StringComparison.OrdinalIgnoreCase)
+        // Pass 2 K4: not on the finishing path (linkedRecord set). A writer-created record of this same review already exists, so no
+        // executor runs; the check would protect nothing and could only refuse (or 503) and leave the Signals unclosed.
+        var isTodo = lane == DecisionLane.Do && string.Equals(primary.SubjectEntity, "sprk_todo", StringComparison.OrdinalIgnoreCase);
+        if (linkedRecord is null && isTodo
             && primary.SubjectId is { } todoId && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
         {
             var inquiryOutcome = await _access.CheckInquiryOutcomeTodoAsync(todoId, ct).ConfigureAwait(false);
@@ -1292,6 +1295,14 @@ public sealed class DecisionCommitService
                 // A review built from an earlier plan may still list Mark complete as skipped: that is not an action of this plan.
                 given = given.Where(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode).ToList();
             }
+        }
+        else if (linkedRecord is not null && isTodo && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode)
+            && given.All(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            // K4, finishing a review recorded under the reduced plan (the inquiry was open then): the stored record carries this
+            // review's content hash (StoredRecord.Covers), so the review was matched against that plan when it was written. Without
+            // the read, the plan it was matched against is the one without Mark complete.
+            plan = plan.WithoutMarkComplete();
         }
 
         // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).

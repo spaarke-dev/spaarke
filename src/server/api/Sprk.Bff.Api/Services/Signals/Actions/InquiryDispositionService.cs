@@ -259,10 +259,8 @@ public sealed class InquiryDispositionService(
     /// its <c>sprk_notes</c>, on any line (<see cref="InquiryReplyTodoCreator.NotesKey"/>, a HINT only), is read as a GUID and accepted
     /// only when that inquiry's derived id (<see cref="TodoIdFor"/>) is <paramref name="todoId"/>. The v5 id match is the proof, so a
     /// note typed above the hint does not hide it. Returns the inquiry, or null. This test alone says nothing about whether the inquiry
-    /// is still OPEN (<see cref="FindOpenInquiryOfTodoAsync"/> reads that). The three paths share it but are not identical: the plan
-    /// route has the gate's notes only (no matter fallback), while the commit route and the for-todo lookup also fall back to the
-    /// matter's open inquiries when the hint fails, so a To Do whose hint was deleted is offered Mark complete by the plan and refused
-    /// it by the commit.
+    /// is still OPEN (<see cref="FindOpenInquiryOfTodoAsync"/> reads that, and falls back to the matter's open inquiries when the hint
+    /// fails; the plan route, the commit route and the for-todo lookup all go through it, task 154 pass 2 F1).
     /// </summary>
     public static Guid? InquiryOfTodo(Guid todoId, string? notes)
     {
@@ -286,8 +284,8 @@ public sealed class InquiryDispositionService(
 
     /// <summary>
     /// THE identification of an inquiry-outcome To Do whose inquiry is still OPEN (task 154, adversarial pass 1), read AS THE CALLER
-    /// through <paramref name="user"/>. The for-todo lookup and the commit route call it; the plan route calls its hinted half
-    /// (<see cref="ReadOpenInquiryAsync"/>). (1) A hint <see cref="InquiryOfTodo"/> accepts: one GET of that inquiry. (2) Otherwise,
+    /// through <paramref name="user"/>. The for-todo lookup, the commit route and the plan route all call it (pass 2 F1: the plan
+    /// passes the notes and matter the gate's "mine" read returned). (1) A hint <see cref="InquiryOfTodo"/> accepts: one GET of that inquiry. (2) Otherwise,
     /// only when <paramref name="matterId"/> is given: one list of the matter's open outbound inquiries, and the one whose derived id is
     /// the To Do's. An inquiry that is closed, not outbound, or not readable by the caller is <see cref="InquiryTodoMatch.None"/>: the
     /// To Do is then an ordinary To Do. A fault (any status but 403/404, a throw, an unparseable answer, a further page) is

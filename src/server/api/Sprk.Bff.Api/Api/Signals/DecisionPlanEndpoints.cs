@@ -198,18 +198,18 @@ public static class DecisionPlanEndpoints
         }
 
         // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
-        // complete. The candidate comes from the gate's own "mine" read of the To Do (its notes hint); whether that inquiry is still
-        // open costs one GET as the caller, sent only for such a To Do whose plan offers Mark complete (adversarial pass 1: once the
-        // inquiry is closed, the To Do is an ordinary To Do). The commit route applies the same reduction.
-        if (decision.InquiryHint is { } hintedInquiry && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        // complete. Pass 2 F1: identified exactly as the commit route identifies it (the hint, else the To Do's matter's open
+        // inquiries), from the notes and matter the gate's own "mine" read returned, as the caller; only for a To Do whose plan offers
+        // Mark complete. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). A fault offers nothing (503).
+        if (plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
         {
-            var open = await signalAccess.IsOpenInquiryAsync(hintedInquiry, ct);
-            if (open is null)
+            var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
+            if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
             {
                 return AccessUnavailable(httpContext);
             }
 
-            if (open.Value)
+            if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)
             {
                 plan = plan.WithoutMarkComplete();
             }

@@ -189,6 +189,16 @@ public sealed class DecisionCommitServiceTests
         /// <summary>The caller's reads of service requests (task 154).</summary>
         public List<string> InquiryReads { get; } = new();
 
+        /// <summary>Task 154 pass 2 F3: a fault answer for the caller's GET of a hinted inquiry.</summary>
+        public DataverseUserResponse? InquiryReadFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: the answer to the caller's list of the matter's open inquiries, instead of the list (a fault,
+        /// or a page with an <c>@odata.nextLink</c>).</summary>
+        public DataverseUserResponse? InquiryListFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: thrown by the caller's list of the matter's open inquiries.</summary>
+        public Exception? InquiryListThrows { get; set; }
+
         /// <summary>Task 150 (D-141): subjects the caller can read but that are not their own work (the "mine" read omits them).</summary>
         public HashSet<Guid> CallerNotMine { get; } = new();
 
@@ -465,6 +475,8 @@ public sealed class DecisionCommitServiceTests
             if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
             {
                 InquiryReads.Add(path);
+                if (InquiryReadFails is { } inquiryFault)
+                    return inquiryFault;
                 var id = Guid.Parse(path["sprk_servicerequests(".Length..path.IndexOf(')')]);
                 return Inquiries.TryGetValue(id, out var inquiry)
                     ? Ok(new Dictionary<string, object?> { ["statecode"] = inquiry.State, ["sprk_direction"] = inquiry.Direction })
@@ -475,6 +487,10 @@ public sealed class DecisionCommitServiceTests
             {
                 // The matter's open outbound inquiries (the fallback), evaluated like Dataverse.
                 InquiryReads.Add(path);
+                if (InquiryListThrows is { } thrown)
+                    throw thrown;
+                if (InquiryListFails is { } listFault)
+                    return listFault;
                 var matter = Guid.Parse(System.Text.RegularExpressions.Regex.Match(path, "_sprk_regardingmatter_value eq ([0-9a-f-]{36})").Groups[1].Value);
                 var direction = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "sprk_direction eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                 var state = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "statecode eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
@@ -1642,6 +1658,109 @@ public sealed class DecisionCommitServiceTests
         result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
         result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
         rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 F3: the commit fails closed when the inquiry read faults ─────────────────────────────────────────
+
+    public enum InquiryFault { HintedGet503, MatterList503, MatterListHasMorePages, MatterListThrows }
+
+    [Theory]
+    [InlineData(InquiryFault.HintedGet503)]
+    [InlineData(InquiryFault.MatterList503)]
+    [InlineData(InquiryFault.MatterListHasMorePages)]
+    [InlineData(InquiryFault.MatterListThrows)]
+    public async Task WhenTheInquiryCannotBeRead_TheCommitIsUnavailable_NothingRunsOrIsWritten(InquiryFault fault)
+    {
+        // The hinted fault keeps the hint; the matter-list faults have none, so the fallback is the only way to know.
+        var rig = InquiryTodoRig(InquiryTodo, fault == InquiryFault.HintedGet503 ? InquiryHint(ServiceRequestId) : null);
+        switch (fault)
+        {
+            case InquiryFault.HintedGet503:
+                rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterList503:
+                rig.InquiryListFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterListHasMorePages:
+                rig.InquiryListFails = DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                {
+                    ["value"] = Array.Empty<object>(),
+                    ["@odata.nextLink"] = "https://org.example/api/data/v9.2/sprk_servicerequests?$skiptoken=2",
+                }));
+                break;
+            case InquiryFault.MatterListThrows:
+                rig.InquiryListThrows = new TaskCanceledException("Dataverse timed out");
+                break;
+        }
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.InquiryReads.Should().ContainSingle("the fault came from the inquiry read, not before it");
+        rig.Executors.Values.SelectMany(e => e.Requests).Should().BeEmpty("no executor runs");
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 K4: the finishing path (a writer-created record of this review exists) runs no inquiry check ──────
+
+    [Fact]
+    public async Task K4_FinishingAMarkCompleteRecordedWhileTheInquiryWasClosed_ClosesTheSignal_EvenThoughTheInquiryIsNowOpen()
+    {
+        // Mark complete ran while the inquiry was closed (an ordinary To Do); the close failed; the ledger forgot. The inquiry is
+        // open again by the retry: before, the guard ran on the finishing path and answered 409, leaving the Signal open forever.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId), inquiryState: 1);
+        FirstCloseFails(rig);
+        var review = MarkComplete();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 0);
+        var reads = rig.InquiryReads.Count;
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.ReasonCode.Should().NotBe(DecisionCommitReasons.InquiryDispositionRequired);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId, "the Signal is closed with the record found");
+        rig.Status(DoSignal).Should().NotBe(Open);
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.InquiryReads.Should().HaveCount(reads, "the finishing path reads no inquiry");
+    }
+
+    public enum InquiryAtFinish { StillOpen, NowClosed, ReadFaults }
+
+    [Theory]
+    [InlineData(InquiryAtFinish.StillOpen)]
+    [InlineData(InquiryAtFinish.NowClosed)]
+    [InlineData(InquiryAtFinish.ReadFaults)]
+    public async Task K4_FinishingAReviewRecordedUnderTheReducedPlan_ClosesTheSignal_WhateverTheInquiryIsNow(InquiryAtFinish now)
+    {
+        // The review was matched against the plan without Mark complete (the inquiry was open) and lists only Reschedule. Its stored
+        // record carries the review's hash, so the finishing path matches it against that plan without reading the inquiry again.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        FirstCloseFails(rig);
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] };
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        if (now == InquiryAtFinish.NowClosed)
+            rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 1);
+        if (now == InquiryAtFinish.ReadFaults)
+            rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle("nothing is run again");
         rig.Executors["mark-complete"].Requests.Should().BeEmpty();
     }
 

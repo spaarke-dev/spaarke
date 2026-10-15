@@ -168,6 +168,10 @@ public sealed class SignalReadService
 
     /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
     internal const string TodoNotesColumn = "sprk_notes";
+
+    /// <summary><c>sprk_todo</c>'s matter lookup as a Web API name: the inquiry-outcome To Do's matter fallback reads that matter's
+    /// open inquiries (task 154, pass 2 F1).</summary>
+    internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
 
@@ -842,15 +846,16 @@ public sealed class SignalReadService
     /// work. The worklist (a chunk of ids) and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, one id) both send this
     /// request; neither builds the predicate itself.
     /// </summary>
-    /// <param name="includeTodoNotes">The per-Signal gate's single-id read only (task 154, D-111): a To Do's notes carry the inquiry
-    /// hint, so the gate knows a candidate inquiry-outcome To Do from this same read with no request of its own. A column, never a
-    /// predicate. The worklist's chunked read leaves it out (adversarial pass 1 K3: an unused ntext column on up to 100 rows).</param>
+    /// <param name="includeTodoNotes">The per-Signal gate's single-id read only (task 154, D-111): a To Do's notes (the inquiry hint)
+    /// and its matter (the fallback, pass 2 F1), so the plan route identifies an inquiry-outcome To Do exactly as the commit route does
+    /// with no To Do request of its own. Columns, never a predicate. The worklist's chunked read leaves them out (adversarial pass 1
+    /// K3: an unused ntext column on up to 100 rows).</param>
     internal static string MineSubjectQuery(
         DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId, bool includeTodoNotes = false)
     {
         var pk = $"{rule.Table}id";
         var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty)
-            + (includeTodoNotes && string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn}" : string.Empty);
+            + (includeTodoNotes && string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn},{TodoMatterColumn}" : string.Empty);
         return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
     }
 

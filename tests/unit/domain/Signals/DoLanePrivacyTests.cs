@@ -301,12 +301,13 @@ public sealed class DoLanePrivacyTests
         var gate = SignalReadService.MineSubjectQuery(rule, "sprk_todos", [SubjectId], Alice, AliceContact, includeTodoNotes: true);
 
         SelectOf(worklist).Should().Be($"sprk_todoid,{PersonColumn("sprk_todo")},sprk_highpriority", "the base (pre-154) select, unchanged");
-        SelectOf(gate).Should().Be($"sprk_todoid,{PersonColumn("sprk_todo")},sprk_highpriority,sprk_notes");
+        SelectOf(gate).Should().Be($"sprk_todoid,{PersonColumn("sprk_todo")},sprk_highpriority,sprk_notes,_sprk_regardingmatter_value",
+            "pass 2 F1: the To Do's matter too, for the commit route's matter fallback");
         gate[gate.IndexOf("&$filter=", StringComparison.Ordinal)..].Should().Be(
             SignalReadService.MineSubjectQuery(rule, "sprk_todos", [SubjectId], Alice, AliceContact)[worklist.IndexOf("&$filter=", StringComparison.Ordinal)..],
             "the same predicate: a column, never a filter");
         SelectOf(SignalReadService.MineSubjectQuery(SignalReadService.DoLaneMineRules["sprk_event"], "sprk_events", [SubjectId], Alice, AliceContact, includeTodoNotes: true))
-            .Should().NotContain("sprk_notes", "only a To Do carries the hint");
+            .Should().NotContain("sprk_notes", "only a To Do carries the hint").And.NotContain("_sprk_regardingmatter_value");
     }
 
     [Fact]
@@ -338,6 +339,70 @@ public sealed class DoLanePrivacyTests
             plan.Actions.Select(a => a.Code).Should().Contain("mark-complete");
             world.Requests.Should().NotContain(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal), "a hint that fails costs no request");
         }
+    }
+
+    // ---- Task 154 pass 2 F1: the plan identifies the To Do exactly as the commit does (the matter fallback included) -----------
+
+    public enum InquiryListFault { Fails, MorePages, Throws }
+
+    private static string MatterListOf(Guid matter) => $"_sprk_regardingmatter_value eq {matter:D}";
+
+    [Theory]
+    [InlineData(null)]                    // the notes were cleared
+    [InlineData("Waiting on the firm")]   // the serviceRequestId= line was deleted in TodoDetail
+    public async Task AHintlessTodo_OnAMatterWithItsOpenInquiry_GetsAPlanWithoutMarkComplete_LikeTheCommit(string? notes)
+    {
+        // Pass 2 F1: before, the plan read only the hint, so it offered (and recommended) Mark complete, and the commit refused it
+        // with 409 inquiry.disposition_required.
+        var world = new World("sprk_todo", hasCore: true)
+        {
+            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry), Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId, MatterInquiries = [OtherInquiry, Inquiry],
+        };
+
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("reschedule", "reassign");
+        plan.Actions[0].IsRecommended.Should().BeTrue();
+        world.Requests.Where(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal)).Should().ContainSingle()
+            .Which.Should().Contain(MatterListOf(MatterId), "one list of the matter's open inquiries, as the caller");
+        world.Requests.Should().NotContain(r => r.StartsWith("sprk_todos(", StringComparison.Ordinal),
+            "the gate's own mine read carried the To Do's matter: no To Do request of its own");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryTodoOnAMatter_StillOffersMarkComplete_AfterOneList()
+    {
+        // The matter has an open inquiry, but its derived To Do id is not this To Do's. The cost: one list per plan read.
+        var world = new World("sprk_todo", hasCore: true)
+        {
+            SubjectRowId = SubjectId, Notes = "Call the client back", Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId, MatterInquiries = [Inquiry],
+        };
+
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+
+        plan.Actions.Select(a => a.Code).Should().Equal("mark-complete", "reschedule", "reassign");
+        world.Requests.Where(r => r.StartsWith("sprk_servicerequests", StringComparison.Ordinal)).Should().ContainSingle()
+            .Which.Should().Contain(MatterListOf(MatterId));
+    }
+
+    [Theory]
+    [InlineData(InquiryListFault.Fails)]
+    [InlineData(InquiryListFault.MorePages)]
+    [InlineData(InquiryListFault.Throws)]
+    public async Task WhenTheMattersInquiriesCannotBeListed_ThePlanIs503_NeverMarkComplete(InquiryListFault fault)
+    {
+        var world = new World("sprk_todo", hasCore: true)
+        {
+            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry), Notes = null, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId, MatterInquiries = [Inquiry], InquiryListFails = fault,
+        };
+
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+
+        problem.Status.Should().Be(503);
+        problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
     }
 
     // =================================================================================================
@@ -427,6 +492,16 @@ public sealed class DoLanePrivacyTests
 
         /// <summary>The caller's read of the inquiry faults (503).</summary>
         public bool InquiryReadFaults { get; init; }
+
+        /// <summary>The subject To Do's matter (<c>_sprk_regardingmatter_value</c>), returned only when the request selects it (task 154
+        /// pass 2 F1); null: the To Do has none.</summary>
+        public Guid? TodoMatter { get; init; }
+
+        /// <summary>The open outbound inquiries on <see cref="TodoMatter"/> as the caller lists them (the matter fallback).</summary>
+        public Guid[] MatterInquiries { get; init; } = [];
+
+        /// <summary>How the caller's list of the matter's open inquiries fails, when it does.</summary>
+        public InquiryListFault? InquiryListFails { get; init; }
         public List<string> Requests { get; } = new();
         public IDataverseUserClient Client => _client.Object;
 
@@ -443,9 +518,15 @@ public sealed class DoLanePrivacyTests
                 .Returns((string path, CancellationToken _) =>
                 {
                     Requests.Add(path);
-                    if (_fault == Fault.MineReadThrows && path.Contains("&$filter=", StringComparison.Ordinal))
+                    if (_fault == Fault.MineReadThrows && path.Contains("&$filter=", StringComparison.Ordinal)
+                        && !path.StartsWith("sprk_servicerequests?", StringComparison.Ordinal))
                     {
                         return Task.FromException<DataverseUserResponse>(new TimeoutException("no answer"));
+                    }
+
+                    if (InquiryListFails == InquiryListFault.Throws && path.StartsWith("sprk_servicerequests?", StringComparison.Ordinal))
+                    {
+                        return Task.FromException<DataverseUserResponse>(new TaskCanceledException("Dataverse timed out"));
                     }
 
                     return Task.FromResult(Answer(path));
@@ -503,6 +584,23 @@ public sealed class DoLanePrivacyTests
                 return Ok(row);
             }
 
+            if (path.StartsWith("sprk_servicerequests?", StringComparison.Ordinal))
+            {
+                // The matter's open outbound inquiries (the fallback), as the caller.
+                var matter = Guid.Parse(Regex.Match(path, "_sprk_regardingmatter_value eq ([0-9a-f-]{36})").Groups[1].Value);
+                var rows = matter == TodoMatter ? MatterInquiries.Select(i => new { sprk_servicerequestid = i.ToString("D") }).ToArray() : [];
+                return InquiryListFails switch
+                {
+                    InquiryListFault.Fails => DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom"),
+                    InquiryListFault.MorePages => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object>
+                    {
+                        ["value"] = rows,
+                        ["@odata.nextLink"] = "https://org.example/api/data/v9.2/sprk_servicerequests?$skiptoken=2",
+                    })),
+                    _ => Ok(new { value = rows }),
+                };
+            }
+
             if (path.Contains("&$filter=", StringComparison.Ordinal))
             {
                 if (_fault == Fault.MineReadFaults)
@@ -530,6 +628,11 @@ public sealed class DoLanePrivacyTests
                 if (Notes is not null && Regex.IsMatch(path, @"\$select=[^&]*sprk_notes"))
                 {
                     subjectRow["sprk_notes"] = Notes;
+                }
+
+                if (TodoMatter is { } todoMatter && Regex.IsMatch(path, @"\$select=[^&]*_sprk_regardingmatter_value"))
+                {
+                    subjectRow["_sprk_regardingmatter_value"] = todoMatter.ToString("D");
                 }
 
                 return Ok(new { value = ids.Contains(SubjectRowId) && mine ? new[] { subjectRow } : [] });
