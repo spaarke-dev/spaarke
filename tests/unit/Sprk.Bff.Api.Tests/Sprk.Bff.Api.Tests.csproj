@@ -40,6 +40,8 @@
     <PackageReference Include="System.Linq.Dynamic.Core" Version="1.6.0" />
     <!-- GHSA-24c8-4792-22hx (HIGH) + GHSA-q6rr-fm2g-g5x8 / GHSA-6q7j-xr26-3h2c (Moderate, DoS): WireMock.Net 1.5.45 pins Scriban.Signed 5.5.0; all patched in 7.2.1. Test-only assembly; WireMock response templating unaffected in our fixtures. -->
     <PackageReference Include="Scriban.Signed" Version="7.2.1" />
+    <!-- GHSA-7pxr-59rr-hqj2 (HIGH, DoS via YAML alias expansion, published 2026-10-14): Microsoft.OpenApi.Readers < 1.6.30 is vulnerable. Transitive via WireMock.Net 1.5.45 -> WireMock.Net.OpenApiParser -> Microsoft.OpenApi.Readers 1.2.3 (and RamlToOpenApiConverter). Pinned to the 1.6.30 fix (same 1.x major line). Test-only assembly; nothing ships. -->
+    <PackageReference Include="Microsoft.OpenApi.Readers" Version="1.6.30" />
 
     <!-- MimeKitLite: exclude the COMPILE asset only, never the runtime asset.
          MimeKitLite re-declares MimeKit's types in the same namespaces, so referencing both at
