@@ -50,6 +50,32 @@ public sealed record InquiryResolutionResult(
     public bool Succeeded => Outcome == InquiryResolutionOutcome.Resolved;
 }
 
+/// <summary>How the for-todo lookup ended (task 154).</summary>
+public enum InquiryLookupOutcome
+{
+    /// <summary>The inquiry and its readable replies.</summary>
+    Found,
+    /// <summary>The To Do or the inquiry is missing or not readable by the caller, or no inquiry matches (one answer for all).</summary>
+    NotFound,
+    /// <summary>A Dataverse fault: 503, never a 404 and never a shorter list.</summary>
+    Unavailable,
+}
+
+/// <summary>One incoming reply to an inquiry, as the caller reads it.</summary>
+public sealed record InquiryReply(Guid CommunicationId, string? Subject, DateTimeOffset? ReceivedOn);
+
+/// <param name="Outcome">How it ended.</param>
+/// <param name="ServiceRequestId">The inquiry, when found.</param>
+/// <param name="Replies">Its incoming replies the caller reads, newest first (undated last), when found.</param>
+/// <param name="Reason">A short machine reason for <see cref="InquiryLookupOutcome.Unavailable"/>.</param>
+public sealed record InquiryLookupResult(
+    InquiryLookupOutcome Outcome, Guid? ServiceRequestId = null, IReadOnlyList<InquiryReply>? Replies = null, string? Reason = null)
+{
+    public static readonly InquiryLookupResult NotFound = new(InquiryLookupOutcome.NotFound);
+
+    public static InquiryLookupResult Unavailable(string reason) => new(InquiryLookupOutcome.Unavailable, Reason: reason);
+}
+
 /// <summary>Resolved Inquiries by disposition. <see cref="Total"/> is the sum.</summary>
 public sealed record DispositionTally(int WriteOff, int BudgetRevised, int ScopeApproved, int NoAction)
 {
@@ -205,6 +231,134 @@ public sealed class InquiryDispositionService(
         bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // RFC 4122 variant
         return new Guid(bytes, bigEndian: true);
     }
+
+    /// <summary>
+    /// THE test of "is this To Do an inquiry's 'Record the outcome' To Do" (task 154): the first line of its <c>sprk_notes</c> is
+    /// <c>serviceRequestId=</c> and a GUID (<see cref="InquiryReplyTodoCreator.NotesKey"/>, a HINT only), accepted only when that
+    /// inquiry's derived id (<see cref="TodoIdFor"/>) is <paramref name="todoId"/>. Returns the inquiry, or null. Used by the for-todo
+    /// lookup, the decision plan and the commit route, so the three never disagree.
+    /// </summary>
+    public static Guid? InquiryOfTodo(Guid todoId, string? notes)
+    {
+        if (todoId == Guid.Empty || string.IsNullOrEmpty(notes))
+            return null;
+
+        var firstLine = notes.Split('\n', 2)[0].Trim();
+        if (!firstLine.StartsWith(InquiryReplyTodoCreator.NotesKey, StringComparison.Ordinal))
+            return null;
+
+        return Guid.TryParse(firstLine[InquiryReplyTodoCreator.NotesKey.Length..].Trim(), out var serviceRequestId)
+            && serviceRequestId != Guid.Empty && TodoIdFor(serviceRequestId) == todoId
+                ? serviceRequestId
+                : null;
+    }
+
+    /// <summary>
+    /// <c>GET /api/v1/inquiries/for-todo/{todoId}</c> (task 154, D-111): the inquiry an inquiry-outcome To Do records and its incoming
+    /// replies, newest first. Every read is AS THE CALLER (<see cref="IDataverseUserClient"/>); nothing is read with the BFF's identity.
+    /// </summary>
+    /// <remarks>
+    /// (1) The To Do: 403/404 is <see cref="InquiryLookupOutcome.NotFound"/>. (2) Its notes hint, accepted only when
+    /// <see cref="InquiryOfTodo"/> accepts it, and then only if the caller reads that service request. (3) Otherwise the To Do's
+    /// matter's open outbound service requests, read as the caller, and the one whose derived id is the To Do's. (4) The inquiry's
+    /// Incoming communications, read as the caller (no Read on the table: none). A fault, a 401, an unparseable answer or a list
+    /// with more pages is <see cref="InquiryLookupOutcome.Unavailable"/> (503), never a shorter list and never a 404.
+    /// </remarks>
+    public async Task<InquiryLookupResult> FindForTodoAsync(Guid todoId, CancellationToken ct)
+    {
+        if (todoId == Guid.Empty)
+            return InquiryLookupResult.NotFound;
+
+        var todo = await user.GetAsync($"sprk_todos({todoId:D})?$select=sprk_notes,_sprk_regardingmatter_value", ct).ConfigureAwait(false);
+        if (!todo.IsSuccess)
+            return LookupFailure(todo, "todo_read_failed");
+
+        Guid serviceRequestId;
+        if (InquiryOfTodo(todoId, ReadText(todo.Body, "sprk_notes")) is { } hinted)
+        {
+            var request = await user.GetAsync($"sprk_servicerequests({hinted:D})?$select=sprk_servicerequestid", ct).ConfigureAwait(false);
+            if (!request.IsSuccess)
+                return LookupFailure(request, "inquiry_read_failed");
+            serviceRequestId = hinted;
+        }
+        else
+        {
+            // The hint is missing, malformed or names another inquiry: the matter's open outbound inquiries, as the caller.
+            if (ReadGuid(todo.Body, "_sprk_regardingmatter_value") is not { } matterId)
+                return InquiryLookupResult.NotFound;
+
+            var open = await user.GetAsync(
+                $"sprk_servicerequests?$select=sprk_servicerequestid&$filter=_sprk_regardingmatter_value eq {matterId:D}"
+                + $" and sprk_direction eq {BudgetInquiryExecutor.DirectionOutbound.ToString(CultureInfo.InvariantCulture)} and statecode eq 0", ct)
+                .ConfigureAwait(false);
+            if (ListRows(open, "inquiries") is not { } rows)
+                return InquiryLookupResult.Unavailable("inquiry_list_failed");
+
+            var match = rows.Select(r => ReadGuid(r, "sprk_servicerequestid")).FirstOrDefault(id => id is { } g && TodoIdFor(g) == todoId);
+            if (match is not { } found)
+                return InquiryLookupResult.NotFound;
+            serviceRequestId = found;
+        }
+
+        var replies = await user.GetAsync(
+            $"sprk_communications?$select=sprk_communicationid,sprk_subject,sprk_receiveddate&$filter=_sprk_regardingservicerequest_value eq {serviceRequestId:D}"
+            + $" and sprk_direction eq {CommunicationIncoming.ToString(CultureInfo.InvariantCulture)}&$orderby=sprk_receiveddate desc", ct)
+            .ConfigureAwait(false);
+        if (ListRows(replies, "replies") is not { } replyRows)
+            return InquiryLookupResult.Unavailable("replies_read_failed");
+
+        var list = replyRows
+            .Select(r => (Id: ReadGuid(r, "sprk_communicationid"), Row: r))
+            .Where(r => r.Id is not null)
+            .Select(r => new InquiryReply(r.Id!.Value, ReadText(r.Row, "sprk_subject"), ReadInstant(r.Row, "sprk_receiveddate")))
+            .OrderByDescending(r => r.ReceivedOn.HasValue)
+            .ThenByDescending(r => r.ReceivedOn)
+            .ThenBy(r => r.CommunicationId)
+            .ToList();
+        return new InquiryLookupResult(InquiryLookupOutcome.Found, serviceRequestId, list);
+    }
+
+    /// <summary>A single-row read the caller could not do: 403/404 is "not found" (one answer for both); anything else, a 401
+    /// included (the token failed mid-request, not a verdict), is unavailable.</summary>
+    private InquiryLookupResult LookupFailure(DataverseUserResponse response, string reason)
+    {
+        if (response.StatusCode is 403 or 404)
+            return InquiryLookupResult.NotFound;
+
+        logger.LogWarning("Inquiry lookup: a caller read failed ({Status}, {ErrorCode}); unavailable.", response.StatusCode, response.ErrorCode);
+        return InquiryLookupResult.Unavailable(reason);
+    }
+
+    /// <summary>A list read as the caller: the rows; none on a 403 (no Read on the table); null on any fault, an unparseable body
+    /// or a further page (a list is never presented shorter than it is).</summary>
+    private List<JsonElement>? ListRows(DataverseUserResponse response, string what)
+    {
+        if (!response.IsSuccess)
+        {
+            if (response.StatusCode == 403)
+                return [];
+            logger.LogWarning("Inquiry lookup: the {What} read failed ({Status}, {ErrorCode}); unavailable.", what, response.StatusCode, response.ErrorCode);
+            return null;
+        }
+
+        if (response.Body is not { } body || !body.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array
+            || body.TryGetProperty("@odata.nextLink", out _))
+        {
+            logger.LogWarning("Inquiry lookup: the {What} read was unparseable or had more pages; unavailable.", what);
+            return null;
+        }
+
+        return value.EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+
+    private static string? ReadText(JsonElement? body, string name) =>
+        body is { ValueKind: JsonValueKind.Object } b && b.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static DateTimeOffset? ReadInstant(JsonElement row, string name) =>
+        ReadText(row, name) is { } text
+        && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at)
+            ? at
+            : null;
 
     private async Task<bool> CompleteTodoAsync(Guid serviceRequestId, CancellationToken ct)
     {
