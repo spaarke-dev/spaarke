@@ -11,20 +11,22 @@
 
 | Field | Value |
 |---|---|
-| **Task** | D-140: #1111 (docs branch → master) then **035** dev BFF deploy from master. |
-| **Blocker** | None. Owner questions below do not block the deploy. |
-| **Next Action** | Watcher `merge-when-green3.sh 1111 ae9bf62c3… master` is armed. When #1111 merges: send the master SHA to ebilling-r1; message word-add-in, R3 and uac-r2 BEFORE deploying; deploy master via `scripts/Deploy-BffApi.ps1` from a clean worktree at the master merge commit (hash-verify + `/healthz`); message all three AFTER (R3 redeploys its branch on top). |
+| **Task** | Post-deploy: 035 follow-ups + lanes 149/150/151. |
+| **Blocker** | None. |
+| **Next Action** | Wait for the four agents (149 sonnet/xhigh `C:\wts-149`; 150 opus `C:\wts-150`; 151 opus `C:\wts-151`; 035 follow-ups + 144/148 report-only, sonnet `C:\wts-035`). Then: send the report-only output to uac-r2; run 035's negative alert test AFTER R3 redeploys (R3 sends its SHA); send PRs 149/150/151 to uac-r2 (+ #1355), merge on CLEAN + green. |
 
-## Merged 2026-10-14/15 (docs branch)
+## Done 2026-10-15
 
-042 #1878 `6a00d1c47` · 038 #1891 `b0fe65988` · uac K1 walker batching #1892 `ae9bf62c3` (uac-r2 authored; our adversarial review CLEAN). 038/042 marked done.
+- **#1111 merged to master `f292ad119`** (D-140). ebilling-r1 has the SHA.
+- **035 deploy:** master `f292ad119` on spaarke-bff-dev at ~05:00Z. Package 37.1 MB, 4/4 SHA-256 match, `/healthz`, `/healthz/dataverse` and signed-in `/api/v1/signals/worklist` all 200. word-add-in, R3 and uac-r2 notified before and after. R3 redeploys R3 + `f292ad119` on top.
+- Owner decisions D-141..D-144 recorded. Tasks 150/151 created, 149 amended.
 
 ## Deploy plan (D-126, D-138 approved)
 
 **Merging to master does NOT deploy** — `deploy-bff-api.yml` lost its `push: master` trigger on 2026-08-11; deploys are
 operator-driven (`/bff-deploy`, `scripts/Deploy-BffApi.ps1`) or `workflow_dispatch`. The schema pre-flight passed on dev (2026-10-14).
 
-1. **035 BFF** from master (includes #1885 sidecar fix and #1887). Notify before AND after: word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`, owner UATs add-ins on dev), R3 (`spaarke-wt-spa-external-access-platform-e0`, dev currently runs R3 `dfb4b9a43`; they redeploy on top), uac-r2 (`spaarke-wt-unified-access-control-r2-ac`).
+1. ~~035 BFF deploy~~ done. Any later dev BFF deploy: notify word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`), R3 (`spaarke-wt-spa-external-access-platform-e0`) and uac-r2 before AND after.
 2. 035 follow-ups: job registered; alerts in `infrastructure/bicep/modules/alerts.bicep` (`ontology.writer.failures > 0` / 15 min, unfiltered; no successful `ontology.evaluator.runs`); negative alert test (blank the writer client id on dev, restore); deploy-log note; mark 035 done.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882: `prvReadsprk_Policy` Deep added to Spaarke Basic User on dev 2026-10-14) → close #1882.
 4. Run 144's stamp job and 148's reconciler **report-only**, send to uac-r2. If CLEAN, enable on dev (D-138): `CoreAncestor__StampReconciliation__ReportOnlyTables=","` (= `scripts/Invoke-OntologyStampBackfill.ps1 -Apply`) and `Ontology__TodoAssigneeOwner__WritesEnabled=true`.
@@ -37,7 +39,6 @@ operator-driven (`/bff-deploy`, `scripts/Deploy-BffApi.ps1`) or `workflow_dispat
 - **D-142** (DI-80 #1873): hide evidence detail when the caller cannot read the witness — read-time batched caller read per witness table; match the 145 write-time rule.
 - **D-144** (DI-84 #1876): unfiled-communication gate DRs owned by the BU default team — with task 149; uac-r2 reviews.
 - D-143: audit stays on (DI-81 #1879 closed). Still open: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
-- Pending push after #1111 merges (do not push earlier, it restarts #1111 CI): local edits to CLAUDE.md, decisions.md (D-141..D-144), current-task.md, `Roles/Spaarke Basic User.xml` (+`prvReadsprk_Policy` Deep, matches dev) + a `notes/security-roles.md` entry + #1355 note (D-110).
 
 ## Coordination
 
