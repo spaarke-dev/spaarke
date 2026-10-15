@@ -718,16 +718,18 @@ public class RegistrationDataverseService : IDisposable
     /// Resolves a Dataverse systemuser ID from an Azure AD object ID.
     /// Returns null if no matching systemuser is found.
     /// </summary>
+    /// <param name="aadObjectId">Entra object ID of the user.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="targetDataverseUrl">Target Dataverse URL, where the systemuser was created. If null, uses the default (admin) environment.</param>
     public async Task<Guid?> ResolveSystemUserIdByAadObjectIdAsync(
-        string aadObjectId, CancellationToken ct = default)
+        string aadObjectId, CancellationToken ct = default, string? targetDataverseUrl = null)
     {
         var filter = $"azureactivedirectoryobjectid eq '{EscapeODataValue(aadObjectId)}'";
         var url = $"{SystemUserEntitySet}?$filter={filter}&$select=systemuserid&$top=1";
 
         _logger.LogDebug("Resolving systemuser by AAD object ID {AadObjectId}", aadObjectId);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await SendGetAsync(url, ct, targetDataverseUrl);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);

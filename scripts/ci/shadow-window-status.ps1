@@ -1,8 +1,16 @@
 <#
 .SYNOPSIS
-    Reports progress toward the CI shadow-window exit criterion.
+    Reports the CI shadow window as CLOSED (sdap-ci.yml retired). -Historical
+    re-runs the original legacy-vs-Router comparison as a diagnostic.
 
 .DESCRIPTION
+    CLOSED 2026-10-14. The window was satisfied at task 071 (2026-09-29), the
+    7-day soak passed at task 075, and task 077 retired sdap-ci.yml: it was moved
+    to docs/archive/workflows/ and no longer runs. With no new legacy runs, the
+    comparison below can only shrink as merged PRs age out of -Limit, so by
+    default the script prints the closed verdict and exits 0. Evidence:
+    projects/ci-cd-unit-test-remediation-r1/notes/{cutover-success,soak-passed}.md.
+
     The shadow window is the gate between "the two-tier CI exists" and "the
     legacy sdap-ci.yml can be deleted". Its exit criterion (spec.md, MUST Rules
     + "Shadow-window exit criterion", amended 2026-08-27):
@@ -64,12 +72,19 @@
                          That false green is EXCLUDED here because it cannot occur
                          under the current configuration, not because time passed.
 
+.PARAMETER Historical
+    Run the original comparison against the legacy runs that still exist.
+    Diagnostic only: the window is closed and no new legacy runs are produced.
+
 .EXAMPLE
-    pwsh scripts/ci/shadow-window-status.ps1
+    pwsh scripts/ci/shadow-window-status.ps1             # prints the closed verdict
+
+.EXAMPLE
+    pwsh scripts/ci/shadow-window-status.ps1 -Historical  # original comparison
 
 .EXAMPLE
     # Include the pre-remediation period -- diagnostic only, NOT the criterion.
-    pwsh scripts/ci/shadow-window-status.ps1 -Since '2026-08-01'
+    pwsh scripts/ci/shadow-window-status.ps1 -Historical -Since '2026-08-01'
 
 .NOTES
     Requires the `gh` CLI, authenticated. Read-only: performs no writes.
@@ -82,10 +97,29 @@ param(
     # See .PARAMETER Since -- do not lower this casually.
     # 2026-09-04T22:13Z = immediately after PR #944 (Tier 1 compile widened to
     # the whole solution), the last change to the configuration under observation.
-    [datetime] $Since = '2026-09-04T22:13:09Z'
+    [datetime] $Since = '2026-09-04T22:13:09Z',
+
+    # See .PARAMETER Historical.
+    [switch] $Historical
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $Historical) {
+    Write-Host ''
+    Write-Host 'CI shadow window -- CLOSED' -ForegroundColor Green
+    Write-Host ('=' * 72)
+    Write-Host '  sdap-ci.yml was retired by task 077 (2026-10-14): moved to'
+    Write-Host '  docs/archive/workflows/sdap-ci.yml and no longer runs.'
+    Write-Host '  Window satisfied at task 071 (2026-09-29); 7-day soak passed at task 075.'
+    Write-Host '  Required checks: Router (ci-router.yml) and Client lint (client-lint.yml).'
+    Write-Host ''
+    Write-Host '  Evidence: projects/ci-cd-unit-test-remediation-r1/notes/cutover-success.md'
+    Write-Host '            projects/ci-cd-unit-test-remediation-r1/notes/soak-passed.md'
+    Write-Host '  Re-run the original comparison (diagnostic only): -Historical'
+    Write-Host ''
+    exit 0
+}
 
 # The two systems being compared. Names must match the `name:` in each workflow.
 $LegacyWorkflow = 'SDAP CI'

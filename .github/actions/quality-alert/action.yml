@@ -1,0 +1,179 @@
+name: Quality alert
+description: >
+  Open, update or close the ONE GitHub issue that represents a scheduled quality check
+  (nightly flake hunt, mutation run, client-test baseline, ...). A failing check opens
+  (or reopens) "Quality alert: <check>", labelled quality-alert and assigned to the
+  owner so GitHub emails them; a later failing run edits that issue in place instead of
+  adding a comment; a passing run comments "Recovered" and closes it. The open list
+  `label:quality-alert is:open` is the dashboard. See docs/procedures/ci-cd-workflow.md,
+  section "Quality alerts".
+
+  The caller's job needs `issues: write`, and the repository checked out (at least
+  `.github/actions`) because this is a local composite action. A failure to post never
+  fails the calling job: it prints a ::warning:: and exits 0.
+
+inputs:
+  check:
+    description: "Stable check name, e.g. nightly-health/flake-hunt. It is the issue's identity: never put a date or run number in it."
+    required: true
+  status:
+    description: "ok | failing"
+    required: true
+  summary:
+    description: "Markdown describing the problem (failing) or the recovery (ok). Truncated at 50,000 characters."
+    required: false
+    default: ""
+  run-url:
+    description: "URL of the workflow run that produced this status."
+    required: false
+    default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  assignee:
+    description: "GitHub login that owns the alert. Assignment is what makes GitHub email them."
+    required: false
+    default: spaarke-dev
+  dry-run:
+    description: "'true' prints what would be done and writes nothing."
+    required: false
+    default: "false"
+  github-token:
+    description: "Token used for gh. Needs issues: write."
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Open, update or close the alert issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        CHECK: ${{ inputs.check }}
+        STATUS: ${{ inputs.status }}
+        SUMMARY: ${{ inputs.summary }}
+        RUN_URL: ${{ inputs.run-url }}
+        ASSIGNEE: ${{ inputs.assignee }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -uo pipefail
+        # Deliberately no `-e`: posting an alert must never fail the calling job. Every
+        # gh call below is checked explicitly and degrades to a ::warning::.
+
+        LABEL="quality-alert"
+        TITLE="🔴 Quality alert: ${CHECK}"
+        TODAY="$(date -u +%Y-%m-%d)"
+        NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        WORK="$(mktemp -d)"
+
+        warn() { echo "::warning title=quality-alert ${CHECK}::$*"; }
+
+        run_gh() {
+          # In dry-run mode every write is only described.
+          if [ "$DRY_RUN" = "true" ]; then echo "[dry-run] gh $*"; return 0; fi
+          gh "$@"
+        }
+
+        main() {
+          case "$STATUS" in ok|failing) ;; *) warn "status must be 'ok' or 'failing', got '${STATUS}'"; return 0 ;; esac
+          if [ -z "$CHECK" ]; then warn "check name is empty"; return 0; fi
+
+          # Every alert issue carries the label, so listing by label and matching the
+          # title exactly avoids search-index lag and emoji/colon quirks of `--search`.
+          # (A missing label simply yields an empty list.)
+          if ! gh issue list --label "$LABEL" --state all --limit 300 \
+                 --json number,title,state,body > "$WORK/all.json"; then
+            warn "could not list issues; no alert was posted or updated"
+            return 0
+          fi
+          # Never fall through with an empty list: that would open a duplicate alert.
+          if ! jq --arg t "$TITLE" '[.[] | select(.title == $t)]' "$WORK/all.json" > "$WORK/mine.json"; then
+            warn "could not parse the issue list (is jq installed?); no alert was posted or updated"
+            return 0
+          fi
+          open_numbers="$(jq -r '[.[] | select(.state == "OPEN")] | sort_by(.number) | .[].number' "$WORK/mine.json")"
+          first_open="$(printf '%s\n' "$open_numbers" | sed -n '1p')"
+          latest_closed="$(jq -r '[.[] | select(.state == "CLOSED")] | sort_by(.number) | last | .number // empty' "$WORK/mine.json")"
+
+          if [ "$STATUS" = "ok" ]; then
+            # Recovery: close every open alert for this check (normally exactly one).
+            [ -n "$open_numbers" ] || { echo "No open alert for '${CHECK}' and the check is ok: nothing to do."; return 0; }
+            for n in $open_numbers; do
+              run_gh issue close "$n" --comment "Recovered in ${RUN_URL}" \
+                || warn "could not close #${n}"
+              echo "Closed alert #${n} for '${CHECK}'."
+            done
+            return 0
+          fi
+
+          # ---- failing ------------------------------------------------------------
+          summary="${SUMMARY:0:50000}"
+          [ -n "$summary" ] || summary="(no summary supplied by the workflow)"
+
+          # "Failing since" survives edits: it is read back from the existing body and
+          # reset only when the alert is created or reopened.
+          first_seen="$TODAY"
+          if [ -n "$first_open" ]; then
+            old="$(jq -r --argjson n "$first_open" '.[] | select(.number == $n) | .body' "$WORK/mine.json" \
+                   | grep -o 'first-seen=[0-9-]*' | head -1 | cut -d= -f2)"
+            [ -z "$old" ] || first_seen="$old"
+          fi
+
+          {
+            echo "<!-- quality-alert check=${CHECK} first-seen=${first_seen} -->"
+            echo "## 🔴 \`${CHECK}\` is failing"
+            echo
+            echo "- **Failing since:** ${first_seen}"
+            echo "- **Last seen failing:** ${NOW} ([workflow run](${RUN_URL}))"
+            echo
+            printf '%s\n' "$summary"
+            echo
+            echo "---"
+            echo "_Maintained by \`.github/actions/quality-alert\`. This issue is edited in place on every failing run and"
+            echo "closes itself with a \"Recovered\" comment when the check passes. Open alerts: \`label:quality-alert is:open\`._"
+          } > "$WORK/body.md"
+
+          ensure_label() {
+            run_gh label create "$LABEL" --color B60205 \
+              --description "A scheduled quality check is failing (managed by .github/actions/quality-alert)" \
+              >/dev/null 2>&1 || true
+          }
+
+          if [ -n "$first_open" ]; then
+            # Already open: refresh the body, never add a comment.
+            run_gh issue edit "$first_open" --body-file "$WORK/body.md" --add-label "$LABEL" --add-assignee "$ASSIGNEE" \
+              || run_gh issue edit "$first_open" --body-file "$WORK/body.md" \
+              || warn "could not update #${first_open}"
+            echo "Updated alert #${first_open} for '${CHECK}'."
+          elif [ -n "$latest_closed" ]; then
+            ensure_label
+            run_gh issue reopen "$latest_closed" || { warn "could not reopen #${latest_closed}"; return 0; }
+            run_gh issue edit "$latest_closed" --body-file "$WORK/body.md" --add-label "$LABEL" --add-assignee "$ASSIGNEE" \
+              || run_gh issue edit "$latest_closed" --body-file "$WORK/body.md" \
+              || warn "could not update #${latest_closed}"
+            run_gh issue comment "$latest_closed" --body "Failing again (reopened): ${RUN_URL}" \
+              || warn "could not comment on #${latest_closed}"
+            echo "Reopened alert #${latest_closed} for '${CHECK}'."
+          else
+            ensure_label
+            if ! run_gh issue create --title "$TITLE" --body-file "$WORK/body.md" \
+                   --label "$LABEL" --assignee "$ASSIGNEE"; then
+              # Most likely the assignee cannot be assigned in this repo; an unassigned
+              # alert is still better than none.
+              warn "create with assignee '${ASSIGNEE}' failed; retrying unassigned"
+              run_gh issue create --title "$TITLE" --body-file "$WORK/body.md" --label "$LABEL" \
+                || { warn "could not create the alert issue"; return 0; }
+            fi
+            if [ "$DRY_RUN" != "true" ]; then
+              new="$(gh issue list --label "$LABEL" --state open --limit 300 --json number,title \
+                     | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)] | sort_by(.number) | last | .number // empty')"
+              if [ -n "$new" ]; then
+                gh issue comment "$new" --body "Failing since this run: ${RUN_URL}" \
+                  || warn "could not comment on #${new}"
+              fi
+            fi
+            echo "Created alert for '${CHECK}'."
+          fi
+        }
+
+        main || warn "unexpected error while posting the alert"
+        exit 0

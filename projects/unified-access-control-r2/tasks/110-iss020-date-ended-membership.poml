@@ -4,7 +4,7 @@
     <title>ISS-020 (#999) — a date-ended org membership stops conferring access · EXECUTED AS PART OF TASK 109, verified here</title>
     <phase>Register-driven (authored 2026-09-19 after owner decision D-2)</phase>
     <gate>blocked — ships with 109; do NOT execute independently</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Verification-and-closure task. The implementation is task 109's; this file exists so ISS-020's own acceptance is checked explicitly and #999 closes against evidence rather than by association.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,4 +97,8 @@ Register: `notes/defer-issues.md` § ISS-020. Related: tasks 020, 042, 043, 109,
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Verification task. Load task 109's POML and notes first; this file's criteria are checked against 109's delivered tests, never re-implemented.</protocol>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 110)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Met by 109 (PR #1093, merged 2026-10-02): one junction read returns two named sets (AccessibleRecordSetService.cs:305-346), tested in OrganizationMembershipReadTests.cs:86/93/118/131/271/552. Only bookkeeping remained. ISS-020 / #999 closed 2026-10-05 as met.</amendment>
+  </amendments>
 </task>

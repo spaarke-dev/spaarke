@@ -341,6 +341,962 @@ On UNSECURE, a root sharee's share is removed from a child ONLY if that child wa
 7. **167:** round 14 stands (dedicated `health-probe` policy, runtime FallbackPolicy + guard rule).
 8. **168:** (a) hide every raw pair / non-root `sprk_regarding*` lookup control on the round-19 target forms (the picker's host excepted; `-Verify` fails on a visible one); the grid lock extends the EXISTING `src/client/pcf/SpaarkeGridCustomizer` (cellEditorOverrides cancel editing for the four root columns; cellRendererOverrides mark them read-only) set on the `sprk_event` / `sprk_analysis` grid configuration by a dry-run/apply/verify script — no new PCF, no web-resource handler (ADR-006); the To Do main form gets its missing `sprk_regardingservicerequest` hidden cell via the picker script; the `PICKER_WITHOUT_PRESAVE` guard's fail-open probe is closed and seeded.
 
+## Round 26 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Tasks 150 and 166, from 150's final verification.
+
+1. **150 reason code (round 17 item 1):** keep `403 sdap.provision.record_creator_unverifiable`, with `creatorState = column-missing` and `creatorColumn`. 146's `permission_unverifiable` belongs to the unsecure endpoint's namespace, and the meaning is the same: unverifiable, 403, fail closed, no retry offered. This is the contract the client maps.
+2. **150's remaining items are completed on the integration branch** (142, 146, 148 and 133 are merged there):
+   - (a) A test drives the REAL `ExternalParticipationService.GetRootRecordFlagsAsync` wire path (the `OrganizationMembershipReadTests` TestServer) with `sprk_issecure` omitted and with it null. It asserts `Unreadable` and that `AccessibleRecordSetService` suppresses the record. Seeded.
+   - (b) `RecordOwnershipResolver.ReadParentAsync` makes an empty flag on a secure-flagged root fail closed, as 150 note §19.1 specifies, with its twin test and seed.
+   - (c) Guide §7c step 0, note §9 G-0 and the "masked window" paragraph state the FULL effect of shipping 150's BFF before G-0: every NULL-flag root reads Unreadable/Restricted, so external participants lose every contact-sourced right on it, grants answer 503 `policy_unreadable`, the last-reader rule applies, and uploads answer 503.
+   - (d) The ribbon: Make Secure and Remove Secure go in 142's ONE Access group, ONE ribbon file and ONE command script. Acceptance (a)–(f) and the four UI tests come from 150's UX amendment.
+3. **Make Secure on an EXISTING record moves its existing files** into the record's own container, as part of the transition.
+   - **Why:** leaving them in the shared container keeps secure content in a container whose access cannot be narrowed (SPE permissions are additive-only). 166's strict derived-container rule would also refuse every download of them.
+   - **One BFF relocation service, `DocumentContainerRelocator`, with two callers:** the Make Secure transition (provisioning, after 148's child pass) and task 166's legacy migration (round 21 item 1 (ii)). The 166 script only triggers the BFF and reads its reports (148's `Invoke-SecureChildBackfill.ps1` precedent); no Graph logic lives in PowerShell.
+   - **For each file:** copy it to the target container through the BFF identity, verify it (size, and hash where Graph returns one), re-point the `sprk_document` through 166's pointer-attach path, then delete the source. Every step is logged with before/after ids. The source is never deleted before the copy is verified.
+   - **When incomplete:** answer 500 with counts (`sdap.provision.files_incomplete`); the record stays flagged and provisioned, and a repeat call completes it (the `childrenOnly` re-entry branch also relocates files). Un-moved files meanwhile fail closed under the strict rule.
+   - **Ownership:** 166 builds the service if its follow-up reaches it first; otherwise the 150 integration lane builds it and 166's script calls it. Never two mechanisms.
+4. **Make Secure confirmation copy** is owner-authored (150 escalation trigger 5). It is asked in the next owner question round with a recommended draft. Until then the command is built and tested with the recommended draft as ONE constant, and it ships only with the owner's answer.
+
+## Owner round 27 (2026-10-04). BINDING. The Make Secure confirmation copy (answers round 26 item 4)
+
+The owner, verbatim: "Accept your recommended wording so that the task does not get delayed (we can adjust in UAT if necessary)". The copy below is ACCEPTED. It ships as ONE constant, pinned verbatim by the UI test.
+
+**`{record}`** is `project`, `matter` or `work assignment`, from the form's table.
+
+- **Title:** Make this {record} secure?
+- **Body, paragraph 1:** Only the person who created this {record} and the people it is shared with will keep access. Everyone else in your organization loses access, and external contacts keep only access granted to them directly.
+- **Body, paragraph 2:** Its existing documents, events, to-dos and other related records become secure too, for the same people, and its files move to the {record}'s own secure storage. This can take a few minutes.
+- **Body, paragraph 3:** To remove the secure designation later, ask someone with Full Access to the {record}, or the person who created it.
+- **Buttons:** **Make Secure** (primary) · **Cancel**
+
+## Round 28 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 147's E1 and E2.
+
+1. **E1 — browser-initiated child creates through the BFF use A1, the existing G5 pattern (round 7 item 3, b2).**
+   - **Pre-check as the caller:** Create and Append on the table, AppendTo on every record named, and the payload names no owner and no field-secured column. That last check is the server-side column policy, so an app-only create cannot bypass FLS.
+   - **The create:** made by the APPLICATION, owned by the team `RecordOwnershipResolver` names (`OwnedChildWrite`), with `sprk_createdbyperson` stamped as the caller (146's 17 tables). `createdby` is the app; the person lives in `sprk_createdbyperson`. Every reader of "who created it" uses `RecordCreatorPerson` (createdbyperson, else createdby).
+     - Task 152's briefing "Created By" matching is updated to it in the same integration (an item on 152's code, tests + seed).
+   - **Rejected:** A2, because Assign into the Secure Record BU is likely refused for users. A3, because it leaves a user-owned window of one request, which the owner has never accepted.
+   - **One create endpoint per table.** 147 builds the routes in this BFF on the existing cores. Re-files go through the existing families: events and communications through 159/161's routes, and Compose's document association through `PUT /api/v1/documents/{id}`.
+     - The sibling `field-mapping-server-write-path-r1` (design-only, also app-only by its Q2) extends these routes instead of adding its own. This is recorded in 147's note for that project.
+2. **E2 — close the in-product paths; the job covers only the out-of-product ones.**
+   - **In-product native creates of a child under a SECURE parent** (subgrid "+ New", quick create, a form New with the parent prefilled) are replaced by BFF-backed commands. These are the existing ribbon command-script pattern (142/150), with enable rules that read `sprk_issecure` through `Xrm.WebApi`. A read failure hides the native command and shows the BFF one (fail closed). Every such surface comes from 147's census plus a live form/subgrid inventory (read-only), as dry-run/-Apply/-Verify scripts.
+   - **Writes outside the product** (imports, flows, direct API) are ADR-002 WP-5 territory. `SecureChildReconciliationJob`'s recent-changes pass runs every 2 minutes with writes ON in every environment where 148 is deployed, with a standing report of each correction.
+   - The model-driven Create privilege on child tables is NOT removed globally: it would break ordinary records, and the native-command replacement closes the in-product path without it.
+3. **Merge order:** task 169 rebases onto 147, which adds `sprk_memo` to the CHILD taxonomy under owner round 2 item 6. 169's "byte-for-byte unchanged" criterion then holds against that base.
+
+## Round 29 (2026-10-04). BINDING. Main-session decision under round 15, applying owner round 27's stance ("accept the recommended wording … adjust in UAT"). Client copy for task 143's five provisioning codes.
+
+These codes are emitted by `ProvisionProjectEndpoint` but have no client entry, so users saw a generic error (found by the 150 merge). They are added to `provisioningService.ts` and to its emitted-codes list (32 → 37), each pinned verbatim. The style is resume-neutral ("could not be finished"), as in rounds 10 and 17.
+
+| Code | Status | Retry | Copy |
+|---|---|---|---|
+| `sdap.provision.creator_no_access` | 403 | No | You are on this project's No Access list, so you cannot secure it. Nothing about the project changed. |
+| `sdap.provision.creator_no_access_unverifiable` | 500 | Yes | Whether you may access this project could not be checked, so securing it could not be finished. Nothing about the project changed. |
+| `sdap.provision.resume_creator_no_access` | 409 | No | Securing the project could not be finished, because the person who created it is on its No Access list. Nothing about the project changed. An administrator needs to review the project's access. |
+| `sdap.provision.resume_creator_no_access` | 500 | Yes | Securing the project could not be finished, because the access of the person who created it could not be checked. Nothing about the project changed. |
+| `sdap.provision.principal_no_access` | per-person warning | — | {name} is on this project's No Access list, so the project was not shared with them. |
+| `sdap.provision.principal_no_access_unverifiable` | per-person warning | — | Whether {name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access. |
+
+## Round 30 (2026-10-04). BINDING. Main-session decision under round 15. Task 158 Q1.
+
+1. **A sharee removed from a secure parent is also removed from the secure records filed under it, but ONLY where their access there came from the parent.**
+   - **Option (c), provenance.** (a) add-only leaves a former sharee with access they should have lost. (b) a blind revoke on the parent's unshare would also remove people shared DIRECTLY on the filed record.
+   - **No new table: the provenance extends task 142's `sprk_assignedaccess` ledger** (CLAUDE.md §11).
+     - Each share 158 passes from a secure parent to a filed secure root is recorded as a ledger row on that root, with source `inherited:{parentTable}:{parentId}` and the subject (user, or team — add a `sprk_subjectteam` lookup to the ledger schema script: dry-run/-Apply/-Verify, through the solution-membership helper).
+     - It carries the mask written, under A4's rules: never lower existing access; on the parent's unshare, remove only the inherited share that is still UNMODIFIED; an operator's removal on the filed record is recorded `Declined` and is never re-added while the parent share persists; a share that is also direct (an independent row, or a raised mask) is kept.
+     - Fan-out happens in the same place 158 already calls `relatedRoots.PassSharesOnAsync`, and in the reverse direction on unshare. Failures report through `children_incomplete`, as 149's do. The L4 job also reconciles provenance.
+   - Tests + seeds per path (share, unshare-inherited, unshare-also-direct, operator-removed-then-parent-reshared, fault).
+
+## Round 31 (2026-10-04). BINDING. Main-session decisions under round 15. Task 158, from its first verification.
+
+1. **The creator of a record that inherits security honours BOTH No Access lists: the record's own and every secure PARENT's.** It is the same rule the sharee mirror already applies (owner N6, round 3b: refuse to provision). The check runs on the inherited path as well, BEFORE any write; it must not depend on the flag being set first. A walled creator, or an unverifiable answer, refuses the create, with the existing No Access reason codes and round 29's copy.
+2. **A record created under a secure parent is created INTO isolation, with no business-unit-visible window** (round 28 E1 rejected such windows).
+   - **The create:** made by the application, owned by the named Secure Record Owners team (G5: as-caller pre-check first), with `sprk_createdbyperson` = the caller and the flag set in the create.
+   - **Then:** the creator's share is added and read back (133's share-first rule); then the container. A creator share that fails deletes the just-created row (read back) and refuses — never a row nobody can open, never a BU-visible row.
+   - Container or child steps that do not complete leave a PROVISIONED-but-incomplete record, which the existing re-entry branch completes.
+   - The out-of-band path (rows written outside the BFF) stays with the job, which secures them (ADR-002 WP-5).
+
+## Owner round 32 (2026-10-04). BINDING. Task 158 Q2.
+
+The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "Path B: secure inline (Recommended)").
+- Amendment A-UAC146 (spaarke-ai-architecture-redesign-r1 spec) is EXTENDED: when the user-OBO `dataverse.update_record` re-files a record under a secure parent, it runs provisioning's app-only steps inline, right after the caller's own write.
+- Record the amendment text beside round 8 item 1 / round 13 item 7 in that spec. Mark 158's remarks ACCEPTED (no longer PROPOSED), and cite this round in the PR's §6.5 block.
+
+## Round 33 (2026-10-04). BINDING. Main-session decisions under round 15. Task 150's integration lane (R-150-1 to R-150-5).
+
+1. **R-150-1: Make Secure stays open to every Write holder.**
+   - Round 9 item 10 limits `/provision-project` on an UNFLAGGED record to its creator, and says "secure an existing record belongs to task 148's surface". Owner round 3b says that surface (the Make Secure ribbon) stays open to Write holders.
+   - So the request names the Make Secure transition (an explicit field, e.g. `transition: "make-secure"`), and the endpoint holds that path to the Write gate. The wizard's create-then-secure path keeps the creator rule. Both are tested, and the guard bites by seeding.
+   - The non-creator's own access after securing is exactly what owner round 27's copy says.
+2. **R-150-2: the Remove Secure confirmation.** Recommended wording, applying owner round 27's stance (adjust in UAT). ONE constant, pinned verbatim:
+   - **Title:** Remove the secure designation from this {record}?
+   - **Paragraph 1:** The {record} and its related records return to normal access: people who can see records in its business unit will be able to see them, and the individual sharing set up while it was secure is removed.
+   - **Paragraph 2:** To secure it again later, use Make Secure.
+   - **Buttons:** **Remove Secure** (primary) · **Cancel**
+3. **R-150-3:** the success lines ("This {record} is now secure." / "This {record} is no longer secure.") and the status-only fallback are accepted as written, adjustable in UAT.
+4. **R-150-4:** external-spa eslint and vitest come with task 140's merge, which adds their configs and a vitest runner. Re-run lint and vitest after 140 merges into the integration branch.
+5. **R-150-5:** an unknown skipped-principal reason code shows a generic per-person warning ("{name} was not given access to this project.") as well as the log entry. Never silent.
+
+## Round 34 (2026-10-04). BINDING. Main-session decisions under round 15. The follow-up round's verifier questions.
+
+1. **162 F-162-f1-1: deleting a document deletes its AI analyses and their outputs.**
+   - `sprk_document_analysis_document` and `sprk_analysis_analysisoutput` go to `Delete = Cascade`, through a dry-run/-Apply/-Verify schema script that uses the solution-membership helper.
+   - Probe with a non-admin test user that deleting a test document removes its analyses and outputs.
+   - Analyses with no document (personal, round 15) are untouched.
+   - Work for the integration lane after 162 merges; the live `-Apply` is a manual gate.
+2. **162 §14.5: ratified.** A rights-query FAULT on promote's session-document check answers 403 `sdap.access.error.system_failure`, the same body the filter gives for the same fault on a body document. A missing right or a missing row still answers `insufficient_rights`. A fault is not a deny (ADR-003, still fail closed).
+3. **140: an internal Write holder who changes a contact-issued grant row OUTSIDE the grant core takes it over,** exactly as `/grant` does.
+   - This includes `POST set-record-share-expiry`'s bulk expiry update.
+   - "Takes it over" means: clear `sprk_grantedbycontact` and stamp `sprk_grantedby` with the changing systemuser, in the same write, so the contact can no longer revoke an internal decision.
+4. **167 ledger, retired routes:** an entry whose route key is absent passes only when `ResolvedBy` is set AND `ProofTest` names a test that pins the route's absence. This covers the nine routes deleted under round 10 item 1 and 164's deletions. Anything else absent still fails ("do not drop or re-key").
+5. **167 ledger, admin policy:** `Credit.AdminOnly` is accepted for a sweep entry whose route is in a pinned `AdminOnlyRoutes` set, each resolved by `RequireAuthorization("SystemAdmin")` or the SPE admin policy (owner round 9 item 3). It is no longer limited to `/api/spe/`. The set is pinned by a test that fails on a route added to it without that policy.
+6. **163's CreateEventWizard defect** (`sprk_Event@odata.bind` on `sprk_document`, which has no such column; its event lookup is `sprk_relatedevent` / `sprk_RelatedEvent`) is fixed by **task 147**, which moves that writer onto the BFF (round 28). The BFF create binds `sprk_relatedevent`, with a test.
+7. **167 `/healthz/catalog`:** the HealthCheckResult is memoized for 30 seconds (one result shared across callers; a fault is not cached beyond the same 30 s), as well as the `health-probe` rate limit. One anonymous IP can then drive at most one catalog read set per 30 seconds. Tested with a fake TimeProvider.
+
+## Round 35 (2026-10-04). BINDING. Main-session decisions under round 15. Task 165's five verifier questions, and task 147's Q2.
+
+1. **165 Q1: every container-creation path stamps, not only the BFF's.**
+   - The control-plane H8 handler (`GraphContainerTypeProvisioner`), `scripts/New-BusinessUnitContainer.ps1` and `scripts/Provision-Customer.ps1` stamp the container they create with round 20's property and the same rule: read back, and remove the container if the stamp does not read back.
+   - The property name is ONE constant on each side (C# and PowerShell). A guard test fails on a container-create call site in `src/` or `scripts/` that does not stamp.
+   - Task 165 owns all three. The H8 change is recorded in `customer-provisioning-orchestration-r1`'s notes for that project.
+2. **165 Q2: an UNBOUND container is reachable by no admin route.** This amends round 20 item 2 ("an unbound container only a ROOT-unit admin").
+   - **Why:** under Model 1, the root admin of ANY environment whose config names a shared type would otherwise reach another customer's unbound containers.
+   - **The rule:** the per-container routes answer the uniform 404 for an unbound container, and log reason `unbound`.
+   - **Binding:** binding happens only through creation stamping (item 1) and the backfill script. The backfill gains an explicit `-Bind <containerId>=<businessUnitId>` input for containers whose owner cannot be derived, and its `-Verify` lists every container still unbound.
+   - **Gates:** backfill `-Apply` plus `-Verify` exit 0 in every environment is a manual gate BEFORE 165's BFF is deployed. The same gate applies before a further environment is onboarded onto a shared type, and it is written into the onboarding guide.
+3. **165 Q3: `sprk_keyvaultsecretname` is allow-listed.**
+   - Allowed names use ONE pinned prefix, taken from the existing configs' naming (read the live configs read-only to choose it).
+   - Config POST/PUT answer 400 for any other name. At read, the BFF refuses to resolve a non-conforming name: it fails closed with its own reason code and never reads the secret.
+   - A `-Verify` script lists the live configs that do not conform; renaming them is a manual gate.
+4. **165 Q4: the security-alerts and secure-score routes are platform-operator-only.** They require a ROOT-unit admin, through the same check as the environment write rule (round 16 item 4). Tests + seeds.
+5. **165 Q5: the container-type permission and consumer READS get the Write rule.** `GET /containertypes/{typeId}/permissions` and `/consumers` require every config of the type to be reachable by the caller.
+   - **Why:** these routes list every customer's consuming app.
+   - The test `ALeafAdmin_ReadingItsOwnSharedContainerType_ReachesTheHandler` is replaced by its refusing counterpart, plus a positive test for an admin who reaches every config of the type.
+6. **147 Q2:** answered by round 28 item 1 as written. Every browser-initiated child create through the BFF is owned by the team `RecordOwnershipResolver` names. For a child of a NON-secure parent, that is the business-unit default team (I-6). Children are no longer user-owned on that path.
+
+## Round 36 (2026-10-04). BINDING. Main-session decision under round 15. Event re-files after task 159 deleted `PUT /api/v1/events/{id}`.
+
+1. **The re-file gets its own route in 159's events family.** Round 28 routes event re-files "through 159/161's routes; add the route there if the family lacks it; never a second one". 159 deleted the general PUT (round 10 item 1: no caller), so task 147 adds ONE route to `Api/Events/EventEndpoints.cs`, for example `PUT /api/v1/events/{id}/regarding`.
+   - **It changes only the filing:** the regarding lookups and their ADR-024 pair.
+   - **What it carries:** 159's as-caller checks (Write on the event; AppendTo on the new parent). It also restores the two checks that went with the deleted PUT: 146's re-file F3 gate and 156's re-stamp. Then 148/149's child pass runs when the event moves under or out of a secure parent.
+   - **Absence pins:** 159's pins keep proving that the general PUT/DELETE/cancel/logs routes stay deleted. They are narrowed so they do not match the new route.
+   - **Bookkeeping:** the new route gets its route-ledger row for 167.
+   - **Base:** 147 merges `integ/uac-r2-batch4`, which now carries 159–164, before it builds the route.
+2. **Communications** keep 161's routes. If 161's family lacks a re-file route, the same rule applies.
+
+## Round 37 (2026-10-04). BINDING. Main-session decisions under round 15. Task 166's relocation questions (verify of `task/uac-r2-166-f1`).
+
+1. **A relocated file is re-indexed as part of the relocation (option a).**
+   - After each re-point, `DocumentContainerRelocator` calls ONE `Services/Ai/PublicContracts` facade method, which:
+     - enqueues RAG indexing for the new item;
+     - deletes the old item's chunks.
+   - **No new facade if one fits:** extend an existing PublicContracts indexing facade if there is one (CLAUDE.md §11). Add a new method only if none fits; never inject AI internals (ADR-013).
+   - **Failure:** an indexing failure does not undo the move. It is reported per file in the relocation report as `index-pending` and counts as incomplete, so the repeat call retries it.
+   - **Every reference to the old item is re-keyed in the same step** (finding F4). Examples: a child attachment's `sprk_parentgraphitemid`, and any other column or index that holds the drive/item id. The note lists each one.
+   - The "interim alternative" (re-index by hand after gate 24) is rejected.
+2. **Several `sprk_document` rows pointing at the file being moved (option b, refined):**
+   - Every referencing row inside the secure record's subtree is re-pointed to the copy, through the pointer-attach path.
+   - A row OUTSIDE that subtree keeps the source. The source is then that other record's file, not the secure record's, so the secure record's transition is COMPLETE.
+   - The report lists each source kept for another record (`SourceKeptForOtherRecords`, with the row ids). The source is deleted only when no row references it any more.
+   - **Re-entry (F2):** a repeat call must recognise a row that is already re-pointed and settle it. It never loops on, and never reports incomplete for, a source that is kept for another record.
+   - Option (c), delete anyway, is rejected.
+3. **Interim pointer rule versus relocation (option a, F1):**
+   - The interim rule ALSO accepts an item uploaded by the BFF identity, but only when its pointer passes the strict derived-container test. That keeps the interim rule never weaker than the strict rule.
+   - Relocated files are therefore served before the strict flip (gate 25).
+   - Tests: a relocated file is served under the interim rule; a BFF-identity item in the wrong container is refused. Seeded.
+
+## Round 38 (2026-10-04). BINDING. Main-session decision under round 15. Task 168, grid lock coverage (note §12.6).
+
+1. **The grid lock covers the same columns the forms hide.** Round 25 item 8 named only the four root columns for the grid. But a person can add the raw filing columns to the `sprk_event` and `sprk_analysis` grids with Edit columns: the ADR-024 pair and the non-root `sprk_regarding*` lookups. Those columns would then be inline-editable, which reopens the door the form lock closes.
+   - `SpaarkeGridCustomizer`'s RootColumnLock covers that full set, BY NAME and from ONE shared list. The list is the one the form scripts use, never a second copy.
+   - It uses the same cell editor and cell renderer overrides as the root columns.
+   - Version v1.1.1, bumped in all four places. Jest cases, plus a seed proving each override bites.
+   - The grid configuration script is unchanged.
+
+## Round 39 (2026-10-05). BINDING. Main-session decisions under round 15. Task 158, from its second verification.
+
+1. **Unsecuring a parent ends what it passed on (option b).** Interpretation xiii in note §6 is reversed.
+   - Unsecure Step 4 revokes each explicit share on the parent. For each sharee it revokes, round 30's reverse rule then runs on the secure records filed under the parent.
+   - **Ended:** only the UNMODIFIED inherited share.
+   - **Kept:**
+     - a direct share;
+     - a raised mask;
+     - a share another secure parent still justifies;
+     - the record's last reader. Owner round 3 S5: never strand a record.
+   - Failures report through `children_incomplete`, as round 30's do.
+   - **Why:** after the unsecure, the filed records are still secure. A sharee's access to them came only from the parent share that was just revoked. Round 30 calls that "a former sharee with access they should have lost". Seeing the now-ordinary parent through its business unit gives no access to a still-secure filed record, so option (c)'s exception does not apply.
+   - Tests and seeds per kept/ended case, plus the fault case.
+2. **DIRECT shares on a filed secure record honour every secure parent's No Access list too (option b).** This extends round 31 item 1, which covered the creator, to every share.
+   - It applies to `/share-user`, and to colleagues named in `/provision-project` on a filed root.
+   - The check runs against the record's own list AND every secure parent's list. It refuses with the existing No Access codes and round 29's copy, and an unverifiable list fails closed.
+   - Use ONE guard entry point (`SecureShareNoAccessGuard`), never a second copy of the parent walk.
+   - Tests and seeds.
+
+## Round 40 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its verification.
+
+1. **R-150-6: a Make Secure that fails after the flag is written can always be finished (option 1, completed).**
+   - **The ribbon:** it also shows Make Secure when `sprk_issecure` is true and `sprk_containerid` is empty. It reads both in the same `retrieveRecord`, and a read failure follows the existing fail-closed enable rule. Acceptance (e) becomes "hidden on a PROVISIONED secure record".
+   - **Retryable failures after Step 7** (`files_incomplete`, `children_incomplete`): the alert becomes a confirm dialog showing the server's detail, with **Make Secure** / **Cancel**. That re-entry is the repeat call round 26 promises.
+   - **Every post-flag failure code is covered.** The note gives a table of the five codes, and for each names which closes it:
+     - the ribbon's retry;
+     - a scheduled job, by name and schedule (148's `SecureChildReconciliationJob` for children; for files, 166's relocator re-entry);
+     - both.
+     A code with neither is a defect to fix.
+   - Tests and seeds.
+2. **A non-creator who runs Make Secure keeps access, on BOTH paths (option a, made symmetric).**
+   - The caller is shared at the creator's level on the forward path (share first, move, prove). The unflagged RESUME path now does the same; the asymmetry is removed.
+   - The caller is then one of "the people it is shared with" in owner round 27's copy, so the copy holds as written.
+   - Option (b) is rejected: a Write holder who secures a record would lose it.
+   - Tests for both paths, with seeds.
+3. **`sdap.provision.principal_share_failed` copy accepted as recommended** (owner round 27's stance: adjust in UAT). In the wizard: "{name} was not given access to this project. You can share it with them later from Manage Access." The ribbon uses the same sentence with {record}, and round 29's two sentences are generalized to {record}. Each is pinned verbatim.
+   - An empty or unresolvable name falls back to "Someone" (finding: `personName("")` produced an empty name). Never an empty name, never silent.
+
+## Round 41 (2026-10-05). BINDING. Main-session decisions under round 15. Task 165, from its verification of `task/uac-r2-165-f2`.
+
+1. **Round 35 item 1 includes H8's replication-pending path, and task 165 fixes it.** It is not handed to another project.
+   - Today, on that path, a container is created and then never stamped and never removed.
+   - It must be stamped and read back before anything durable consumes the container (Key Vault write, H7 hand-off, `CompletedPhase`), or removed.
+   - The H8 code lives in this repository, and round 35 assigned it to 165.
+   - Correct the guide and the note D19 to match the code.
+2. **Unbound containers leave every dashboard view (option b, D18).** That includes the platform operator's aggregate `unattributedContainerCount` and storage.
+   - Under Model 1, the root admin of ANY environment is that environment's platform operator. An aggregate over unbound containers of a shared type therefore counts other customers' containers.
+   - The alarm is the backfill's `-Verify`, which lists every unbound container to the operator who runs it, plus the pre-deploy/onboarding gate (round 35 item 2).
+3. **The three dev test containers whose owner cannot be derived** (`b!DcvT…`, `b!rAta…`, `b!c8YR…`) are BOUND to the root unit `06fbf21c` ("Spaarke") with `-Bind`, as a manual live step.
+   - Binding is reversible and deleting is not, so nothing is deleted.
+4. **Dev config `68f9a952` stores `null` as its secret name.** Its owning app's secret is stored under a conforming name (for example `spe-owning-app-model1-owner`), and the config is PATCHed to that name.
+   - Deliver a script (dry run / `-Apply` / `-Verify`) and a manual gate. Never delete the config.
+   - If the read-only investigation proves the config is used only by the control plane, say so in the note with the evidence, and still make it conforming.
+5. **The verifier's LOW items are closed in the same round:**
+   - a test that bites for the platform-operator `TotalCount` guard;
+   - the creation guard's two holes: a URI held in a variable, and the other seeded shape;
+   - the allow-list regex anchored with `\z` (not `$`), with a trailing-newline test;
+   - the H5/H8 root-business-unit read, checked in live gate (d).
+
+## Round 42 (2026-10-05). BINDING. Main-session decisions under round 15. Task 140, from its verification.
+
+1. **The race between a contact's write and an internal take-over is closed (option A).**
+   - The contact-mode grant PATCH and the contact revoke's deactivation both send the row's ETag as `If-Match`, using the ETag from the read that checked "issuer == caller".
+   - A 412 means the row changed in between. The answer is then 409 `managed_elsewhere`, with the existing copy, and the row is re-read for the response. There is no blind retry.
+   - Option (B), re-read only, narrows the window but does not close it. Option (C) accepts a known hole.
+   - Tests: a take-over between the check and the write, on both the grant and the revoke path. Seeded.
+2. **The reconciliation job (R1) and a contact-issued row with no expiry: the contact's cap applies (neither A, B nor C).**
+   - A contact-issued grant may never outlive the issuing contact's own access (task 140's rule: capped at its level and its own expiry).
+   - So when R1 writes are on and it finds a contact-issued row with a null expiry:
+     - It re-stamps the expiry to the EARLIER of +90 days and the issuing contact's own active grant expiry on that record.
+     - If the issuing contact no longer holds an active grant there, it deactivates the row.
+     - It keeps the contact as issuer, because no internal person acted.
+     - It reports each such row.
+   - Option (A), skip, leaves an open-ended contact grant. Option (B), take over with no person to stamp, invents an issuer.
+   - Correct the three places that say the job only DEACTIVATES grant rows.
+   - Tests and seeds per case: re-stamped to +90, capped by the contact's expiry, issuer contact gone.
+
+## Round 43 (2026-10-05). BINDING. Main-session decision under round 15. Task 167, from its verification of `task/uac-r2-167-f2`.
+
+1. **Every AnonymousByDesign route's compensating control is enforced by the build (option A).** Round 12 item 1 keeps the strict rule. Under round 15, a mandatory control that only a waiver's text names is not enforced.
+   - For each explicitly anonymous route, the guard pins the control the waiver names, extending the pattern `HealthProbeRoutes` already uses for `/healthz`, `/healthz/catalog` and `/ping`. That covers all 13 others, among them `/healthz/dataverse`, `/status` and `/api/config`. A control is one of:
+     - a named rate-limit policy;
+     - `RequireWebhookSignature`;
+     - an `IsDevelopment`-only mapping.
+   - The test fails when the control is removed, swapped for a looser one, or applied in a form the guard cannot see (for example by attribute). Seed each kind.
+   - The waiver text and the pinned control must agree: a test fails when they differ.
+2. **The time-bound observation is closed too:** `MemoizedHealthCheck`'s shared evaluation gets an upper time bound, a registration `Timeout`, or both. A hung evaluation ends as a cached fault for no longer than the memo window (round 34 item 7), never as a permanently stuck state. Tested with the fake `TimeProvider`.
+
+## Round 44 (2026-10-05). BINDING. Main-session decision under round 15. Task 168, from its re-verification.
+
+1. **The grid script requires SpaarkeGridCustomizer v1.1.1 (option a).** Round 38's "the grid configuration script is unchanged" means the CONFIGURATION it writes is unchanged.
+   - Raising `$MinCustomizerVersion` to 1.1.1 is required: with v1.1.0, `-Verify` would pass while the pair and the intermediate lookups stay editable (ADR-003, fail closed).
+   - **Integration work (with the 168 merge):**
+     - A lock-step test pins `$MinCustomizerVersion` to the PCF manifest version.
+     - A C# lock-step test ties `config/regarding-filing-columns.json` `rootColumns` to `CoreAncestorResolver.CoreAncestorLookups`.
+     - The picker derives `$RequiredPairColumns` from the shared list without the hard-coded exclusion, or fails with a clear message naming the column a table lacks.
+
+## Round 45 (2026-10-05). BINDING. Main-session decisions under round 15. Task 166 relocation, from its re-verification.
+
+1. **A moved file keeps its version history (option a, completed).**
+   - **Replay:** the relocator replays the source's prior versions into the copy through the BFF identity, oldest first, with the current content last.
+     - It lists versions app-only with the existing `SpeFileStore.ListFileVersionsAsync`.
+     - It adds ONE app-only facade method, `DownloadFileVersionAsync`, to the existing SpeFileStore facade.
+     - Each upload's size is checked.
+   - **Failure:** a failed replay deletes the copy and leaves the row and the source untouched (Failed, retried).
+   - **Original authorship:** Graph cannot set a version's author or date. So the relocation ledger records each replayed version's ORIGINAL author, date and size against the new version id. `GET /api/documents/{id}/versions` reports the original author and date from that record, so the history a user sees is unchanged.
+   - **Version limit:** when the target container's version limit is lower than the source's count, the relocator reports `versions-truncated` with counts. That is a stated outcome, never silent.
+   - Tests and seeds: replay order, a failure that deletes the copy, author/date mapping, truncation.
+2. **Each in-subtree row gets its OWN copy (as built; ratified).** Round 37 item 2 said "re-pointed to the copy". One shared copy is impossible while the unique key `sprk_graphitemid_uk` (on `sprk_graphitemid` alone) is active, and the key is correct. The note states this.
+3. **A `sprk_communicationattachment` row that names the moved file but is not linked to the document is classified by subtree (option a).** The rule follows the subtree of the record its communication is regarding:
+   - inside the secure record's subtree: re-key it to the copy, or report it pending;
+   - outside: keep it (the source stays for it);
+   - undecidable: pending.
+
+   This is the same split as round 37 item 2.
+4. **A repeat call deletes the source using the witness recorded at verification (option a).**
+   - The relocation ledger records the source's size and quickXorHash when the copy is verified. A later repeat call deletes the source only if it still matches that witness.
+   - If the source was edited after the move, it no longer matches. That is reported as `source-changed-after-move`, with the row id, and the source is not deleted.
+   - That case closes through the relocator's own re-entry: re-copy, verify, re-point. Never by a manual admin step.
+5. **The verifier's other items are closed in the same round:**
+   - Guards V6/F-C: real tests that fail when each guard is removed.
+   - The two client pointer-write shapes the guard and the FLS p4a scan miss (F-D).
+   - The gate name in the deploy-order text (F-E, 23a).
+   - **Integration note:** `IRelocatedFileIndexing` takes the last free slot under the ADR010 1:1-interface ceiling. At integration, register it without a 1:1 interface if ADR-010 allows; otherwise record the ceiling change in the PR's ADR block.
+
+## Round 46 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its re-verification.
+
+1. **The caller's share after Make Secure is floored on their EFFECTIVE rights before the call (option b).**
+   - Round 40 item 2 promises the caller keeps access. A4 says "never lower existing access". F3 decides Full Access from effective rights.
+   - So a caller who held Full Access by ownership or role keeps Delete, through an explicit share at Full Access, exactly as one who held it by share.
+   - The floor is read in the same pre-write step as WhoAmI. A read failure fails closed with the existing unverifiable code.
+   - The caller never gets more than they held, and never less than Collaborate. Assign is never shared.
+   - Correct the note and the guide to say this precisely.
+   - Tests and seeds: share-held, ownership-held and role-held Full Access, Collaborate-only, and the read fault.
+2. **The scheduled backstop for `files_incomplete`.**
+   - The backstop is 147's `SecureChildReconciliationJob` (every 2 minutes). It is not a new job.
+   - Each run, it also settles the PENDING Make Secure relocations recorded in the relocation ledger, through the ONE `DocumentContainerRelocator`, with a per-run cap and a report.
+   - `-SecureTransitionDeployed` is gated on that job being registered with writes on.
+   - Round 40 named 166's migration job, which is registered disabled, so it cannot be the backstop.
+   - This is wired at integration, after 147, 150 and 166 are all on the integration branch.
+3. **§23.4 confirmed (the broader reading).**
+   - A Make Secure resume runs the full forward rule set before any write: WhoAmI, the caller's No Access check, the creator read, then the caller's proven share, with the creator in the colleague step.
+   - An administrator who finishes a record through the ribbon is shared to like any caller.
+   - A direct API call with no `transition` keeps the creator rule (F8, round 9 item 10 / round 33 item 1).
+4. **§23.1: the client can tell a non-default owner team apart.**
+   - Case: a secure root reassigned outside Spaarke to a non-default team.
+   - `can-manage-access` returns the owning team id, and whether it is the Secure Record Owners team.
+   - The ribbon offers Make Secure ("finish") when a flagged root has a container but is NOT owned by that team, just as it does when the root is user-owned.
+   - The retry's forward path re-owns the root to the Secure team. That also settles a legacy record provisioned before task 133's owner move; test that path explicitly.
+   - Accepting this as a documented edge is rejected.
+5. **The untested fail-open branch:** the RESUME's unverifiable No Access refusal gets a test that bites when seeded.
+
+## Round 47 (2026-10-05). BINDING. Main-session decisions under round 15. Task 158, from its re-verification of `task/uac-r2-158-r1c-v1`.
+
+0. **Round 39 is still owed in full by task 158's next fix round.** That round's code predated it, so the verifier found round 39 not implemented. Correct the I-11 registry row and note §6 xiii to match it.
+1. **E-158-v1-1: the complete fix in note §15.1 is applied, in task 158's lane.** 142 is merged into 158's branch and into the integration branch, and the change is small and local.
+   - **(1)** 158's reverse rule counts an Assigned-To row as justification ONLY when it is `Shared` or `Adopted`, never `CoveredByExisting`.
+   - **(2)** When 158 then removes the share:
+     - 142's `CoveredByExisting` row becomes `Skipped`, with reason `covering-share-ended`.
+     - 142's materializer runs at once. On a secure record, the assignee is suggested, not shared (owner rules).
+   - **(3)** 142's `EndAssignmentAsync` calls the inheritance's sharee-only pass for a filed secure root.
+   - Tests and seeds per step. Accepting the over-retention is rejected.
+2. **E-158-v1-2: the operator-unshare race is closed.**
+   - **Now, in task 158:** the `Declined` marker is written BEFORE the revoke.
+   - **At integration, after 140 merges:** every pass's ledger update sends `If-Match`, with the ETag it decided on. A mismatch re-reads and re-decides; there is no blind write.
+     - Use task 140's `If-Match` support on the Dataverse client (round 42). Never a second mechanism.
+     - It is an integration-checklist item with tests and seeds.
+3. **Seeding claims must be accurate.** The verifier's seeds X03, X07, X09 and X17 survived; X09 is confirmed over-retention. Each gets a test that bites.
+4. **The copy defect** (a doubled period in the Office "removed" refusal) is fixed.
+
+## Round 48 (2026-10-05). BINDING. Main-session decision under round 15. Task 132, the share-write eviction guard (re-verification of `task/uac-r2-132-f1-v1c-v1`).
+
+1. **Close the bypass CLASSES, not one shape at a time.** Each round, the verifier found one more way to reach `DataverseWebApiService`'s POA share writes around the evicting seam. The guard must instead forbid the mechanisms such a bypass needs, and the claims must state exactly what is covered.
+   - **(a) No `[UnsafeAccessor]` anywhere** in `src/server/**`. Spaarke has no legitimate use for it; it reaches private members regardless of visibility. An ArchTest (an IL scan for `UnsafeAccessorAttribute`) fails on any use. Seeded with seed U.
+   - **(b) No reflection over the Dataverse service types** in the BFF: `GetMethod(s)`, `GetMember(s)` or `InvokeMember` on `DataverseWebApiService` / `IDataverseService` types (or on a `Type` obtained from them), and no `MethodInfo.Invoke` or `CreateDelegate` against them. This uses the existing IL-scan infrastructure (`IlCallScan`). Seeded with seed R.
+   - **(c) The doc comments, the guard header and note §16.6/16.7** are rewritten to state exactly what is enforced: every compiled call path, plus a ban on `UnsafeAccessor` and on reflection over those types. Never "by construction" beyond that.
+   - **(d) The gate script's `ReassignMatter -Apply`** never overwrites a recorded `OriginalOwner`: a second run keeps the first original. Tested.
+
+## Round 49 (2026-10-05). BINDING. Main-session decisions under round 15. Task 165, from its re-verification of `task/uac-r2-165-f2-v1`.
+
+1. **Routes that reach the whole tenant or the whole container type are for Spaarke's own operator environment only (option a).**
+   - **Which routes:**
+     - security alerts and secure score (round 35 item 4);
+     - container-type permissions and consumers (round 35 item 5);
+     - any other route whose answer spans the shared SPE tenant or a shared container type.
+   - **Why:** under Model 1, every customer environment's root admin is a "platform operator" in their own environment (round 41 item 2). A root-unit check judged against one environment's own hierarchy therefore cannot confine these routes.
+   - **The marker is a BFF DEPLOYMENT setting,** for example `SpeAdmin:PlatformOperatorEnvironment`. It is not a Dataverse column, because a customer admin can edit a column.
+     - It is validated at startup, and its default is `false`, so a missing setting fails closed.
+     - It is set `true` only for Spaarke-operated environments (dev, and Spaarke's own operator environment), in their App Service configuration through the deployment scripts and Bicep.
+   - **Who may call them:** only a root-unit admin in an environment with the marker. Every other caller gets the uniform 403/404.
+   - **Docs:** the topology doc and the customer deployment guide record that customer environments never carry the marker.
+   - **Rejected:**
+     - (b) needs a per-config "shared" column that a customer admin could clear;
+     - (c) relies on an operational promise that cannot be enforced.
+   - Tests and seeds: the marker off with a root admin; the marker on with a leaf admin; the marker missing.
+2. **The verifier's criteria are owed in the same round:**
+   - **H8 resume must survive the production Cosmos serializer.**
+     - The resume record (root container id, container type id) is persisted as typed fields. Never as `JsonElement` evidence: Newtonsoft writes that as `{"valueKind":1}`.
+     - The fake repository round-trips through the production serializer, so the tests see what production sees.
+   - **A non-OData fault after the container type exists** still reports and records the type and any root container (no orphan type, no unbound root).
+   - **The docs that claim "never creates a second container"** are corrected to match the fixed code.
+   - **The creation guard's five surviving shapes** each get a bite: an absolute-URL raw POST, a class-level constant URL, a generic `PostAsJsonAsync<T>`, a cross-file PowerShell URL variable, and `-Meth Post`. D30's "fails closed on what it cannot judge" is made true, or it is reworded to exactly what is enforced.
+
+## Round 50 (2026-10-05). BINDING. Main-session decisions under round 15. Task 140, from its re-verification of `task/uac-r2-140-x1-v1c-v1`.
+
+1. **The grant-row expiry read defect is fixed on master NOW, as its own PR (option B).**
+   - The defect: since task 023, `/revoke` and re-grants over dated rows throw. `sprk_expiresdate` is DateOnly / TimeZoneIndependent, and the read does not handle that wire shape.
+   - The fix (`DataverseDateOnlyJsonConverter` plus `GrantRowWireTests`) has no schema dependency. It goes to master on a branch off master, through a PR, merged when the Router is green.
+   - Task 140 then merges on top: the same code, no conflict.
+   - Holding a live production defect behind 140's deploy gates is rejected.
+2. **A deleted issuing contact: the grant's provenance survives the delete, and the grant ends.** None of the options as framed.
+   - **Why not the framed options:**
+     - (C) `Restrict` would block deleting a contact, including privacy deletions.
+     - A cascade is ruled out by owner G2 (ii).
+     - (A) and (B) leave an undated grant that has outlived its issuer.
+   - **The fix, in task 140's schema script** (dry run / `-Apply` / `-Verify`, through the solution-membership helper):
+     - Add `sprk_grantedbycontactid`, a text column holding the issuing contact's GUID.
+     - Every write that sets or clears `sprk_grantedbycontact` sets or clears it in the same write (grant core, take-over, collapse).
+     - `-Apply` backfills it from the existing lookups.
+   - **R1:** a row whose `sprk_grantedbycontactid` is set while `sprk_grantedbycontact` is empty means the issuer was deleted. R1 deactivates the row and reports it.
+   - **Justification (CLAUDE.md §11):**
+     - *Existing:* the lookup, which `RemoveLink` erases.
+     - *Extension:* the lookup cannot outlive the row it points to.
+     - *Cost of doing nothing:* a deleted contact's grant becomes an indefinite, issuer-less grant.
+   - Tests and seeds: issuer deleted, take-over clears both, backfill.
+3. **The two unpinned guards get tests that bite:** V6, R2-ended in `Effective()`; and V11, the `Unknown()` guard for an unplanned issuer row.
+
+## Round 51 (2026-10-05). BINDING. Main-session decision under round 15. Task 147, from its re-verification (`task/uac-r2-147-r1c-v1`, ready to merge).
+
+1. **Descendants released on a move out: ratified as implemented (option a).**
+   - A descendant leaves isolation only under the re-filed row's own F3 act: Full Access on the record it left, or the row's creator.
+   - A row that was never isolated releases nothing.
+   - This is round 24 item 2 ("never release without an F3 holder's act") applied to a re-file. The re-filed row's F3 holder acts for its subtree, as the unsecuring F3 holder does for a root's children (148).
+   - **Rejected:**
+     - (b) a per-descendant check: a descendant's isolation is inherited, not its own;
+     - (c) never release: that strands a re-filed subtree.
+2. **The side pane's partial-save rollback is fixed at integration.** When the filing saves and the other fields fail, rollback reverts only the fields that failed, never the persisted filing. Test it.
+
+## Round 52 (2026-10-05). BINDING. Main-session decisions under round 15. Task 167, from its re-verification of `task/uac-r2-167-f2-v1`. The same principle as round 48: verify BEHAVIOUR against the real application wherever a guard claims behaviour. Source-text heuristics remain only with exactly stated limits.
+
+1. **Sign-in is proven at run time.** This replaces trust in the `.Succeed(` text heuristic.
+   - A test builds the REAL BFF authorization services (the real `Program` DI, as the existing real-Program tests do).
+   - It evaluates an anonymous `ClaimsPrincipal` against EVERY registered policy, and every policy that endpoints reference, through the real `IAuthorizationService`. Every one must fail, except the pinned AnonymousByDesign routes, which use no policy.
+   - This catches shadowed lambdas, reflection and any custom handler, whatever its shape.
+   - Seed it with the verifier's handler that succeeds every requirement.
+   - Keep the text rule as a fast first check, and state its limits.
+2. **The IsDevelopment-only control is proven at run time.**
+   - The real app boots with `EnvironmentName = Production`, and the test asserts from `EndpointDataSource` that no development-only route (the anonymous save-debug route and every other) is mapped.
+   - Add an IL-scan ban on any write to `IHostEnvironment.EnvironmentName` / `IWebHostEnvironment.EnvironmentName` in `src/server/**`.
+   - Seed both.
+3. **Retired-route absence is judged at run time** (refines round 34 item 4).
+   - A ledger entry whose route key is absent passes only when `ResolvedBy` is set AND the route is absent from the booted real app's `EndpointDataSource` (method plus pattern), checked by the guard itself.
+   - `ProofTest` stays as the named regression test, but the guard no longer trusts its text. Unreachable assertions therefore cannot satisfy it.
+   - Seed: a deleted route re-mapped turns the guard red.
+4. **Presence evidence:** an `Authorization = null` assignment never counts as a bearer. Better still, presence is judged at run time from `EndpointDataSource` where the rule allows it. State the remaining heuristic's limits exactly.
+5. Note 19.2 and the guard headers state exactly what is enforced at run time and what by text.
+
+## Round 53 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its second re-verification of `task/uac-r2-150-integ-c-v2`.
+
+1. **The caller-rights read fault gets a provisioning code (option b).**
+   - The code is `500 sdap.provision.caller_rights_unverifiable`, retryable, with the detail the worker wrote: "Which access you hold on this {record} could not be read, so securing it could not make sure you keep that access. Nothing was changed; you may try again."
+   - It is added to `provisioningService.ts` and to the emitted-codes list, pinned verbatim. The ribbon gets the same copy with `{record}`.
+   - **Why:** round 26 item 1 keeps codes namespaced by endpoint. F3's `sdap.unsecure.permission_unverifiable` belongs to the unsecure endpoint.
+2. **A flagged root with a container, owned by another team INSIDE the Secure Record business unit, is already isolated (option b).**
+   - Example: the retired default team, before task 144's migration.
+   - **The behaviour:**
+     - `can-manage-access` (`includeOwner`) reports it as owned by "another team inside the Secure business unit".
+     - The ribbon HIDES Make Secure there: the record is secure and isolated, and the user has nothing to finish.
+     - Moving the record to the named team is task 144's migration (script/job), which stays out of provisioning, as 144 decided.
+     - The server's 409 `owned_by_other_secure_team` stays as the API answer.
+   - **Integration checklist:** 144's migration `-Apply`/`-Verify` is a live gate before 150's ribbon ships.
+   - Tests: the ribbon is hidden for that case; the server refusal is unchanged.
+3. **The test gaps are closed:**
+   - The ribbon's "who owns it cannot be told" table uses a fetch mock that returns a real Promise, so each case runs the guard it names: record-echo, null answer, and the others. Seeds C2 and C4 bite.
+   - The ownership-held and role-held Full Access cases run DIFFERENT fixture paths, so a fake can tell them apart.
+
+## Round 54 (2026-10-05). BINDING. Main-session decisions under round 15. Task 166 relocation, from its second re-verification of `task/uac-r2-166-f1-v2`.
+
+1. **A post-move edit becomes current only if its author may still write (option a, ratified and tightened).**
+   - Every post-move edit is carried into the history.
+   - The LAST edit becomes current only when its author holds Write on the document NOW.
+   - **That Write check is read FRESH, never from the 60-second `CachedAccessDataSource`.** A Write answer cached just before Make Secure must not make a non-writer's edit current.
+   - An app-only, unknown or faulted answer means "not current" (fail closed).
+   - Test: a stale cached Write answer cannot make an edit current. Seeded.
+2. **The relocation lock lasts as long as the move.**
+   - A move now replays every prior version, so a fixed 10-minute TTL can expire mid-move.
+   - The lock is RENEWED while the relocation runs (a heartbeat with a bounded renewal interval). A move whose renewal fails stops before its next destructive step (re-point or source delete) and reports `lock-lost`. It never continues unlocked.
+   - Test: a second relocator cannot start a move while the first still holds a renewed lock. Seeded.
+3. **No intermediate edit is dropped.**
+   - When the witness has no version id, or an id is not numeric, the relocator does NOT fall back to "current only". It orders the post-move versions by their timestamps.
+   - If the order cannot be decided, it reports `history-undecidable` for that file and leaves the row and the source untouched (retried). It never silently carries only the latest.
+4. **Every fail-closed branch gets a test that bites:** Sk, Sq, Si, Sm, Sj and Sw; the version-list paging (Sd: a long history is never cut at one page); and the Unknown → never-delete witness branch.
+   - Note §22's "each new check seeded" / "every seed bit" claims are corrected to what is true.
+   - The test header comment that still says "unless it is byte-identical" (F-3) is corrected.
+
+## Round 55 (2026-10-05). BINDING. Main-session decision under round 15. Task 132, the share-write eviction, from its second re-verification of `task/uac-r2-132-f1-v1c-v2`.
+
+1. **Move the eviction INTO the share-write primitive.**
+   - **Why this, and not more bans:** three verification rounds found a new way around the guard each time (UnsafeAccessor; reflection; a VB late binder; a metadata token plus a compiled expression tree). Banning mechanisms one at a time cannot end, because any caller-side guard can be bypassed by a caller. The root-cause fix makes eviction a property of the write itself, so every route evicts, including routes no guard foresaw.
+   - **The design:**
+     - `Spaarke.Dataverse` gets ONE small hook interface, e.g. `IRecordShareWriteObserver`.
+     - `DataverseWebApiService`'s POA share writes (GrantAccess, ModifyAccess, RevokeAccess, and any other) call that observer after the write, in a `finally`, on `CancellationToken.None`. An observer fault is logged and never fails the write, the same contract as the seam.
+     - The BFF implements the observer with `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync`. It is registered unconditionally, with a Null-Object for hosts without the cache (ADR-032 P-pattern, and §10 asymmetric-registration rule F.1).
+     - The current seam (`DataverseRecordShareService`) stops evicting separately, so no write evicts twice; or it becomes the observer itself. Choose whichever leaves ONE eviction path.
+   - **Justification (CLAUDE.md §11):**
+     - *Existing:* the seam evicts, but only for its own callers.
+     - *Extension:* the observer extends the primitive the seam already wraps.
+     - *Cost of doing nothing:* any non-seam route leaves stale access in the cache.
+   - **Tests:**
+     - A behaviour test proves an eviction for a write reached WITHOUT the seam: the verifier's seeds V and M, adapted as real tests calling the primitive by reflection and by expression.
+     - An observer fault does not fail the write.
+     - Exactly one eviction per write.
+     - Seed: remove the observer call, and the tests go red.
+2. **The IL guards stay as defence in depth,** but every comment, the guard header and note §16.8 now say what is TRUE:
+   - eviction is guaranteed by the primitive for every route that goes through `DataverseWebApiService`;
+   - the guards additionally stop a raw HTTP call to the share actions that bypasses that class. Enumerate exactly the shapes they check.
+   - Drop "no method chosen or invoked by reflection" and every other claim the guards cannot back.
+3. **The Unicode-escape `[UnsafeAccessor]` outside the scan set** (seed U5) is caught by scanning the compiled IL of EVERY `src/server` project, not the source text.
+
+## Owner round 56 (2026-10-05). BINDING. The bar for finishing a lane, and over-engineering. REPLACES round 15's "never defer, never sideline" standard from now on.
+
+The owner, verbatim: "it is important that we address issues that impact the quality, performance, and maintainability and extendability of the solution … However, the other risk is 'overengineering' and this is also a risk because it introduces complexity and unnecessary cost. This project has already exceeded the budget by 10x." The owner adopted the rule below and the round cap from now on, and chose to KEEP all work already decided or built (rounds 1–55 stand; nothing is reverted or simplified retroactively).
+
+1. **Every finding is classified first.**
+   - **FIX in the lane:**
+     - **(a) Runtime defects:** wrong behaviour that a real user, operator or job path can trigger. That includes security gaps, fail-open, data loss and cross-customer exposure.
+     - **(b) Maintainability defects that compound:** duplicate mechanisms, docs or comments that contradict the code, important behaviour with no behaviour test, fragile coupling.
+     - **(c) Performance problems** with real, measurable impact.
+   - **RECORD as a known limit** (one line each in the task note's "Known limits" section and the PR description; no fix round):
+     - **(d)** guard or static-analysis bypasses that only deliberately adversarial code in our own repository can reach (reflection, late binding, unsafe accessors, unusual spellings);
+     - **(e)** rare edges that already fail closed and have no realistic trigger;
+     - **(f)** requests to seed-prove minor, non-security branches.
+2. **The over-engineering check.** Any NEW column, job, setting, abstraction, service or guard must pass CLAUDE.md §11's three questions against a realistic failure. A fix is never bigger than the problem it solves. When two fixes work, choose the simpler one. Verifiers report over-engineering as a finding.
+3. **The round cap.** From now on, each lane gets at most ONE more fix round after its current one. Whatever remains at the cap is classified: (a)–(c) items are escalated to the main session, and (d)–(f) items go to Known limits.
+4. **Process.** Verifiers classify each finding (a)–(f) and lead with (a)–(c). Fixers fix (a)–(c) and record (d)–(f) as known limits, without building new machinery for them.
+5. **Batch 5:** scope review before starting (owner, 2026-10-05). For each of the 29 tasks: what it delivers, its risk if dropped, and keep / merge / cut. The owner decides.
+
+## Round 57 (2026-10-05). BINDING. Main-session decisions under owner round 56. Task 165, from its final re-verification of `task/uac-r2-165-f2-v2`.
+
+1. **Only dev carries the operator marker for now (option c).**
+   - Spaarke's production operator environment does not exist yet: `spaarke-bff-prod` / "demo" is stopped.
+   - When it is stood up, the marker is added in the same change that stands it up (registry key, `.bicepparam`, the guard's list, the App Service setting).
+   - Until then, every other environment refuses the 8 routes. This is the smallest fail-closed choice.
+2. **D38 accepted (option a).** The DELEGATED container-type routes stay outside the marker.
+   - Graph authorizes them with the caller's OWN token, and the BFF lends no identity, so the caller's SharePoint Embedded administrator role is the boundary.
+   - Gating them would only remove legitimate screens.
+3. **Fixed in 165's final round** (owner round 56: class a or b):
+   - **The deploy script's marker parse fails open.** `[bool]"false"` is true. `Deploy-BffApi.ps1` accepts only a JSON boolean and fails on any other type. The registry ArchTest rejects string values.
+   - **Security fail-closed branches with no biting test.** These get tests (seeds VB5, VB6, VB7 and VL7 must turn red):
+     - the container-type rule's Unverifiable → 503 path;
+     - the scope read-fault path;
+     - the 5000-row truncation path;
+     - `QuarantineClearedSince`'s time clause.
+4. **Known limit** (class d, no fix): the creation guard does not see a `System.Net.WebClient` upload written by deliberately unusual script code.
+
+## Round 58 (2026-10-05). BINDING. Main-session decisions under owner round 56. Task 158, from its final re-verification of `task/uac-r2-158-r1c-v2`.
+
+1. **A No Access entry added LATER also ends the walled person's direct shares on secure records filed under that parent (option a; class a, security).**
+   - Task 143's `NoAccessShareEnforcer` already removes the person's share on the walled record and syncs its children.
+   - It now also reaches secure work assignments and projects filed under that record, using the ONE existing parent walk (`SecureRootInheritance.ReadSecureParentsAsync`) and the existing revoke.
+   - It never strands the last reader (S5). Failures report as children-incomplete.
+   - Round 39 item 2 says every share honours every secure parent's list, and a share-time check alone would leave a wall that does not wall. No new mechanism.
+2. **Fixed in 158's final round** (class a and b):
+   - **(a) The failed-revoke regression from round 47 item 2.** If the revoke after the `Declined` marker fails or is not confirmed, the marker is reverted, in the same request (`finally`). A share the operator did not actually remove is never marked declined, and the parent's unshare still ends it.
+   - **(a) Step 4.5's by-parent ledger read** counts only rows still in force. It excludes Revoked and ended rows in the query, so a large provenance history cannot wedge the unsecure. Truncation of rows still in force still fails closed.
+   - **(b) The already-ordinary-path 500 copy** no longer says "Calling again completes it" where a repeat call cannot. State what the operator must do instead.
+3. **Known limit** (class f): the Revoked filter in `EndWhatAParentPassedOnAsync` (seed Z28) is equivalent by construction. No test is added.
+
+## Owner round 59 (2026-10-05). BINDING. Batch 5 scope (review: `notes/batch5-scope-review-2026-10-05.md`).
+
+**The owner, on the standard:** "The key to this review is making sure we are not over-engineering; but if the work is required then we need to do it — this isn't meant to take short cuts or remove important functionality." There is no fixed budget: "we need this functionality to be robust and comprehensive because it is what makes the system broadly usable." Owner round 56's bar stands, read with this clarification: required functionality is built fully; machinery that answers no realistic failure is not.
+
+1. **036 is built (owner).** At least what is needed so that internal users in Teams or the external app put core records at no risk.
+   - **Read set:** Dataverse decides which records an internal user sees, through the impersonated root set (FR-20), behind the flag.
+   - **Writes:** EVERY write route (create to-do, upload, create event, every other write in the external/Teams surface) checks the caller's real Dataverse rights on the target record, through the existing `CallerRecordAccessProbe`, before writing. No write relies on the fixed Read|Write|Create grant.
+   - Truncation reuses the existing `Capped` / `CapCeiling`. The runbook goes in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
+   - The ADR-034 amendment (§6.5 path B) is put to the owner with the task.
+2. **Deferred to a new project (owner): 056, 088, 089, 094, 095.**
+   - Each is filed as a GitHub issue.
+   - FR-32 point-in-time replay stays formally unmet in this project. Dataverse audit keeps accumulating, so no data is lost.
+3. **The promised features are kept (owner): 153, 101, 067, and 064's single per-record read that feeds them; also 099.**
+   - 153 covers project, matter and work assignment only. The Organization/Contact banners are cut: walls there are visible in 154's subgrids.
+   - 067 is a read-only No Access section plus suppressed and vetoed rows (066 is folded in). Authoring stays in 154's form, so there is ONE place to author.
+4. **154 keeps a record picker (main session, applying this round's "no removal of important functionality").**
+   - Pasting record GUIDs is not usable, and it is how the silent-wall defect arises.
+   - Reuse the EXISTING polymorphic record picker (the RegardingResolver / PolymorphicPicker the filing forms use). Do not build the new ObjectRecordPicker PCF.
+   - The save-time id check, and the reader rejecting a non-canonical id, are kept as well.
+   - The display-name column `sprk_objectrecordname` is kept ONLY if the picker cannot show the record without it.
+5. **Kept as reviewed:**
+   - 105 (paging);
+   - 113 (ISS-028);
+   - 114 (with its owner decision on the licence proxy and Assigned-To);
+   - 136 (live session only);
+   - 090 (trimmed; it absorbs 058, 082's paragraph, 087's doc correction and 089's known-gap line).
+6. **Merged as reviewed:**
+   - 003 → 130's live gate;
+   - 013 → 141 G-8;
+   - 037 and 039 → 136's CIAM session;
+   - 047 → the batch-4 deploy gates;
+   - 058 → 090;
+   - 066 → 067.
+7. **Cut as reviewed (each closed with its reason):**
+   - 054: known limit (fails closed); close #964.
+   - 055: the stamp already does it; the per-child block is a known limit.
+   - 057 and 069: already tested, or nothing left to test.
+   - 082: PR #840's guard exists.
+   - 087: Dataverse audit is the source.
+   - 110: met by 109; close #999.
+   - 111: no measurable impact.
+   - 112: rare and toward less access; with 140's If-Match now available it can be revisited cheaply if it ever occurs.
+   - 170: rename only. The duplicate record filter it exposed goes to the new project as a class (b) item.
+8. **Order:**
+   - 154 (security fix first);
+   - 113, 114, 105 and 101 in parallel;
+   - 064, then 153 and 067, then 099 (one PCF deploy);
+   - 036 once batch 4 is deployed (it can start alongside);
+   - 090 last.
+
+## Round 60 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 150's integration lane, from its final verification (`task/uac-r2-150-integ-d`, ready to merge).
+
+1. **Wizard copy for `sdap.provision.caller_rights_unverifiable` stays as written (option a).**
+   - The wizard reads: "Which access you hold on this project could not be read, so securing it could not make sure you keep that access. Nothing was changed."
+   - The retry is offered by the host action, under the FR-31 copy rule (the message never advises trying again).
+   - The server and the ribbon keep round 53's full sentence.
+   - The wizards send no transition, so they do not receive this code today.
+2. **The release order for 150's ribbon versus task 144's migration (option b).**
+   - **The ribbon ships once the DEFAULT-TEAM part of 144's migration is complete:**
+     - the dry-run plan has no MIGRATE rows;
+     - the retired default team no longer holds the Secure Record Owner role.
+   - **The full `-Verify` exit 0 is run AFTER that,** once the ribbon's Make Secure "finish" has settled the NOT-ISOLATED rows. These are user-owned legacy records, records owned by a team outside the business unit, and flagged records left before the owner move.
+   - **Why:** the ribbon is the tool that finishes those rows. Gating it on their absence would require settling them by hand first, which is a circular order.
+   - **Docs that follow this answer:** the README, guide §7d.1, `Set-AccessRibbon.ps1` help and note §9 G-11. Updated at integration.
+
+## Round 61 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 158, from its final verification (`task/uac-r2-158-h`, ready to merge).
+
+1. **A No Access entry on a secure parent reaches EVERY secure record filed below it, at any depth (option b, transitive).** This is class (a), security.
+   - Example: a work assignment filed under a project that is filed under the matter. Projects and work assignments can be filed under each other (task 158), so chains deeper than one level exist. A one-level reach leaves a walled person's direct share on the grandchild.
+   - **The same rule at share time:** `CheckRecordAndSecureParentsAsync` checks EVERY secure ancestor's list, not only the direct parent's. This is round 39 item 2, read as "every secure parent" up the chain.
+   - **Implementation:**
+     - The ONE existing walk (`SecureRootInheritance.ReadSecureParentsAsync` upward and `ListFiledRootsAsync` downward) iterates level by level.
+     - It is cycle-safe (a visited set) and bounded by a small maximum depth. Reaching the bound reports `children-incomplete` / Unverifiable, which fails closed.
+     - No second walk, no new service.
+   - **Flapping:** a record is enforced once per run (the existing reached set), so the job does not flap.
+   - **Tests:** a grandchild direct share removed by the matter's entry; a grandchild share refused at share time; a cycle; the depth bound.
+   - **Done at integration** as part of the 158 merge, not as another lane round.
+2. **Interpretation xxxiv is ratified (option a):** N5 for filed records requires the entry author's Write on BOTH the walled parent and each filed record. An entry never strips access on a record its author cannot change.
+3. **Known limits** (class e/f): the verifier's surviving seeds V01, V07, V08 and V09, and the two LOW items. They are recorded in 158's note, and the 5-minute job covers each one.
+
+## Round 62 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 165, from its final verification (`task/uac-r2-165-h`, at the round cap).
+
+1. **The operator marker is bound to the App Service it is deployed to (option A; class a, fail-open).**
+   - **The defect:** `Deploy-BffApi.ps1` reads the marker by the `-Environment` LABEL, which defaults to `dev`. A deploy that names another App Service without `-Environment` would set `SpeAdmin__PlatformOperatorEnvironment=true` on it.
+   - **The fix:** when the marker is declared true, the script refuses unless `-AppServiceName` and `-ResourceGroupName` equal that registry entry's `appServiceName` / `resourceGroup`. Put this in the existing block or in `scripts/common/SpeAdminOperatorMarker.ps1`.
+   - **Test:** a seedable ArchTest case through the existing PowerShell driver (the marker is declared true, the App Service differs, the deploy refuses).
+   - **Rejected:** option (B), making `-Environment` mandatory, changes every existing dev invocation for no extra safety once (A) is in place. Option (C) leaves a fail-open path.
+2. **The stand-up recipe is corrected (class b).** Guide §6.5.4 and the comment on the `demo` entry in `config/environments.json` must say that the stand-up change also makes that registry entry reachable through `-Environment`, since `demo` is not in the `ValidateSet`. The same mismatch exists in the CORS comment and is fixed there too.
+3. **Known limits** (165 note §15.5):
+   - Class (d): a case-variant spelling of the registry key. The parse is case-insensitive and the ArchTest is case-sensitive.
+   - Class (f): no test proves the deploy exits on an invalid declaration. It fails closed anyway.
+4. **Done at integration** as part of the 165 merge (the lane is at its cap).
+
+## Round 63 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 132, from its final verification (`task/uac-r2-132-g`, ready to merge).
+
+1. **Known limit (class f, option A):** the observer's `CancellationToken.None` contract is not pinned by a test. The current invalidators ignore the token, so there is no runtime effect. Add one line to 132's note "Known limits" at PR time; no code change.
+2. **The L2 guard gap is filed with its owner (option A): #1310.** `CosmosProvisioningSecretGuardTests` resolves DLLs by directory name and skips the L2 Api assembly. It belongs to the customer-provisioning lane, and is not fixed here.
+3. **Integration note (148 × 132):**
+   - Since round 55, every share write made through `DataverseWebApiService` evicts by itself. 148's child share mirroring and removal are therefore covered without any change.
+   - Child OWNER changes (re-own on secure/unsecure, the job) still call `InvalidateRecordOwnerChangeAsync`, using `CancellationToken.None`. This is checked and tested at the 132 merge (the "148 × 132 child evictions" item).
+
+## Round 64 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. The 150 + 166 merges and the Make Secure relocation wiring (integ `9fec61fec`).
+
+1. **`PUT /api/v1/documents/{id}` is KEPT,** although 166 deleted it as having no caller.
+   - **Why:** round 28 makes it Compose's document re-file route (147).
+   - **What it keeps:** 146's AppendTo check. Any body that names a storage-pointer field is refused with 400 `sdap.documents.pointer_field_refused` before any write (round 21's F0).
+   - **PR text:** it is not in the "routes the sweep deleted" list.
+2. **Documents whose file cannot be found never block Make Secure.**
+   - They are reported as `filesUnresolvable` and are never moved, re-pointed or deleted. That includes archive rows holding a document GUID, word-add-in-r1's archive bug.
+   - Otherwise a record with one such row would answer `files_incomplete` forever.
+3. **The backstop also settles isolated documents whose file is still in a shared business-unit container,** as well as those with an open ledger step. A failed copy is never written to the ledger, and this is the only way it gets finished (round 46 item 2's intent).
+4. **Known limit (class e):** a repeat call whose only work was an owed source delete answers 409 "already provisioned". The work is done; the message does not say so.
+
+## Round 65 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Integration of 165 and 167.
+
+1. **165's secret-name allow-list after master `bb8ba7251` (option A, carried to its conclusion).**
+   - Master moved SPE Admin onto the BFF's own managed identity. It deleted `SpeAdminTokenProvider` and every Key Vault secret read, and made `keyVaultSecretName` optional. What round 35 item 3 and round 41 item 4 guarded no longer exists.
+   - **The fix:**
+     - REMOVE the read guard and the filter's 409. Kept, they would block the Model 1 config that `bb8ba7251` made work.
+     - CHECK whether any code still READS `sprk_keyvaultsecretname`.
+   - **If NOTHING reads it** (class b, a dead mechanism), also remove:
+     - the 400 validation on config POST/PUT;
+     - `Test-SpeConfigSecretName.ps1` / `Repair-SpeConfigSecretName.ps1` and their gate;
+     - round 41 item 4's dev-config repair live step.
+
+     Record that SPE Admin authenticates as the BFF identity, and that the column is retained only as data, in the topology doc and 165's note.
+   - **If something still reads it:** keep ONLY the 400 validation of a supplied name.
+   - **Resolving the merge:** take master's managed-identity design in `SpeAdminGraphService` / `SpeAdminTokenProvider` (modify/delete → delete). Re-apply 165's other work (container binding, the operator marker, type routes) on top. Then do round 62 items 1–3.
+2. **The five sweep entries fixed in code but still Pending** (S-24, S-18, S-78, S-64, S-65): ONE generic ledger credit, not five new scanner vocabularies.
+   - **The credit (`ProvenByTest`):** a present route's entry is resolved when `ResolvedBy` is set AND `ProofTest` names a test that drives the REAL app (WebApplicationFactory / the booted BFF) and asserts the route's authorization outcome. That means a refusal for an unauthorized caller and success for an authorized one.
+   - **Enforcement:** the guard checks that the named test exists, runs (is not skipped) and references the route.
+   - **The cap:** this is the only new vocabulary. It does not loosen any existing rule.
+   - Use it for those five, and for any later fix shape the scanner cannot see.
+
+## Round 66 (2026-10-05). BINDING. OWNER decision. Task 148's open escalation (r2 verifier item 3).
+
+1. **The double-fault stranded mirror on unsecure is ACCEPTED as a known limit (option C).** The owner chose "Accept and document" over the write-ahead marker (A) and the schema column (B).
+   - **The case:** on unsecure, a released child's mirror revoke fails, AND putting it back on the Secure team also fails. The call answers 500 `children_incomplete` and logs Critical once, naming the row and the manual revoke. A second `/unsecure-project` call then treats the child as never isolated (round 22) and completes. The record's former sharees keep their share on that one child.
+   - **Why accepted (round 56):** it takes two consecutive write failures on the same row, it is bounded to the record's own former sharees, and it is logged with the row id. Option A would amend round 22, add a marker principal and a standing live invariant (a memberless team in every environment). That is a fix bigger than the problem.
+   - **Recorded:** as a known limit in 148's note, the PR description, and the deployment guide's residual-risk section (the operator's manual revoke). No code change.
+
+## Round 67 (2026-10-06). BINDING. OWNER decision. Task 114 (external licensed users) rescoped with Restricted.
+
+Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" reading. The flag stays and is load-bearing for Restricted.
+
+1. **What Restricted means.** A Restricted record (`sprk_accesspermission` = Restricted 100000002) is for internal use only. *Internal* = a licensed system user who is **not** flagged `sprk_isexternal = true`. Contact-based access never reaches a Restricted record, even an internal person's work contact. This is already the behaviour: `RootRecordFlags.RemovesContactSourcedAccess`.
+2. **Sharing rule** ("+ User" `/share-user` and Assigned-To auto-grants, task 142's materializer; ONE rule in `ClassifyEligibility`):
+
+   | Record | `sprk_isexternal` false or blank | `sprk_isexternal` true |
+   |---|---|---|
+   | Not Restricted | share | share (2026-09-18 ruling) |
+   | Restricted | share | **refuse** |
+
+   The standard Share dialog can only share with licensed users anyway, so the BFF adds no licence check: enabled + person + the table above.
+3. **Blank = not external, everywhere** (owner: "sprk_isexternal means they're external"). `SystemUserIdentityResolver.IsExternalAsync` (internal-only messages) changes to match: blank is internal, not fail-closed external. One-off data step per environment: set B2B guests (`#EXT#` in the user name) to `sprk_isexternal = true`, with a dry-run listing first; nothing else is changed.
+4. **Becoming Restricted removes existing shares held by users with `sprk_isexternal = true`.** No other shares are removed.
+5. **The standard (OOB) Share dialog on Restricted records:**
+   - **(a) Primary:** hide the OOB Share command on Restricted records with a ribbon rule, so sharing goes through Manage Access "+ User", which applies the rule.
+   - **(b) and (c) Backups**, "if they don't create too much work; unlikely these scenarios will arise":
+     - (b) the reconciliation job removes a share held by a user flagged external on a Restricted record;
+     - (c) Manage Access shows such a share as "External user — no access" until it is removed.
+
+## Round 68 (2026-10-06). BINDING. OWNER decisions on the batch-4 live-gate findings.
+
+1. **G149-2:** a Web API `GrantAccess`/`RevokeAccess` is an acceptable stand-in for the model-driven Share dialog. Task 149 completes on the G149-1/G149-2 evidence.
+2. **Create-then-open on secure records:** the Events API and Office to-do routes create rows with no inline share, so the creator can't open a new row for up to 2 minutes, until the share-mirror job runs. ACCEPTED (inside the existing window).
+3. **Empty SPE containers from the gate runs:** delete them. None is referenced by any Dataverse project, matter, work assignment, business unit or document (checked 2026-10-06). The BFF has no container-delete route and the admin's Graph token is refused, so deletion is an operator step (SharePoint admin). The 15 ids:
+   - `b!1jQ90fRNREqIkel3wEl2txG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!4ltjdXaQMEGKlLr47q0m6RG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!8qdU0gEubUSu29rQVtpvehG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!DuRySBK9FkKk2wSDxRigwhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!ECpwsE3P2Em14S3B84uYOxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`
+   - `b!HkqHE0XETUCPMjmQJXU3YBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!IRjcuov6dU-QV2n8wNvGgxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!Q93-JrZ7fUmviHObJDHmyhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!UhVkyYyZrEKopsCjLi3dfxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!UhxDf-Qp9UKCLyeglKKvdhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!ZxwACqn6EEKP99-lPgOiBhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!_0H4eQgAXkm7AAo66_apUBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!_yZXxbMiOESIRAX0EKNSlhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!qZ9Qj5EIfkKIBIESyeRL1xG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+4. **Event `b52562e5`** has a record type and no regarding link, so its two to-dos stay unstampable. That is fine.
+5. **Make Secure on a record that already has documents** strands those documents for every OBO read path, until the broker-only document task lands. The owner chose NOT to add a temporary guard ("it just risks a regression and somehow missing the reversion later"). Recorded as a known risk.
+6. **Broker-only document gap (upload403 investigation):** a new task is ADDED to the front of batch 5. Its scope depends on the Office-edit option, which is pending.
+
+## Round 69 (2026-10-06). BINDING. OWNER decision. SPE document access: broker-only everywhere, with JIT Office edit. New task 171.
+
+1. **Broker-only for ALL containers** (environment/root, business-unit, per-record secure), for system users and contacts alike: the BFF checks Dataverse, then reads and writes bytes app-only. Access follows Dataverse privileges with no membership to manage. Owner: "this is critical otherwise SPE wouldn't work for any users!"
+2. **Office edit:** just-in-time permission for a system user with Write on the record (Dataverse decides, as the caller), the narrowest kind SPE supports. A reconciliation pass removes it when Write goes away. This is the ONE exception to the 2026-08-25 "no user is ever granted a container permission" rule.
+3. **Contacts** (external and workforce-contact) are included in broker-only and verified on secure containers. They never receive an SPE permission (SPE accepts only Entra members or guests), so a contact edits by downloading and uploading a new version.
+4. **Why not membership as the model:** a container member can open every file in that container directly through Office or SharePoint, whatever Dataverse says about the record the file belongs to. That cannot honour per-record privileges, even with one container per customer environment, and per-record secure containers would multiply the lists to keep in sync.
+5. **Task 171** owns it, first in batch 5. It escalates if Office edit needs a container-level role, because of the exposure on business-unit containers.
+
+## Round 70 (2026-10-06). BINDING. OWNER decision. Office edit and container membership (task 171).
+
+- **Premise (owner):** SPE access is container-level, not per file.
+- **Option (c) chosen:** internal system users (`sprk_isexternal` not true) are standing WRITERS on the environment/BU container, kept in sync automatically (created, enabled, moved, disabled, flagged external). Content narrower than all internal users is made Secure, which gives it its own container. Owner: "this is e.g., why we have secure containers".
+- **Secure containers:** no standing members. JIT membership for Office edit is granted to users with Write on the record and removed when Write goes away.
+- **Users flagged external** are never members of an environment/BU container. Every non-edit byte path stays broker-only (app-only after the Dataverse check) on all containers.
+- **Accepted consequence:** for non-secure documents, Dataverse privileges finer than "internal user" are not enforced on a direct SharePoint/Office path.
+
+## Round 71 (2026-10-06). BINDING. OWNER decision. Grants whose record is gone.
+
+- **Problem:** deleting a root record leaves its contact grants (`sprk_externalrecordaccess`, including Assigned-To auto-grants) ACTIVE with an empty record lookup. The lookup can only clear its link on delete, because of the Dataverse one-cascade-parent limit.
+- **Owner: "yes add this check/deactivation".** The existing `ExternalAccessReconciliationJob` gains rule R4: it deactivates an active grant whose record is gone, through the same lifecycle path as R1-R3. Ledger rows get the equivalent cleanup in `AssignedAccessReconciliationJob` if that is a small extension.
+- **The rule honours the job's mode.** On dev it only reports until the owner decides `ExternalAccess:Reconciliation:WritesEnabled` (task 137).
+
+## Round 72 (2026-10-06). BINDING. OWNER decisions on task 171's open items.
+
+1. **F4: ADD the locked item-id copy.** A field-security-locked `sprk_graphitemidbound` ("Spaarke BFF-Managed Field Writers" profile, so only the BFF writes it), written wherever the BFF sets a pointer. The pointer check requires `sprk_graphitemid` to equal it. A one-off backfill copies the current value (the pre-lock residual is accepted, as it was for the drive id).
+2. **F10: REFUSE share-link** for documents on secure or Restricted records (clear message). Standard documents keep it.
+3. **"Modified by" = the BFF app for app-only writes: ACCEPTED.** Owner: "if it is technically convoluted then ok". Graph's driveItem `createdBy`/`lastModifiedBy` are system-set and read-only; the SharePoint `ValidateUpdateListItem` author/editor rewrite is not supported on SPE containers. Spaarke records the person, and Office/Word desktop edits show the real user.
+4. **Delete the 20 empty test SPE containers** (ids in `notes/batch4-live-gates-2026-10-06.md` and round 68). The BFF has no delete route and the admin Graph token is refused, so the owner runs it as a SharePoint admin step.
+5. **The owner is available for the screen session now** (2026-10-06).
+
+## Round 73 (2026-10-06): #1011 reassigned to this project
+
+- **From** spaarkeai-word-add-in-r1 (pasted by the owner): GitHub #1011 reopened and assigned to unified-access-control-r2 (owner decision 2026-10-06). GitHub had auto-closed it on 2026-09-30 when #960 merged, reading commit `34beafe78`'s "do not close #1011" as a closing keyword.
+- **Defect:** `MembershipFieldDiscoveryService` synthesizes Owner targets `{systemuser, team}` and keeps only the first match, so `ownerid` is always one SystemUser descriptor. A team-owned record (the D-11 convention) resolves to nobody through its Owner column. Task 043 routed this project's access checks around it via `owningteam`; the resolver itself was never repaired.
+- **Action:** task 172 created (`tasks/172-membership-resolver-team-owned-owner-column.poml`). Bind every matched identity type of a polymorphic lookup; the people-targeting surface (A3, task 152) stays byte-identical; the C-1 name-keyed allowance stays. Regression test: a team-owned record resolves to that team's members. PR text uses "refs #1011" only.
+- **Owed to spaarkeai-word-add-in-r1:** whether any Office-route access result changes (their saves create team-owned `sprk_document` / `sprk_todo`). Answered from task 172's step-0 trace.
+
+## Round 74 (2026-10-06): BINDING. OWNER correction of the review round limits
+
+- **Withdrawn:** "at most 2 fix rounds; escalate any F1 still open instead of starting round 3" (the 2026-10-06 hygiene rule, CLAUDE.md standing directives, repo task-execute Step 9.5). The owner: "we should never allow known broken code to not be fixed just because it takes more than 2 rounds ... the policy change was to avoid unnecessary testing checks and pseudo fixes."
+- **In force:** limits cut review ceremony, never fixing. That means fix-diff-scoped re-checks, one full verifier pass (two for auth/security), no speculative findings and no pseudo-fixes. Fixing continues until no F-class finding remains. Escalate on non-convergence or an owner-only decision.
+- **Also binding:** every defect found is fixed directly or surfaced to the owner, "whether or not it was directly or indirectly caused by the current work or only uncovered or found in the course of the work ... this is critical."
+- **Applied:** project CLAUDE.md; project memory; repo-wide PR #1336.
+- **Consequence for task 171:** the round-2 re-verify findings V1–V7 are all fixed in a further round, then a fix-diff-scoped check.
+
+## Round 75 (2026-10-06): BINDING. OWNER delegation; 036's ADR-034 amendment APPROVED
+
+- **The owner:** "for 036 if an ADR decision is needed and it is consistent with objectives of this project then approve it."
+- **What is approved:** the ADR-034 section 6.5 path B amendment in task 036's tension block, as reworded per owner D1 (2026-09-30).
+  - For systemuser ACCESS on the SPA/Teams plane, Dataverse's own answer (the FR-20 impersonated read) replaces the membership rules.
+  - So BU and role-depth access is honoured exactly as in the MDA, and BU-ownership matching no longer over-grants.
+  - The membership walk stays for non-access scoping and for the contact plane.
+- **Why it is consistent:**
+  - It is objective D1 itself: a user with access in the MDA has access in Teams/SPA.
+  - Path A was rejected because the BU guess is wrong in general.
+  - Path C was rejected because no compliant shape makes a pattern match equal Dataverse's answer.
+- **Unchanged:**
+  - The concise `.claude/adr/ADR-034` text and the full `docs/adr` text merge with or before 036's PR, and the PR cites this round.
+  - The flag stays off until 142 and 143 are complete.
+- **Standing:** future ADR decisions inside 036's scope are delegated on the same test (consistent with the project's objectives). Each one is still recorded as a round and cited in the PR. A decision that is NOT clearly consistent comes back to the owner.
+
+## Round 76 (2026-10-06): BINDING. OWNER decisions on task 114's findings
+
+1. **Restricted wins over the last-reader rule.**
+   - On a Restricted record, a user flagged `sprk_isexternal = true` keeps no share, even as the record's last reader.
+   - The removal reports `no-internal-reader` so an administrator can share the record with an internal user. Admins still see it.
+   - The same rule applies in provisioning: an external-flagged creator or Make Secure caller gets no share on a Restricted record.
+   - The skip text is "{name} is flagged as an external user and can't be given access to a Restricted record."
+2. **The 'Spaarke Demo' team holds System Administrator: not deliberate.** Filed as #1343 (least-privilege role for demo users).
+- **Also filed under the round-74 rule** (found in passing during 114):
+  - #1344: CA2024 breaks `Spaarke.sln -warnaserror`.
+  - #1345: three ui-components jest suites fail on master.
+- **Earlier, from task 172:** #1339 (byRole attribution) and #1340 (membership role/identity vocabulary).
+
+## Round 77 (2026-10-07): BINDING. OWNER decision: accept the business-unit read gap on non-secure Restricted records
+
+- **The gap:** a licensed user flagged `sprk_isexternal = true` can still read a NON-secure Restricted record in their own business unit through the model-driven app. Dataverse's business-unit read privilege applies whatever the shares are, so removing shares can't stop it.
+- **Decision:** accept it as a known limit. The rejected alternatives were a separate business unit for external-flagged users, and making Restricted imply secure.
+- **Still enforced (task 114):**
+  - no share is given or kept;
+  - the OOB Share is hidden;
+  - the external SPA/Teams plane vetoes Restricted records for external-flagged system users (added after the 114 verifier's K1);
+  - secure Restricted records are fully closed.
+- **Recorded in:** task 114's note and PR as a known limit.
+
+## Round 78 (2026-10-07): BINDING. OWNER decision: secure-only records may be shared with external-flagged system users
+
+- **The question:** the owner's suggested refusal text (test feedback on TrackingFieldTrio 1.0.36) said "Restricted and secure records cannot be shared with external users", but the rule (round 67) bars external-flagged users only on Restricted records.
+- **Decision (owner, verbatim):** "we should allow external systemusers (e.g., outside counsel who have Spaarke licenses should have access)".
+- **So:** `sprk_isexternal` is consulted only on Restricted records, Secure – Restricted included. A secure record that is not Restricted can be shared with an external-flagged, licensed system user. This is the rule as built by task 114, so nothing changes.
+- **Copy:** the refusal reads "... Restricted records cannot be shared with external users." (PR #1369); it does not mention secure.
+
+## Round 79 (2026-10-07/08): BINDING. OWNER decisions from the Manage Access test rounds
+
+- **Modal standard:** `SprkModal` is the canonical modal. Manage Access stays on it; WizardShell is for step flows only, and Manage Access has no steps. Not moved to a code-page dialog.
+- **Lookup over a modal:** "the lookup should always be on top of the parent modal." Applied to Manage Access and the email composer (#1371) through `SprkModal` `sidePaneLayering` (PR #1389). Docking left is only the fallback when the pane cannot be layered above the modal.
+- **Reconciliation settings on dev:** approved by the owner ("if it is just a bff ... that's fine").
+  - `ExternalAccess__Reconciliation__WritesEnabled=true`: the report-only run first showed 0 planned changes across R1–R4 (9 grants scanned), and the first write-mode run changed 0.
+  - `Communication__OwnershipHoldAlertUserIds__0` set to ralph.schroeder@spaarke.com (`1d02f31c…`).
+  - Set 2026-10-08 ~00:51Z; the BFF restarted and is healthy.
+- **Test containers:** the owner approved the cleanup of the 21 empty test containers; the owner runs `Remove-TestContainers.ps1` as SharePoint admin.
+- **Restricted share:** the owner confirmed it works (the "+ User" filter and the named refusal).
+
+## Round 80 (2026-10-08): BINDING. OWNER decision: re-adding a contact whose grant has lapsed restores it at the picked level
+
+- **The case:** Manage Access "+ Contact" re-adds a contact whose grant has lapsed. `/invite-and-grant` sends no expiry.
+  - After task 113's pre-write check, the server wrote nothing yet answered 200 "granted <level>".
+  - A later expiry renewal would revive the OLD, possibly higher, level.
+- **Decision ("Restore at picked level"):** a re-add is an explicit SET. It restores the grant at the PICKED level with the default 90-day expiry; the server supplies that expiry when the existing row has lapsed.
+  - The grantor ceiling and the contact-issuer cap still bound the result.
+  - A ledger entry is adopted only when the grant is written.
+- **Rejected:** refusing with a 409, because the Expiration toolbar would then restore the old level; and shipping 113 as it was.
+- **Applied in:** task 113, PR #1406.
+
+## Round 81 (2026-10-08): BINDING. OWNER decision: child records show their parent's access permission; a parentless child keeps its own
+
+- **Trigger:** UAT. A To Do created through the Word web add-in on a document under Restricted matter PAT-176903 showed `sprk_accesspermission` = Standard. The peer word-add-in-r1 traced it: ownership was correct (`CoreAncestorResolver.StampAsync` fails closed; `RecordOwnershipResolver` applies secure-if-any), but no BFF path writes the child's `sprk_accesspermission` (Office, the wizards, `ChildRecordEndpoints.cs`), so it kept the default. Effective access was already right: Restricted bars external users through the root.
+- **Decision:**
+  - **A child WITH a parent inherits** the parent's `sprk_accesspermission`: To Do, Event, Communication and Document. The owner added `sprk_accesspermission` (the global choice) to `sprk_document` live on 2026-10-08; it must be brought into source.
+  - **A child WITHOUT a parent keeps its own value**, which the user sets.
+  - **Parentless value is recorded only; no new enforcement** (owner, 2026-10-08: "This is fine (BUT in future we might need to revisit)"). A parented child's protection keeps coming from the parent (every `sprk_regarding*` lookup, ownership to the Secure team, mirrored shares, Restricted bars external users).
+  - **Control:** a permission control on these child records, but NOT TrackingFieldTrio on Communication (email).
+- **Implementation shape (adopted from the peer's advice):** write the value ONCE in the shared stamp/ownership path (`CoreAncestorResolver` / `RecordOwnershipResolver`), never an Office-only write; the ≤2-minute reconcile keeps it in step on re-file or a parent change; the field is locked with "inherited from X" while the record has a parent.
+- **Rejected:** the peer's "retire or lock the column" (communication model): the owner wants the value visible.
+- **Doc drift to fix in the task:** `docs/data-model/sprk_communication.md:12` (child carries no permission of its own) and `unified-access-control-cascade.md:37` (column not on `sprk_todo`).
+- **Revisit later (owner):** whether a parentless child's own value should be enforced.
+
+## Round 82 (2026-10-08): BINDING. OWNER decision: the parent's permissions control a filed child, whatever the child's own secure flag says
+
+- **The case:** a work assignment or project filed under a secure matter or project, not yet flagged `sprk_issecure` (inheritance pending, Refused or Failed). The #1410 fix (PR #1419) walked secure ancestors only for children flagged secure, so a person walled off the parent could still see such a child in Teams/SPA. Inheritance can end Refused or Failed, so the gap could be permanent.
+- **Decision (owner):** "It should be that the parent permissions control." A secure parent's No Access entries (and its access) govern a filed child regardless of the child's own flag.
+- **Applied in:**
+  - PR #1419 (#1410): the read-time veto walks every work assignment or project that has a secure ancestor, not only those flagged secure. The verifier gives the fix shape and cost; `fix1410` implements it.
+  - PR #1411 (task 064): the per-record report counts an entry reached through a secure parent as in force even when the filed record's flag is false, and even when the same entry is also on the direct path (pass-2 F3).
+- **Already consistent:** the share-time guard (`SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`) checks parents for such a record.
+- **Relationship to Q4:** Q4 ("No Access applies to internal users on SECURE records") is read with "secure" meaning the record or any filing ancestor.
+
+## Round 83 (2026-10-08): BINDING. OWNER decisions on the open list ("follow recommendation" unless noted)
+
+1. **No Access record picker:** follow-up task: RegardingResolver in a "link only" mode (no core-ancestor stamp) plus `sprk_objectrecordname`.
+2. **Task 101 views:** keep overdue shares in "External Shares Expiring in 30 Days"; add Granted By beside Created By.
+3. **Task 105:** seed 250 test documents on dev for the paging live gate; delete them afterwards.
+4. **#1396:** add the secure-ownership layer for grant rows (`sprk_externalrecordaccess` on secure records owned like the record), as a small task.
+5. **Task 064:** the No Access Reason stays hidden from Write holders (as built).
+6. **#1350:** replace the share-link with an open-record link (SharePoint refuses sharing links on CSP container sites).
+7. **Hook cap:** raise `.claude/hooks/reinject-project-state.ps1`'s 15,000-character cap to about 20,000 (repo-wide).
+8. **"My events":** moot. Master already shows events the caller created or is assigned to (task 097, owner decision B; `EventEndpoints.cs:518-520`). Batch-4 O-1 is closed.
+9. **Copilot agent in dev:** "yes I think so". Task 164 (j) checks it live and records "not available" if it is not.
+10. **#1425:** round 82 applies to external contacts too: a contact walled on a secure parent is denied the records filed under it, at read time and at grant time.
+11. **Task 153 O1:** BOTH: a non-clickable red form banner plus a clickable TrackingFieldTrio indicator that opens Manage Access.
+- **TrackingFieldTrio 1.0.39:** dark mode PASS (owner). Lookup-pane placement accepted as the SprkModal standard; no further check.
+- **Hands-on checks** for 171/114/batch 4 will be done by the owner in the SPA and the apps (owner, 2026-10-08).
+
+## Round 84 (2026-10-08): BINDING. OWNER decision: a child's access always follows its parent, both ways, and is locked while it has a parent
+
+- **The question:** found by the task 067 verifier. The server applied Secure/Limited/Restricted from a record's OWN flags only, so a work assignment filed under a secure matter but not yet flagged secure (inheritance pending, Refused or Failed) kept its org-wide and standing contact grants (#1442).
+- **Owner (verbatim):** "Child access should always follow parent; if parent changes, then child changes. A protection is that if a child has a parent then the access cannot be changed manually (e.g. its locked)."
+- **Follow-ups answered the same day:**
+  - **Un-securing cascades ("Child follows"):** when a parent goes from Secure back to not secure, its filed children become not secure too. This REPLACES round 6 item 4 ("parent unsecured → children stay secure; no unsecure cascade").
+  - **Scope ("all children"):** work assignments and projects filed under a parent take the parent's `sprk_issecure` AND `sprk_accesspermission`. To Do, Event, Communication and Document take `sprk_accesspermission` (round 81 / task 173).
+- **Rule:**
+  - A record WITH a parent: effective Secure and Access Permission are the parent's (the most restrictive across several parents). They change when the parent changes. Users cannot set them on the child: the fields and the Make Secure / Remove Secure / Update Access commands are locked or hidden while a parent exists.
+  - A record WITHOUT a parent keeps and edits its own values (round 81 for the four child types: recorded only).
+  - Enforcement uses the effective (parent-derived) values on every path:
+    - the read-time veto and cancellation;
+    - grant time;
+    - the No Access enforcer;
+    - share mirroring;
+    - the Manage Access display.
+  - Until the stored flag catches up, the server computes the value from the filing chain and fails closed.
+- **Applied in:** PR #1419 (No Access via the parent, round 82); #1442 (cancellation and flags follow the parent); #1425 (contact plane); task 173 (the four child types' Access Permission); a new task for work assignments and projects (flag cascade both ways, lock, effective flags in enforcement); task 067's modal reads the effective value once the server exposes it.
+- **Superseded:** round 6 item 4 (no unsecure cascade) and its task 158 constraint. Also any rule that a filed child's Secure can be removed by an explicit act while it still has a parent (F3 now applies only to parentless records).
+
+## Round 85 (2026-10-08): BINDING. OWNER decisions: evidence stand-ins, Key Vault rule, banner wording ("follow your recommendations")
+
+- **A. Task 047:** the API run that provisioned a secure project (G4, batch4-live-gates-2026-10-06:571) stands in for the Create Project wizard run. 047 closes.
+- **B. Task 143 (v):** an agent-made Web API share stands in for the MDA Share dialog (as for G149-2, round 68).
+- **C. Task 162 (i)/(j):** testuser1 stands in for uac.child.
+- **D. Tasks 146 and 166 (f):** second-internal-user checks are accepted as test-proven (146: `SecureDesignationRemovalTests`; 166 (f): its unit tests).
+- **E. Task 105:** closes on the API result (250 documents, no `truncated`); the SPA notice check is waived (the notice renders only on that flag).
+- **F. Key Vault:** agents never read secrets from the prod Key Vault (`sprk-prod-kv`) for dev checks; a dev gate that needs a prod-only credential stops and asks. Standing rule in the project CLAUDE.md §5. Context: gatesA read app `170c98e1`'s secret from `sprk-prod-kv` (read only, never printed) for Graph container reads.
+- **G. Task 153 wording:** (a) the banners no longer point at "the person icon"; (b) the indicator shows only No Access. The pill already shows Secure, so the SECURE banner points to Manage Access, not to a marker.
+
+## Round 86 (2026-10-08): BINDING. OWNER decision: ADR-006 amended (path B) for thin form-event scripts
+
+- **Conflict (CLAUDE.md §6.5):** ADR-006 forbade new framework-free JS web resources. Task 153's banner (`sprk_accessstatus_banner.js`) and task 173's lock (`sprk_accesspermission_inherited.js`) need form or field notifications and per-record field state. Only form scripts can reach those: a PCF cannot raise form notifications or change another control, and a Code Page is a dialog or page. Four such scripts had already shipped, flagged only as warnings (`sprk_bff_auth.js`, `sprk_assignedaccess_postsave.js`, `sprk_noaccessentry_postsave.js`, `sprk_todo_regarding_presave.js`).
+- **Owner:** "if this can't be done any other way then approve". Path B, amendment (version 2.1, PR #1462).
+- **Limits:**
+  - form events only;
+  - platform form APIs, plus the BFF through `Spaarke.BffAuth`, only;
+  - no UI of its own;
+  - no access decision;
+  - fails safe;
+  - namespaced, idempotent and jest-tested;
+  - registered by a checked-in operator script.
+- **Sequencing:** PR #1462 merges before PR #1450 and PR #1458.
+
+## Round 87 (2026-10-09): BINDING. OWNER decision: the parent sets a FLOOR; a child may be stricter (refines round 84)
+
+Asked during task 175 (PR #1503). Verifier pass 1 had found F1: a re-file un-secured a work assignment without F3. Owner answers, verbatim where quoted:
+
+1. **Inheritance:** "a child created on a secured (or whatever access level) [parent] is inherited by its children; if the secure parent is made unsecure then the children are changed to unsecure; but a user can update the child of an unsecure back to secure."
+2. **Own vs inherited:** a value the user set ON the child stays when the parent later loosens. Only INHERITED values follow the parent down. (Example: the child is made secure by hand, the parent is later secured and then un-secured, and the child stays secure.)
+3. **Access Permission** works the same way as Secure. The parent's value is the minimum. A user may set a child stricter by hand; looser than the parent is refused (locked). When the parent loosens, inherited values follow it down.
+4. **Who may:** the same as today. Anyone who can manage access may make a child stricter, as Make Secure works now. Removing the extra strictness, never below the parent, needs Full Access or the creator (F3).
+5. **Re-file:** a secure work assignment with no parent, filed under an ordinary matter, STAYS secure. A re-file never loosens a child; it can only raise it to the new parent's floor. This closes verifier F1.
+6. **Lock scope:** Secure and Access Permission only. People can still be granted or shared access on a child within the parent's limits. `/grant`, `/share-user` and Update Access stay available.
+7. **Documents:** "if it is technically easier for documents to then remain in both containers that is acceptable". Owner rule to confirm against the build: "in a secure 'family' of records all documents added to any of the members of the family will go to the same secure container".
+
+**Supersedes:** round 84's "always equal parent / locked" where it conflicts. The parent is a floor, not an equality. Round 84's un-secure cascade still applies, to INHERITED values only.
+
+## Round 88 (2026-10-09): BINDING. OWNER decision: one SPE container per secure family (#1506)
+
+Asked after a build check showed that every secure record gets its own container, including inherited-secure ones (task 158). The consequence: uploads under a secure work assignment filed under a secure matter are refused with `container_ancestor_ambiguous` (#1506).
+
+1. **Family container:** the TOP-most secure record in the chain owns the one container. Every record secure because of it uses that container: work assignments, projects, and their To Do / Event / Message / Document records. No new container is created for inherited-secure records. A record secured on its own, with no secure ancestor, starts a new family with its own container.
+2. **Joining a family:** new files go to the family container. Existing files may stay where they are. The owner adds: "is it more efficient and easier that if a record already has a secure container, and a new family member is added then that secure container becomes the family's container". In other words, adopt an existing secure container as the family's container instead of creating a new one, where that works. The owner also asked whether search is container-constrained, i.e. whether a search can only be directed at one container. That is being researched; the answer goes to the owner before the design is fixed.
+3. **Un-secure:** the files MOVE to the business-unit container. They do not stay in the old secure container. This replaces round 87 item 7's "remain in both containers is acceptable" for the un-secure case.
+
+**Status:** the design goes in a new task (container routing for secure families). It must not land in task 175, which leaves container routing untouched.
+
+## Round 89 (2026-10-09): BINDING. OWNER decisions: Manage Access needs the Share privilege; Create buttons follow the Create privilege; build internal grant notification
+
+Asked after the owner's hands-on testing as testuser1 (Spaarke Basic User role).
+
+1. **Who may manage access:** Dataverse's own **Share** privilege on the table (set per security role) is required IN ADDITION to Write on the record. This replaces the task-118 / D-1 "Write on the record" delegation rule as the sole test. It applies to Manage Access, grant, share, revoke and expiry changes (the delegation filter) and to `can-manage-access`, so the affordance hides for roles without Share. → task 179.
+2. **Create buttons:** every custom Create / wizard ribbon button (Create Event, Create Project, Create To Do, the other wizards) hides when the user lacks the Create privilege on the target table. Use Dataverse's standard privilege rule, no code. A read-only role then sees no create commands. → task 180.
+3. **Internal grant notification: "Build it now".** When an internal user is given access (a grant to a contact linked to an internal user, or a user share), they are notified with a link to the record. Reuse task 100's in-app notification (deep link) unless the design shows a reason not to. The dev-facing notice text "Internal notify (deep-link) is not yet available… (escalated; see project notes)" is replaced with user-facing wording. → task 181.
+4. Task 174's stand-in (testuser1's linked contact for the CIAM contact) is accepted, and 174 is closed.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
@@ -380,6 +1336,129 @@ On UNSECURE, a root sharee's share is removed from a child ONLY if that child wa
   6. **The Manage Access gate ignores both flags** (`RecordAccessGateEndpoint.cs:105-107`).
   7. **`sprk_communication` has its own `sprk_accesspermission`, which the BFF never reads** (`ExternalParticipationService.cs:549-553`).
   8. **The access-permission pill is never disabled** (`TrackingFieldTrio.tsx:335-367`).
+
+## Round 90 (2026-10-10): BINDING. OWNER: wrap up the core of uac-r2; fix only what impacts it, file the rest
+
+The owner, after the task count kept rising (74 tasks added 2026-09-28..10-09): "we need to wrap up the core uac-r2 functionality. BUT my concern ... is that we do not want to have buried issues that will only later come up and be more difficult to fix. BUT ALSO we need to get this project completed. ... focus on the core objectives of uac-r2, and if we come across issues that will directly impact uac-r2 or are significant functional bugs that will make the system not work (breaking) then fix those. For any others put into issues and we will address them after the project is completed."
+
+1. **Fix in this project** only a finding that (a) directly impacts uac-r2's objectives (access control: who can read, write, share, see or be notified, and its enforcement, reconciliation and bounds), or (b) is a significant functional bug that breaks the system on a real path. Security and data-loss defects in uac-r2's own code are (a).
+2. **Everything else becomes a GitHub issue, not a project task.** File it with evidence and report it; nothing is buried. It is worked after the project closes. A new project task needs (1).
+3. **Closing rule (accepted recommendation B):** a task closes when its code is merged and deployed and its server-side live gate passes. The owner's browser checks stay on `owner-hands-on-checklist-2026-10-08.md` and do not hold the task open. A failed owner check reopens the work as a fix, under rule 1.
+4. **Batch-4 sweep (accepted recommendation C):** one pass runs the batch-4 live checks that need nothing from the owner and closes those that pass. Tasks that need owner inputs (CIAM identities for 140, users for 171, the 165 role grant) are labelled as waiting on the owner.
+5. Unchanged: no round cap on fixing an in-scope defect; one full verifier pass (two for auth/security); escalate on non-convergence.
+
+## Round 91 (2026-10-10): BINDING. OWNER decisions on task 179 (PR #1586)
+
+1. **Roles:** remove `prvShare` on matter, project and work assignment from "Spaarke Office Add In User" (the add-in needs Read). Core User keeps Share and is the "can manage access" role. The main session applies this on dev with a read-back when 179 deploys.
+2. **No Access removal needs Share:** removing or deactivating an entry loosens access, so the remover needs Write and Share on each covered record. Adding an entry stays Write.
+3. **Assigned-To shares:** keep the current policy (ADR-034 A4); filed as #1595 for after the project.
+4. **Filed secure children:** inherited (mirrored) shares carry Share when the root share holds it. A root sharee who can manage access on the root can manage it on its filed children. This supersedes round 11's "no Share on mirrored children" for the Share bit only.
+5. **The main session accepted three executor deviations:** `/no-access/enforce` keeps the table Write (the org-owned table has no Share privilege); `/assigned-access/sync` keeps Write; Make Secure, Remove Secure, Close and Invite need Share.
+
+## Round 92 (2026-10-10): OWNER: batch-4 proof
+
+- 137: the testuser1 linked-contact stand-in is accepted, as for 174. The CIAM sign-in step stays on checklist §4.
+- 166 (f): the unit tests are accepted as proof (no dev identity lacks the Create privilege), as for gate 19.
+
+## Round 93 (2026-10-10): OWNER: No Access entry removal is enforced through roles
+
+No BFF path removes or deactivates an entry: users do it in the model-driven app, and only `sprk_noaccessentry` table privileges govern that. The owner chose roles only, for wrap-up: only roles that also hold Share may hold Write or Delete on the entry table. On dev the only human role with Write is Spaarke Access Administrator (Write at Global, no Delete, no Share on matter, project or work assignment). So it is assigned only together with a role that holds Share, for example Core User, and the setup guides say so. Per-record enforcement (a BFF remove route) is filed as #1601 for after the project.
+
+## Round 94 (2026-10-12): OWNER: external file access to secure records, and the secure-family model
+
+**External file access** (the investigation is at origin/master `91cbac7b8`): contacts never hold an SPE permission. Every byte is streamed by the BFF, app-only, after the evaluator decides, through `/api/v1/external` routes in `ExternalProjectDataEndpoints.cs`. Decisions on the gaps:
+- **G1 (owner restatement): a file is filed to exactly ONE record.** A document in a secure container is reachable only by those with access to that secure document. File bytes that also exist outside the secure container belong to a separate Document, controlled by its own record. Consequence: the external document routes authorize by the document's OWN filing record (the one whose container holds it), not by `_sprk_project_value` alone, and no document may confer access through a second record.
+- **G2: enforce document-level Restricted on external routes.**
+- **G3: approved as recommended.** On Make Secure, Restricted, a No Access entry or a revoke, enumerate and delete the item's sharing-link permissions app-only. Delete relocated sources permanently, not soft-delete. Retiring links altogether (#1350) is still acceptable.
+- **G4: approved as recommended.** Read the container type's sharing setting, set `isSharingRestricted = true`, and add that check to the provisioning verifier. Changing it is a tenant configuration write, so the owner runs it or approves it explicitly.
+- **G5: approved as recommended.** Check the recipients of secure or Restricted attachments: a recipient without a grant, or on the No Access list, is refused or sent a link instead.
+- **G6 (#1072/056) and G7 (#1566):** stay as filed.
+- **G8:** live proof with a real CIAM sign-in through the External SPA, run by the owner from steps the agent provides. It needs the four CIAM identities from task 140.
+
+**Secure family (direction, design note pending, not yet built).** The owner rejects one business unit or owner team per secure family because it doesn't scale. Preferred direction:
+- a `sprk_securefamily` table, with a lookup of the same name on every family table, as the canonical "umbrella" relationship;
+- a single lookup, so a child belongs to at most one family; a write that would put a child under two families is refused;
+- ownership stays with Secure Record Owners (isolation);
+- one Dataverse **access team** per family, which each family row is shared with once; internal access is team membership;
+- external contacts are unaffected: they are still BFF-evaluated grants, and the family gives the evaluator a one-hop key.
+
+The owner asked for research on the practical and technical limits of access teams and POA growth (running), and asked whether the umbrella family serves other aggregation needs ("update all related records", "all decisions across related records").
+
+## Round 95 (2026-10-12): OWNER: ontology records join the standard child contract; secure-family team type
+
+1. **Approved: ontology Signals and Decision Records adopt the standard child-record contract.** They get polymorphic regarding plus typed subject lookups, core-ancestor stamps re-derived on re-file, resolver ownership through the single write path, lineage rows, reconciler and share-mirror reach, and the census guard.
+   - **D-34 split:** the decision context (`sprk_corerecordid`, `sprk_corerecordtype`, the policy version, the snapshot) is immutable. Filing, stamps, owner and shares follow the subject's current family.
+   - **Split of work:** ontology implements the schema delta and the writers; UAC adds the lineage rows and the census guard (F4), reviews F8, and reviews every ontology PR.
+   - Contract, acceptance criteria and sequencing: [ontology-standard-child-contract-2026-10-12.md](ontology-standard-child-contract-2026-10-12.md).
+2. **Secure family: research done.** It supersedes round 94's "access team per family" as the recommendation. **The agent now recommends an owner team per family** (zero POA, no per-row share, a one-query drift check, isolation between families by construction, `ReassignObjectsOwner` per family), conditional on seven spikes. The owner has not yet chosen between an owner team and an access team. Full comparison: [secure-family-design-research-2026-10-12.md](secure-family-design-research-2026-10-12.md).
+3. **#1746 suppression walk (peer question).**
+   - Start from the subject row itself, so the subject's own owner never stops the walk.
+   - An ordinary-team-owned *intermediate* stops it. That is the resolver's own rule, bounded by the recent-changes pass, which writes by default.
+   - An Undetermined, Failed or faulted walk counts as secure, or the hit is skipped. It is never ordinary.
+
+## Round 96 (2026-10-12): OWNER: personal To Do decision-record owner (Q23); creator-person column (Q27)
+
+- **Q23, decided** (recorded by ontology as D-134). "The owner should be the Assigned To contact's team." A decision record on a personal (no-core) To Do is owned by the business-unit default team of the To Do's Assigned To. The path is contact → its systemuser → that user's business unit → its default team, the resolver's existing user → BU → team path.
+  - Before this decision: the To Do's own owning team, that is, the creator's.
+  - Shipped in ontology #1665 or a follow-up. If it needs a change to `RecordOwnershipResolver`, that is UAC's file: ontology sends the shape first.
+  - **Edge cases, owner answers (2026-10-12):**
+    - items 1, 5 and 6 (no Assigned To, no systemuser, several systemusers, or a disabled user) → the To Do's own team;
+    - item 2: **follow the assignee**. When Assigned To changes, the existing DRs and Signals are re-owned to the new assignee's team. A later core filing still follows the re-file rule. This needs a reconciler, because Assigned To can change from the client; ontology maps the shape first.
+    - item 3: the Signal follows the same rule;
+    - item 4: the To Do's own owner is unchanged.
+  - **"Personal" means filed under nothing** (owner, 2026-10-12, review K2). A no-core To Do filed under a non-core parent, such as an unfiled document, keeps the To Do's own team.
+  - Application and non-interactive users are not people (the round-67 `ClassifyEligibility` rule), so they count as "no single user" and the fallback applies (#1665 review F2).
+  - **Item 7 is binding, not a choice:** any secure parent wins (SRO or Refused), per F1/C9.
+  - Resolver surface: `RecordOwnershipContext.ForUserTeam(Guid)`, added by ontology and reviewed by UAC. The assignee lookup goes through `systemuser.sprk_primarycontact`, filtered to `isdisabled = false`, and must return exactly one user.
+- **Q27, decided:** the owner created `sprk_createdbyperson` on `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal` on spaarkedev1 (#1777, #1783).
+  - Read-only verify on 2026-10-12, with the scratch copy of `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`:
+    - **OK:** lookup → systemuser, nav `sprk_CreatedByPerson`, cascade NoCascade/RemoveLink.
+    - **Different but harmless:** the relationship names are `sprk_{table}_CreatedByPerson_systemuser`.
+  - **Gaps:**
+    - the columns are NOT field-secured, and the BFF-Managed Readers/Writers grants are missing;
+    - the columns are not in SpaarkeCore.
+  - Put to the owner whether UAC may apply the field security and solution membership on dev.
+
+- **E11 email bind on the CIAM plane, decided 2026-10-12/13** (source: provisioning T240d items 1–2, task 184).
+  - E11 binds only on this environment's intent: an active contact-level grant, OR a pending invite.
+  - Task 184 found that no existing record marks a pending invite. The owner then chose **a new column**, `contact.sprk_externalinvitedon`: set by the BFF invite flow, field-secured to the BFF (BFF-Managed Readers/Writers profiles), never cleared. "Pending" means it is set and the contact has no oid binding.
+  - An invite of someone who already has a CIAM account (Graph ObjectConflict) becomes ExistingAccount, with a sign-in email.
+- **Model 1 workforce sign-in: under discussion with the owner.**
+  - Owner requirements:
+    - the customer sees which of its workforce has signed in, on the contact table;
+    - there are no pre-created contacts, so the first sign-in shows a registration form.
+  - Recommendation put to the owner: (A) home-tenant sign-in, with the BFF accepting the listed customer tenants on the external routes, and the task 141 member test as designed. The alternative is (B) guest invite plus a recorded oid set.
+  - Open with the owner: A or B, approval of new registrations, and baseline access.
+- **Model 1 workforce sign-in: SUPERSEDED.** This record originally said "round 97: option A, no B2B guests, all in UAC task 186". That record was written against a branch that lacked ADR-028 A6–A8, and as written it contradicted A8. The settled decision is **ADR-028 A9** (owner-confirmed 2026-10-13, PR #1810, driven by SPA-r3):
+  1. **Licensed core users** stay B2B guests in the Spaarke tenant (A8, unchanged).
+  2. **Workforce contacts** sign in to the browser SPA with their company account, at the customer's home directory, through one multi-tenant Spaarke SPA client. They are not B2B guests.
+     - The BFF accepts their token only on: an exact `iss` for a tid in `CustomerTenantIds`, this stamp's audience, a user token, and `acct = 0`.
+     - They are keyed on (tid, oid), never on email.
+     - First sign-in returns `registration_required`, then a profile form; there is NO approval.
+     - Teams is deferred.
+  3. **A licensed user** reaching the SPA with their company account resolves through a stored link (tid, oid) → systemuserid, never by email.
+  4. **Partners** stay on CIAM.
+  5. **Ownership:** SPA-r3 owns workforce sign-in and registration end to end. UAC owns only baseline access: how the role "Spaarke Internal Contact User (Workforce)" applies (task 186, re-scoped).
+     - Round 97's other answers still stand under A9: no approval, and the Workforce role as baseline. The owner created that role on dev in the root BU (9deaac9c-02c7-f111-a05c-0022482913fc, 655 privileges, no `sprk_servicerequest` privilege).
+  6. **Process lesson:** before recording an auth decision, merge master and check it against ADR-028 (project CLAUDE.md §3).
+
+## Round 97 (2026-10-13): OWNER: task 184 after provisioning's cross-customer review
+
+The decisions follow provisioning's review of #1801, findings F1 and F2.
+
+- **F1, account squatting: merge #1801 now, follow up in task 185.**
+  - The squatting route: someone with User.Create in spaarkeextid pre-creates `victim@acme`. Customer Y's invite then hits ExistingAccount and sets the marker, so the squatter binds to Y's contact.
+  - #1801 still narrows exposure: master binds ANY matching email, with no intent at all.
+  - Task 185 adds the invite-code proof: a single-use code, stored only as a hash, that E11 requires on both the marker leg and the grant-only leg.
+  - Provisioning approved #1801 on this basis and records 185 as a T240d PRODUCTION GATE.
+- **F2, marker age: a 30-day window, inside #1801.** E11 honours `sprk_externalinvitedon` only while it is 30 days old or less. A re-invite refreshes it, and a far-future date is refused.
+- **Deny codes: keep them distinct.** The owner accepted the small existence leak, because the distinct code helps support. `contact_not_invited` stays separate from `contact_not_found`.
+- **Organization-wide grants:** E11 counts only a grant on the contact itself as intent (as built). The owner asked how organization-grant contacts get access, and the answer was given in session.
+  - There is no self sign-up: every external person gets a CIAM identity through an invite.
+  - A new-account invite binds the oid in the same request. An existing-account invite binds on first sign-in through the marker.
+  - The organization grant supplies the access; the invite supplies the identity.
+  - Counting organization grants as intent would let any CIAM account with a matching email bind to any member contact of a granted organization, which is the squatting route made wider.
+- **Dev schema:** `Set-ExternalInviteMarkerSchema.ps1 -Apply` ran on spaarkedev1 and `-Verify` passes. The first `-Apply` hit MetadataCache lag (0x80041103) at the field-level-security step; a re-run completed it.
 
 ## C7 research
 
@@ -470,3 +1549,31 @@ On UNSECURE, a root sharee's share is removed from a child ONLY if that child wa
 - **Daily Briefing:**
   - The **to-do channel filters `owninguser = caller`** (`DailyBriefingCollector.cs:1027`), so team-owned to-dos vanish. The peer was told.
   - Matters, projects and events come through the membership resolver's `owningteam` term. A BU default team contains the whole BU, so these would surface for everyone in the BU.
+
+## Round 98 (2026-10-13): OWNER: task 185 invite-code design
+
+The full record is in `notes/185-invite-code-design.md` §11.
+- **The hash:** salted SHA-256.
+- **The grant leg:** option (c). Granting access to an unbound contact that has an email sends the invite, with the code, automatically, so a contact that was granted but never invited is still matched on first sign-in, from that email. A grant alone, with no code, never binds.
+- **The plaintext code:** fixed in 185's scope with a "system mail" send option (no AI enrichment, the link removed from the stored body, no Sent Items).
+- **Q5–Q9:** accepted as recommended.
+- **The owner's question** "is the plaintext copy really a threat?" was answered: low risk. Using it needs a compromised stamp that can create CIAM accounts AND a co-operating reader inside the customer. Also, invite emails were going through AI triage like any other email.
+
+## Round 99 (2026-10-14): OWNER: external stale-stamp fix shape (task 187, #1857)
+
+- **The finding** (ontology-r1, mapped by uac-r2 on `630373cbb`): external read surfaces admit a child row by its COPIED core-ancestor stamp only. A stale copy, or a "carrier" row (its own pair names ordinary M; another lookup puts it under secure X; never restamped), lists behind the D-123 wall to an external reader of M. The surfaces affected are to-dos, events, PATCH/DELETE on to-dos, messages, notifications, invoice threads and document related links. `ReconciledEmailFiling` was refuted as an exposure: it hides rows, it does not expose them.
+- **Options offered:** (A) an owner-team check: cheap and fail-closed, but it over-hides carriers; (B) a live-parent check: precise, with a bounded extra read; (A then B).
+- **The owner chose (B) "Live-parent check (precise)".** Each external row read resolves the live roots of its source and carrier parents and evaluates them alongside the stamped roots. The walk is bounded and fails closed. A row whose live parents the caller can read stays visible.
+
+## Round 100 (2026-10-14): OWNER: task 187 scope questions
+
+1. **Invoice message threads:** "Yes, match the family rule". The owner asked whether the secure family already covers this. It does not: the family is the decided direction (rounds 88/94/95: `sprk_securefamily` as the one-hop key) but is not built, and the team type is still open. Until it exists, 187 walks each invoice-thread message's OTHER parents, and a message also filed under secure X is withheld. The invoice itself is not re-walked, so option A (2026-10-11, "inherit") still holds for ordinary messages. **Follow-up:** when the secure family lands, 187's walk is replaced by the family key (same rule, one hop).
+2. **Invoices module `/fetch`:** "Yes, apply it". An invoice whose live parents include a secure root the caller can't read is withheld.
+3. **Document delete-own:** "Yes, same check". It answers 403 behind the wall and 503 on a read failure, as to-dos and events do.
+
+## Round 100b (2026-10-14): OWNER: secure-family team type = owner team per family (C)
+
+- **The owner:** "owner team is my understanding". It had not been recorded: round 95 left it open. The owner asked for an independent technical judgement, not agreement.
+- **The agent's assessment:** C stands on its own merits. The research recommended C **against** the owner's own round 94 suggestion (B, an access team). It matches Microsoft's guidance for a recurring user set. It has no per-row grant, a one-query drift check, isolation between families by construction, and `ReassignObjectsOwner` per family. The family key itself is the more direct design: today membership is a computed lineage walk, which is the root of #1506, #1857 (task 187) and the share-mirror drift. With the key, the walk runs once at write time, in one owner, and every reader uses one hop.
+- **Not more design research.** The §7 spikes verify platform behaviour and are the build's first phase, with go/no-go criteria. Spike 1 is dropped (B only). Spike 3 (BU depth through team membership) would hit B equally, so it can't flip the choice. Genuinely open design items: nested families (task 158), and whether to generalise to a "record family" (§8).
+- **Recorded:** C is decided, conditional on spikes 2–7. Not built; it needs its own task or project. Task 187's walk ships now and is replaced by the family key later.

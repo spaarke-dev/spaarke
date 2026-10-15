@@ -4,7 +4,7 @@
     <title>Rename FinanceAuthorizationFilter to RecordTargetAuthorizationFilter once the route-sweep tasks (159-166) are integrated: it is now the shared record-target filter for finance, AI, communications and other routes, so its name and its deny log lines must stop saying "Finance"</title>
     <phase>Session 27 — route authorization sweep (owner rounds 9-10), follow-up</phase>
     <gate>after 159, 161, 162, 163, 164 and 166 are integrated into work/unified-access-control-r2 (they reuse the filter under its current name, by the 2026-10-03 main-session ruling)</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits an authorization filter's type and every call site on the BFF route surface, plus RouteAuthorizationGuardTests' filter-name recognition (task 074/167), which credits filters by name. A rename that the guard does not learn would read every route as ungated.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,4 +84,9 @@
     <output type="code">updated call sites and tests</output>
     <output type="doc">projects/unified-access-control-r2/notes/task-170-rename-record-target-filter.md (baseline comparison, call-site list, suite counts)</output>
   </outputs>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 170)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Rename only: about 20 src files, 7 test files and 3 docs would change and nothing would be fixed. RouteAuthorizationGuardTests matches filters by name, so a missed rename would make routes look ungated. Optionally change the deny log text from 'Finance' to 'Record' while FinanceAuthorizationFilter.cs is already being edited.</amendment>
+    <amendment n="2" title="Follow-up">The duplicate record filter it exposed (FinanceAuthorizationFilter vs RecordRouteAccessAuthorizationFilter, scope review side finding 1) goes to a new project as a class (b) item: GitHub #1307. This task's issue is #1109.</amendment>
+  </amendments>
 </task>

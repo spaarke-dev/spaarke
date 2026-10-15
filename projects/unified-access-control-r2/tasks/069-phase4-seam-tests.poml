@@ -4,7 +4,7 @@
     <title>Phase 4 seam tests: share lifecycle, secure-project explicit-only access, MDA/SPA parity pins (FR-28/29/30)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 061, 063, 064 merged</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,4 +83,8 @@
   <notes>spec.md FR-28/29/30, NFR-04/05 remain their own gates (Phase 1 canary, task 062).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 069)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Already tested: InternalUserShareTests.cs (~60 tests), UnifiedEvaluatorSeamTests.cs:223-318 and 826-854, DelegationRuleCharacterizationTests.cs:64-100. Report accuracy is moot once 064's report endpoint is cut; the narrowed 064 brings its own tests.</amendment>
+  </amendments>
 </task>
