@@ -155,8 +155,12 @@ jobs:
             # Which diffs run Tier 2 `Full Unit Tests` (run-unit-tests below). Deliberately SEPARATE
             # from `bff`: `bff` also gates Tier 1's bff_changed, Tier 2 lint and plugin-size, and
             # widening it would put more work into the blocking tier (p95 <= 3 min budget). This is
-            # a SUPERSET of `bff` that adds every other path that compiles into, or is run by, a
-            # test project in Spaarke.sln. The Tier 2 shards run `dotnet test` over the WHOLE
+            # a SUPERSET of `bff` that adds the paths that compile into a test project in Spaarke.sln,
+            # plus the non-code files those tests read and assert on (Bicep templates, seed-data
+            # manifest, config/, Dataverse solution XML, scripts/). Known gap: ~40 source-scan tests in
+            # Sprk.Bff.Api.Tests also read src/client/** and src/solutions/**; adding those would run the
+            # four Windows shards on nearly every client PR, so they are covered by the nightly full run
+            # (nightly-health.yml) instead. The Tier 2 shards run `dotnet test` over the WHOLE
             # solution with a namespace filter, and `rest` is the complement of the other shards,
             # so any test project in the solution runs there; the only thing missing was this trigger.
             # Before 2026-10-15 these paths ran in two standalone jobs in ci-standalone-checks.yml
@@ -167,6 +171,14 @@ jobs:
               - 'tests/integration/**'
               - 'tests/Insights/**'
               - 'tests/fixtures/**'
+              # Non-code inputs that tests in these projects read and assert on (review of #1922):
+              # ControlPlane tests pin infrastructure/bicep/** and scripts/seed-data/manifest.yaml,
+              # IntegrationTests read src/dataverse/solutions/** and config/**, BFF source-scan
+              # tests read src/dataverse/** and scripts/**.
+              - 'infrastructure/bicep/**'
+              - 'config/**'
+              - 'src/dataverse/**'
+              - 'scripts/**'
               - 'Directory.Packages.props'
               - 'Directory.Build.props'
               - 'Spaarke.sln'

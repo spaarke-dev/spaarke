@@ -5,14 +5,14 @@ techStack: [git, gh-cli]
 appliesTo: ["push to github", "create PR", "commit and push", "ready to merge"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-10-15
 ---
 
 # Push to GitHub
 
 > **Category**: Operations
 > **Last Reviewed**: 2026-10-15
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — normalized minimal frontmatter; extracted PR body template to references/)
+> **Reviewed By**: procedure / code-quality cleanup (CI tier-file freeze lifted 2026-10-15); earlier ai-procedure-quality-r1 (Phase 2b Wave 2b-B)
 > **Exemplar rationale**: Each push targets ephemeral branch state — no canonical reference holds.
 > **PR body template**: [`references/pr-template.md`](references/pr-template.md)
 
