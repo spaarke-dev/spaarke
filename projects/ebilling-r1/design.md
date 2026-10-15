@@ -405,7 +405,7 @@ Not the Ontology's: `matter.invoicedToDate` by line core record is eBilling's / 
 | ADR-047 | Notifications through the spine |
 | ADR-012 / ADR-021 | Shared components and Fluent v9 for SPA and wizard |
 
-**ADR tensions**: none identified at design time. Re-checked at spec (`/adr-check`). The domain grouping of rule types (D-26) needs a matching note in the Ontology design (CM-7/CM-8), coordinated, not an ADR change.
+**ADR tensions**: one project exception recorded after design: the Content Understanding preview analyzer is primary under a path-A exception (D-81, spec.md ADR Tensions), with a GA fallback kept in step. Otherwise none identified at design time. Re-checked at spec (`/adr-check`). The domain grouping of rule types (D-26) needs a matching note in the Ontology design (CM-7/CM-8), coordinated, not an ADR change.
 
 ---
 

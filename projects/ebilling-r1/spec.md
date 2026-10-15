@@ -317,7 +317,11 @@ Size: one new package, `Azure.AI.ContentUnderstanding` (D-50; delta measured in 
 
 ## ADR Tensions (per CLAUDE.md §6.5)
 
-> No ADR tensions surfaced at design time. All listed ADRs apply without exception. Coordination items (not ADR conflicts): the billing rule types extend the Ontology's closed `RuleType` set under its CM-7 / CM-8 rule (agreed with ontology-r1); the `sprk_invoicestatus` retirement requires notifying ontology-r1. This section is re-checked by `/adr-check` during implementation.
+| Rule | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| D-53 (project decision; ADR-013 AI platform posture) | "Build on GA Content Understanding `2025-11-01`; the preview is adopted only when it reaches GA" | The owner chose the `2026-06-01-preview` analyzer as primary (task 005 go / no-go, D-81): about 4 points more accurate on hard templates (day-month dates, hh:mm hours) | **A — project exception** | Owner decision 2026-10-15. Guard rails: a GA fallback analyzer kept in step and selectable by configuration; both measured in 161 / 162; REST client covers both API versions (no prerelease SDK); preview retirement / GA tracked as #1945; at GA the analyzer is re-created and re-tested. Cite in the PR; code-review approves explicitly. |
+
+> Apart from the row above (added after design, 2026-10-15), no ADR tensions surfaced at design time. All listed ADRs apply without exception. Coordination items (not ADR conflicts): the billing rule types extend the Ontology's closed `RuleType` set under its CM-7 / CM-8 rule (agreed with ontology-r1); the `sprk_invoicestatus` retirement requires notifying ontology-r1. This section is re-checked by `/adr-check` during implementation.
 
 ## Success Criteria
 

@@ -17,7 +17,7 @@
     <estimated-effort>1-2 days</estimated-effort>
   </metadata>
 
-  <prompt>Add IInvoiceAi.ReadInvoiceAsync backed by an internal Content Understanding client (package Azure.AI.ContentUnderstanding 1.1.0, GA API 2025-11-01, managed identity) that calls the custom analyzer sprk_invoice_vN once and maps header, fee lines, expense lines and timekeeper summary — every field with confidence, page and bounding box — to a typed result, with stable reason codes for unreadable documents. If task 005 was no-go, STOP before coding (see escalation).</prompt>
+  <prompt>Add IInvoiceAi.ReadInvoiceAsync backed by an internal Content Understanding client (REST over IHttpClientFactory, preview API 2026-06-01-preview primary with a GA 2025-11-01 fallback analyzer per D-81, managed identity) that calls the custom analyzer sprk_invoice_vN once and maps header, fee lines, expense lines and timekeeper summary — every field with confidence, page and bounding box — to a typed result, with stable reason codes for unreadable documents. If task 005 was no-go, STOP before coding (see escalation).</prompt>
 
   <role>SPAARKE platform developer. Expert in Azure AI SDKs, managed identity in the BFF, and the PublicContracts AI facades. Follow ADRs strictly.</role>
 
@@ -43,6 +43,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-81 (owner, 2026-10-15)">Path-A exception: the analyzer built on `2026-06-01-preview` is primary; a GA fallback analyzer on `2025-11-01` with the same field schema is kept in step and selected by configuration only (`ContentUnderstanding:ApiVersion`, `ContentUnderstanding:AnalyzerId`; no code change to switch). Preview and GA analyzers do not interoperate, so each is deployed on its own API version by scripts/content-understanding/Deploy-Analyzers.ps1 (extend it to accept the preview API version and a preview definition file under infrastructure/content-understanding/, keeping its idempotent create / no-change / refuse-without--Replace behaviour; the 004 "no preview string" criterion is superseded by D-81). The GA SDK Azure.AI.ContentUnderstanding 1.1.0 does not cover the preview API: implement the client as a thin REST client over IHttpClientFactory with a managed-identity token (DefaultAzureCredential, scope https://cognitiveservices.azure.com/.default), serving both API versions; do not add a prerelease SDK. Add the 1.1.0 package only if a concrete need appears, and then report it as an escalation (BFF hygiene, NFR-12). Carry the spike conditions: deterministic completion step (hh:mm hours, missing rates), analyzer v2 wording for hours and non-US dates, page-range analysis of very long PDFs, and field names as actually returned (notes/extraction-spike.md). Cite the D-81 path-A exception in the PR.</constraint>
     <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md; this task's package must be justified in the PR with its measured delta.</constraint>
     <constraint source="NFR-12 / D-50">Exactly one new package: Azure.AI.ContentUnderstanding 1.1.0. No other NuGet or npm package; no raw REST client written instead of the SDK unless 005 recorded that the SDK cannot do a required call (then escalate).</constraint>
     <constraint source="FR-47 / ADR-028">Managed identity only (the DI TokenCredential); no key option, no key in config. Endpoint, API version and analyzer id come from ContentUnderstandingOptions using exactly task 003's key names.</constraint>
@@ -107,6 +108,8 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">Per D-81, switching ContentUnderstanding:ApiVersion / AnalyzerId between the preview primary and the GA fallback needs no code change: a test runs ReadInvoiceAsync against each configuration (seam test with recorded responses), and both analyzers are deployed in dev by Deploy-Analyzers.ps1 with a second run reporting no change.</criterion>
+    <criterion testable="true">No prerelease package is referenced; if Azure.AI.ContentUnderstanding is not needed, the publish-size delta for the client is reported as code-only.</criterion>
     <criterion testable="true">Given a scrubbed analyzer result fixture, ReadInvoiceAsync maps every FR-21 header field and every fee, expense and timekeeper-summary row, each with confidence, page and normalised bounding box.</criterion>
     <criterion testable="true">Negative: fixtures or stubs for encrypted, over-page-limit, no-invoice and service-error results raise the typed exception with invoice.read.unreadable, invoice.read.page_limit, invoice.read.no_invoice and invoice.read.service_failed respectively; none returns a partial result.</criterion>
     <criterion testable="true">A non-USD currency value maps through unchanged and does not throw.</criterion>

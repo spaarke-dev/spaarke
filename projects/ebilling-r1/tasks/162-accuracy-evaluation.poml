@@ -41,6 +41,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-81">Measure BOTH the preview primary analyzer and the GA fallback analyzer (kept in step under D-81) against NFR-04 / NFR-06, reported separately (never pooled), so the owner can confirm the preview exception or fall back to GA.</constraint>
     <constraint source="project, 004">Every tuned artefact is versioned: a new analyzer file and name, an Action JPS version bump; never an in-place change of a version already used for measured results or stored corrections.</constraint>
     <constraint source="FR-44">Baseline first, then tune; report both. Same item set and scoring rules across runs; the evaluation set is not edited to improve a score.</constraint>
     <constraint source="NFR-06, FR-26">Settings changes from 161 are applied in dev only through the admin form (audited) and re-measured against NFR-06 before keeping them.</constraint>

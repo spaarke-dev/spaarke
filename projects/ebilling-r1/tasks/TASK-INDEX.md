@@ -18,7 +18,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 002 | ✅ [done] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
 | 003 | ✅ [done] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
 | 004 | ✅ [done] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |
-| 005 | 🟡 [wip] | Extraction spike — four arms, coding model comparison, package size; go / no-go | STANDARD | opus / high | none | 002, 004 |
+| 005 | ✅ [done] | Extraction spike — four arms, coding model comparison, package size; go / no-go | STANDARD | opus / high | none | 002, 004 |
 
 ### Phase 1 — Data model (WP1)
 

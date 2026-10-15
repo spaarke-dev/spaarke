@@ -70,7 +70,7 @@ Status lives in `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (**
 
 ### Packages, firm visibility, corrections, tracking
 
-- **One new package only:** `Azure.AI.ContentUnderstanding` 1.1.0, GA API `2025-11-01` (D-50, D-53, NFR-12).
+- **Content Understanding access:** preview `2026-06-01-preview` primary with a GA `2025-11-01` fallback analyzer, through a REST client; `Azure.AI.ContentUnderstanding` is added only if 043 shows a need (D-50, D-53 as amended by D-81, NFR-12).
   - Measure the publish-size delta against a fresh master build on every BFF task (root §10).
   - The preview `2026-06-01` is allowed only as spike arm (c′) in task 005.
 - **Firm-visible output (D-66):**
@@ -140,6 +140,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
 - 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
+- 2026-10-15 — D-81: extraction GO on Content Understanding with a preview exception (path A): preview analyzer primary, GA fallback analyzer kept in step and selectable by config, REST client for both versions (no beta SDK), 161 / 162 measure both.
 
 ### Open owner questions
 

@@ -4,7 +4,7 @@
     <title>Extraction spike — four arms, coding model comparison, package size; go / no-go</title>
     <phase>0 Baseline and AI foundations (WP0)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Spike code and an evaluation note outside src/; produces the evidence for an owner gate decision.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -122,7 +122,9 @@ Execution 2026-10-15 (task-execute, STANDARD, opus): steps 1-7 done; step 8 = ow
 - Do NOT mark done until the owner decides; then record the decision here and in D-81.
 - Azure: created spike analyzers sprk_invoice_v1p (preview), sprk_invoice_v1_cls, sprk_invoice_router, sprk_invoice_router_p (preview). No model deployment; sprk_invoice_v1 unchanged.
 - No new defects filed. The research note section 9.6 statement on GA -> preview portability is corrected in place.
-</notes>
+
+Owner decision 2026-10-15 (D-81): GO with a path-A preview exception (option B); GA fallback analyzer kept in step. Spike-only analyzers sprk_invoice_v1_cls, sprk_invoice_router and sprk_invoice_router_p can be deleted; sprk_invoice_v1p is the starting point for the preview primary in 043.
+rework: none task 005</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

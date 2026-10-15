@@ -41,6 +41,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-81">Measure BOTH the preview primary analyzer and the GA fallback analyzer (kept in step under D-81) against NFR-04 / NFR-06, reported separately (never pooled), so the owner can confirm the preview exception or fall back to GA.</constraint>
     <constraint source="project">No src/** change. Harness and outputs stay under projects/ebilling-r1/notes/; settings are not changed here (162 applies any change).</constraint>
     <constraint source="FR-31, D-64">Only label outcomes (sprk_islabel true: Corrected, Confirmed individually) count as ground truth from corrections; bulk-accepted and unreviewed values are reported as counts only.</constraint>
     <constraint source="D-47">Report each signal's contribution as well as the combined score; recommend weights and caps within 025's valid ranges (0-1); self-report may never raise a score above analyzer confidence.</constraint>
