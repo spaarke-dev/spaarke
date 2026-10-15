@@ -2386,6 +2386,52 @@ public partial class SignalReevaluationJobTests
         h.Org.Rows.Values.Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until, "a justified stamp is not rewritten (D-61)");
     }
 
+    [Fact]
+    public async Task Run_DoLane_BobsThreeDismissals_StillRaiseAlicesToDo_AndSuppressBobsNext_152()
+    {
+        // Task 152 (D-145a, #1921): Bob dismissed three of his own To Dos on the project (he decided each); their rows carry the stamp those
+        // dismissals justify (written when he dismissed). The nightly pass raises Alice's overdue To Do on the same project, and suppresses
+        // Bob's next one.
+        var bob = Guid.Parse("15200000-0000-4000-8000-0000000000b0");
+        var alice = Guid.Parse("15200000-0000-4000-8000-0000000000a0");
+        var h = new Harness().WithTodoPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(TodoPolicyCode);
+        var versionId = h.Sysadmin.CurrentVersionOf(TodoPolicyCode);
+        var due = new DateTime(2026, 10, 1);
+        var until = RunAt.UtcDateTime.AddDays(-1).AddDays(30);
+        foreach (var days in new[] { 6, 3, 1 })
+        {
+            var todo = Guid.NewGuid();
+            h.WithTodo(todo, due, project: ProjectId, assignee: bob);
+            var id = h.Org.SeedSignal(Key(TodoPolicyCode, "sprk_todo", todo, 1), SignalWriter.SignalStatusResolved, SignalWriter.ResolutionDismissed,
+                resolvedOn: RunAt.UtcDateTime.AddDays(-days), suppressedUntil: until, due: due, policyId: policyId, versionId: versionId);
+            h.Org.Rows[id]["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectType);
+            h.Org.Rows[id]["sprk_corerecordid"] = Lower(ProjectId);
+            var recordId = Guid.NewGuid();
+            h.Org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId);
+            h.Sysadmin.DecisionRecords[recordId] = new Entity("sprk_decisionrecord", recordId)
+            {
+                ["sprk_recordclass"] = new OptionSetValue((int)RecordedDecisionClass.Dismissal),
+                ["sprk_decidedon"] = RunAt.UtcDateTime.AddDays(-days),
+                ["sprk_assignedtointernal"] = new EntityReference("contact", bob),
+            };
+        }
+
+        var aliceTodo = Guid.NewGuid();
+        h.WithTodo(aliceTodo, due, project: ProjectId, assignee: alice);
+        var bobNext = Guid.NewGuid();
+        h.WithTodo(bobNext, due, project: ProjectId, assignee: bob);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        h.Org.Rows.Values.Should().Contain(r => r.GetAttributeValue<string>("sprk_dedupekey") == Key(TodoPolicyCode, "sprk_todo", aliceTodo, 1),
+            "Bob's dismissals never suppress Alice's Do item");
+        h.Org.Rows.Values.Should().NotContain(r => r.GetAttributeValue<string>("sprk_dedupekey") == Key(TodoPolicyCode, "sprk_todo", bobNext, 1),
+            "three of Bob's own dismissals on the project suppress his next Do item for the policy");
+        h.Org.Updates.Should().BeEmpty("Bob's stamps are justified by his own dismissals and are not rewritten (D-61)");
+    }
+
     /// <summary>#1661 round 2: the secure matter's family carries a live stamp from its three dismissals (each with a Decision Record), the
     /// matter is a hit, and another subject's open Signal is not a hit (a normal pass would close it as ConditionCleared).</summary>
     private static (Guid PolicyId, DateTime Until, Guid OtherOpen) SecureStampedMatterWithAnOpenNonHit(Harness h)
@@ -3005,6 +3051,11 @@ public partial class SignalReevaluationJobTests
                         result.Entities.Add(copy);
                     }
 
+                    break;
+                // Task 152 (D-145a): the suppression pass's read of a Do item's person (the "mine" rule's column), by id.
+                case "sprk_todo" when query.ColumnSet.Columns.SequenceEqual(["sprk_assignedto"])
+                                      && query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_todoid") is { } todoIds:
+                    foreach (var todo in SubjectRows["sprk_todo"].Where(t => todoIds.Values.Contains(t.Id))) result.Entities.Add(todo);
                     break;
                 case "timezonedefinition" when Value("timezonecode") is int zoneCode && _zones.TryGetValue(zoneCode, out var name):
                     result.Entities.Add(new Entity("timezonedefinition", Guid.NewGuid()) { ["standardname"] = name });

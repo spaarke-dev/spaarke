@@ -43,9 +43,12 @@ public enum SignalAccessOutcome
 /// <param name="SubjectTable">Do lane only (task 150): the subject's table, from the subject lookup that carries the pair id (task
 /// 141); null when it cannot be derived. Carried so <see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/> can run later.</param>
 /// <param name="SubjectId">Do lane only: the subject's id (<c>sprk_regardingrecordid</c>); null when absent.</param>
+/// <param name="CallerContactId">Do lane only, once the "mine" read admitted the caller (<see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/>):
+/// the caller's linked contact (null when they have none), so the suppression count reports only the caller's own Do-lane count
+/// (task 152, D-145a).</param>
 public sealed record SignalAccessDecision(
     SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null,
-    string? SubjectTable = null, Guid? SubjectId = null)
+    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -350,7 +353,7 @@ public sealed class SignalCoreRecordAccess
             {
                 if (TryReadGuid(subject, pk, out var id) && id == subjectId)
                 {
-                    return allowed;
+                    return allowed with { CallerContactId = caller.ContactId };
                 }
             }
 
