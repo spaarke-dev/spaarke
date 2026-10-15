@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="133" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-97 / PB-08: repo-deployed system playbooks are read-only in the Playbook Designer — the BFF refuses every canvas-to-node sync for them (Designer save, JIT sync, re-analysis)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF write path that deletes live node rows (data loss); owner decision D-97.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data-loss guard on a shared write path with three callers; fail-closed design judgement (sweep §12 "highest-risk standalone item").</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and PR; files (NodeService canvas sync, PlaybookEndpoints canvas PUT, AnalysisOrchestrationService JIT sync) are not edited by 132. 138 edits NodeService later and depends on this task.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,dataverse,bug,separate-pr</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Make it impossible for a canvas save or a just-in-time canvas sync to replace the nodes of a repo-deployed system playbook, per D-97, and prove it with a negative test that the save is refused.</prompt>
+  <role>SPAARKE senior backend engineer.</role>
+  <goal>The BFF refuses (HTTP 409 with a problem-details message naming the playbook and the reason) a canvas save for a protected playbook, and skips the JIT sync for it with a log line; protected playbooks' nodes are byte-identical after any of the three triggers. Own PR to master, not merged.</goal>
+
+  <context>
+    <background>Sweep §0.3, §9.3 and §11 row PB-08: NodeService.SyncCanvasToNodesAsync (NodeService.cs:381-516) deletes every node without `__canvasNodeId` — every node the deploy scripts write — and recreates stubs, mapping unknown canvas types (`control`, `aiAnalysis`, `output`, queryDataverse, …) to AiAnalysis(0) (NS:986-1019). Triggers: PUT /api/ai/playbooks/{id}/canvas (PlaybookEndpoints.cs:144, sync at :716); AnalysisOrchestrationService.cs:198-210 JIT sync; AnalysisExecutionHandler.cs:289 (reaches the same JIT path through ExecutePlaybookAsync). The ISS-018c wipe of Due Soon (2026-06-30) is this mechanism. The PlaybookBuilder code page source has retired graph authoring (src/client/code-pages/PlaybookBuilder/src/index.tsx header), but the endpoint stays reachable by any client, so the guard is server-side.
+Live (read 2026-10-09): sprk_issystemplaybook is true on Tasks Overdue, Tasks Due Soon, New Documents, New Emails, New Events, matter-health-single, predict-matter-cost@v1, summarize-document-for-chat@v1, summarize-document-for-workspace@v1 and Daily Briefing Narrate, but NULL on New Work Assignments and Matter/Project Activity Summary (both sprk_playbooktype = 2 Notification). So the flag alone does not identify every system playbook.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs (SyncCanvasToNodesAsync :381)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/INodeService.cs (:95)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs (SaveCanvasLayout :690-728)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (:197-213)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/AnalysisExecutionHandler.cs (:289)</file>
+      <file>scripts/Deploy-Playbook.ps1 (:512, :766 writes sprk_issystemplaybook), scripts/Deploy-NotificationPlaybooks.ps1 (does not)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-97: system playbooks are read-only in the Designer (save refused). Fixing the sync to preserve non-canvas nodes is NOT in scope; record it only as a note (see notes).</constraint>
+    <constraint source="project">"Protected" = sprk_issystemplaybook = true OR sprk_playbooktype = 2 (Notification) OR any node of the playbook lacks `__canvasNodeId` in its config (a repo-deployed node). Decide it in ONE place, inside NodeService before any delete, so all three triggers are covered by the same check; the endpoint maps the refusal to 409. Fail closed: if the playbook or its nodes cannot be read, refuse.</constraint>
+    <constraint source="project">The canvas layout JSON itself must not be persisted for a protected playbook either (PlaybookEndpoints.cs:712 writes it before the sync): refuse before both writes.</constraint>
+    <constraint source="project">No Dataverse data change. Setting sprk_issystemplaybook on New Work Assignments / Matter Activity, or making Deploy-NotificationPlaybooks.ps1 set it, is owner approval required (the type rule already covers them). The dev BFF deploy is owner approval required.</constraint>
+    <constraint source="project">Worktree: `git worktree add C:\wt133 -b fix/designer-readonly-system-playbooks origin/master`. Own PR; do not merge. BFF hygiene per root CLAUDE.md §10 (publish size, CVE, hot-path declaration). /conflict-check before the PR. Never --no-verify or bare git stash. You cannot write .claude/; report the text for the project CLAUDE.md gotcha update to the main session. Never save a system playbook in the Designer, including to test this. No parking.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL. Read sweep §9.3, §12 "T-canvas", NodeService sync and the three callers.</step>
+    <step order="1">Write the failing tests first: deploy-shaped nodes (no `__canvasNodeId`) + a canvas save → today nodes are deleted.</step>
+    <step order="2">Add the protected check in NodeService; map to 409 in SaveCanvasLayout; JIT path logs "[PLAYBOOK-EXEC] canvas sync refused for protected playbook" and continues with the stored nodes.</step>
+    <step order="3">Designer round-trip test (sweep §10.1): repo JSON nodes for one notification playbook and matter-health-single → save canvas → assert refused and nodes unchanged.</step>
+    <step order="4">Full BFF suite (background), ArchTests built explicitly, publish size; PR; CI green; independent review; fix F-class findings; STOP for the owner's merge and the dev deploy approval.</step>
+    <step order="5">Record in notes/task-133-designer-readonly.md; status in POML and TASK-INDEX; run the drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a user-authored (non-system) playbook in dev also has nodes without `__canvasNodeId` (so the rule would lock it), STOP and report the list before shipping; the owner decides.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs; Api/Ai/PlaybookEndpoints.cs; Services/Ai/AnalysisOrchestrationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (NodeService protected-sync tests); the Designer round-trip test</output>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/task-133-designer-readonly.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Negative: PUT /api/ai/playbooks/{id}/canvas for a playbook with sprk_issystemplaybook = true returns 409, writes no canvas JSON, deletes and creates no node (test asserts zero Delete/Create/Update calls).</criterion>
+    <criterion testable="true">The same refusal holds for sprk_playbooktype = 2 with the flag null, and for a non-flagged playbook with one node lacking `__canvasNodeId`.</criterion>
+    <criterion testable="true">The JIT sync in AnalysisOrchestrationService skips a protected playbook (no node writes) and the run proceeds on the stored nodes; the AnalysisExecutionHandler path is covered by the same test or a second one.</criterion>
+    <criterion testable="true">When the playbook or nodes read fails, the save is refused (fail closed) — seeding proof requested for this guard.</criterion>
+    <criterion testable="true">A user-authored playbook whose nodes all carry `__canvasNodeId` still saves and syncs exactly as before (regression test).</criterion>
+    <criterion testable="true">Negative: no Dataverse data change; no sync redesign; test scope = the cases above only.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 from sweep PB-08 + D-97. Optional later (note only, not this task): make SyncCanvasToNodesAsync preserve non-canvas nodes and map every canvas type, rejecting unknown types instead of falling back to AiAnalysis — would let system playbooks become editable again; needs its own owner decision. The project CLAUDE.md §6 gotcha "Do NOT open and save a system playbook" stays until this ships to every environment.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

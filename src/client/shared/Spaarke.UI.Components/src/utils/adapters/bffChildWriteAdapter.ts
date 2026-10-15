@@ -27,7 +27,12 @@
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetch } from './bffDataServiceAdapter';
 
-/** The tables a browser writer creates through the BFF (task 147's census). Lower-case logical names. */
+/**
+ * The tables a browser writer creates through the BFF (task 147's census). Lower-case logical names.
+ * `sprk_workassignment` (spaarke-ontology-platform-r1 task 046, D-21; unified-access-control-r2's answer D-113) is a ROOT,
+ * not a child, created through the same route: the server decides its owner and, under a secure matter or project, creates
+ * it secure.
+ */
 export const BFF_CHILD_CREATE_TABLES: ReadonlySet<string> = new Set([
   'sprk_todo',
   'sprk_event',
@@ -36,6 +41,7 @@ export const BFF_CHILD_CREATE_TABLES: ReadonlySet<string> = new Set([
   'sprk_reportcard',
   'sprk_analysis',
   'sprk_document',
+  'sprk_workassignment',
 ]);
 
 /** The BFF re-file route for each table a browser writer re-files (one route per table). */
@@ -180,6 +186,20 @@ export async function createChildRecordViaBff(
   table: string,
   payload: Record<string, unknown>
 ): Promise<string> {
+  return (await createRecordViaBffWithWarnings(authenticatedFetch, bffBaseUrl, table, payload)).id;
+}
+
+/**
+ * {@link createChildRecordViaBff}, also returning the server's non-fatal `warnings` (ontology task 046: a work assignment
+ * created secure whose securing is not yet complete). Same contract otherwise: rejects with a {@link ChildRecordWriteError}
+ * carrying the server's message — nothing was created.
+ */
+export async function createRecordViaBffWithWarnings(
+  authenticatedFetch: AuthenticatedFetch,
+  bffBaseUrl: string,
+  table: string,
+  payload: Record<string, unknown>
+): Promise<{ id: string; warnings: string[] }> {
   const entity = (table ?? '').toLowerCase();
   if (!isBffChildCreateTable(entity)) {
     throw new ChildRecordWriteError(`'${table}' records are not created through the BFF child-record route.`, 0);
@@ -199,7 +219,11 @@ export async function createChildRecordViaBff(
   if (typeof id !== 'string' || !id) {
     throw new ChildRecordWriteError('The BFF did not return the new record id.', response.status);
   }
-  return cleanId(id);
+  const serverWarnings = body['warnings'];
+  const warnings = Array.isArray(serverWarnings)
+    ? serverWarnings.filter((w): w is string => typeof w === 'string' && w.length > 0)
+    : [];
+  return { id: cleanId(id), warnings };
 }
 
 /**

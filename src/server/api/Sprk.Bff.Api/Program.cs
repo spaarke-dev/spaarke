@@ -104,6 +104,11 @@ builder.Services.AddFinanceModule(builder.Configuration);
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
 
+// Signal/Policy domain module (spaarke-ontology-platform-r1 task 023, spec FR-09/FR-10). Policy-scope
+// resolution building block; no endpoints, no background work — pure domain code consumed by future
+// in-BFF callers (the predicate compiler / Signal writer / evaluator, tasks 021/030/031/032).
+builder.Services.AddSignalsModule();
+
 // Notification spine Layer-C (spaarke-notification-spine-r1 task 020) — SignalR delivery service +
 // negotiate endpoint. Registered UNCONDITIONALLY (ADR-032): real Serverless impl when Azure SignalR
 // is configured, Null-Object no-op otherwise. Placement Justification (CLAUDE.md §10): the spine is

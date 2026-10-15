@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -203,7 +204,7 @@ public class OfficeEmailSaveMessageKeyTests
             services.RemoveAll<ReconciledEmailFiling>();
             services.AddScoped(sp => new ReconciledEmailFiling(
                 resolver, dataverse.Object, probe.Object, sp.GetRequiredService<SecureChildReconciler>(),
-                NullLogger<ReconciledEmailFiling>.Instance));
+                sp.GetRequiredService<CoreAncestorRestamper>(), NullLogger<ReconciledEmailFiling>.Instance));
         }));
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-caller-token");

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Closed BFF action catalog and the decision-plan read endpoint</title>
+    <phase>4b Commit and actions</phase>
+    <gate>007 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF service and endpoint; the catalog decides what a decision can do and which record class it produces.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A closed table plus a read endpoint, with every entry named below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>007</deps>
+    <tags>bff-api,endpoints,actions</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the closed action catalog in C# and a read-only endpoint that returns a Signal's decision plan resolved against it (actions in plan order, their parameters, effect lines, excludes and record class, the lane's dismissal reasons, and the rule description from task 026 when present).</prompt>
+  <role>SPAARKE backend developer. A closed catalog grows by code review, not configuration.</role>
+  <goal>Every action code a seeded plan names resolves in the catalog; the wizard can fetch a Signal's plan in one call; record class is derived from the catalog, never chosen.</goal>
+
+  <context>
+    <background>v4 gives each rule several actions, each its own wizard step (reconciliation Z-3, S-6, S-8). D-19: Approve variance is a record-only action ("action definition only"). D-18: Revise budget is created by the BFF writer. D-17: one commit route records the outcome of every action the rule offered. Spec A-2 already makes the record-class mapping code, not configuration; spec section 2.2 keeps the Action Engine out of R1, so the catalog is a closed C# table (reconciliation C-4 recommendation). Task 009 seeds POL-COMMIT-BUDGET v2 with the codes send-budget-inquiry, revise-budget, approve-variance.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the catalog contains exactly: Decide lane send-budget-inquiry (Judgement), revise-budget (Judgement; parameter: which sprk_budget when the matter has several, D-18), approve-variance (Judgement; record-only, effect line "The Decision Record is the approval; nothing else is written", D-19; excludes revise-budget per v4 Z-4). Do lane mark-complete (Routine; excludes reschedule and reassign), reschedule (Routine; writes sprk_duedate, D-27), reassign, send-reminder (Judgement), extend-response-date. Next-step creators add-todo, create-event, send-email, assign-work (Next steps make the record Judgement, reconciliation R-2).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-45, D-51, D-54): reassign and extend-response-date are ROUTINE (D-45). Add record-the-response (Do lane, work assignment; writes the D-54 response columns from task 047; record class Judgement per the v4 baseline, reconciliation R-3). assign-work is also usable as a PLAN action (Decide lane, Judgement) so the Know-promotion rule can offer it (D-51). Still excluded: escalate, extend-sla, close-inquiry (D-20).</constraint>
+    <constraint source="project">Scope: dismissal reasons per lane are a closed list with Other requiring detail (reconciliation R-8, v4 baseline): Decide = Already approved offline, Not material, Wrong matter - misresolved, Duplicate, Handled outside Spaarke, Other; Do = Already done outside Spaarke, Not mine, No longer needed, Duplicate, Other. Wrong matter - misresolved carries countsTowardSuppression = false (R-10). The stored form is "code - detail".</constraint>
+    <constraint source="project">Scope: the read endpoint takes a Signal id, authorizes it as the caller with a caller-identity read of the Signal's grouping matter (IDataverseUserClient; put the check in one place under Services/Signals so task 038 reuses it rather than writing a second one), reads the Signal's policy version's sprk_decisionplan, and returns the resolved plan. An unknown code in a plan is a logged, metered refusal for that plan (fail closed), never a silent skip.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entry, RequireAuthorization, single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: no DI-registration or ctor-null tests; behaviour tests only.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Decision plans and the action catalog</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the catalog as one immutable table (code, lane, label, work type, parameters, effect lines, excludes, record class) and the dismissal-reason lists.</step>
+    <step order="2">Implement the plan resolver and the read endpoint with the census entry.</step>
+    <step order="3">Tests: every code task 009 seeded resolves; excludes are symmetric where stated; an unknown code refuses; authorization cases.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_analysisaction rows are AI Actions for the ADR-039 spine and have none of these fields (#6, S-8); spec A-2 already places the class mapping in code. No closed decision-action table exists in the BFF (grep for "excludes" and "recordclass" in Services/ finds none).</existing>
+    <extension>No: sprk_analysisaction is the AI capability catalog and changing it is the R2 Action Engine (spec section 2.2). A closed C# table is the smallest surface that lets the commit route and the wizard agree.</extension>
+    <cost-of-doing-nothing>The wizard cannot build one step per action, the commit route cannot validate what was taken or derive the record class, and Approve variance has nowhere to be defined (D-19).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs</output>
+    <output type="test">tests/unit/domain/Signals/DecisionActionCatalogTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given POL-COMMIT-BUDGET v2's plan, when resolved, then three actions return in plan order with labels, parameters, effect lines and record class Judgement, and approve-variance lists revise-budget in excludes.</criterion>
+    <criterion testable="true">Given the Decide and Do lanes, when the dismissal reasons are read, then each list is exactly as stated and only Wrong matter - misresolved has countsTowardSuppression false.</criterion>
+    <criterion testable="true">Negative: a plan naming an unknown code is refused for that plan, logged with a stable EventId and metered.</criterion>
+    <criterion testable="true">Negative: the catalog contains no escalate, extend-sla or close-inquiry action.</criterion>
+    <criterion testable="true">Negative: a caller who cannot read the Signal's matter gets 404 (no read) per the 097/#1312 pattern; an unresolved caller gets 403; the route is in the census.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given reassign and extend-response-date, when resolved, then each has record class Routine (D-45); given record-the-response, then Judgement; given assign-work as a plan action, then it resolves (D-51).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-49, FR-50; D-17, D-18, D-19, D-20, D-27. D-45 (C-3 decided: Routine), D-51, D-54.</notes>
+
+  <completion date="2026-10-07">
+    <summary>Closed 13-action catalog + per-lane dismissal reasons + plan resolver (whole-plan refusal, EventId 50302, metered) + GET /api/v1/signals/{signalId}/decision-plan authorized as the caller via SignalCoreRecordAccess (Signal then core record of any type; no-core owner-only Do lane). Census ledger: count 117->118, one GovernedFile, one HandlerDecision. 49 domain tests; RouteAuthorizationGuard 86/86; publish +0.02 MB vs fresh master (36.22 -> 36.24, 192 files each); no vulnerable packages. Commit 2cff1f051.</summary>
+    <record>projects/spaarke-ontology-platform-r1/notes/036-026-stream-c-record.md</record>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

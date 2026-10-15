@@ -249,6 +249,16 @@
     <EmbeddedResource Include="Services\Registration\EmailTemplates\*.html" />
   </ItemGroup>
 
+  <!-- Ontology Platform R1 task 020 (spec FR-05): rule-type JSON Schemas embedded as resources so
+       RuleBodySchemaValidator needs no on-disk path at runtime (same pattern as the email templates
+       above) and schema bytes travel with the publish regardless of working directory. Remove first
+       so the file is embedded only, not also copied loose as Content via the Web SDK's default
+       *.json glob. -->
+  <ItemGroup>
+    <Content Remove="Services\Signals\Schemas\*.json" />
+    <EmbeddedResource Include="Services\Signals\Schemas\*.json" />
+  </ItemGroup>
+
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
        config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
        reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->

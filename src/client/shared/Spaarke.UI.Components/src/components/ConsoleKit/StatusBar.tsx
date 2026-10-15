@@ -25,6 +25,19 @@ export interface StatusBarProps {
   decidedBy?: string | null;
   /** When it closed (ISO 8601). */
   decidedOn?: string | null;
+  /**
+   * True in the moment a decision was just recorded in this session (task 058): the bar leads with "Recorded". A bar for an
+   * item that was already closed when opened leaves this off.
+   */
+  recorded?: boolean;
+  /** For `Dismissed`: why. Shown as "Reason: ...". */
+  reason?: string | null;
+  /** For `Superseded`: what replaced it (a record number or name). Shown as "Superseded by ...". */
+  supersededBy?: string | null;
+  /** A short qualifier that follows the state, for example "Inquiry sent, still open" (task 058). */
+  note?: string | null;
+  /** How many other open items are left on the same card after this one closed. `0` reads "No other open items". */
+  openItemsLeft?: number | null;
   className?: string;
 }
 
@@ -47,13 +60,41 @@ const useStyles = makeStyles({
 });
 
 export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(function StatusBar(
-  { state, recordId, recordClass, decidedBy, decidedOn, className },
+  {
+    state,
+    recordId,
+    recordClass,
+    decidedBy,
+    decidedOn,
+    recorded,
+    reason,
+    supersededBy,
+    note,
+    openItemsLeft,
+    className,
+  },
   ref
 ) {
   const styles = useStyles();
   const badge = CONSOLE_STATE_BADGES[state];
   const when = decidedOn && !Number.isNaN(new Date(decidedOn).getTime()) ? new Date(decidedOn).toLocaleString() : null;
-  const parts = [recordId, recordClass, decidedBy ? `by ${decidedBy}` : null, when].filter((p): p is string => !!p);
+  const left =
+    typeof openItemsLeft === 'number'
+      ? openItemsLeft > 0
+        ? `${openItemsLeft} other open ${openItemsLeft === 1 ? 'item' : 'items'} left`
+        : 'No other open items'
+      : null;
+  const parts = [
+    recorded ? 'Recorded' : null,
+    recordId,
+    recordClass,
+    decidedBy ? `by ${decidedBy}` : null,
+    when,
+    reason?.trim() ? `Reason: ${reason.trim()}` : null,
+    supersededBy?.trim() ? `Superseded by ${supersededBy.trim()}` : null,
+    note?.trim() ? note.trim() : null,
+    left,
+  ].filter((p): p is string => !!p);
 
   const intent = STATE_INTENT_OVERRIDE[state] ?? TONE_TO_INTENT[badge.tone];
 

@@ -96,28 +96,23 @@
   "events": [
     {
       "sprk_eventname": "Contract Renewal Deadline - Contoso",
-      "sprk_eventdescription": "Annual supply agreement with Contoso Ltd. expires on June 30, 2026. Begin renewal negotiations at least 60 days prior. Key contact: Sarah Mitchell (General Counsel).",
-      "sprk_eventstatus": 100000000
+      "sprk_eventdescription": "Annual supply agreement with Contoso Ltd. expires on June 30, 2026. Begin renewal negotiations at least 60 days prior. Key contact: Sarah Mitchell (General Counsel)."
     },
     {
       "sprk_eventname": "GDPR Audit Preparation Meeting",
-      "sprk_eventdescription": "Kickoff meeting for GDPR compliance audit preparation. Review current DPA status, identify gaps in documentation, and assign remediation tasks. All stakeholders required.",
-      "sprk_eventstatus": 100000000
+      "sprk_eventdescription": "Kickoff meeting for GDPR compliance audit preparation. Review current DPA status, identify gaps in documentation, and assign remediation tasks. All stakeholders required."
     },
     {
       "sprk_eventname": "IP License Fee Payment Due",
-      "sprk_eventdescription": "Quarterly royalty payment to Fabrikam Inc. under cross-licensing agreement. Amount calculated per usage metrics from Q1 2026. Payment deadline: April 15, 2026.",
-      "sprk_eventstatus": 100000000
+      "sprk_eventdescription": "Quarterly royalty payment to Fabrikam Inc. under cross-licensing agreement. Amount calculated per usage metrics from Q1 2026. Payment deadline: April 15, 2026."
     },
     {
       "sprk_eventname": "Board Compliance Report",
-      "sprk_eventdescription": "Prepare and submit quarterly compliance report to the board of directors. Cover regulatory changes, outstanding issues, remediation progress, and risk assessments.",
-      "sprk_eventstatus": 100000000
+      "sprk_eventdescription": "Prepare and submit quarterly compliance report to the board of directors. Cover regulatory changes, outstanding issues, remediation progress, and risk assessments."
     },
     {
       "sprk_eventname": "Vendor Risk Assessment - Northwind",
-      "sprk_eventdescription": "Conduct annual risk assessment for Northwind Traders. Evaluate financial stability, data handling practices, and regulatory compliance. Schedule on-site audit if risk score exceeds threshold.",
-      "sprk_eventstatus": 100000000
+      "sprk_eventdescription": "Conduct annual risk assessment for Northwind Traders. Evaluate financial stability, data handling practices, and regulatory compliance. Schedule on-site audit if risk score exceeds threshold."
     }
   ],
 

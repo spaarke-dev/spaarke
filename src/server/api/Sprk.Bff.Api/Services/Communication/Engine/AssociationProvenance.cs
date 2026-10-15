@@ -90,4 +90,12 @@ public sealed record SignalTrace
     public required double Confidence { get; init; }
     public required string Provenance { get; init; }
     public required IReadOnlyList<string> Obligations { get; init; }
+
+    /// <summary>
+    /// Rung 5's <c>sprk_triagecategory</c> taxonomy choice (spaarke-ontology-platform-r1 D-117(b)), read back as the
+    /// TRIAGE-EMAIL hint. Omitted from the JSON when null, so every other signal and every document written before
+    /// this field existed serializes exactly as before.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? TriageCategory { get; init; }
 }

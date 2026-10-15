@@ -259,7 +259,37 @@ public partial class RouteAuthorizationGuardTests
             + "filter with the Create privilege and AppendTo on the regarding record; GET / runs its query as the caller "
             + "(task 159, #1098). PATCH /{id}/filing (task 147, owner round 36) takes only the filing, its shape checked "
             + "before the filter, and re-files through OwnedChildWrite.RefileAsync (AppendTo on every new parent, F3). "
+            + "PATCH /{id}/due-assignee (ontology platform R1 task 044, #29) writes ONLY sprk_duedate and/or the assignee contact "
+            + "(statuscode Reassigned, reassigned-by): shape checked before the filter, the same write filter on sprk_events({id}) "
+            + "(no Read → uniform 404; Read without Write → 403), then EventDueAssigneeWrite runs AS THE CALLER through "
+            + "IDataverseUserClient (open work only). "
             + "PUT /{id}, DELETE /{id}, /{id}/cancel and /{id}/logs were deleted (round 10 item 1)."),
+        new GovernedFile("Api/Signals/DecisionPlanEndpoints.cs", Scope.RouteLevelGate,
+            "/api/v1/signals/{signalId}/decision-plan (ontology platform R1 task 036) -- a Signal's decision plan resolved against "
+            + "the closed action catalog. The record-level decision is SignalCoreRecordAccess.AuthorizeAsync, asked AS THE CALLER "
+            + "through IDataverseUserClient (the Signal row, then its core record of any type; a no-core Signal, in the Do lane only, "
+            + "needs the caller's own read of BOTH the Signal and its subject row, D-35 as amended by D-129): no read is the uniform 404, "
+            + "an unresolved caller the single 403 (D-29), a fault reading the subject a 503."),
+        new GovernedFile("Api/Signals/DecisionCommitEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/signals/{signalId}/decision (ontology platform R1 task 043, D-17) -- records ONE decision on a Signal. "
+            + "Before anything else (even the review-id lookup) every Signal in the review -- the primary and each Also-resolve -- "
+            + "goes through SignalCoreRecordAccess.AuthorizeAsync AS THE CALLER through IDataverseUserClient (no read: the uniform "
+            + "404; an unresolved caller: the single 403); then every action's preflight checks the caller's own rights before any "
+            + "write (a missing right is 403). Core record and item subject are derived server-side from the Signal, never the body; "
+            + "the Decision Record's owning team is the ownership resolver's answer for the core and every resolved Signal's subject (D-129)."),
+        new GovernedFile("Api/Signals/SignalReadEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/v1/signals/worklist (ontology platform R1 task 038, D-15, FR-54) -- the worklist's only Signal reader. The "
+            + "record-level decision is SignalReadService.ReadAsync, every row-visibility read AS THE CALLER through IDataverseUserClient: "
+            + "the Signals (Dataverse trims by the Signal's BU and shares), then one batched read per core type of the catalog-named core "
+            + "table (a row whose core record the caller cannot read, a half pair or a non-core type is dropped without trace), then for "
+            + "the Do lane the subject filtered to the caller's own work (task 097 decision B, D-44, D-129; a no-core row is Do-only, "
+            + "D-35). An unresolved caller is the single 403 (D-29); a fault is 503, never a shorter list."),
+        new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
+            + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
+            + "serviceRequestId): no Read is the uniform 404, Read without Write a 403; every write then runs AS THE CALLER "
+            + "(IDataverseUserClient, version-conditional), so Dataverse enforces Write a second time. The reply is read as the "
+            + "caller and must be Incoming and filed against the inquiry named."),
         new GovernedFile("Api/FieldMappings/FieldMappingEndpoints.cs", Scope.RouteLevelGate,
             "field-mapping configuration reads, type validation, and the push route: Read on the source as the caller, children "
             + "read and written impersonated (task 166; sweep S-67)."),
@@ -708,6 +738,23 @@ public partial class RouteAuthorizationGuardTests
     //            RouteLevelGate: each of its three routes carries RecordRouteAccessAuthorizationFilter on a constant entity
     //            set. Pinned through the real pipeline by tests/integration/auth/UnifiedAccessControl/RecordNoAccessEndpointTests.cs.
     //
+    // 118 -> 119 (2026-10-07, spaarke-ontology-platform-r1 task 036; renumbered at a master merge 2026-10-08). Net +1: Api/Signals/DecisionPlanEndpoints.cs ADDED --
+    // GET /api/v1/signals/{signalId:guid}/decision-plan. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions
+    // below. Ontology task 036 owns only these three ledger edits (this count, one GovernedFiles entry, one
+    // HandlerDecision); other ontology routes (038, 043, 044, 046 ...) add their own and the main session reconciles.
+    //
+    // 119 -> 120 (2026-10-09, spaarke-ontology-platform-r1 task 071). Net +1: Api/InquiryEndpoints.cs ADDED -- POST
+    // /api/v1/inquiries/{serviceRequestId:guid}/disposition. Classified by GovernedFiles (RouteLevelGate); its record-level
+    // decision is the already-credited fixed-entity-set form of RecordRouteAccessAuthorizationFilter. The main session
+    // reconciles the count with the other ontology routes at integration.
+    //
+    // 120 -> 121 (2026-10-11, spaarke-ontology-platform-r1 task 043). Net +1: Api/Signals/DecisionCommitEndpoints.cs ADDED --
+    // POST /api/v1/signals/{signalId:guid}/decision. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
+    // The main session reconciles the count with the other ontology routes at integration.
+    //
+    // The three moves below landed on master in parallel with the three ontology moves above, each side counting from 118.
+    // Their files are disjoint, so at the 2026-10-14 master -> ontology merge the count is 118 + 3 + 3 = 124.
+    //
     // 118 -> 119 (2026-10-10, spaarke-SPA-external-access-platform-r3 task 033, FR-04):
     //
     //   033  +1  Api/ExternalAccess/ExternalMessageEndpoints.cs ADDED — GET /api/v1/external/{root}/{id}/messages, the
@@ -729,7 +776,13 @@ public partial class RouteAuthorizationGuardTests
     //            derived in-portal feed) and POST /api/v1/external/notifications/seen (the caller's last-seen marker), on the
     //            COLLABORATION group. Governed GroupGated; both routes take no id and are Permanent CallerScopedOnly (the
     //            /me precedent). Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalNotificationFeedTests.cs.
-    private const int ExpectedEndpointFileCount = 121;
+    //
+    // 121 + 121 -> 124 (2026-10-14, merge of master into docs/ontology-platform-design): the union of the two
+    // 118 -> 121 sequences above (ontology 036/071/043 + external-access-r3 033/035/037). No route added or removed here.
+    //
+    // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
+    // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
+    private const int ExpectedEndpointFileCount = 125;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -996,6 +1049,10 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
+        new NotAuthorizationForm("AddEndpointFilter(ValidateDueAssigneeRequestAsync)",
+            "Ontology platform R1 task 044: PATCH /api/v1/events/{id}/due-assignee request SHAPE only (EventDueAssigneeWrite.ShapeProblem, "
+            + "no I/O): at least a due date or an assignee. It runs before the route's RecordRouteAccessAuthorizationFilter(\"write\") "
+            + "and decides nothing about any record."),
     };
 
     /// <summary>
@@ -1720,14 +1777,51 @@ public partial class RouteAuthorizationGuardTests
             "Task 159 (#1098; sweep S-12): the list runs AS the caller — QueryEventsAsCallerAsync refuses an empty caller "
             + "(DataverseWebApiService.cs:343-350) and sends MSCRMCallerID through DataverseImpersonation.ApplyAsSystemUser "
             + "(:205-207); an unresolvable caller is 403 before any query (EventEndpoints.cs:341-498). The query is the gate."),
+        new HandlerDecision("GET /api/v1/signals/{signalId:guid}/decision-plan", "GetDecisionPlanAsync", "IDataverseUserClient",
+            new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:147), which reads "
+            + "the Signal (SignalCoreRecordAccess.cs:114) and then its core record (:166), or for a no-core Do Signal its subject row "
+            + "(:219; a thrown or faulted read is Unavailable, :224/:229), through IDataverseUserClient AS THE CALLER; "
+            + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:160, caller_unresolved 403 at :148-150, "
+            + "a subject-read fault 503 at :153-155)."),
+        new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "CommitDecisionAsync", "IDataverseUserClient",
+            new[] { "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 043: the handler calls DecisionCommitService.CommitAsync (DecisionCommitEndpoints.cs:56), whose first I/O is "
+            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:434) -- the Signal and "
+            + "its core record (or, no-core, its subject row) read AS THE CALLER through IDataverseUserClient; anything but Allowed returns before the review-id "
+            + "ledger, any app-only read or any write (uniform 404 at :439-440, caller_unresolved 403 at :435-436, 503 at :437-438). Before any "
+            + "write or close it also asks, as the caller through CallerRecordAccessProbe, Write on each Signal's subject and "
+            + "AppendTo on the core record (FR-51; :856, :1275), also before a stored-record repeat closes anything and again "
+            + "before a replay repairs a close (:671, :697), and every executor's own preflight. The Decision Record's owning team is the "
+            + "ownership resolver's answer for EVERY parent the record sits under (the core, if any, and the subject of each Signal it "
+            + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:950), so the answer never shows "
+            + "whether a row exists (a refusal is 422, a resolver fault 503: :952-965)."),
+        new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
+            new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:70), "
+            + "the same decision as decision-plan: the Signal, then its core record of any type, read AS THE CALLER through IDataverseUserClient "
+            + "(a no-core Do Signal needs the caller's own read of the Signal and its subject, D-35 as amended by D-129). Anything but Allowed returns the uniform 404 (:83) / caller_unresolved 403 (:71-73) / subject-fault 503 (:76-78) before the count is "
+            + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
+            + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
+            + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
+        new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
+            new[] { "SignalReadService.ReadAsync" },
+            "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:59). It resolves the caller "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:240; unresolved: the single 403 at SignalReadEndpoints.cs:63), runs the "
+            + "worklist FetchXML as the caller (:510), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:671; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:726). Nothing app-only is "
+            + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
+            + "D-123); a fault is 503 (SignalReadEndpoints.cs:72), never a shorter list."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — the payload mapped with the "
-            + "caller's client (ChildRecordEndpoints.cs:194), then OwnedChildWrite.CreateAsync checks the table privilege and "
-            + "AppendTo on EVERY bound record before the app-only create (:199)."),
+            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
+            + "caller's client (:243), then OwnedChildWrite.CreateAsync checks the table privilege and AppendTo on EVERY bound "
+            + "record before the app-only create (:258) — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:241-256 → "
-            + "UpdateAsync, :271): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
-            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :320)."),
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:432-433 → "
+            + "UpdateAsync, :448): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :988)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "
@@ -2412,9 +2506,9 @@ public partial class RouteAuthorizationGuardTests
             + "the validationToken handshake (ComposeSyncEndpoints.cs:104-110) only echoes the token."),
         Permanent("POST /api/communications/incoming-webhook", PermanentBasis.AnonymousByDesign, "167",
             "Graph mail-notification webhook. Mandatory control: RequireWebhookSignature at "
-            + "CommunicationEndpoints.cs:402, which fails closed with no key or header "
-            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :406 (defense in depth); "
-            + "the validationToken handshake (CommunicationEndpoints.cs:1175-1184) only echoes the token."),
+            + "CommunicationEndpoints.cs:513, which fails closed with no key or header "
+            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :517 (defense in depth); "
+            + "the validationToken handshake (CommunicationEndpoints.cs:1291-1301) only echoes the token."),
 
         // ---------- the task-167 UNOWNED-NEW findings — ASSIGNED at the integration (2026-10-05) ----------
         // The 21 of notes/task-167-every-route-authorization-guard.md §3, each given to the task whose surface it is

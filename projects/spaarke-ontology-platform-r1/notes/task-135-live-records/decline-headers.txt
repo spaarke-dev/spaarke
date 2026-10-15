@@ -1,0 +1,16 @@
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Date: Fri, 09 Oct 2026 05:15:14 GMT
+Server: Kestrel
+Set-Cookie: ARRAffinity=39ab6951be1d210059fab2cf5828755f6064dfa13d809c4874ee86cd45b830db;Path=/;HttpOnly;Secure;Domain=spaarke-bff-dev.azurewebsites.net
+Set-Cookie: ARRAffinitySameSite=39ab6951be1d210059fab2cf5828755f6064dfa13d809c4874ee86cd45b830db;Path=/;HttpOnly;SameSite=None;Secure;Domain=spaarke-bff-dev.azurewebsites.net
+Transfer-Encoding: chunked
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+X-XSS-Protection: 0
+X-Frame-Options: DENY
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+X-Insights-Cache: false
+X-Insights-Elapsed-Ms: 6561
+

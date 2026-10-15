@@ -264,7 +264,7 @@ Barrel: `src/index.ts` re-exports the same six subpaths declared in `package.jso
 |---|---|
 | `./components` | `DailyBriefingApp` (top-level composer), `TldrSection`, `ActivityNotesSection`, `ChannelHeading` + `channelIcons`, `NarrativeBullet`, `PreferencesDropdown`, `CaughtUpFooter`, `DigestHeader`, `EmptyState` (per FR-04). |
 | `./widgets` | Reserved for a future `DailyBriefingWorkspaceWidget` matching the Calendar widget shape; currently empty. The LegalWorkspace section shim mounts `DailyBriefingApp` directly. |
-| `./hooks` | `useBriefingNotifications`, `useBriefingPreferences`, `useBriefingActions` (per FR-06 — the three split hooks that replaced the monolithic `useNotificationData` in R2), plus `useBriefingNarration` and `useInlineTodoCreate` (per FR-05). |
+| `./hooks` | `useBriefingRender` (fires `POST /api/ai/daily-briefing/render` unconditionally on mount — the live data path), `useBriefingPreferences`, and `useInlineTodoCreate` (per FR-05). The appnotification-driven `useBriefingNotifications` / `useBriefingNarration` / `useBriefingActions` (per FR-06 — the three split hooks that replaced the monolithic `useNotificationData` in R2) were deleted as dead code by ontology-platform-r1 task 010 / C-1 (2026-10-03). |
 | `./services` | Notification + narration + preferences service modules (Xrm.WebApi + `authenticatedFetch`). |
 | `./types` | `NotificationContext`, `NarrateRequest`, briefing payload types, preference types. |
 | `./utils` | Pure helpers (date, channel-icon resolution). |
