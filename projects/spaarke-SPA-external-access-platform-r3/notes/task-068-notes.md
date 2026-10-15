@@ -220,3 +220,32 @@ The owner approved all four dev changes: 044 apply, BFF from R3, three PCF impor
 - For the two pages, re-upload the saved pre-deploy content (`wr-sprk_emailpage-before.json`, `wr-sprk_communicationconversationpage.html-before.json` in the session scratchpad), or rebuild them from master, then publish.
 
 **Hosts not deployed.** These also get the switch on their next build: the Console (`sprk_spaarkeai`, last deployed by word-add-in) and DocumentUploadWizard (follow-up 4).
+
+### Step 6c - owner check: "External | Internal Only" tags (2026-10-14, owner-approved)
+
+**Owner check.** The switch works on dev (the Messages modal sent one Internal Only and one non-internal message). The owner asked for a better look and placement: "an on/off tag with the label in the tag, (External) | (Internal Only), red for Internal Only and green for External".
+
+**What changed:**
+- `InternalOnlySwitch` gained `variant="tags"`, extending the existing control rather than adding a new one. The tags variant:
+  - is a two-option radio group with one tab stop; the arrow keys move between options;
+  - colours the selected option with Fluent palette tokens, green or red, and adapts to dark mode;
+  - when `locked`, keeps "Internal Only" selected and makes "External" unavailable;
+  - moves the hints into tooltips. The "External" hint is new wording: "People outside your organization with access to this record can see this".
+- **The Messages compose bar** (`ConversationView`) shows the tags in a row above the message box (commit `7419e8637`).
+- **The email composer** uses the tags too (commit `247ce6a6e`; owner: "Also use tags in New Email"). The rules are unchanged, and re-selecting the current tag is not a change, so an untouched reply of an unknown source still omits the field.
+- **The timeline compose box** keeps the switch.
+
+**Tests:** EmailComposer and ConversationView, 370 passed. New tag-variant tests cover arrow keys, the locked state and the tooltip hint.
+
+**Deployed** (approved "Also use tags in New Email"):
+- CommunicationConversationPanel 1.18.4; reads back 1.18.4.
+- `sprk_emailpage` at 01:53:16Z; byte-equal, and word-add-in's #1812 marker is present.
+- `sprk_communicationconversationpage.html` at 01:53:24Z; byte-equal.
+
+The 1.18.4 bundle contains no email composer, so the second commit did not change it.
+
+**Rollback:**
+- Re-import 1.18.3 (`src/client/pcf/CommunicationConversationPanel/Solution/bin/`, gitignored, or rebuild from `be5c7257e`).
+- Re-upload `wr-*-before-tags.json` from the session scratchpad, or rebuild both pages from `be5c7257e`.
+
+**Not yet rebuilt** (they show the tags on their next build): the CommunicationActions and CommunicationMessageActions PCFs, the Console and the Word add-in, all of which use EmailComposer.
