@@ -59,7 +59,7 @@ public class FinanceOptions
     /// <summary>
     /// SPE container id of the <b>Procedure Library</b> (ebilling-r1 FR-16, D-55): billing guidelines, rate cards and
     /// internal procedures. Internal only (D-63): never visible to firm (CIAM) users. Its documents go through the
-    /// standard document pipeline and ARE indexed.
+    /// standard document pipeline and are intended to be indexed (blocked today by the pointer check — DEF-014).
     /// </summary>
     /// <remarks>
     /// Optional at start-up: empty is allowed so no stamp fails to boot; a consumer that needs it refuses with a stable

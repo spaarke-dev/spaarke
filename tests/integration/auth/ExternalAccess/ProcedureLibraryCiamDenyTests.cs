@@ -1,5 +1,9 @@
-// ebilling-r1 task 028 (FR-16, D-55, D-63): a firm (CIAM) user can never open, or find through search, a document in the
-// Procedure Library container.
+// ebilling-r1 task 028 (FR-16, D-55, D-63): a firm (CIAM) user can never download the bytes of a document in the Procedure
+// Library container, and has no search route through which to find one.
+//
+// SCOPE — BYTES, NOT METADATA. These tests prove the file content is refused. They do NOT prove the row's metadata is hidden:
+// a Procedure Library sprk_document row filed (by mistake) under a record the firm can read still appears in that record's
+// external document LIST (name, summary). Closing that needs a change to the shared external-access list routes — DEF-015.
 //
 // KEEP-path classification (ADR-038 section 2 path #1, security-auth): every test asserts an AUTHORIZATION decision for an
 // external caller. Compiled into Sprk.Bff.Api.Tests by the existing tests/integration/auth glob.
@@ -126,6 +130,9 @@ public sealed class ProcedureLibraryExternalDownloadTests : IClassFixture<Extern
     {
         var document = _fixture.Data.Seed(
             ExternalDataService.DocumentParentKind.Matter, FirmMatter, "billing-guidelines.pdf", ProcedureLibrary, "item-guidelines");
+        // The item really is in the Procedure Library (uploaded by the BFF), so the item-exists half of the pointer check
+        // passes and only the container rule can refuse it.
+        _fixture.StoreItem(ProcedureLibrary, "item-guidelines", new byte[] { 7, 7, 7 });
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.GetAsync($"/api/v1/external/matters/{FirmMatter}/documents/{document}/content");
@@ -190,8 +197,10 @@ public sealed class CiamSearchRouteTests : IClassFixture<CustomWebAppFactory>
         ciamRoutes.Should().Contain(r => r.StartsWith("/api/v1/external/", StringComparison.OrdinalIgnoreCase));
         searchRoutes.Should().NotBeEmpty("the BFF has search routes; finding none means the scan is broken");
 
-        ciamRoutes.Should().OnlyContain(r => r.StartsWith("/api/v1/external", StringComparison.OrdinalIgnoreCase),
-            "a CIAM token authenticates only on the external group");
+        ciamRoutes.Should().OnlyContain(
+            r => r.Equals("/api/v1/external", StringComparison.OrdinalIgnoreCase)
+                 || r.StartsWith("/api/v1/external/", StringComparison.OrdinalIgnoreCase),
+            "a CIAM token authenticates only on the external group (not on the workforce /api/v1/external-access group)");
         ciamRoutes.Should().NotContain(r => r.Contains("search", StringComparison.OrdinalIgnoreCase),
             "the external group has no search route, so search never returns a document to a firm user (D-63)");
         searchRoutes.Should().OnlyContain(s => !s.Anonymous && !s.AdmitsCiam,

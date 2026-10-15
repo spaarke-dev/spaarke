@@ -1191,6 +1191,17 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             VerifyPointers = false;
         }
 
+        /// <summary>
+        /// Places <paramref name="bytes"/> in SPE as item <paramref name="itemId"/> of <paramref name="drive"/>, as if the BFF had
+        /// uploaded it there — so a pointer to it passes the item-exists half of the pointer check and only the container rule
+        /// can refuse it.
+        /// </summary>
+        public void StoreItem(string drive, string itemId, byte[] bytes)
+        {
+            _spe[itemId] = bytes;
+            _itemDrives[itemId] = drive;
+        }
+
         /// <summary>The row the container resolver reads for (<paramref name="entity"/>, <paramref name="id"/>).</summary>
         private Entity RecordRow(string entity, Guid id)
         {
