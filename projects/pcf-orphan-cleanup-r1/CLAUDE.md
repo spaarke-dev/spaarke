@@ -117,6 +117,15 @@ Mid-project tasks (003, 004, 005) are sequential (003 = Dataverse mutation must 
 
 ---
 
+## Standing directives & gotchas (2026-10-14)
+
+- **Re-run the 4-check live on the day of any deletion.** The June results went stale: SpaarkeMaster 1.2.x (2026-10-08) made SDV, EventAutoAssociate, EventFormController and RegardingLink root components bound to live forms and views. Check `RetrieveDependenciesForDelete` **and** a content grep of `systemform.formxml`, `savedquery.layoutxml/layoutjson`, `sitemap` and `sprk_*` web resources. `RetrieveDependenciesForDelete` missed RegardingLink's 6 view bindings.
+- **Also check data, not only metadata**: `sprk_chartdefinition.sprk_drillthroughtarget` names pages by string.
+- **Web API `RemoveSolutionComponent`**: pass `SolutionComponent = { "@odata.type": "Microsoft.Dynamics.CRM.solutioncomponent", "solutioncomponentid": <the COMPONENT's object id> }` + `ComponentType` + `SolutionUniqueName`. `ComponentId` is rejected, and the solutioncomponent row id is read as the component id.
+- **A component with no dedicated solution** (e.g. one only in Default): create a temp unmanaged solution, `AddSolutionComponent`, export it unmanaged + managed, and delete the empty temp solution afterwards.
+- **Re-import for recovery with `scripts/Import-SolutionScoped.ps1`** (scoped publish). Never use `pac solution import --publish-changes` or Publish All.
+- `AnalysisWorkspaceSolution` cannot be exported (dangling CustomControlResourceId `f3757ca8-…`); its only backup is the June ZIP.
+
 ## Decisions Made
 
 See [`spec.md §5`](spec.md#5-decisions-made-binding-for-this-project) for the binding decisions table.

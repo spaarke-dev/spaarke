@@ -1,72 +1,28 @@
 # Current Task — pcf-orphan-cleanup-r1
 
-> Last updated: 2026-06-22 (Task 001 ✅ complete)
+> Last updated: 2026-10-15 (by context-handoff; task 003 closed)
 
-## Active Task
+## Quick Recovery
 
-**None — Task 001 just completed.** Next pending = Task 003 (gated by owner triage on DEV-001).
+| Field | Value |
+|---|---|
+| **Task** | (soak) 7-day wait after task 003, ends **2026-10-22**; next task is 004 |
+| **Status** | No active task. Task 003 ✅ (owner smoke tests complete, no cleanup regressions) |
+| **Next Action** | Merge PR #1897. On or after 2026-10-22, if no regressions are reported, start task 004 via task-execute. Before 006, get answers to the owner questions below |
+| **Branch / PR** | `work/pcf-orphan-cleanup-r1` → PR #1897 (smoke tests done; ready to merge) |
 
-## Session 2 Outcomes (2026-06-22)
+## State
 
-### ✅ Task 001 complete
+- spaarkedev1 cleanup is done: 4 customcontrols and 3 canvas custom pages deleted (details in `notes/dataverse-cleanup-log.md`). Restore path: `backups-2026-10-14/` + `scripts/Import-SolutionScoped.ps1` (command in the log).
+- Smoke-test failures were all pre-existing and filed: #1950 (calendar counts), #1951 (PROJECT BUDGET target), #1952 (hidden user layouts), #1956 (2b, needs the card and the console lines from the owner). Missing system Matters workspace created separately (PR #1955).
+- Held controls: SpeDocumentViewer, EventAutoAssociate, EventFormController, RegardingLink, FieldMappingAdmin, AnalysisWorkspace (DEV-002–005).
 
-- **Outputs**:
-  - 10 baseline solution ZIPs in [`backups-2026-06-22/`](backups-2026-06-22/) (~5 MB total)
-  - [`notes/preflight-results-spaarkedev1.md`](notes/preflight-results-spaarkedev1.md) — disposition table for 11 customcontrols + 6 canvas apps
-  - [`notes/preflight-deviations.md`](notes/preflight-deviations.md) — DEV-001 flagged
-- **Verdict**: 10/11 customcontrols **ready-to-delete**; 4/6 canvas apps ready; **AnalysisWorkspace PCF + canvas held** per DEV-001 (live ribbon ref in `sprk_analysis_commands.js:167`)
-- **Branch**: `chore/pcf-orphan-cleanup-preflight`
+## Remaining tasks
 
-### 🔲 Remaining (in dependency order)
+004 shared-lib `@types/react` peerDep (FULL) → 005 VisualHost React 16 re-pin + deploy (FULL) → 006 spaarkedev2 replay (FULL) → 007 log finalize + inventory refresh.
 
-| Task | Status | Blocker |
-|---|---|---|
-| 003 — Dataverse cleanup spaarkedev1 (10 controls + 4 canvas apps) | NOT started | DEV-001 owner triage (see [preflight-deviations.md](notes/preflight-deviations.md)); also wants a dedicated 4-6 hour focused block |
-| (7-day soak) | — | Calendar gate after 003 |
-| 004 — Shared lib `@types/react` peerDep | Blocked on 003 + soak | |
-| 005 — VisualHost re-pin React 16 | Blocked on 004 | |
-| 006 — Dataverse cleanup spaarkedev2 | Blocked on 005 + soak | |
-| 007 — Cleanup-log finalize | Blocked on 006 | |
+## Open owner questions (block 006)
 
-## Branches in flight
-
-- `chore/pcf-orphan-cleanup-setup` → PR #411 (project scaffolding)
-- `chore/pcf-orphan-cleanup-source-delete` → PR #412 (source deletion — 3 PCFs)
-- `chore/pcf-orphan-cleanup-preflight` → new PR for Task 001 outputs (current branch)
-
-## DEV-001 quick reference (blocks Task 003 row 4 + canvas 3)
-
-`Spaarke_OpenAnalysisWorkspace()` in [`src/client/webresources/js/sprk_analysis_commands.js:145-189`](../../src/client/webresources/js/sprk_analysis_commands.js#L145) opens canvas page `sprk_analysisworkspace_8bc0b` at line 167 via `Xrm.Navigation.navigateTo({ pageType: 'custom', name: 'sprk_analysisworkspace_8bc0b' })`. The companion file `sprk_AnalysisWorkspaceLauncher.js` documents a form-onload approach that's MEANT to replace the ribbon path, but completion is unverified. Three possible outcomes documented in [`notes/preflight-deviations.md`](notes/preflight-deviations.md):
-1. Ribbon still wired → do not delete
-2. Ribbon retired → reclassify ready-to-delete
-3. Ambiguous → owner decision
-
-## Next Action
-
-After PR #411 + #412 + the upcoming preflight PR are merged AND DEV-001 is resolved:
-
-1. **Schedule a 4-6 hour focused block** for Task 003 (Dataverse cleanup spaarkedev1).
-2. Resume execution by saying:
-   - "work on task 003" → executes Task 003
-   - "continue" → loads TASK-INDEX, picks the next 🔲
-
-## Notes for the next session
-
-- PAC CLI is authenticated to **spaarkedev1** (profile [3]). No re-auth needed.
-- 10 baseline ZIPs are committed to git in `backups-2026-06-22/` — recoverable from any branch.
-- AnalysisBuilder (PCF dfc82d5b) has NO dedicated solution to back up; lives only in Default. If Task 003 deletes it, resurrection requires either an out-of-env restore or accepting irrecoverability (per project §3.5.4 worst-case path).
-- Per-control deletion order for Task 003 (post-deviation): UQC → SDV (mandatory live-form re-check) → AnalysisBuilder → DueDatesWidget → EventAutoAssociate (also the resurrection spot-test) → EventCalendarFilter → EventFormController → FieldMappingAdmin → RegardingLink → LegalWorkspace PCF. Plus canvas apps 1, 2, 4, 5. **HOLD AnalysisWorkspace PCF + canvas 3 per DEV-001.**
-
-## Blockers
-
-- **DEV-001** — AnalysisWorkspace PCF + canvas app held pending live-ribbon resolution. Task 003 row 4 + canvas 3 blocked.
-
-## Recovery Notes
-
-If context is lost mid-execution next session:
-
-1. Read [`CLAUDE.md`](CLAUDE.md) for project context
-2. Read this `current-task.md` for session outcomes + DEV-001 summary
-3. Read [`notes/preflight-results-spaarkedev1.md`](notes/preflight-results-spaarkedev1.md) for per-control disposition
-4. Read [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) for what's done / pending
-5. Resume via `task-execute` on Task 003 (or any unblocked 🔲)
+1. **AnalysisWorkspace PCF (DEV-005)**: delete it now that the DEV-001 reason is gone?
+2. **FieldMappingAdmin (DEV-004)**: retire it, or keep it?
+3. **Task 006 scope**: replay only the set cleared on dev1 (SDV/EAA/EFC/RL retirement belongs to `pcf-legacy-retirement-r1` / #1468)?
