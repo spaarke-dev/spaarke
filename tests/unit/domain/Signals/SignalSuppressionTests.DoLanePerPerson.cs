@@ -122,6 +122,40 @@ public partial class SignalSuppressionTests
         s.StampedIds.Should().BeEmpty("a second pass writes nothing");
     }
 
+    [Theory]
+    [InlineData("sprk_workassignment")] // the assigner (D-44): "mine", not the item's person
+    [InlineData("sprk_event")]          // the creator: "mine", not the item's person
+    public async Task T152_ACallerWhoIsNotTheItemsPerson_IsToldTheirDismissalCountsTowardNothing(string table)
+    {
+        // Review F1: Alice's item; Bob may see and dismiss it, but his dismissal of it counts toward no one, so the wizard must not
+        // tell him "1 of 3".
+        var s = BobDismissedThreeOfHisOwn();
+        var subject = Guid.NewGuid();
+        var anchor = s.Open(MatterId, subject, subjectEntity: table);
+        var row = s.Others.Single(r => r.LogicalName == table && r.Id == subject);
+        row[SignalReadService.DoLaneMineRules[table].PersonColumn] = new EntityReference("contact", Alice);
+        row["sprk_issecure"] = false; // a work assignment is a lineage root: an ordinary one, as the store's own roots are
+
+        var status = await StatusAsync(s, anchor, callerContact: Bob);
+
+        status.Should().Be(new SuppressionStatus(0, 0, null, false), "the caller's dismissal of another person's Do item counts toward nothing");
+        (await StatusAsync(s, anchor, callerContact: Alice))!.PolicyCountsTowardSuppression.Should().BeTrue("the item's own person's does");
+    }
+
+    [Fact]
+    public async Task T152_ADoSignalOfAPolicyNoLongerInTheDoLane_IsNotAnsweredFromTheUnsplitCount()
+    {
+        // Review K3: the policy was switched to the Decide lane; its Signals were raised in the Do lane and still are Do items to the
+        // route's gate. Bob's three dismissals now pool at (policy, matter); Alice must not be shown them.
+        var s = BobDismissedThreeOfHisOwn(SignalWriter.LaneDecide);
+        var aliceOpen = OpenDo(s, MatterId, Alice);
+        foreach (var row in s.Signals) row["sprk_lane"] = new OptionSetValue(SignalWriter.LaneDo);
+
+        var status = await StatusAsync(s, aliceOpen, callerContact: Alice);
+
+        status.Should().Be(new SuppressionStatus(0, 0, null, false));
+    }
+
     // ---- Fixtures --------------------------------------------------------------------------------------------------------------
 
     private static Store LaneStore(int lane) => new() { PolicyLane = lane };

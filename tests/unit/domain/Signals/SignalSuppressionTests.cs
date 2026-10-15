@@ -1952,7 +1952,7 @@ public partial class SignalSuppressionTests
                 "sprk_decisionrecord" => Records,
                 "businessunit" => SecureBusinessUnits(),
                 "team" => CountTeamRead(),
-                "sprk_matter" or "sprk_project" or "sprk_workassignment" or "sprk_communication" or "sprk_todo" =>
+                "sprk_matter" or "sprk_project" or "sprk_workassignment" or "sprk_communication" or "sprk_todo" or "sprk_event" =>
                     Others.Where(r => r.LogicalName == q.EntityName).ToList(),
                 _ => throw new NotSupportedException(q.EntityName),
             };

@@ -858,14 +858,15 @@ public sealed class SignalSuppressionService
     /// <para><b>Do lane (D-145a, task 152; D-141).</b> The count is the anchor's HOLDER's (<see cref="SuppressionHolder"/>) within its
     /// partition: a Do item for a person reports only that person's own counted dismissals, and only to that person
     /// (<paramref name="callerContactId"/>, the caller's linked contact the "mine" read resolved); any other caller, including one the
-    /// "mine" rule admits as the item's owner or creator, is told nothing (an empty status). An item with no individual reports its own
-    /// per-item count.</para>
+    /// "mine" rule admits as the item's owner, creator or assigner, is told nothing and that its dismissal counts toward nothing (an empty
+    /// status whose <see cref="SuppressionStatus.PolicyCountsTowardSuppression"/> is false). So is the caller of a Do Signal whose policy
+    /// is no longer in the Do lane. An item with no individual reports its own per-item count.</para>
     /// </summary>
     public async Task<SuppressionStatus?> GetStatusForSignalAsync(
         Guid signalId, IDataverseUserClient caller, CancellationToken ct, Guid? callerContactId = null)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
-            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false);
+            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", "sprk_lane", .. SignalLineageColumns], ct).ConfigureAwait(false);
 
         if (signal.GetAttributeValue<EntityReference>("sprk_policy") is not { Id: var policyId } || policyId == Guid.Empty)
         {
@@ -888,10 +889,19 @@ public sealed class SignalSuppressionService
             return null;
         }
 
-        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_policycode"], ct).ConfigureAwait(false);
+        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_policycode", "sprk_lane"], ct).ConfigureAwait(false);
         if (policy.GetAttributeValue<string>("sprk_policycode") is not { Length: > 0 } code)
         {
             return null; // a no-core grain is keyed by the policy code: without it the count would be silently zero
+        }
+
+        // Task 152 review K3: the count is split by the POLICY's lane, the route's "mine" gate by the SIGNAL's. A Do Signal of a policy
+        // since switched to another lane would be answered from the unsplit (policy, core) count, colleagues' dismissals included: it is
+        // answered as a dismissal that counts toward nothing instead.
+        if (signal.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value == SignalWriter.LaneDo
+            && policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value != SignalWriter.LaneDo)
+        {
+            return CountsTowardNothing;
         }
 
         // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns, then Decision-Record facts
@@ -905,14 +915,20 @@ public sealed class SignalSuppressionService
             throw new SuppressionPartitionUndeterminedException();
         }
 
-        var empty = new SuppressionStatus(0, 0, null, assessed.PolicyCounts);
         if (assessed.AnchorHolder.PersonId is { } person && person != callerContactId)
         {
-            return empty; // D-145a / D-141: another person's Do-lane count is never reported
+            // D-145a / D-141: another person's Do-lane count is never reported, and this caller's dismissal of it counts toward no one
+            // (it is not theirs to count, review F1), so the wizard says it does not count rather than "1 of 3".
+            return CountsTowardNothing;
         }
 
-        return assessed.Partitions.FirstOrDefault(p => p.Partition == anchor && p.Holder == assessed.AnchorHolder).Assessment?.Status ?? empty;
+        return assessed.Partitions.FirstOrDefault(p => p.Partition == anchor && p.Holder == assessed.AnchorHolder).Assessment?.Status
+            ?? new SuppressionStatus(0, 0, null, assessed.PolicyCounts);
     }
+
+    /// <summary>The count for a caller whose dismissal of this Signal counts toward no one (task 152): nothing counted, nothing reported, and
+    /// <see cref="SuppressionStatus.PolicyCountsTowardSuppression"/> false so the wizard does not promise a count.</summary>
+    private static SuppressionStatus CountsTowardNothing => new(0, 0, null, false);
 
     /// <summary>
     /// Counts the pairing and brings its stamps into line, in every partition (#1661, D-123): at the threshold the partition's open and
@@ -1144,7 +1160,9 @@ public sealed class SignalSuppressionService
                 .Where(s => knownHolders is null || !knownHolders.ContainsKey((s.Entity.ToLowerInvariant(), s.Id)))
                 .ToList();
             var read = subjects.Count == 0 ? holders : await HoldersOfSubjectsAsync(subjects, ct).ConfigureAwait(false);
-            holders = knownHolders is null ? read : knownHolders.Concat(read).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value);
+            holders = knownHolders is null ? read
+                : read.Count == 0 ? knownHolders
+                : knownHolders.Concat(read).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value);
         }
 
         SuppressionHolder HolderOfRow(Entity s) => doLane.Value ? HolderOf(holders, s) : SuppressionHolder.Everyone;

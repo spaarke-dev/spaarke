@@ -71,4 +71,18 @@ Seeding proofs:
   job-level test cannot reach a worked grain; the job test seeds justified stamps (as the existing #1661 job tests do) and stamping is
   proven at the service level.
 
+## Adversarial pass 1 and fix round
+
+Pass 1 confirmed the core rule (a dismissal counts only for the person who decided it, and only on that person's own Do items) on every
+path, and found:
+
+- **F1, fixed.** A "mine" caller who is not the item's person (an owner, creator or assigner) was told "n of 3" from the unsplit count.
+  `GetStatusForSignalAsync` now returns `(0, 0, null, false)` for that caller, so the wizard says the dismissal does not count.
+  Theory `T152_ACallerWhoIsNotTheItemsPerson_IsToldTheirDismissalCountsTowardNothing` covers an assigner on a work assignment and a
+  creator on an event. Seeding proof: reverting to `assessed.PolicyCounts` makes both cases fail.
+- **K3, fixed.** A Do-lane Signal whose policy has since left the Do lane is no longer answered from the unsplit count; it gets the
+  empty status. Test `T152_ADoSignalOfAPolicyNoLongerInTheDoLane_IsNotAnsweredFromTheUnsplitCount`; removing the check makes it fail.
+- **K4, fixed.** `AssessAsync` reuses the caller's holder map unchanged when the read adds nothing, and merges only when it does.
+- **K1, deferred.** The main session files the issue.
+
 rework: none task 152
