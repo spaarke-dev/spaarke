@@ -12,7 +12,7 @@
 | Field | Value |
 |---|---|
 | **Task** | 152 (#1946) uac-r2 F3 fix round; 153 (#1953) adversarial pass 1; 146 blocked on the dev BFF connection's privilege cache. |
-| **Blocker** | 146 items 1, 2, 3, 9, 11 need a dev BFF restart (my restart or R3's #1949 redeploy). Waiting on the owner. |
+| **Blocker** | 146 items 1, 2, 3, 9, 11 need a dev BFF restart (my restart or R3's #1949 redeploy). R3 is redeploying `c20bff283` (owner-approved); waiting for R3 to report it. |
 | **Next Action** | (1) 152 agent `af490c65f025a85b5` returns the F3 test SHA, then send it to uac-r2 for a re-check, then merge on green, then close #1921. (2) 153 pass-1 reviewer `a97a4b7bbe382f169` returns, then a fix round that keeps uac-r2's anti-spoof property, then pass 2, then uac-r2, then merge. (3) After the BFF restarts, wait about 15 minutes, then resume the 146 agent to re-run its blocked items. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
@@ -45,7 +45,7 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Open owner questions
 
-- Approve R3's redeploy with uac-r2's #1949, and/or a dev BFF restart by us. Either clears the 146 privilege cache. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
+- None open. The owner approved R3's redeploy of `c20bff283` (2026-10-15), and ontology cleared it with the window open now. Wait for R3's SHA, healthz and restart time, then re-run 146 about 15 minutes later. Backlog: DI-82 #1881 (`sprk_assignedto` vs `sprk_assignedtointernal`).
 
 ## Peers (current session names)
 
