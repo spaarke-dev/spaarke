@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, no task started |
+| **Task** | Wave W0-1 + W2-1 in parallel: 001, 002, 003, 041 (agents running); 040 queued |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Owner starts execution: `work on task 001` (Wave 0-1 = 001, 002, 003 in parallel; 040, 041 may start alongside — see `tasks/TASK-INDEX.md`) |
+| **Status** | in-progress (parallel mode) |
+| **Next Action** | Collect agent results; main session commits per task; launch 040 when a slot frees (it shares appsettings.template.json with 003 and the BFF build with 041); then W0-2 (004) and W1-1 schema batches |
 
 ### Files Modified This Session
 - Pipeline output only (README, plan, CLAUDE.md, tasks/). See the pipeline commit.

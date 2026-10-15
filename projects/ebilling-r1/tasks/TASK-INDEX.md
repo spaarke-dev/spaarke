@@ -14,9 +14,9 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 001 | 🔲 [open] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
-| 002 | 🔲 [open] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
-| 003 | 🔲 [open] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
+| 001 | 🟡 [in-progress] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
+| 002 | 🟡 [in-progress] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
+| 003 | ✅ [completed] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
 | 004 | 🔲 [open] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |
 | 005 | 🔲 [open] | Extraction spike — four arms, coding model comparison, package size; go / no-go | STANDARD | opus / high | none | 002, 004 |
 
@@ -50,7 +50,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 040 | 🔲 [open] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
-| 041 | 🔲 [open] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
+| 041 | 🟡 [in-progress] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
 | 042 | 🔲 [open] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
 | 043 | 🔲 [open] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
 | 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |

@@ -40,3 +40,61 @@ Read `sprk_totalamount` and `statuscode`, in task 015's scope.
 **Related**: #1771. The private invoice-status copies tracked there now carry an added comment: `FinancialCalculationToolHandler.cs:44-45` uses status values 100000002 and 100000003, which do not exist. Both are fixed in scope by task 015.
 
 ---
+
+### DEF-001 — Customer stamps need gpt-5.2 / gpt-5.4-mini and a Content Understanding region (hand-off to customer-provisioning-orchestration-r1)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 003 (step 8 hand-off) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1915 |
+
+**Description**
+
+eBilling R1 deployed `gpt-5.2` (Content Understanding extraction, FR-47, D-51, D-53) and `gpt-5.4-mini` (UTBMS coding, D-46) in dev, with a CU resource whose model defaults map to them. Customer stamps built from `openai.bicep` / `PinnedModelCatalog` have neither model and no CU-capable (AIServices) resource. Without them the extraction and coding Actions fail on a stamp: CU analyze has no completion deployment, and the coding Action resolves a deployment that does not exist. gpt-4o / gpt-4o-mini retire 2027-04-14.
+
+**Entry-points**
+
+- `infrastructure/bicep/modules/openai.bicep` and `PinnedModelCatalog` (owned by customer-provisioning-orchestration-r1; not edited by ebilling-r1).
+- CU GA regions (api 2025-11-01): australiaeast, canadacentral, eastus, eastus2, japaneast, southcentralus, southeastasia, swedencentral, uksouth, westeurope, westus, westus3 (westus2 is NOT listed). Cross-region Bring Your Own Capacity is supported.
+- Dev reference inventory: `projects/ebilling-r1/notes/003-model-deployments.md`.
+
+**Suggested fix**
+
+Add the model pins and a CU resource + `PATCH contentunderstanding/defaults` step to the stamp template or handlers (single owner for the pin catalog), with `Cognitive Services Content Understanding Reader` for the stamp BFF identity in the runtime RBAC module (keyless, ADR-028 A6).
+
+**Estimated effort**: unknown - needs design in customer-provisioning-orchestration-r1.
+**Blockers**: none for eBilling R1 (dev only); needed before any customer-stamp eBilling go-live.
+**Related**: ebilling-r1 tasks 003, 004, 043.
+
+---
+
+### DEF-002 — Dev BFF still uses key-based Azure OpenAI / Document Intelligence settings
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | backlog |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 003 (found, not caused) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1916 |
+
+The dev App Service has `Ai__OpenAiKey`, `AzureOpenAI__ApiKey`, `DocumentIntelligence__OpenAiKey` and `DocumentIntelligence__DocIntelKey` (values not read). ADR-028 A6 requires keyless access. Out of eBilling scope; the new Content Understanding path is keyless.
+
+---
+
+### DEF-003 — Dev deployment `gpt-4o-mini` serves gpt-4.1-mini (deprecated 2027-04-14)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | backlog |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 003 (found, not caused) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1917 |
+
+The deployment name misdescribes its model and the model retires 2027-04-14. eBilling does not use it (coding uses `gpt-5.4-mini`, D-46).
+
+---
