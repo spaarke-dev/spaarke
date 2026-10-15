@@ -8,6 +8,7 @@
   },
   "workflowSizeGuideline": "small",
   "autoCompactWindow": 400000,
+  "promptCacheTtl": "1h",
   "hooks": {
     "PreToolUse": [
       {

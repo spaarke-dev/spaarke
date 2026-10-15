@@ -80,9 +80,10 @@ All are documented at https://code.claude.com/docs/en/sub-agents, `/model-config
 | `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` | `env` | `4` | Concurrent workflow agents per run (default up to 16) |
 | `workflowSizeGuideline` | top level | `small` | Advice to Claude: fewer than 5 workflow agents. Not a cap. |
 | `autoCompactWindow` | top level | `400000` | Auto-compact threshold in tokens (100000–1000000 or `"auto"`) |
+| `promptCacheTtl` | top level | `"1h"` | Main-conversation prompt cache lives 1 hour instead of 5 minutes. The default is 1 hour only within plan usage; with extra usage enabled, sessions fall back to 5 minutes, so a pause of more than 5 minutes rewrites the whole context. Owner-approved 2026-10-14 |
 
 Not changed:
-- **Prompt-cache TTL** (`subagentPromptCacheTtl`) stays at the 5-minute default. Rule 4 removes most rewrites without paying the 1-hour write premium on every agent.
+- **Sub-agent prompt-cache TTL** (`subagentPromptCacheTtl`) stays at the 5-minute default. Rule 4 removes most rewrites without paying the 1-hour write premium on every agent.
 - **Skill listing:** project skills are about 8.6k characters of the roughly 32k listing. The rest is built-in and plugin skills, about 3% of a request. Hiding skills that other skills invoke is a risk, so `skillOverrides` is not used.
 
 ## Measuring
