@@ -14,18 +14,23 @@ public static class GraphModule
     /// App settings naming this stamp's own SharePoint Embedded containers. Written by provisioning (H4b, from
     /// H8's container — task 227c) or an operator; never by the customer. The ownership guard treats them as
     /// owned without reading a marker (task 227d). Only <c>SharePointEmbedded:OwnedContainerIds</c> is a list
-    /// (separated by <c>,</c> or <c>;</c>); the other two are single ids, taken verbatim.
+    /// (separated by <c>,</c> or <c>;</c>); the others are single ids, taken verbatim.
     /// </summary>
     /// <remarks>
-    /// <c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
+    /// <para><c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
     /// marker (dev, demo): an operator lists them there. Provisioned stamps never need it — the BFF marks every
-    /// container it creates, and H4b writes the other two.
+    /// container it creates, and H4b writes the default and archive keys.</para>
+    /// <para>The two <c>Finance:</c> keys are the eBilling Procedure Library and E-Billing Output Files containers
+    /// (ebilling-r1 FR-16, owner D-55 / D-67), so app-only eBilling writers (exports, reports, rule drafts) reach them.
+    /// Same status as the keys above: written by provisioning or an operator, never by the customer.</para>
     /// </remarks>
     public static readonly IReadOnlyList<string> StampContainerSettingKeys = new[]
     {
         "EmailProcessing:DefaultContainerId",
         "Communication:ArchiveContainerId",
         OwnedContainerIdsKey,
+        "Finance:ProcedureLibraryContainerId",
+        "Finance:EbillingOutputContainerId",
     };
 
     private const string OwnedContainerIdsKey = "SharePointEmbedded:OwnedContainerIds";

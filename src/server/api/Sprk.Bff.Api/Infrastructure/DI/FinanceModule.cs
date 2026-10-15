@@ -21,9 +21,10 @@ public static class FinanceModule
         // Provides: ClassificationConfidenceThreshold, BudgetWarningPercentage,
         //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes,
         //           ClassificationDeploymentName, ExtractionDeploymentName
-        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral —
-        // FinanceOptions carries NO DataAnnotations (all members have safe defaults; InvoiceExtractionPlaybookId
-        // is intentionally empty in lower envs, so it is NOT marked [Required]).
+        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
+        // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
+        // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
+        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key.
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))
             .ValidateDataAnnotations()
