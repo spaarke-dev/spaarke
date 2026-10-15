@@ -380,6 +380,11 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
+            + "not yet resolved). The handler admits a WorkforceHome identity only (:114) and registers only the caller "
+            + "itself, keyed by its own token tid/oid/email; it takes no record id."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -782,7 +787,16 @@ public partial class RouteAuthorizationGuardTests
     //
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
-    private const int ExpectedEndpointFileCount = 125;
+    //
+    // 125 -> 126 (2026-10-15, spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9):
+    //
+    //   047  +1  Api/ExternalAccess/ExternalRegistrationEndpoints.cs ADDED — POST /api/v1/external/registration, a
+    //            WorkforceHome caller's one-time registration, on its OWN /api/v1/external group (ExternalCollaboration,
+    //            no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent CallerScopedOnly (it registers
+    //            only the caller, from its own token). Pinned by
+    //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    private const int ExpectedEndpointFileCount = 126;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2736,6 +2750,10 @@ public partial class RouteAuthorizationGuardTests
             + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:277), and messages read only for its accessible "
             + "set (:288) and its own service requests (the module's ScopeRows, :313), under the external read rules (:328). "
             + "Takes no id."),
+        Permanent("POST /api/v1/external/registration", PermanentBasis.CallerScopedOnly, "r3-047",
+            "Registers ONLY the caller: a WorkforceHome identity (ExternalRegistrationEndpoints.cs:114), keyed by its own "
+            + "token tid/oid and email claim (:172), through ContactIdentityBinder.RegisterHomeContactAsync (:184). The "
+            + "closed body carries names only; it takes no record, owner or contact id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
             + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),
