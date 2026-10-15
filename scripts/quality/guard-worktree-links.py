@@ -7,8 +7,9 @@ plus an `rm -rf` fallback) deleted THROUGH the junction and emptied the other wo
 npm's own @spaarke/auth / @spaarke/sdap-client junctions, 70 tracked files. This hook denies the two commands
 that make that possible. It applies to the Bash and PowerShell tools (`tool_input.command`).
 
-  A. Creating a link (PowerShell `New-Item -ItemType Junction|SymbolicLink|HardLink`, `mklink /J|/D|/H`,
-     `ln -s`) whose location is inside one registered worktree and whose target is inside a DIFFERENT one.
+  A. Creating a link (PowerShell `New-Item -ItemType Junction|SymbolicLink|HardLink` (also assigned, in a block or
+     group, with common parameters), `[IO.Directory]::CreateSymbolicLink('L','T')` with literal arguments,
+     `mklink /J|/D|/H` (also Git Bash `cmd //c mklink //J`), `ln -s` (also behind `VAR=x`)) whose location is inside one registered worktree and whose target is inside a DIFFERENT one.
      Links inside one worktree, or with either side outside every worktree, are allowed.
   B. A recursive delete (`rm -r`, `Remove-Item -Recurse`, `rmdir|rd|del /s`) or `git worktree remove` whose path
      argument resolves EXACTLY to a registered worktree root (main checkout included) or to a `.claude/worktrees`
@@ -31,13 +32,19 @@ import sys
 
 GIT_TIMEOUT_SECONDS = 3
 LINK_TYPES = {"junction", "symboliclink", "hardlink"}
-OPERATORS = {";", "&&", "||", "|", "&", "\n"}
 SHELL_WRAPPERS = {"pwsh": "ps", "powershell": "ps", "bash": "bash", "sh": "bash", "zsh": "bash", "cmd": "cmd"}
 WRAPPER_FLAGS = {"-c", "-command", "/c", "/k", "-lc", "-ic", "-cl"}
 PS_DELETE = {"remove-item", "ri"}
 CMD_DELETE = {"rmdir", "rd", "del", "erase"}
-NEW_ITEM_PARAMS = ["path", "name", "itemtype", "type", "value", "target", "force", "credential", "whatif", "confirm"]
-NEW_ITEM_SWITCHES = {"force", "whatif", "confirm"}
+NEW_ITEM_PARAMS = ["path", "name", "itemtype", "type", "value", "target", "force", "credential", "whatif", "confirm",
+                   "usetransaction", "erroraction", "warningaction", "informationaction", "progressaction",
+                   "errorvariable", "warningvariable", "informationvariable", "outvariable", "outbuffer",
+                   "pipelinevariable", "verbose", "debug"]
+NEW_ITEM_SWITCHES = {"force", "whatif", "confirm", "usetransaction", "verbose", "debug"}
+NEW_ITEM_ALIASES = {"ea": "erroraction", "wa": "warningaction", "infa": "informationaction", "ev": "errorvariable",
+                    "wv": "warningvariable", "iv": "informationvariable", "ov": "outvariable", "ob": "outbuffer",
+                    "pv": "pipelinevariable", "vb": "verbose", "db": "debug", "wi": "whatif", "cf": "confirm"}
+LINK_COMMANDS = {"new-item", "ni", "mklink", "ln"}
 # Remove-Item parameters: name -> takes a value. Aliases/common parameters included; anything else is "unsure".
 DELETE_PARAMS = {"path": True, "literalpath": True, "include": True, "exclude": True, "filter": True,
                  "credential": True, "stream": True, "erroraction": True, "warningaction": True,
@@ -248,6 +255,8 @@ class Context:
 
 # --- A: links between worktrees ---------------------------------------------------------------------------
 def resolve_new_item_param(name):
+    if name in NEW_ITEM_ALIASES:
+        return NEW_ITEM_ALIASES[name]
     cands = [p for p in NEW_ITEM_PARAMS if p.startswith(name)]
     if name in NEW_ITEM_PARAMS:
         return name
@@ -428,23 +437,110 @@ def check_delete(ctx, paths, cwd, what):
     return None
 
 
+# --- statement shapes the walker must see through -------------------------------------------------------------
+ENV_ASSIGN = re.compile(r"^[A-Za-z_]\w*=")
+PS_ASSIGN = re.compile(r"^\$\w+(?::\w+)?=(.*)$")
+PS_ASSIGN_NAME = re.compile(r"^\$\w+(?::\w+)?$")
+OPENERS = re.compile(r"^(?:\[\w+\])?(?:[$@]?[({])+")
+BASH_LEAD_WORDS = {"then", "do", "else"}
+DOUBLE_SLASH_FLAG = re.compile(r"(?<![\w/\\:.])//([A-Za-z])(?=\s|$)")
+DOTNET_SYMLINK = re.compile(
+    r"\[\s*(?:System\.)?IO\.(?:Directory|File)\s*\]\s*::\s*CreateSymbolicLink\s*\(\s*"
+    r"(?:'([^'$`]*)'|\"([^\"$`]*)\")\s*,\s*(?:'([^'$`]*)'|\"([^\"$`]*)\")\s*\)", re.I)
+
+
+def strip_assignment(tokens, flavor):
+    """Drop a leading `VAR=value` (bash env prefix) / `$var =` (PowerShell assignment) so the real command is first."""
+    if flavor == "bash":
+        i = 0
+        while i < len(tokens) and ENV_ASSIGN.match(tokens[i]):
+            i += 1
+        tokens = tokens[i:]
+        if tokens and tokens[0] in BASH_LEAD_WORDS:
+            tokens = tokens[1:]
+    elif flavor == "ps" and tokens:
+        m = PS_ASSIGN.match(tokens[0])
+        if m:
+            tokens = ([m.group(1)] if m.group(1) else []) + tokens[1:]
+        elif PS_ASSIGN_NAME.match(tokens[0]) and len(tokens) > 1 and tokens[1] == "=":
+            tokens = tokens[2:]
+    return tokens
+
+
+def embedded_link_command(tokens, flavor):
+    """For a statement that does not start with a link command, the tokens from a link command (or a `cmd /c`
+    wrapper around one) that sits inside a block or group (`{ New-Item ... }`, `& { $x = ... }`, `(New-Item ...)`,
+    `$(...)`, `[void](...)`), closers trimmed; None otherwise. A bare word later in the statement
+    (`echo New-Item ...`) is data, not a command."""
+    for i, t in enumerate(tokens):
+        m = OPENERS.match(t)
+        prev_open = i > 0 and re.search(r"[({]$", tokens[i - 1]) is not None
+        if not (m or prev_open):
+            continue
+        cand = t[m.end():] if m else t
+        rest = ([cand] if cand else []) + tokens[i + 1:]
+        rest = strip_assignment(rest, flavor)
+        if not rest or command_base(rest[0]) not in LINK_COMMANDS | set(SHELL_WRAPPERS):
+            continue
+        args = []
+        for a in rest[1:]:
+            if re.fullmatch(r"[})]+", a):
+                break
+            args.append(a)
+        if args:
+            args[-1] = re.sub(r"[})]+$", "", args[-1])
+        return [rest[0]] + args
+    return None
+
+
+def dotnet_symlink_finding(ctx, text, cwd):
+    """CreateSymbolicLink('L','T') with two literal-string arguments."""
+    for m in DOTNET_SYMLINK.finditer(text):
+        link = m.group(1) if m.group(1) is not None else m.group(2)
+        target = m.group(3) if m.group(3) is not None else m.group(4)
+        try:
+            found = check_link(ctx, link, target, "cwd", cwd)
+        except Unsure:
+            continue
+        if found:
+            return found
+    return None
+
+
 # --- statement walker ------------------------------------------------------------------------------------
 def analyse(command, cwd, ctx, flavor, depth=0):
     """First finding ('A'|'B', ...) in the command line, or None."""
     if depth > 3:
         return None
+    if flavor == "ps":
+        try:
+            found = dotnet_symlink_finding(ctx, strip_heredoc_bodies(command), cwd)
+        except Exception:
+            found = None
+        if found:
+            return found
     for tokens in tokenize(command):
+        tokens = strip_assignment(tokens, flavor)
         if not tokens:
             continue
         base = command_base(tokens[0])
+        if base not in LINK_COMMANDS and base not in SHELL_WRAPPERS:
+            embedded = embedded_link_command(tokens, flavor)
+            if embedded:
+                tokens = embedded
+                base = command_base(tokens[0])
         args = tokens[1:]
         try:
             if base in SHELL_WRAPPERS:
                 inner_flavor = SHELL_WRAPPERS[base]
+                if base == "cmd" and flavor == "bash":      # Git Bash: `cmd //c mklink //J L T` (// stops path mangling)
+                    args = [re.sub(r"^//([A-Za-z])$", r"/\1", a) for a in args]
                 idx = next((i for i, a in enumerate(args) if a.lower() in WRAPPER_FLAGS), None)
                 if idx is not None:
                     inner = args[idx + 1:]
                     text = inner[0] if len(inner) == 1 else " ".join(f'"{a}"' if " " in a else a for a in inner)
+                    if base == "cmd" and flavor == "bash":
+                        text = DOUBLE_SLASH_FLAG.sub(r"/\1", text)
                     found = analyse(text, cwd, ctx, inner_flavor, depth + 1)
                     if found:
                         return found

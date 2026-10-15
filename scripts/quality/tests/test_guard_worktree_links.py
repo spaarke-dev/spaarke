@@ -135,6 +135,106 @@ class GuardWorktreeLinks(unittest.TestCase):
         self.ps(f"New-Item -ItemType File -Path {self.wta}\\x.txt -Value {self.wtb}\\y", False)
         self.sh(f"ln {self.wtb}/f {self.wta}/f", False)       # hard link without -s is outside the rule
 
+    # --- A: review round 1 (F3): spellings that used to slip through --------------------------------------------
+    def _ends(self):
+        a, b = self.wta, self.wtb
+        return (os.path.join(a, "node_modules"), os.path.join(b, "node_modules"),
+                os.path.join(a, "y"), os.path.join(a, "x"))
+
+    def test_new_item_with_common_parameters(self):
+        link, tgt, same_t, same_l = self._ends()
+        for extra in ("-ErrorAction Stop", "-ea Stop", "-ErrorAction:Stop", "-WarningAction SilentlyContinue",
+                      "-wa Ignore", "-Verbose", "-vb", "-Debug", "-ProgressAction SilentlyContinue",
+                      "-InformationAction Ignore", "-infa Ignore", "-OutVariable ov", "-ov ov",
+                      "-ErrorVariable ev", "-ev ev", "-WhatIf", "-Confirm:$false", "-Force", "-Force:$true",
+                      "-WhatIf:$false"):
+            with self.subTest(extra=extra):
+                self.ps(f"New-Item -Path {link} -ItemType Junction -Value {tgt} {extra}", True)
+                self.ps(f"New-Item {extra} -ItemType Junction -Path {link} -Target {tgt}", True)
+                self.ps(f"New-Item -Path {same_l} -ItemType Junction -Value {same_t} {extra}", False)
+
+    def test_cmd_c_with_double_slash_flags_in_git_bash(self):
+        link, tgt, same_t, same_l = self._ends()
+        self.sh(f"cmd //c mklink //J {link} {tgt}", True)
+        self.sh(f'cmd //c mklink //J "{link}" "{tgt}"', True)
+        self.sh(f"cmd //C mklink //D {msys(link)} {msys(tgt)}", True)
+        self.sh(f'cmd.exe //c "mklink //J {link} {tgt}"', True)
+        self.sh(f"cmd //c mklink //J {same_l} {same_t}", False)
+        self.sh(f"cmd //c mklink //J {self.outside} {tgt}", False)
+
+    def test_leading_environment_assignment_in_bash(self):
+        link, tgt, same_t, same_l = self._ends()
+        self.sh(f"MSYS_NO_PATHCONV=1 cmd /c mklink /J {link} {tgt}", True)
+        self.sh(f"MSYS=winsymlinks:nativestrict ln -s {tgt} {link}", True)
+        self.sh(f"A=1 B=two MSYS=winsymlinks:nativestrict ln -s {tgt} {link}", True)
+        self.sh(f"MSYS_NO_PATHCONV=1 cmd //c mklink //J {link} {tgt}", True)
+        self.sh(f"MSYS_NO_PATHCONV=1 rm -rf {self.wtb}", True)
+        self.sh(f"MSYS_NO_PATHCONV=1 cmd /c mklink /J {same_l} {same_t}", False)
+        self.sh(f"MSYS=winsymlinks:nativestrict ln -s {same_t} {same_l}", False)
+        self.sh("FOO=bar", False)
+
+    def test_powershell_assignment_of_new_item(self):
+        link, tgt, same_t, same_l = self._ends()
+        for cmd in (f"$null = New-Item -ItemType Junction -Path {link} -Target {tgt}",
+                    f"$x = New-Item -ItemType Junction -Path {link} -Target {tgt}",
+                    f"$x=New-Item -ItemType Junction -Path {link} -Target {tgt}",
+                    f"$null=New-Item -ItemType Junction -Path {link} -Target {tgt}",
+                    f"$x = (New-Item -ItemType Junction -Path {link} -Target {tgt})",
+                    f"[void](New-Item -ItemType Junction -Path {link} -Target {tgt})",
+                    f"$null = New-Item -ItemType Junction -Path {link} -Target {tgt} | Out-Null"):
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, True)
+        self.ps(f"$null = New-Item -ItemType Junction -Path {same_l} -Target {same_t}", False)
+        self.ps(f"$x = New-Item -ItemType Junction -Path {same_l} -Target {same_t}", False)
+
+    def test_new_item_and_mklink_inside_a_block(self):
+        link, tgt, same_t, same_l = self._ends()
+        deny = (
+            f"if (-not (Test-Path {link})) {{ New-Item -ItemType Junction -Path {link} -Target {tgt} }}",
+            f"if (-not (Test-Path {link})) {{ New-Item -ItemType Junction -Path {link} -Target {tgt}}}",
+            f"& {{ New-Item -ItemType Junction -Path {link} -Target {tgt} }}",
+            f"& {{ $null = New-Item -ItemType Junction -Path {link} -Target {tgt} }}",
+            f"foreach ($i in 1..2) {{ ni -ItemType Junction -Path {link} -Target {tgt} -Force }}",
+            f"try {{ (New-Item -ItemType Junction -Path {link} -Target {tgt}) }} catch {{ }}",
+            f"$r = $(New-Item -ItemType Junction -Path {link} -Target {tgt})",
+            f"if ($true) {{ cmd /c mklink /J {link} {tgt} }}",
+            f"& {{ mklink /J {link} {tgt} }}",
+        )
+        for cmd in deny:
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, True)
+        for cmd in (
+            f"if (-not (Test-Path {same_l})) {{ New-Item -ItemType Junction -Path {same_l} -Target {same_t} }}",
+            f"& {{ New-Item -ItemType Junction -Path {same_l} -Target {same_t} }}",
+            f"if ($true) {{ Write-Host New-Item -ItemType Junction -Path {link} -Target {tgt} }}",
+            f"Write-Host (New-Item -ItemType Directory -Path {link})",
+            f"if ($true) {{ New-Item -ItemType Junction -Path {self.outside} -Target {tgt} }}",
+        ):
+            with self.subTest(cmd=cmd):
+                self.ps(cmd, False)
+        self.sh(f"if [ ! -e {link} ]; then ln -s {tgt} {link}; fi", True)
+        self.sh(f"{{ ln -s {tgt} {link}; }}", True)
+        self.sh(f"if [ ! -e {same_l} ]; then ln -s {same_t} {same_l}; fi", False)
+
+    def test_create_symbolic_link_dotnet_call(self):
+        link, tgt, same_t, same_l = self._ends()
+        for cls in ("[IO.Directory]", "[System.IO.Directory]", "[System.IO.File]", "[io.directory]"):
+            with self.subTest(cls=cls):
+                self.ps(f"{cls}::CreateSymbolicLink('{link}', '{tgt}')", True)
+                self.ps(f'{cls}::CreateSymbolicLink("{link}","{tgt}")', True)
+                self.ps(f"$null = {cls}::CreateSymbolicLink('{link}','{tgt}')", True)
+                self.ps(f"{cls}::CreateSymbolicLink('{same_l}', '{same_t}')", False)
+                self.ps(f"{cls}::CreateSymbolicLink('{self.outside}', '{tgt}')", False)
+        self.ps(f"[IO.Directory]::CreateSymbolicLink($l, '{tgt}')", False)         # non-literal: unsure, allowed
+        self.ps(f'[IO.Directory]::CreateSymbolicLink("{link}/$n", "{tgt}")', False)
+        self.sh(f"powershell -NoProfile -Command \"[IO.Directory]::CreateSymbolicLink('{link}','{tgt}')\"", True)
+        self.ps(f"[IO.Directory]::Exists('{link}')", False)
+        self.ps("[IO.Directory]::CreateSymbolicLink('relative-link', 'relative-target')", False)
+
+    def test_operators_constant_removed(self):
+        with open(HOOK, encoding="utf-8") as fh:
+            self.assertNotIn("OPERATORS", fh.read())
+
     # --- B: recursive delete / git worktree remove of a root: must fire --------------------------------------
     def test_rm_rf_root_in_all_spellings(self):
         b = self.wtb
