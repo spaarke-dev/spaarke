@@ -63,18 +63,108 @@ public sealed class InvoiceAiContractTests
     }
 
     // FR-50: amounts, counts and line references are inserted by the notice template from data, so no number may
-    // be produced by the notice model (result) or reach it (request). Task 131 builds on this guarantee.
+    // be produced by the notice model (result) or reach it (request). Task 131 builds on this guarantee. The walk
+    // recurses into generic type arguments (IReadOnlyList<decimal>, arrays, nullable) and into nested records from
+    // the PublicContracts namespace, so a numeric member anywhere under these types fails the test.
     [Theory]
     [InlineData(typeof(InvoiceFirmNoticeDraft))]
     [InlineData(typeof(InvoiceFirmNoticeRequest))]
     [InlineData(typeof(InvoiceFirmNoticeFinding))]
-    public void FirmNoticeContract_Type_HasNoNumericProperty(Type type)
+    public void FirmNoticeContract_Type_HasNoNumericPropertyAnywhere(Type type)
     {
-        type.GetProperties()
-            .Where(p => NumericTypes.Contains(Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType))
-            .Select(p => p.Name)
-            .Should().BeEmpty();
+        NumericPaths(type, type.Name, new HashSet<Type>()).ToList().Should().BeEmpty();
     }
+
+    // Must-fire control: the walk really does see numbers behind a generic argument, an array, a nullable and a
+    // nested PublicContracts record. Without this a walk that silently stops at the first level would pass.
+    [Theory]
+    [InlineData(typeof(ProbeDirect), "ProbeDirect.Count")]
+    [InlineData(typeof(ProbeGeneric), "ProbeGeneric.Amounts")]
+    [InlineData(typeof(ProbeArray), "ProbeArray.Amounts")]
+    [InlineData(typeof(ProbeNullable), "ProbeNullable.Count")]
+    [InlineData(typeof(ProbeNested), "ProbeNested.Items.Inner.Total")]
+    public void NumericPaths_FindsANumericMemberBehindGenericsArraysNullablesAndNestedRecords(Type type, string expectedPath)
+    {
+        NumericPaths(type, type.Name, new HashSet<Type>()).ToList().Should().Contain(expectedPath);
+    }
+
+    private static IEnumerable<string> NumericPaths(Type type, string path, HashSet<Type> visited)
+    {
+        if (!visited.Add(type))
+        {
+            yield break;
+        }
+
+        foreach (var property in type.GetProperties())
+        {
+            var propertyPath = $"{path}.{property.Name}";
+            foreach (var found in NumericPathsOfType(property.PropertyType, propertyPath, visited))
+            {
+                yield return found;
+            }
+        }
+    }
+
+    private static IEnumerable<string> NumericPathsOfType(Type type, string path, HashSet<Type> visited)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        if (NumericTypes.Contains(type))
+        {
+            yield return path;
+            yield break;
+        }
+
+        if (type.IsArray)
+        {
+            foreach (var found in NumericPathsOfType(type.GetElementType()!, path, visited))
+            {
+                yield return found;
+            }
+
+            yield break;
+        }
+
+        if (type.IsGenericType)
+        {
+            foreach (var argument in type.GetGenericArguments())
+            {
+                foreach (var found in NumericPathsOfType(argument, path, visited))
+                {
+                    yield return found;
+                }
+            }
+
+            yield break;
+        }
+
+        if (IsContractRecord(type))
+        {
+            foreach (var found in NumericPaths(type, path, visited))
+            {
+                yield return found;
+            }
+        }
+    }
+
+    // A nested record from the PublicContracts namespace (or one of this class's own probe records, which stand in
+    // for one in the must-fire control).
+    private static bool IsContractRecord(Type type) =>
+        !type.IsEnum
+        && (type.Namespace == typeof(IInvoiceAi).Namespace || type.DeclaringType == typeof(InvoiceAiContractTests));
+
+    private sealed record ProbeDirect { public int Count { get; init; } }
+
+    private sealed record ProbeGeneric { public IReadOnlyList<decimal> Amounts { get; init; } = []; }
+
+    private sealed record ProbeArray { public int[] Amounts { get; init; } = []; }
+
+    private sealed record ProbeNullable { public long? Count { get; init; } }
+
+    private sealed record ProbeNested { public IReadOnlyList<ProbeItem> Items { get; init; } = []; }
+
+    private sealed record ProbeItem { public ProbeInner Inner { get; init; } = new(); }
+
+    private sealed record ProbeInner { public double Total { get; init; } }
 
     // FR-22: the coding result carries codes, confidence and observations only; amounts stay with the
     // extracted line and can never be overwritten by the coding model.

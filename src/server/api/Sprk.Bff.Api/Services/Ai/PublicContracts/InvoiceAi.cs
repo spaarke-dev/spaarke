@@ -226,13 +226,16 @@ public sealed class InvoiceAi : IInvoiceAi
         {
             // IActionResolver's documented contract: InvalidOperationException = no Action routed for the
             // consumer type, or the routed Action row does not exist. Fail closed — no hard-coded fallback.
+            // The code says WHERE it failed, not that retrying is useless: the routing read swallows its own
+            // exceptions and reports "no Action routed" (platform issue #1936), so a transient read failure
+            // also lands here. Callers retry a bounded number of times before marking work Failed.
             throw Fail(InvoiceAiException.BindingMissing, consumerType, subjectId, ex,
                 $"No Binding / Action is configured for consumer type '{consumerType}'.");
         }
         catch (Exception ex)
         {
-            // Any other resolver failure (e.g. a transient Dataverse read) is not proof the Binding is missing;
-            // report it as a failed run so a caller may retry.
+            // Any other resolver failure (the Action row read itself failing, say) is not proof the Binding is
+            // missing; report it as a failed run.
             throw Fail(InvoiceAiException.CompletionFailed, consumerType, subjectId, ex,
                 $"Resolving the Action for consumer type '{consumerType}' failed.");
         }
@@ -498,9 +501,14 @@ internal static class InvoiceAiOutputParser
             return null;
         }
 
-        return value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : throw new InvoiceAiOutputException($"{path}.{name}");
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            throw new InvoiceAiOutputException($"{path}.{name}");
+        }
+
+        // An empty or whitespace-only optional value carries no information; surface it as absent (null), not "".
+        var text = value.GetString();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
     private static decimal? OptionalDecimal(JsonElement obj, string name, string path)

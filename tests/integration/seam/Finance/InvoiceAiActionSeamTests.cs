@@ -252,18 +252,38 @@ public sealed class InvoiceAiActionSeamTests
         ex.Which.ReasonCode.Should().Be("ai.invoice.output_invalid");
     }
 
-    // A transient routing-table read failure is not proof the Binding is missing; reporting it as a failed run
-    // lets the caller retry instead of failing the submission permanently.
+    // The production routing read (ConsumerRoutingService.ResolveActionAsync) swallows every non-cancellation
+    // exception and returns null, so a failed Binding-table read and a genuinely missing Binding look the same
+    // to the facade: both surface as binding_missing. The code says where the failure happened, not that
+    // retrying is useless - callers retry it a bounded number of times (platform issue #1936).
     [Fact]
-    public async Task ClassifyAsync_WhenTheRoutingReadFailsTransiently_ThrowsCompletionFailedNotBindingMissing()
+    public async Task ClassifyAsync_WhenTheRoutingReadReturnsNull_AsOnAMissingRowOrAFailedRead_ThrowsBindingMissing()
     {
         var h = new Harness(output: "{}");
         h.Routing.Setup(r => r.ResolveActionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("dataverse unavailable"));
+            .ReturnsAsync((Guid?)null);
 
         var ex = await FluentActions.Awaiting(() => h.Sut.ClassifyAsync(ClassifyRequest())).Should().ThrowAsync<InvoiceAiException>();
 
-        ex.Which.ReasonCode.Should().Be("ai.invoice.completion_failed");
+        ex.Which.ReasonCode.Should().Be("ai.invoice.binding_missing");
+        ex.Which.ConsumerType.Should().Be("invoice-classify");
+        h.Prompt.Should().BeNull("a null route never reaches the model");
+    }
+
+    // An optional string the model returns empty or whitespace-only carries no information; it is absent (null),
+    // not "", so callers can test for presence with a null check. A required string stays strict.
+    [Fact]
+    public async Task ClassifyAsync_WhenAnOptionalStringIsEmptyOrWhitespace_ParsesItAsNull()
+    {
+        var h = new Harness("""{"classification":"NotInvoice","confidence":0.4,"hints":{"vendorName":"   ","invoiceNumber":"","currency":"USD"},"reasoning":" "}""");
+
+        var result = await h.Sut.ClassifyAsync(ClassifyRequest());
+
+        result.Reasoning.Should().BeNull();
+        result.Hints.Should().NotBeNull();
+        result.Hints!.VendorName.Should().BeNull();
+        result.Hints.InvoiceNumber.Should().BeNull();
+        result.Hints.Currency.Should().Be("USD");
     }
 
     // The AI kill switch keeps its own 503 contract (ADR-032): a disabled resolver is not relabelled as a

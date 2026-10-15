@@ -96,17 +96,28 @@ public interface IInvoiceAi
     // Each resolves its Action ONLY through the Binding for its ConsumerTypes key and runs it ONLY through
     // IActionRunner: the prompt, output schema and model tier live in the Action / Binding rows, never in
     // C#. All four FAIL CLOSED (FR-46) — they never return a default or fall back to a hard-coded prompt:
-    //   - InvoiceAiException(ai.invoice.binding_missing)   — no Binding / Action for the consumer type
+    //   - InvoiceAiException(ai.invoice.binding_missing)   — the Action could not be resolved for the consumer type
     //   - InvoiceAiException(ai.invoice.completion_failed) — the run failed
     //   - InvoiceAiException(ai.invoice.output_invalid)    — the output does not parse into the result
     //   - FeatureDisabledException(ai.invoice.disabled or ai.linear-consumers.disabled) — AI kill switch (ADR-032)
     //   - OperationCanceledException — the caller cancelled
+    //
+    // The reason codes classify WHERE the failure happened, not whether retrying helps:
+    //   - binding_missing is NOT proof the Binding row is absent. The platform's routing read swallows every
+    //     non-cancellation exception and reports "no Action routed", so a transient routing-table read failure
+    //     (platform issue #1936) produces the same code as a genuinely missing Binding. Callers retry it a
+    //     bounded number of times before marking work Failed.
+    //   - completion_failed covers transient model / transport failures AND permanent Action misconfiguration
+    //     (for example an empty SystemPrompt or OutputSchemaJson on the Action row), so it is not always
+    //     retryable either.
+    //   - output_invalid means the model answered but not in the contract; a retry may or may not help.
 
     /// <summary>
     /// Classify a Finance attachment as invoice / not invoice, with best-effort header hints
     /// (consumer type <see cref="ConsumerTypes.InvoiceClassify"/>, FR-46).
     /// </summary>
-    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid; the code classifies where the failure happened, not whether a retry helps (see the notes above).</exception>
+    /// <exception cref="ArgumentException"><see cref="InvoiceClassifyRequest.DocumentText"/> is empty or whitespace.</exception>
     Task<InvoiceClassifyResult> ClassifyAsync(
         InvoiceClassifyRequest request,
         CancellationToken cancellationToken = default);
@@ -116,7 +127,8 @@ public interface IInvoiceAi
     /// (consumer type <see cref="ConsumerTypes.InvoiceLineCode"/>, FR-22). The caller refuses any returned
     /// code outside the line's code set.
     /// </summary>
-    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid; the code classifies where the failure happened, not whether a retry helps (see the notes above).</exception>
+    /// <exception cref="ArgumentException"><see cref="InvoiceCodeLinesRequest.Lines"/> is empty.</exception>
     Task<InvoiceCodeLinesResult> CodeLinesAsync(
         InvoiceCodeLinesRequest request,
         CancellationToken cancellationToken = default);
@@ -126,7 +138,8 @@ public interface IInvoiceAi
     /// catalogue, listing text that could not be converted (consumer type
     /// <see cref="ConsumerTypes.BillingRuleDraft"/>, FR-27).
     /// </summary>
-    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid; the code classifies where the failure happened, not whether a retry helps (see the notes above).</exception>
+    /// <exception cref="ArgumentException"><see cref="BillingRuleDraftRequest.DocumentText"/> is empty or whitespace, <see cref="BillingRuleDraftRequest.RuleTypes"/> is empty, or a rule type's <see cref="BillingRuleTypeOption.ParameterSchemaJson"/> is not a valid JSON object.</exception>
     Task<BillingRuleDraftResult> DraftRulesAsync(
         BillingRuleDraftRequest request,
         CancellationToken cancellationToken = default);
@@ -136,7 +149,8 @@ public interface IInvoiceAi
     /// (consumer type <see cref="ConsumerTypes.InvoiceFirmNotice"/>, FR-50). Prose only: amounts, line
     /// references and clause quotes are inserted by the caller's template.
     /// </summary>
-    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid.</exception>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid; the code classifies where the failure happened, not whether a retry helps (see the notes above).</exception>
+    /// <exception cref="ArgumentNullException">The request or its <see cref="InvoiceFirmNoticeRequest.Findings"/> is null.</exception>
     Task<InvoiceFirmNoticeDraft> DraftFirmNoticeAsync(
         InvoiceFirmNoticeRequest request,
         CancellationToken cancellationToken = default);
