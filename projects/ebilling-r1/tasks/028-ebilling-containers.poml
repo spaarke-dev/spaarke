@@ -4,7 +4,7 @@
     <title>Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Small BFF configuration change plus one indexing guard and verification of existing access enforcement; brief sets STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
