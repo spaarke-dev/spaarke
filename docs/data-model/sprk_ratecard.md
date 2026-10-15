@@ -9,7 +9,7 @@ A **rate card** carries the provenance (source document) and effective period fo
 
 ## sprk_ratecard (Rate Card)
 
-Entity set `sprk_ratecards`. **User / team owned.** Primary name `sprk_name` (Text 200, application-required).
+Entity set `sprk_ratecards`. **User / team owned.** Primary name `sprk_name` (Text 200, application-required: required by the BFF write path, not enforced on API writes).
 
 | Logical name | Type | Notes |
 |---|---|---|
@@ -32,12 +32,12 @@ Status (`statecode` / `statuscode`):
 
 ## sprk_ratecardrate (Rate Card Rate)
 
-Entity set `sprk_ratecardrates`. **User / team owned.** Primary name `sprk_name` (Text 200, application-required; composed by the rate import, e.g. timekeeper or classification and period).
+Entity set `sprk_ratecardrates`. **User / team owned.** Primary name `sprk_name` (Text 200, application-required: required by the BFF write path, not enforced on API writes; composed by the rate import, e.g. timekeeper or classification and period).
 
 | Logical name | Type | Notes |
 |---|---|---|
 | `sprk_name` | Text (200), primary name | Required. |
-| `sprk_ratecard` | Lookup -> `sprk_ratecard` (application-required; **parental**: cascade delete, assign, share, unshare, reparent) | Relationship `sprk_ratecard_ratecardrate_ratecard`. Deleting a card deletes its rates. |
+| `sprk_ratecard` | Lookup -> `sprk_ratecard` (**SystemRequired**, so the platform refuses a rate without its card on every write; **parental**: cascade delete, assign, share, unshare, reparent) | Relationship `sprk_ratecard_ratecardrate_ratecard`. Deleting a card deletes its rates. |
 | `sprk_timekeeper` | Lookup -> `sprk_timekeeper` (optional; delete **Restrict**) | Empty = the rate is by classification. Relationship `sprk_timekeeper_ratecardrate_timekeeper`. |
 | `sprk_classification` | Choice (global `sprk_timekeeperrole`, optional) | **Held pending the owner decision** (see below); created by `-ApplyClassification`. |
 | `sprk_approvedrate` | Money (2 decimals, 0 to 1,000,000,000) | Hourly rate the client approved. |

@@ -23,7 +23,7 @@ User-owned (like `sprk_policy`), entity set `sprk_rulesets`, primary name `sprk_
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_name` | Text (200), primary name | Shown to firms when the rule set is visible to firms (D-66). |
+| `sprk_name` | Text (200), primary name, application-required | Shown to firms when the rule set is visible to firms (D-66). Required by the BFF write path (task 076), not enforced on API writes: Dataverse enforces ApplicationRequired on forms only. |
 | `sprk_domain` | Choice, global `sprk_policydomain` | Billing in R1. |
 | `sprk_sourcedocument` | Lookup -> `sprk_document` (delete RemoveLink) | The Procedure Library document the rules were drafted from. Internal only (D-63): never exposed to firm users. Relationship `sprk_document_ruleset_sourcedocument`. |
 | `sprk_scope` | Choice (local) | Client default = 100000000, Firm = 100000001. |
@@ -83,6 +83,6 @@ The Signals readers of `sprk_policy` select **every enabled, active policy** reg
 
 ## Gotchas
 
-- The primary-name `MaxLength` in an entity-create body is ignored (850); the script shortens `sprk_name` to 200 right after creating the table (only while it has no rows).
+- The primary-name `MaxLength` and `RequiredLevel` in an entity-create body are ignored (850 / None); the script shortens `sprk_name` to 200 (only while the table has no rows) and sets it to ApplicationRequired right after creating the table (DEF-007).
 - The status relabel is safe because the table is new and empty; the script refuses (exit 2) if value 1 or 2 carries any label other than the system or the target one.
 - `sprk_domain` is also the name of an unrelated email-domain text column on `account` and `sprk_organization`. Dataverse names are per table, so there is no clash, but a query joining a rule set to an organization must alias the columns.

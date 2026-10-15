@@ -31,6 +31,10 @@
 
     ADR-002: no plugin, business rule, calculated / rollup column or flow. Admin forms and views are task 029's.
 
+    Required levels (DEF-007 / DEF-009): the primary name sprk_ruleset.sprk_name is set to ApplicationRequired after the
+    create (the create body's level is ignored). ApplicationRequired is enforced by FORMS only; an API write without a name is
+    the BFF write path's to refuse (task 076), not the platform's.
+
     Eventually consistent metadata reads: a 404 right after a create is not trusted (the item is re-read); a create
     refused with "already exists" counts as skipped after a type check on a settled read; a column create issued right
     after its table was created is retried while the table is still propagating; the primary-name length in an entity
@@ -48,11 +52,14 @@
     pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1
 
 .NOTES
-    Project: ebilling-r1, task 019. Dev only in R1. Pattern: scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1
+    Project: ebilling-r1, task 019. Dev only in R1. The Dataverse helpers live in EbillingSchema.psm1 (shared by the
+    eBilling schema scripts). Pattern: scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1
     (task 018) and Deploy-EbillingInvoiceHeaderSchema.ps1 (task 012, statuscode values); the global option set follows
     scripts/Deploy-AiCatalogSchemaExtensions.ps1.
     Exit codes: 0 = done (created / skipped), 1 = error, 2 = escalation (destructive or conflicting).
 #>
+
+using module .\EbillingSchema.psm1
 
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -63,413 +70,24 @@ param(
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $DryRun = [bool]$WhatIfPreference
-$ApiBase = "$EnvironmentUrl/api/data/v9.2"
 $RuleSetTable = 'sprk_ruleset'
 $PolicyTable = 'sprk_policy'
 $VersionTable = 'sprk_policyversion'
 $DomainOptionSet = 'sprk_policydomain'
 
-# The table the column helpers currently write to.
-$script:Entity = $RuleSetTable
-# Tables created by this run (their metadata may lag) and tables a WhatIf run would create.
-$script:JustCreated = [System.Collections.Generic.List[string]]::new()
-$script:Planned = [System.Collections.Generic.List[string]]::new()
-# What the final verification must find: table, column, expected AttributeType.
-$script:Expect = [System.Collections.Generic.List[object]]::new()
-
-# Tallies for the final summary.
-$script:Created = [System.Collections.Generic.List[string]]::new()
-$script:Changed = [System.Collections.Generic.List[string]]::new()
-$script:Skipped = [System.Collections.Generic.List[string]]::new()
-$script:Token = $null
-$script:TokenAt = [datetime]::MinValue
-
-class EscalationException : System.Exception {
-    EscalationException([string]$message) : base($message) {}
-}
-
-# ---------------------------------------------------------------------------------------------------------------
-# Web API plumbing (same behaviour as the task 010 / 012 scripts)
-# ---------------------------------------------------------------------------------------------------------------
-
-function Get-DataverseToken {
-    if ($script:Token -and ((Get-Date) - $script:TokenAt).TotalMinutes -lt 40) { return $script:Token }
-    $t = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>&1
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($t)) {
-        throw "Could not get a Dataverse token from Azure CLI ($t). Run 'az login'."
-    }
-    $script:Token = $t.Trim()
-    $script:TokenAt = Get-Date
-    return $script:Token
-}
-
-function Get-ErrorText($err) {
-    $text = $err.Exception.Message
-    if ($err.ErrorDetails -and $err.ErrorDetails.Message) {
-        try {
-            $j = $err.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop
-            if ($j.error.message) { $text = "$($j.error.code): $($j.error.message)" }
-        } catch { $text = $err.ErrorDetails.Message }
-    }
-    return $text
-}
-
-function Get-StatusCode($err) {
-    try { return [int]$err.Exception.Response.StatusCode } catch { return 0 }
-}
-
-# A write that hit a customization / publish lock, throttling or a transient fault is retried with backoff.
-function Test-Transient([int]$status, [string]$text) {
-    if ($status -in 429, 500, 502, 503, 504) { return $true }
-    return ($text -match '(?i)publish.*(in progress|running)|(in progress).*publish|customization.*(lock|in progress)|(lock|locked).*customiz|another .*import|0x80071151|0x80048d19|SqlException.*(timeout|deadlock)|timeout|timed out|unexpected error occurred')
-}
-
-function Invoke-Dv {
-    param(
-        [string]$Path,
-        [string]$Method = 'GET',
-        $Body = $null,
-        [hashtable]$ExtraHeaders = @{},
-        [switch]$NoRetry
-    )
-    $uri = if ($Path -like 'http*') { $Path } else { "$ApiBase/$Path" }
-    $attempt = 0
-    $max = if ($NoRetry -or $Method -eq 'GET') { 3 } else { 7 }
-    while ($true) {
-        $attempt++
-        $headers = @{
-            Authorization      = "Bearer $(Get-DataverseToken)"
-            'OData-MaxVersion' = '4.0'
-            'OData-Version'    = '4.0'
-            Accept             = 'application/json'
-        }
-        foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
-        $p = @{ Uri = $uri; Method = $Method; Headers = $headers }
-        if ($null -ne $Body) {
-            $p.Body = ($Body | ConvertTo-Json -Depth 30 -Compress)
-            $p.ContentType = 'application/json; charset=utf-8'
-        }
-        try {
-            return Invoke-RestMethod @p
-        } catch {
-            $status = Get-StatusCode $_
-            $text = Get-ErrorText $_
-            if ($status -eq 401 -and $attempt -eq 1) { $script:Token = $null; continue }
-            if ($attempt -lt $max -and (Test-Transient $status $text)) {
-                $delay = [Math]::Min(60, 5 * [Math]::Pow(2, $attempt - 1))
-                Write-Host "    transient failure (HTTP $status), retry $attempt/$($max - 1) in ${delay}s: $text" -ForegroundColor DarkYellow
-                Start-Sleep -Seconds $delay
-                continue
-            }
-            $e = [System.Exception]::new("API error ($Method $Path) HTTP ${status}: $text")
-            $e.Data['Status'] = $status
-            throw $e
-        }
-    }
-}
-
-# Returns $null when the item does not exist (HTTP 404 / "does not exist"); any other failure propagates.
-function Get-DvOrNull([string]$Path, [int]$Retries = 0) {
-    for ($i = 0; $true; $i++) {
-        try { return Invoke-Dv -Path $Path }
-        catch {
-            $s = $_.Exception.Data['Status']
-            if ($s -eq 404 -or $_.Exception.Message -match '(?i)could not find|does not exist|0x80060888|0x80040217') {
-                # Metadata reads are eventually consistent: a must-exist item can read as 404 once. -Retries re-reads it.
-                if ($i -lt $Retries) { Start-Sleep -Seconds 3; continue }
-                return $null
-            }
-            throw
-        }
-    }
-}
-
-function New-Label([string]$Text) {
-    return @{
-        '@odata.type'   = 'Microsoft.Dynamics.CRM.Label'
-        LocalizedLabels = @(@{
-                '@odata.type' = 'Microsoft.Dynamics.CRM.LocalizedLabel'
-                Label         = $Text
-                LanguageCode  = 1033
-            })
-    }
-}
-
-$SolutionHeader = @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName }
-
-# ---------------------------------------------------------------------------------------------------------------
-# Item helpers
-# ---------------------------------------------------------------------------------------------------------------
-
-function Get-Attr([string]$Table, [string]$Column, [string]$Select = 'LogicalName,AttributeType') {
-    return Get-DvOrNull "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')?`$select=$Select"
-}
-
-function Assert-AttrType($attr, [string]$Column, [string]$ExpectedType) {
-    if ($attr.AttributeType -ne $ExpectedType) {
-        throw [EscalationException]::new("$($script:Entity).$Column already exists with type '$($attr.AttributeType)' but this task needs '$ExpectedType'. A same-name column of a different type must not be changed by script - owner decision needed.")
-    }
-}
-
-function Test-TableKnown([string]$Table) {
-    return ($script:Planned -contains $Table) -or [bool](Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=LogicalName" -Retries 2)
-}
-
-# Metadata reads are eventually consistent across Dataverse nodes, so an existence check can be a false negative. A
-# create refused with "already exists" is therefore the authoritative "it is there": the item is counted as skipped,
-# after the type check on a settled read. A create issued on a table created seconds ago can be refused as "entity not
-# found" (0x80041102, MetadataCache) while the table propagates: that is retried (only when this run created a table).
-function Invoke-DvCreate {
-    param([string]$Path, $Body, [string]$Column, [string]$ExpectedType)
-    $table = $script:Entity
-    for ($try = 0; $true; $try++) {
-        try {
-            Invoke-Dv -Path $Path -Method POST -Body $Body -ExtraHeaders $SolutionHeader | Out-Null
-            return 'created'
-        } catch {
-            $msg = $_.Exception.Message
-            if ($msg -match '(?i)already exists|0x80047013|0x80048403') {
-                for ($i = 0; $i -lt 12; $i++) {
-                    $attr = Get-Attr $table $Column
-                    if ($attr) { Assert-AttrType $attr $Column $ExpectedType; break }
-                    Start-Sleep -Seconds 5
-                }
-                return 'exists'
-            }
-            if ($script:JustCreated.Count -gt 0 -and $try -lt 12 -and $msg -match '(?i)could not find|does not exist|0x80060888|0x80040217|0x80041102|MetadataCache|HTTP 404') {
-                Write-Host "    new table still propagating in the metadata cache, retry $($try + 1)/12 in 8s" -ForegroundColor DarkYellow
-                Start-Sleep -Seconds 8
-                continue
-            }
-            throw
-        }
-    }
-}
-
-function Wait-AttrVisible([string]$Column) {
-    for ($i = 0; $i -lt 12; $i++) {
-        if (Get-Attr $script:Entity $Column) { return }
-        Start-Sleep -Seconds 5
-    }
-    throw "$($script:Entity).$Column was created but is not visible in metadata after 60 s."
-}
-
-function Add-Column {
-    param([string]$Column, [hashtable]$Definition, [string]$ExpectedType)
-    $script:Expect.Add(@{ Table = $script:Entity; Column = $Column; Type = $ExpectedType })
-    $attr = Get-Attr $script:Entity $Column
-    if ($attr) {
-        Assert-AttrType $attr $Column $ExpectedType
-        $script:Skipped.Add("$($script:Entity).$Column"); Write-Host "  skipped  $Column (exists, $ExpectedType)" -ForegroundColor Yellow
-        return
-    }
-    if ($DryRun) { $script:Created.Add("$($script:Entity).$Column"); Write-Host "  WOULD CREATE $Column ($ExpectedType)" -ForegroundColor Cyan; return }
-    $r = Invoke-DvCreate -Path "EntityDefinitions(LogicalName='$($script:Entity)')/Attributes" -Body $Definition -Column $Column -ExpectedType $ExpectedType
-    if ($r -eq 'exists') { $script:Skipped.Add("$($script:Entity).$Column"); Write-Host "  skipped  $Column (exists, found via create refusal)" -ForegroundColor Yellow; return }
-    Wait-AttrVisible $Column
-    $script:Created.Add("$($script:Entity).$Column"); Write-Host "  CREATED  $Column ($ExpectedType)" -ForegroundColor Green
-}
-
-function Add-Lookup {
-    param(
-        [string]$Column, [string]$SchemaName, [string]$RelSchema, [string]$Target, [string]$Display, [string]$Description,
-        [string]$DeleteBehavior = 'RemoveLink', [string]$RequiredLevel = 'None'
-    )
-    $table = $script:Entity
-    $script:Expect.Add(@{ Table = $table; Column = $Column; Type = 'Lookup' })
-    $attr = Get-Attr $table $Column
-    if ($attr) {
-        Assert-AttrType $attr $Column 'Lookup'
-        $lk = Get-DvOrNull "EntityDefinitions(LogicalName='$table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=Targets"
-        if ($lk -and $lk.Targets -and ($lk.Targets -notcontains $Target)) {
-            throw [EscalationException]::new("$table.$Column already exists as a lookup to '$($lk.Targets -join ',')' but this task needs '$Target'. Owner decision needed.")
-        }
-        $script:Skipped.Add("$table.$Column"); Write-Host "  skipped  $Column (exists, Lookup -> $Target)" -ForegroundColor Yellow
-        return
-    }
-    if (-not (Test-TableKnown $Target)) {
-        throw "Lookup target table '$Target' for $Column does not exist in $EnvironmentUrl."
-    }
-    if ($DryRun) { $script:Created.Add("$table.$Column"); Write-Host "  WOULD CREATE $Column (Lookup -> $Target)" -ForegroundColor Cyan; return }
-    $rel = @{
-        '@odata.type'        = 'Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'
-        SchemaName           = $RelSchema
-        ReferencedEntity     = $Target
-        ReferencingEntity    = $table
-        CascadeConfiguration = @{
-            Assign = 'NoCascade'; Delete = $DeleteBehavior; Merge = 'NoCascade'
-            Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'
-        }
-        Lookup               = @{
-            '@odata.type'  = 'Microsoft.Dynamics.CRM.LookupAttributeMetadata'
-            SchemaName     = $SchemaName
-            DisplayName    = New-Label $Display
-            Description    = New-Label $Description
-            RequiredLevel  = @{ Value = $RequiredLevel }
-        }
-    }
-    $r = Invoke-DvCreate -Path 'RelationshipDefinitions' -Body $rel -Column $Column -ExpectedType 'Lookup'
-    if ($r -eq 'exists') { $script:Skipped.Add("$table.$Column"); Write-Host "  skipped  $Column (exists, found via create refusal)" -ForegroundColor Yellow; return }
-    Wait-AttrVisible $Column
-    $script:Created.Add("$table.$Column"); Write-Host "  CREATED  $Column (Lookup -> $Target)" -ForegroundColor Green
-}
-
-function New-StringDef([string]$Schema, [string]$Display, [string]$Description, [int]$MaxLength, [string]$Format = 'Text', [string]$RequiredLevel = 'None') {
-    return @{
-        '@odata.type'  = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
-        SchemaName     = $Schema
-        DisplayName    = New-Label $Display
-        Description    = New-Label $Description
-        RequiredLevel  = @{ Value = $RequiredLevel }
-        MaxLength      = $MaxLength
-        FormatName     = @{ Value = $Format }
-    }
-}
-
-function New-MemoDef([string]$Schema, [string]$Display, [string]$Description, [int]$MaxLength) {
-    return @{
-        '@odata.type'  = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
-        SchemaName     = $Schema
-        DisplayName    = New-Label $Display
-        Description    = New-Label $Description
-        RequiredLevel  = @{ Value = 'None' }
-        MaxLength      = $MaxLength
-        Format         = 'TextArea'
-    }
-}
-
-# A LOCAL choice column. If it exists its option labels must be exactly the expected set (never edited by script).
-function Add-LocalChoice {
-    param([string]$Column, [string]$Schema, [string]$Display, [string]$Description, [string[]]$Labels, [string]$RequiredLevel = 'None')
-    $table = $script:Entity
-    $attr = Get-Attr $table $Column
-    if ($attr) {
-        Assert-AttrType $attr $Column 'Picklist'
-        $script:Expect.Add(@{ Table = $table; Column = $Column; Type = 'Picklist' })
-        # The option list of a column created moments ago can read back empty (eventual consistency): re-read before judging.
-        $have = @()
-        for ($i = 0; $i -lt 12 -and $have.Count -eq 0; $i++) {
-            $pk = Get-DvOrNull "EntityDefinitions(LogicalName='$table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet(`$select=Options,IsGlobal)"
-            $have = @($pk.OptionSet.Options | ForEach-Object { $_.Label.UserLocalizedLabel.Label })
-            if ($have.Count -eq 0) { Start-Sleep -Seconds 5 }
-        }
-        if ($have.Count -ne $Labels.Count -or @($have | Where-Object { $_ -notin $Labels }).Count -gt 0) {
-            throw [EscalationException]::new("$table.$Column exists with options [$($have -join ', ')] but the spec needs exactly [$($Labels -join ', ')]. Editing or removing options needs an owner decision.")
-        }
-        $script:Skipped.Add("$table.$Column"); Write-Host "  skipped  $Column (exists, choice with $($Labels.Count) options)" -ForegroundColor Yellow
-        return
-    }
-    $options = @(); $v = 100000000
-    foreach ($l in $Labels) { $options += @{ Value = $v; Label = New-Label $l }; $v++ }
-    $def = @{
-        '@odata.type'  = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
-        SchemaName     = $Schema
-        DisplayName    = New-Label $Display
-        Description    = New-Label $Description
-        RequiredLevel  = @{ Value = $RequiredLevel }
-        OptionSet      = @{
-            '@odata.type'  = 'Microsoft.Dynamics.CRM.OptionSetMetadata'
-            IsGlobal       = $false
-            OptionSetType  = 'Picklist'
-            Options        = $options
-        }
-    }
-    Add-Column -Column $Column -Definition $def -ExpectedType 'Picklist'
-}
-
-# Creates a table with its primary name column (pattern: Deploy-ChartDefinitionEntity.ps1).
-function Add-Table {
-    param([string]$Table, [string]$Display, [string]$Plural, [string]$Description, [string]$PrimaryColumn, [string]$PrimaryDisplay, [string]$PrimaryDescription, [int]$PrimaryLength, [string]$Ownership = 'OrganizationOwned')
-    $script:Entity = $Table
-    $script:Expect.Add(@{ Table = $Table; Column = $PrimaryColumn; Type = 'String' })
-    $existing = Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=LogicalName,OwnershipType,PrimaryNameAttribute"
-    if ($existing) {
-        if ($existing.PrimaryNameAttribute -ne $PrimaryColumn) {
-            throw [EscalationException]::new("$Table already exists with primary name '$($existing.PrimaryNameAttribute)', this task needs '$PrimaryColumn'. Owner decision needed.")
-        }
-        $script:Skipped.Add("table $Table"); Write-Host "  skipped  table $Table (exists, primary name $PrimaryColumn)" -ForegroundColor Yellow
-        return
-    }
-    if ($DryRun) { $script:Planned.Add($Table); $script:Created.Add("table $Table"); Write-Host "  WOULD CREATE table $Table" -ForegroundColor Cyan; return }
-    $def = @{
-        '@odata.type'          = 'Microsoft.Dynamics.CRM.EntityMetadata'
-        SchemaName             = $Table
-        DisplayName            = New-Label $Display
-        DisplayCollectionName  = New-Label $Plural
-        Description            = New-Label $Description
-        OwnershipType          = $Ownership
-        IsActivity             = $false
-        HasNotes               = $false
-        HasActivities          = $false
-        PrimaryNameAttribute   = $PrimaryColumn
-        Attributes             = @(
-            @{
-                '@odata.type'  = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
-                SchemaName     = $PrimaryColumn
-                RequiredLevel  = @{ Value = 'ApplicationRequired' }
-                MaxLength      = $PrimaryLength
-                DisplayName    = New-Label $PrimaryDisplay
-                Description    = New-Label $PrimaryDescription
-                IsPrimaryName  = $true
-            }
-        )
-    }
-    try {
-        Invoke-Dv -Path 'EntityDefinitions' -Method POST -Body $def -ExtraHeaders $SolutionHeader | Out-Null
-    } catch {
-        if ($_.Exception.Message -notmatch '(?i)already exists|0x80047013|0x80048403|0x80040216') { throw }
-        # A stale read hid a table that is already there: the refusal is authoritative; confirm on a settled read.
-        if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=LogicalName" -Retries 12)) { throw }
-        $script:Skipped.Add("table $Table"); Write-Host "  skipped  table $Table (exists, found via create refusal)" -ForegroundColor Yellow
-        return
-    }
-    $script:JustCreated.Add($Table)
-    if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=LogicalName" -Retries 20)) {
-        throw "$Table was created but is not visible in metadata after 60 s."
-    }
-    $script:Created.Add("table $Table"); Write-Host "  CREATED  table $Table ($Ownership, primary name $PrimaryColumn)" -ForegroundColor Green
-}
-
-# The create body's MaxLength for the primary name column is ignored by Dataverse (it comes back as 850), and an
-# alternate key on (lookup, string) needs the string kept short (index limit 1700 bytes). Shorten the primary name to the
-# wanted length - only while the table has no rows, so no data can be cut. A table that already holds rows is left alone
-# and reported.
-function Set-PrimaryNameLength([string]$Table, [string]$Column, [int]$Wanted) {
-    $path = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.StringAttributeMetadata"
-    $a = Get-DvOrNull $path -Retries 4
-    if (-not $a) { if ($DryRun) { return }; throw "$Table.$Column was not found (string)." }
-    if ([int]$a.MaxLength -eq $Wanted) { $script:Skipped.Add("$Table.$Column length $Wanted"); Write-Host "  skipped  $Column max length already $Wanted" -ForegroundColor Yellow; return }
-    $set = Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=EntitySetName" -Retries 2
-    $rows = (Invoke-Dv "$($set.EntitySetName)?`$select=$($Table)id&`$top=1").value
-    if (@($rows).Count -gt 0) { Write-Host "  WARNING: $Table has rows and $Column max length is $($a.MaxLength) (wanted $Wanted); not shortened" -ForegroundColor DarkYellow; return }
-    if ($DryRun) { $script:Changed.Add("$Table.$Column length $Wanted"); Write-Host "  WOULD SET $Column max length $($a.MaxLength) -> $Wanted" -ForegroundColor Cyan; return }
-    $was = [int]$a.MaxLength
-    $a.MaxLength = $Wanted
-    Invoke-Dv -Path $path -Method PUT -Body $a -ExtraHeaders @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
-    for ($i = 0; $i -lt 12; $i++) {
-        $chk = Get-DvOrNull $path
-        if ($chk -and [int]$chk.MaxLength -eq $Wanted) { break }
-        Start-Sleep -Seconds 5
-    }
-    if ([int]$chk.MaxLength -ne $Wanted) { throw "$Table.$Column max length is still $($chk.MaxLength) after the update." }
-    $script:Changed.Add("$Table.$Column length $Wanted"); Write-Host "  CHANGED  $Column max length $was -> $Wanted" -ForegroundColor Green
-}
+# Shared Dataverse helpers (scripts/ebilling/EbillingSchema.psm1). The state lists are shared by reference.
+$State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName $SolutionUniqueName -DryRun:$DryRun -Entity $RuleSetTable
+$script:Created = $State.Created
+$script:Changed = $State.Changed
+$script:Skipped = $State.Skipped
+$script:Expect = $State.Expect
+$script:Planned = $State.Planned
+$script:JustCreated = $State.JustCreated
+$SolutionHeader = $State.SolutionHeader
 
 # ---------------------------------------------------------------------------------------------------------------
 # Task 019 helpers
 # ---------------------------------------------------------------------------------------------------------------
-
-function New-DateOnlyDef([string]$Schema, [string]$Display, [string]$Description) {
-    return @{
-        '@odata.type'    = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
-        SchemaName       = $Schema
-        DisplayName      = New-Label $Display
-        Description      = New-Label $Description
-        RequiredLevel    = @{ Value = 'None' }
-        Format           = 'DateOnly'
-        DateTimeBehavior = @{ Value = 'DateOnly' }
-    }
-}
 
 function New-TwoOptionDef([string]$Schema, [string]$Display, [string]$Description, [bool]$Default) {
     return @{
@@ -518,7 +136,7 @@ function Add-GlobalChoice {
     try {
         Invoke-Dv -Path 'GlobalOptionSetDefinitions' -Method POST -Body $body -ExtraHeaders $SolutionHeader | Out-Null
     } catch {
-        if ($_.Exception.Message -notmatch '(?i)already exists|duplicate|0x80047013|0x80048403|0x8004f009') { throw }
+        if (-not (Test-DuplicateRefusal $_.Exception.Message -Loose)) { throw }
         if (-not (Get-GlobalOptionSet $Name -Retries 12)) { throw }
         $script:Skipped.Add("optionset $Name"); Write-Host "  skipped  global option set $Name (exists, found via create refusal)" -ForegroundColor Yellow
         return
@@ -530,7 +148,7 @@ function Add-GlobalChoice {
 # A choice column bound to a global option set. If it exists it must be a picklist bound to that same set.
 function Add-GlobalChoiceColumn {
     param([string]$Column, [string]$Schema, [string]$Display, [string]$Description, [string]$OptionSetName)
-    $table = $script:Entity
+    $table = Get-EbEntity
     $attr = Get-Attr $table $Column
     if ($attr) {
         Assert-AttrType $attr $Column 'Picklist'
@@ -624,7 +242,7 @@ function Add-StatusValues([string]$Table) {
             } | Out-Null
         } catch {
             # A stale read hid an option that is already there: the refusal is authoritative, verify on a settled read.
-            if ($_.Exception.Message -notmatch '(?i)already exists|duplicate|0x80047013|0x80048403|0x8004f009') { throw }
+            if (-not (Test-DuplicateRefusal $_.Exception.Message -Loose)) { throw }
             $found = $null
             for ($i = 0; $i -lt 12 -and -not $found; $i++) {
                 $found = Get-StatusOptions $Table | Where-Object { $_.Label -eq $s.Label -and $_.State -eq $s.State }
@@ -670,6 +288,7 @@ try {
         -Description 'A published set of rules built from one guideline, rate card or procedure document, assigned to a client default or a firm (FR-09, FR-28).' `
         -PrimaryColumn 'sprk_name' -PrimaryDisplay 'Name' -PrimaryDescription 'Name of the rule set, shown to firms when its visible-to-firms flag is on (D-66).' -PrimaryLength 200
     Set-PrimaryNameLength $RuleSetTable 'sprk_name' 200
+    Set-PrimaryNameRequired $RuleSetTable 'sprk_name'
     Add-GlobalChoiceColumn -Column 'sprk_domain' -Schema 'sprk_Domain' -Display 'Domain' -Description 'Rules system the set belongs to (Billing in R1).' -OptionSetName $DomainOptionSet
     Add-Lookup -Column 'sprk_sourcedocument' -SchemaName 'sprk_SourceDocument' -RelSchema 'sprk_document_ruleset_sourcedocument' -Target 'sprk_document' `
         -Display 'Source Document' -Description 'The guideline, rate card or procedure document the rules were drafted from (Procedure Library; internal only, D-63).'
@@ -686,7 +305,7 @@ try {
 
     # --- 3. sprk_policy -----------------------------------------------------------------------------------------
     Write-Host "3. $PolicyTable (additive)" -ForegroundColor Cyan
-    $script:Entity = $PolicyTable
+    Set-EbEntity $PolicyTable
     Add-GlobalChoiceColumn -Column 'sprk_domain' -Schema 'sprk_Domain' -Display 'Domain' `
         -Description 'Rules system the policy belongs to. Empty reads as Ontology; billing policies are Billing (D-26).' -OptionSetName $DomainOptionSet
     Add-Lookup -Column 'sprk_ruleset' -SchemaName 'sprk_RuleSet' -RelSchema 'sprk_ruleset_policy_ruleset' -Target $RuleSetTable `
@@ -694,7 +313,7 @@ try {
 
     # --- 4. sprk_policyversion ----------------------------------------------------------------------------------
     Write-Host "4. $VersionTable (additive)" -ForegroundColor Cyan
-    $script:Entity = $VersionTable
+    Set-EbEntity $VersionTable
     Add-Column 'sprk_clausereference' (New-MemoDef 'sprk_ClauseReference' 'Clause Reference' 'The verbatim clause of the source guideline this rule was drafted from (D-66, FR-38).' 4000) 'Memo'
     Add-Column 'sprk_clauselocation' (New-StringDef 'sprk_ClauseLocation' 'Clause Location' 'Section and page of the clause in the source document, e.g. Section 4.2, page 7.' 200) 'String'
     Add-LocalChoice -Column 'sprk_consequence' -Schema 'sprk_Consequence' -Display 'Consequence' `

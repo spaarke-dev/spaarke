@@ -1762,6 +1762,8 @@ These scripts were used during initial SPE Container Type registration and are k
 
 Owned by `ebilling-r1` (`projects/ebilling-r1/`). All are idempotent: a second run reports no change.
 
+The `Deploy-Ebilling*Schema.ps1` scripts share one helper module, `ebilling/EbillingSchema.psm1` (Dataverse calls, re-reads of eventually consistent metadata, create-or-skip with every "already exists" code, required-level helpers, publish locks); a hardening fix is made there once. Required levels: ApplicationRequired is enforced on forms only, SystemRequired on every write (decisions: `projects/ebilling-r1/notes/schema-script-hardening.md`).
+
 ### `ebilling/Deploy-EbillingInvoiceLineSchema.ps1`
 
 Additive Dataverse metadata script that turns `sprk_billingevent` into the Invoice Line (FR-04 / FR-05): review, coding, adjustment and extraction columns, `sprk_linestatus`, the work-assignment lookup and the ADR-024 resolver fields. The UTBMS code lookups are deferred until `sprk_billingcode` exists (task 018) and are created on the next run after that (done in dev 2026-10-15). Supports `-WhatIf`; never deletes or renames. Columns: `docs/data-model/sprk_billingevent.md`.
@@ -1832,6 +1834,24 @@ Additive Dataverse metadata script (FR-11 / FR-05 / FR-35, `ebilling-r1` task 02
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingExportSchema.ps1`
+
+Additive Dataverse metadata script (FR-13 / FR-41 / D-21, `ebilling-r1` task 023) that creates the user-owned AP export batch table `sprk_billingexport` (`sprk_name` 100, `sprk_invoicecount`, `sprk_totalamount`, multi-select `sprk_formats` CSV / JSON / XML, `sprk_exportstatus` Generating / Completed / Failed, `sprk_mappingsnapshot` 1,048,576, `sprk_failurereason`), its `sprk_csvdocument` / `sprk_jsondocument` lookups to `sprk_document`, and the single-valued `sprk_invoice.sprk_billingexport` batch lookup that keeps an invoice in at most one batch. It first checks (read-only) that `sprk_invoice` has no other batch link and stops with exit 2 before any write if it does. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads (it also waits for the shortened primary-name length to settle before setting the required level, so the second update cannot undo the first). Columns: `docs/data-model/sprk_billingexport.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingExternalIdentifierSchema.ps1`
+
+Additive Dataverse metadata script (FR-12 / FR-05 / D-12 / D-68, `ebilling-r1` task 022) that creates the user-owned table `sprk_externalidentifier` (typed identifiers such as the firm invoice number, firm client-matter number, law-department matter number and PO as quoted): the eight-value local choice `sprk_identifiertype` (system-required), `sprk_identifiervalue`, `sprk_normalizedvalue` (system-required matching value), `sprk_issuingsystem`, the `sprk_issuingorganization` and `sprk_regardinginvoice` lookups, the ADR-024 `sprk_regarding*` lookups and five resolver fields, and the owner-decided alternate key (firm, type, normalized value, core record id). It waits for the key index to be Active and stops with exit 2, choosing no other key, if Dataverse refuses this one. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns and the key tests: `docs/data-model/sprk_externalidentifier.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1
 ```
 
 ### `content-understanding/Deploy-Analyzers.ps1`
@@ -2015,3 +2035,5 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 (sprk_timekeeper roster columns and statuscode, sprk_ratecard, sprk_ratecardrate; classification held pending an owner decision; `ebilling-r1` task 017).
 - **2026-10-15:** Added ebilling/Deploy-EbillingSubmissionSchema.ps1 (sprk_invoicesubmission table, ADR-024 regarding lookups, firm-scoped tracking-number alternate key; `ebilling-r1` task 020).
 - **2026-10-15:** Added ebilling/Deploy-EbillingApprovalSchema.ps1 (sprk_invoiceapproval table, ADR-024 regarding lookups, SystemRequired invoice lookup, eligible-approver N:N to contact; `ebilling-r1` task 021).
+- **2026-10-15:** Added ebilling/Deploy-EbillingExportSchema.ps1 (sprk_billingexport AP batch table, CSV / JSON document lookups, single-valued sprk_invoice.sprk_billingexport batch lookup; `ebilling-r1` task 023).
+- **2026-10-15:** Added ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 (sprk_externalidentifier table, ADR-024 regarding lookups, D-68 alternate key on firm, type, normalized value and core record id; `ebilling-r1` task 022).

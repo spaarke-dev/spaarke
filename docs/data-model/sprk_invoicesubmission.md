@@ -13,8 +13,8 @@ User-owned, entity set `sprk_invoicesubmissions`, primary name `sprk_name` (text
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_name` | Text (200), primary name | Display name of the submission. |
-| `sprk_trackingnumber` | Text (100) | `{firm invoice number}.{n}`. Part of the alternate key. Allocated concurrency-safe by task 045. |
+| `sprk_name` | Text (200), primary name, application-required | Display name of the submission. Required by the BFF write path, not enforced on API writes. |
+| `sprk_trackingnumber` | Text (100), **SystemRequired** | `{firm invoice number}.{n}`. Part of the alternate key; the platform refuses an empty value on every write. Allocated concurrency-safe by task 045. |
 | `sprk_firminvoicenumber` | Text (100) | The number as submitted, or as extracted from the PDF when none was entered. |
 | `sprk_submissionsequence` | Whole number, 1 .. 2,147,483,647 | The `n` of the tracking number. Dataverse refuses 0 (checked live). |
 | `sprk_channel` | Choice (local) | SPA 100000000, Internal 100000001, Mailbox 100000002 (reserved), Outlook 100000003 (reserved), API 100000004 (reserved). |
@@ -30,7 +30,7 @@ The table's system `statecode` / `statuscode` keep the defaults (Active 1 / Inac
 
 ## Lookups
 
-All are optional; every relationship has Delete = RemoveLink and no other cascade.
+All are optional except `sprk_vendororg`, which is **SystemRequired** (alternate key column; the platform refuses a submission without a firm on every write). Every relationship has Delete = RemoveLink and no other cascade.
 
 | Logical name | Target | Relationship | Meaning |
 |---|---|---|---|
@@ -60,7 +60,7 @@ Lengths follow `projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md`
 
 ## Alternate key
 
-`sprk_invoicesubmission_firm_trackingnumber` on (`sprk_vendororg`, `sprk_trackingnumber`), index status **Active** (Dataverse lists the attributes alphabetically: `sprk_trackingnumber`, `sprk_vendororg`). The key is firm-scoped because two firms can both send `INV-002` (D-37). A lookup-based key is addressed in the Web API by the lookup **value** name: `sprk_invoicesubmissions(_sprk_vendororg_value=<id>,sprk_trackingnumber='INV-002.1')`. Checked live: a second row with the same firm and tracking number is refused with HTTP 412, `0x80060892` "Entity Key Firm and Tracking Number violated"; the same tracking number under a different firm is accepted. Rows with an empty firm or tracking number are not covered by the key.
+`sprk_invoicesubmission_firm_trackingnumber` on (`sprk_vendororg`, `sprk_trackingnumber`), index status **Active** (Dataverse lists the attributes alphabetically: `sprk_trackingnumber`, `sprk_vendororg`). The key is firm-scoped because two firms can both send `INV-002` (D-37). A lookup-based key is addressed in the Web API by the lookup **value** name: `sprk_invoicesubmissions(_sprk_vendororg_value=<id>,sprk_trackingnumber='INV-002.1')`. Checked live: a second row with the same firm and tracking number is refused with HTTP 412, `0x80060892` "Entity Key Firm and Tracking Number violated"; the same tracking number under a different firm is accepted. Rows with an empty firm or tracking number would not be covered by the key, so both columns are SystemRequired (the platform refuses a null on every write).
 
 ## Notes for the writers
 

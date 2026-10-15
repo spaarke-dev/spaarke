@@ -13,7 +13,7 @@ Entity set `sprk_billingcodesets`. Status is the standard `statecode` / `statusc
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_name` | Text (200), primary name | Unique by convention; the seed matches a set on this name. |
+| `sprk_name` | Text (200), primary name, application-required | Unique by convention; the seed matches a set on this name. Required by the BFF write path, not enforced on API writes. |
 | `sprk_body` | Text (100) | Standards body, e.g. `ABA`, `LOC`. |
 | `sprk_version` | Text (50) | Published version, e.g. `1997`, `2023-04`. |
 | `sprk_sourceurl` | URL (500) | Where the set was downloaded from (utbms.com). |
@@ -24,9 +24,9 @@ Entity set `sprk_billingcodes`. Status is the standard `statecode` / `statuscode
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_code` | Text (100), primary name | The code as billed (`L110`, `E101`, `110402`). Unique within its set. |
-| `sprk_codeset` | Lookup -> `sprk_billingcodeset` (required; delete **Restrict**) | Relationship `sprk_billingcodeset_billingcode_codeset`. |
-| `sprk_codetype` | Choice (local, required) | Task = 100000000, Activity = 100000001, Expense = 100000002. |
+| `sprk_code` | Text (100), primary name, **SystemRequired** (alternate key column) | The code as billed (`L110`, `E101`, `110402`). Unique within its set. The platform refuses an empty code on every write. |
+| `sprk_codeset` | Lookup -> `sprk_billingcodeset` (**SystemRequired**, alternate key column; delete **Restrict**) | Relationship `sprk_billingcodeset_billingcode_codeset`. The platform refuses a code without a set on every write. |
+| `sprk_codetype` | Choice (local, application-required) | Task = 100000000, Activity = 100000001, Expense = 100000002. Required by the BFF write path and the seed, not enforced on API writes. |
 | `sprk_phase` | Text (20) | Phase code the task rolls up to (`L100`, `TR200`, `110400`). Empty for activity and expense codes. |
 | `sprk_description` | Text (500) | Short name of the code. |
 | `sprk_guidancetext` | Multiline text (10,000) | Definition / usage guidance for the coding Action. **An administrator edit is never overwritten by the seed.** |
@@ -42,6 +42,8 @@ GET /api/data/v9.2/sprk_billingcodes(_sprk_codeset_value=<set id>,sprk_code='L11
 ```
 
 (`sprk_codeset=` and `sprk_CodeSet=` are refused with 400.) Filtering also works: `sprk_billingcodes?$filter=_sprk_codeset_value eq <set id>`.
+
+**Required levels.** Dataverse enforces `ApplicationRequired` on forms only; an API write that omits the value succeeds. The two alternate-key columns (`sprk_codeset`, `sprk_code`) are therefore **SystemRequired** (the platform refuses a null on every write: `Attribute 'x' cannot be NULL`); the other "application-required" columns above are required by the BFF write path and the seed, not enforced on API writes. Set by `Deploy-EbillingBillingCodeSchema.ps1` (DEF-006, DEF-009).
 
 Gotcha: the primary-name `MaxLength` in an entity-create body is ignored (Dataverse returns 850), and an alternate key on (lookup, text) fails above 1,700 bytes of index. The schema script shortens `sprk_code` to 100 and `sprk_name` to 200 right after creating the tables (only while they hold no rows).
 

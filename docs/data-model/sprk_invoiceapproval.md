@@ -13,7 +13,7 @@ User-owned, entity set `sprk_invoiceapprovals`, primary name `sprk_name` (text 2
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_name` | Text (200), primary name, application-required | Display name of the approval. |
+| `sprk_name` | Text (200), primary name, application-required | Display name of the approval. Required by the BFF write path, not enforced on API writes. |
 | `sprk_approvalstatus` | Choice (local), default Pending | Pending 100000000, Approved 100000001, Rejected 100000002, Returned 100000003 (FR-11). The system `statecode` / `statuscode` keep the defaults (Active 1 / Inactive 2) and carry no approval meaning. |
 | `sprk_approvedamount` | Money (precision 2, `_base` companion) | The approved total for the portion, frozen on approval (FR-35). |
 | `sprk_eligibleresolvedon` | Date and time (user local) | When the eligible approvers were last resolved: at acceptance, then on each re-resolution (D-78). The staleness marker for the refresh job or the manual refresh. |

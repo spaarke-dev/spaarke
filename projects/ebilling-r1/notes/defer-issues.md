@@ -317,7 +317,8 @@ Owner decides the product standard (original ABA, LOC 2013 revised, or ABA plus 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: `Set-PrimaryNameRequired` now runs for `sprk_billingcodeset.sprk_name` (ApplicationRequired) and `sprk_billingcode.sprk_code` is SystemRequired (alternate-key column), both in dev; the helper lives in `scripts/ebilling/EbillingSchema.psm1` (`notes/schema-script-hardening.md`). |
 | **Urgency** | before admins edit code sets by hand |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 017 (found while fixing the same defect in its own script) |
@@ -348,7 +349,8 @@ Add the `Set-PrimaryNameRequired` step to the 018 script after table creation an
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: `Deploy-EbillingPolicyStoreSchema.ps1` calls `Set-PrimaryNameRequired` for `sprk_ruleset.sprk_name`; dev now reads ApplicationRequired. |
 | **Urgency** | before admins create rule sets by hand (task 076) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 020 (found while fixing the same defect in its own script) |
@@ -379,7 +381,8 @@ Add the `Set-PrimaryNameRequired` step to the 019 script after `Set-PrimaryNameL
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: `0x80072551` (and every other duplicate code) is recognised by one `Test-DuplicateRefusal` in `scripts/ebilling/EbillingSchema.psm1`, which all seven schema scripts now import; confirmed on a settled read before it counts as skipped. |
 | **Urgency** | before the next schema script re-run (tasks 021-028 should copy the fixed helper) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 020 |
@@ -410,7 +413,8 @@ Add `0x80072551` to the duplicate test of each script's lookup-create helper (co
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: SystemRequired (null-row guarded) on `sprk_ratecardrate.sprk_ratecard`, `sprk_billingcode.sprk_codeset` / `sprk_code`, `sprk_invoicesubmission.sprk_vendororg` / `sprk_trackingnumber`; other columns stay ApplicationRequired with scripts and `docs/data-model/*.md` corrected; per-column table in `notes/schema-script-hardening.md`. |
 | **Urgency** | before any writer relies on a "required" column from schema 017-020 |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 021 |
@@ -443,7 +447,8 @@ Raise the level to SystemRequired for each lookup or column whose null breaks an
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: `0x8009050d` is in `Test-DuplicateRefusal` and `Set-PrimaryNameLength` counts rows with `$count=true` (no false "has rows"), both once in `scripts/ebilling/EbillingSchema.psm1`. |
 | **Urgency** | before the next schema script re-run (tasks 022-028 should copy the fixed helpers) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 021 |
@@ -499,5 +504,37 @@ In task 024 decide with the owner: replace the Matter column with a multi-select
 **Blockers**: owner decision (destructive change)
 
 **Related**: D-33, D-54; ebilling-r1 tasks 024, 103
+
+---
+
+### DEF-012 — eBilling schema scripts: `Set-PrimaryNameRequired` can undo the primary-name length change on a stale read
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the next new-table schema script run (tasks 022 and 024-028 copy these helpers) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 023 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1942 |
+
+**Description**
+
+`Set-PrimaryNameLength` shortens a new table's primary name (850 to N); `Set-PrimaryNameRequired` then reads the attribute and PUTs the whole attribute back with ApplicationRequired. When that read still shows the old MaxLength (850), the second PUT silently restores it. Seen on the first run of `Deploy-EbillingExportSchema.ps1`: the log said "CHANGED max length 850 -> 100", verification then read 850, exit 1; a second run fixed it. Nothing is lost (empty table, re-runnable).
+
+**Entry-points**
+
+- `scripts/ebilling/EbillingSchema.psm1` (`Set-PrimaryNameRequired` / `Set-ColumnRequiredLevel`, same read-modify-PUT)
+- `scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1` (own copy, task 022)
+- model fix: `scripts/ebilling/Deploy-EbillingExportSchema.ps1` (`Set-PrimaryNameRequired` takes the wanted length and waits up to 60 s until the read shows it)
+
+**Suggested fix**
+
+Make the required-level update wait for a settled read of the length the previous step set (or set both in one PUT), once, in the shared module.
+
+**Estimated effort**: 1 hour
+
+**Blockers**: none
+
+**Related**: DEF-010; ebilling-r1 tasks 017-023
 
 ---
