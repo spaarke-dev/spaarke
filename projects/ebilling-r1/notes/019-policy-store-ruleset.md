@@ -110,3 +110,7 @@ Relationships (all delete = RemoveLink, other cascades NoCascade): `sprk_ruleset
 > Please confirm: (1) none of these names is planned by you under another name; (2) `sprk_consequence` is a new typed column and should not reuse `sprk_proposedaction` (free text, required, "what is put to the human") or `sprk_lane` (Decide / Do cadence); (3) your readers (`SignalReevaluationJob.ReadEnabledPoliciesAsync`, `PolicyScopeResolver.LoadEnabledPoliciesAsync`) may skip `sprk_domain = Billing` in task 070, which is a change in your code, so we ask you to review that PR; (4) no backfill of the existing rows is wanted.
 >
 > Evidence: `projects/ebilling-r1/notes/019-policy-store-ruleset.md`, `docs/data-model/sprk_ruleset.md`.
+
+## 7. Closure (main session, 2026-10-15)
+
+ontology-r1 review received and applied to task 070 (bb7fc112c). Signals tests with no code change: `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter FullyQualifiedName~Signals` 1622 passed, 0 failed (covers tests/unit/domain/Signals and tests/integration/seam/Signals). All acceptance criteria met.

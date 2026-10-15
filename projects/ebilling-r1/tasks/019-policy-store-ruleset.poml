@@ -4,7 +4,7 @@
     <title>Policy store extensions, sprk_ruleset, visible-to-firms flag</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script on a shared (ontology-owned) store plus one new table; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
