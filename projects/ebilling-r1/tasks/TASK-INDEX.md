@@ -34,7 +34,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 017 | ⏸ [blocked: owner classification + stub delete] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
 | 018 | ✅ [completed] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
 | 019 | 🟡 [in-progress] | Policy store extensions, `sprk_ruleset`, visible-to-firms flag | STANDARD | sonnet / high | P1-A | none |
-| 020 | 🟡 [in-progress] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
+| 020 | ✅ [completed] | `sprk_invoicesubmission` schema | STANDARD | sonnet / high | P1-A | none |
 | 021 | 🔲 [open] | `sprk_invoiceapproval` schema | STANDARD | sonnet / high | P1-A | none |
 | 022 | 🔲 [open] | `sprk_externalidentifier` schema and firm-scoped key | STANDARD | sonnet / high | P1-A | none |
 | 023 | 🔲 [open] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |

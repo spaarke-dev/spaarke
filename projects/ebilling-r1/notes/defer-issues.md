@@ -343,3 +343,65 @@ Add the `Set-PrimaryNameRequired` step to the 018 script after table creation an
 **Related**: ebilling-r1 tasks 017, 018; `notes/017-timekeeper-ratecard-schema.md` sections 6 and 7
 
 ---
+
+### DEF-007 — `sprk_ruleset` primary name is not application-required in dev
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before admins create rule sets by hand (task 076) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 020 (found while fixing the same defect in its own script) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1937 |
+
+**Description**
+
+`Deploy-EbillingPolicyStoreSchema.ps1` (task 019) asks for `ApplicationRequired` on `sprk_ruleset.sprk_name` in the entity-create body. Dataverse ignores that property; dev reads back `RequiredLevel = None`. A form or API write can create a rule set with an empty name. The rule set name is shown to firms and cited on every finding (D-66, D-79), so a nameless rule set yields a finding that cites nothing. Same class as DEF-006.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` (`Add-Table`, then `Set-PrimaryNameLength`)
+- `scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1` (`Set-PrimaryNameRequired`, the model fix)
+
+**Suggested fix**
+
+Add the `Set-PrimaryNameRequired` step to the 019 script after `Set-PrimaryNameLength` and re-run it in dev (existing rows are unaffected).
+
+**Estimated effort**: 30 minutes
+
+**Blockers**: none
+
+**Related**: DEF-006; ebilling-r1 tasks 019, 020
+
+---
+
+### DEF-008 — eBilling schema scripts fail a re-run on a stale lookup read (`0x80072551` is not treated as already-exists)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the next schema script re-run (tasks 021-028 should copy the fixed helper) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 020 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1938 |
+
+**Description**
+
+A lookup (relationship) create that hits an existing relationship returns `0x80072551: NavigationPropertyName ... is not unique within an entity`. The scripts only treat "already exists" as a skip, so a re-run whose existence read is stale stops with exit 1 instead of reporting no change. "A second run reports no change and exits 0" is an acceptance criterion of every schema task. Nothing is lost (the scripts are re-runnable). Fixed in `Deploy-EbillingSubmissionSchema.ps1` (`Invoke-DvCreate`).
+
+**Entry-points**
+
+- Not fixed in: `Deploy-EbillingInvoiceLineSchema.ps1`, `Deploy-EbillingInvoiceHeaderSchema.ps1`, `Deploy-EbillingTimekeeperRateCardSchema.ps1`, `Deploy-EbillingBillingCodeSchema.ps1`, `Deploy-EbillingPolicyStoreSchema.ps1`, `Deploy-EbillingApprovalSchema.ps1` (grep: none contains `0x80072551`; not individually verified)
+- `scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1` (`Invoke-DvCreate`, the model fix)
+
+**Suggested fix**
+
+Add `0x80072551` to the duplicate test of each script's lookup-create helper (confirm on a settled read, throw if the column never becomes readable), or move the helper into one shared file.
+
+**Estimated effort**: 1 hour
+
+**Blockers**: none
+
+**Related**: DEF-006, DEF-007; ebilling-r1 task 020
+
+---

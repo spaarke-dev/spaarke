@@ -4,7 +4,7 @@
     <title>sprk_invoicesubmission schema</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new table and a new script file (new files, explicit ADR constraints); no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,6 +110,8 @@
   </acceptance-criteria>
 
   <notes>
+    Completed 2026-10-15. Script scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 created sprk_invoicesubmission in dev (27 items: table, 11 columns, 10 lookups, 4 resolver fields, firm-scoped alternate key sprk_invoicesubmission_firm_trackingnumber Active); the final run reports created 0 / changed 0 / skipped 29, exit 0. Key test: duplicate (firm, tracking number) refused HTTP 412 0x80060892, same number under another firm accepted, test rows deleted. Details, run history and deviations: projects/ebilling-r1/notes/020-invoicesubmission-schema.md. Deviations: primary name length and required level are ignored in the create body (set afterwards); relationship duplicate refusal 0x80072551 handled (DEF-008, #1938 for the other scripts); sprk_ruleset.sprk_name not required (DEF-007, #1937). TASK-INDEX.md and current-task.md are updated by the main session.
+    rework: none task 020
     Brief said "alternate key for tracking number uniqueness"; the key is (firm, tracking number) because two firms can both send INV-002 (FR-10 numbering is per firm invoice number, D-37).
     Columns sprk_firminvoicenumber, sprk_submissionsequence, sprk_outcomereasoncode, sprk_firmnoticetext, sprk_ponumber and sprk_correlationid are not named in FR-10 but are required by FR-10 (tracking composition), FR-21 (stable reason code), FR-50 (sent text stored with the submission) and FR-18 (PO entered at submission); they are added here because later tasks have no solution-sync step.
     Persons are contacts in Spaarke (assignment fields and sprk_createdbyperson-style person links), so sprk_submitter targets contact.

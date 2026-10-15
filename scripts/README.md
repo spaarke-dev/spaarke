@@ -1816,6 +1816,24 @@ pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https
 pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
+### `ebilling/Deploy-EbillingSubmissionSchema.ps1`
+
+Additive Dataverse metadata script that creates `sprk_invoicesubmission` (FR-10, D-37), one row per submission attempt: the user-owned table, its tracking-number / channel / processing-status / findings / notice / PO / received-on / correlation columns, the submitter, firm, document, report-document, resulting-invoice and resubmission-of lookups, the ADR-024 `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` / `sprk_regardingrecordtype` lookups and four resolver text fields, and the firm-scoped alternate key `sprk_invoicesubmission_firm_trackingnumber` on (`sprk_vendororg`, `sprk_trackingnumber`) (waits for the index to be Active). Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns: `docs/data-model/sprk_invoicesubmission.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingApprovalSchema.ps1`
+
+Additive Dataverse metadata script (FR-11 / FR-05 / FR-35, `ebilling-r1` task 021) that creates the user-owned `sprk_invoiceapproval` (invoice x core record): `sprk_approvalstatus` (Pending default / Approved / Rejected / Returned), `sprk_approvedamount`, `sprk_eligibleresolvedon`, `sprk_decidedon`, the `sprk_invoice` lookup (raised to SystemRequired, because Dataverse does not enforce ApplicationRequired on API writes), the `sprk_decisionrecord` and `sprk_decidedby` (contact) lookups, the ADR-024 `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` / `sprk_regardingrecordtype` lookups with four resolver text fields, and the N:N `sprk_invoiceapproval_eligibleapprover_contact` (the queryable eligible-approver store). It first checks (read-only) that every approver assignment lookup on Matter, Project and Work Assignment targets `contact` and stops with exit 2 before any write if not. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns: `docs/data-model/sprk_invoiceapproval.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
@@ -1995,3 +2013,5 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingBillingCodeSchema.ps1 and ebilling/Seed-EbillingBillingCodes.ps1 (UTBMS code set tables, alternate key, default-code-set lookups, eight seeded sets; `ebilling-r1` task 018).
 - **2026-10-15:** Added ebilling/Deploy-EbillingPolicyStoreSchema.ps1 (policy store domain / rule set / clause / consequence columns, `sprk_policydomain`, `sprk_ruleset` table; `ebilling-r1` task 019).
 - **2026-10-15:** Added ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 (sprk_timekeeper roster columns and statuscode, sprk_ratecard, sprk_ratecardrate; classification held pending an owner decision; `ebilling-r1` task 017).
+- **2026-10-15:** Added ebilling/Deploy-EbillingSubmissionSchema.ps1 (sprk_invoicesubmission table, ADR-024 regarding lookups, firm-scoped tracking-number alternate key; `ebilling-r1` task 020).
+- **2026-10-15:** Added ebilling/Deploy-EbillingApprovalSchema.ps1 (sprk_invoiceapproval table, ADR-024 regarding lookups, SystemRequired invoice lookup, eligible-approver N:N to contact; `ebilling-r1` task 021).
