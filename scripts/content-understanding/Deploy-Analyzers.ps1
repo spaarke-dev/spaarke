@@ -3,10 +3,12 @@
 <#
 .SYNOPSIS
     Idempotently deploys Content Understanding analyzer definitions (analyzer-as-code) to a
-    Content Understanding resource, on the pinned GA API 2025-11-01.
+    Content Understanding resource, each on the API version it was built for: the GA API 2025-11-01
+    or the preview API 2026-06-01-preview (D-81).
 
 .DESCRIPTION
-    Reads one or more analyzer definition files (default: sprk-invoice-v1.json), and for each:
+    Reads one or more analyzer definition files (default: the D-81 pair, sprk-invoice-v2.json on GA and
+    sprk-invoice-v2p.json on the preview), and for each:
 
       1. GET the analyzer from the resource.
       2. Missing            -> create it (PUT) and poll the long-running operation to completion.
@@ -29,8 +31,15 @@
     by this script (ADR-028). The caller needs the Cognitive Services Content Understanding
     Contributor (or Owner) role on the resource to create or replace analyzers.
 
-    All requests use the date-only GA api-version (default 2025-11-01); a value that is not a
-    plain date is refused by parameter validation (D-53).
+    API version per file (D-81). Analyzers are scoped to the api-version they were created with: a
+    preview-built analyzer is 404 under the GA API and a GA-built one is 404 under the preview, so each
+    definition is always deployed, compared and verified on its own version. A definition file names
+    it in tags.apiVersion (deployed with the analyzer, so the pairing is visible on the service too); a
+    file without that tag uses -ApiVersion, default 2025-11-01. A -ApiVersion that disagrees with a
+    file's tags.apiVersion is refused (exit 2) before any call is made. Only a plain date (GA) or a
+    date followed by -preview is accepted. The GA and preview twins of one schema version
+    (sprk_invoice_vN / sprk_invoice_vNp) carry the same fieldSchema, config and models;
+    tests/Spaarke.ArchTests/ContentUnderstandingAnalyzerPairTests.cs keeps them in step.
 
     Analyzer ids: the service allows letters, digits, "." and "_" only (a hyphen is rejected with
     InvalidAnalyzerId), so the analyzerId inside the file is sprk_invoice_v1 although the file name
@@ -42,10 +51,13 @@
 
 .PARAMETER AnalyzerFile
     One or more analyzer definition files. Relative paths resolve against the current directory,
-    then against the repository root. Default: infrastructure/content-understanding/sprk-invoice-v1.json
+    then against the repository root. Default: infrastructure/content-understanding/sprk-invoice-v2.json
+    and infrastructure/content-understanding/sprk-invoice-v2p.json (the D-81 GA fallback and preview
+    primary).
 
 .PARAMETER ApiVersion
-    GA REST api-version. Default 2025-11-01. Must be a plain date.
+    REST api-version for files that do not name one in tags.apiVersion (default 2025-11-01). A plain
+    date (GA) or a date followed by -preview. When passed, it must equal every file's tags.apiVersion.
 
 .PARAMETER Replace
     Allow replacing an existing analyzer whose definition differs from the file.
@@ -62,11 +74,14 @@
 .EXAMPLE
     pwsh ./scripts/content-understanding/Deploy-Analyzers.ps1 -Endpoint $env:CONTENT_UNDERSTANDING_ENDPOINT
 
+.EXAMPLE
+    pwsh ./scripts/content-understanding/Deploy-Analyzers.ps1 -Endpoint $env:CONTENT_UNDERSTANDING_ENDPOINT -AnalyzerFile infrastructure/content-understanding/sprk-invoice-v1.json -ApiVersion 2025-11-01
+
 .NOTES
-    Project : ebilling-r1, task 004 (FR-47, D-49, D-53)
+    Project : ebilling-r1, task 004 (FR-47, D-49, D-53); per-file api-version and the preview, task 043 (D-81)
     Exit codes:
       0  success (created, replaced, or no change; also -WhatIf)
-      2  bad arguments (endpoint, analyzer id)
+      2  bad arguments (endpoint, analyzer id, api-version, or -ApiVersion disagreeing with a file)
       3  analyzer file missing or invalid
       4  could not acquire an access token
       5  an existing analyzer differs and -Replace was not passed (nothing written)
@@ -78,10 +93,12 @@
 param(
     [string]$Endpoint = $env:CONTENT_UNDERSTANDING_ENDPOINT,
 
-    [string[]]$AnalyzerFile = @('infrastructure/content-understanding/sprk-invoice-v1.json'),
+    [string[]]$AnalyzerFile = @(
+        'infrastructure/content-understanding/sprk-invoice-v2.json',
+        'infrastructure/content-understanding/sprk-invoice-v2p.json'),
 
-    [ValidatePattern('^\d{4}-\d{2}-\d{2}$')]
-    [string]$ApiVersion = '2025-11-01',
+    [ValidatePattern('^\d{4}-\d{2}-\d{2}(-preview)?$')]
+    [string]$ApiVersion,
 
     [switch]$Replace,
 
@@ -94,6 +111,16 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 # Properties the service sets itself; never part of the definition we compare or send.
 $ServerAddedProperties = @('createdAt', 'lastModifiedAt', 'status', 'warnings', 'supportedModels')
+
+# Properties the service RESOLVES from a request value (task 043, measured on 2026-06-01-preview): a create
+# that sends config.workflow must use 'default' or 'agentic', and the service then reports the resolved
+# workflow (for example 'standard.2026-06-01-preview'). Compared only when the file states them; a file
+# that leaves them out accepts the service's resolution.
+$ServerResolvedPaths = @('/config/workflow')
+
+# GA api-version for a file that names none in tags.apiVersion when -ApiVersion is not passed.
+$DefaultApiVersion = '2025-11-01'
+$ApiVersionPattern = '^\d{4}-\d{2}-\d{2}(-preview)?$'
 
 # ---------------------------------------------------------------------------
 # Arguments
@@ -191,7 +218,7 @@ function Get-Differences {
     foreach ($p in ($paths | Sort-Object -Unique)) {
         $inWant = $want.Contains($p); $inHave = $have.Contains($p)
         if ($inWant -and -not $inHave)      { $diffs.Add("$p : in file, missing on service") }
-        elseif ($inHave -and -not $inWant)  { $diffs.Add("$p : on service, not in file") }
+        elseif ($inHave -and -not $inWant)  { if ($ServerResolvedPaths -notcontains $p) { $diffs.Add("$p : on service, not in file") } }
         elseif ($want[$p] -ne $have[$p])    {
             # Long text: show the window around the first character that differs.
             $a = $want[$p]; $b = $have[$p]
@@ -221,7 +248,7 @@ function Resolve-AnalyzerPath {
 # ---------------------------------------------------------------------------
 Write-Host 'Deploy-Analyzers.ps1' -ForegroundColor Cyan
 Write-Host "  Endpoint   : $Endpoint"
-Write-Host "  ApiVersion : $ApiVersion"
+Write-Host "  ApiVersion : $(if ($ApiVersion) { $ApiVersion } else { "per file (tags.apiVersion; default $DefaultApiVersion)" })"
 Write-Host "  Mode       : $(if ($WhatIfPreference) { 'what-if (no writes)' } elseif ($Replace) { 'deploy, replace allowed' } else { 'deploy, no replace' })"
 
 # ---------------------------------------------------------------------------
@@ -243,7 +270,16 @@ foreach ($file in $AnalyzerFile) {
     if ($id -notmatch '^[A-Za-z0-9._]{1,64}$') {
         Write-Host "ERROR: $path analyzerId '$id' is invalid (letters, digits, '.' and '_' only, 1-64 chars; a hyphen is not allowed)." -ForegroundColor Red; exit 2
     }
-    $plans += [pscustomobject]@{ File = $path; Id = $id; Desired = (Remove-ServerProperties $definition); State = $null; Diffs = $null }
+    $tags = $definition['tags']
+    $fileApi = if ($tags -is [System.Collections.IDictionary] -and $tags['apiVersion']) { [string]$tags['apiVersion'] } else { $null }
+    if ($fileApi -and $fileApi -notmatch $ApiVersionPattern) {
+        Write-Host "ERROR: $path tags.apiVersion '$fileApi' is neither a GA date nor a date followed by -preview." -ForegroundColor Red; exit 2
+    }
+    if ($fileApi -and $ApiVersion -and $fileApi -ne $ApiVersion) {
+        Write-Host "ERROR: $path is built for api-version '$fileApi' (tags.apiVersion) but -ApiVersion is '$ApiVersion'. Analyzers do not move between api-versions; omit -ApiVersion or pass the file's version." -ForegroundColor Red; exit 2
+    }
+    $planApi = if ($fileApi) { $fileApi } elseif ($ApiVersion) { $ApiVersion } else { $DefaultApiVersion }
+    $plans += [pscustomobject]@{ File = $path; Id = $id; ApiVersion = $planApi; Desired = (Remove-ServerProperties $definition); State = $null; Diffs = $null }
 }
 if (($plans.Id | Sort-Object -Unique).Count -ne $plans.Count) {
     Write-Host 'ERROR: two analyzer files declare the same analyzerId.' -ForegroundColor Red; exit 2
@@ -262,7 +298,7 @@ if (-not $script:AccessToken) {
 # Plan pass: read every analyzer, decide, and refuse before any write
 # ---------------------------------------------------------------------------
 foreach ($plan in $plans) {
-    $url = "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$ApiVersion"
+    $url = "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$($plan.ApiVersion)"
     $resp = Invoke-Cu -Method GET -Uri $url
     if ($resp.StatusCode -eq 404) {
         $plan.State = 'create'
@@ -274,7 +310,7 @@ foreach ($plan in $plans) {
         Write-Host "ERROR: GET $($plan.Id) returned HTTP $($resp.StatusCode): $($resp.Content)" -ForegroundColor Red
         exit 6
     }
-    Write-Host "  $($plan.Id): $($plan.State)  ($([IO.Path]::GetFileName($plan.File)))"
+    Write-Host "  $($plan.Id) @ $($plan.ApiVersion): $($plan.State)  ($([IO.Path]::GetFileName($plan.File)))"
 }
 
 $blocked = @($plans | Where-Object { $_.State -eq 'differs' })
@@ -307,7 +343,7 @@ foreach ($plan in $plans) {
         Write-Host "  $($plan.Id) differs from the file ($($plan.Diffs.Count) propert$(if ($plan.Diffs.Count -eq 1) { 'y' } else { 'ies' })):"
         foreach ($d in $plan.Diffs) { Write-Host "    - $d" }
     }
-    $putUrl = "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$ApiVersion$(if ($replacing) { '&allowReplace=true' })"
+    $putUrl = "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$($plan.ApiVersion)$(if ($replacing) { '&allowReplace=true' })"
 
     if (-not $PSCmdlet.ShouldProcess("analyzer '$($plan.Id)' at $Endpoint", "PUT ($verb) from $([IO.Path]::GetFileName($plan.File))")) {
         Write-Host "RESULT $($plan.Id): WOULD $verb (what-if, nothing written)" -ForegroundColor Yellow
@@ -344,7 +380,7 @@ foreach ($plan in $plans) {
     }
 
     # Post-write verification: the deployed analyzer must now equal the file.
-    $verify = Invoke-Cu -Method GET -Uri "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$ApiVersion"
+    $verify = Invoke-Cu -Method GET -Uri "$Endpoint/contentunderstanding/analyzers/$($plan.Id)?api-version=$($plan.ApiVersion)"
     if ($verify.StatusCode -ne 200) {
         Write-Host "RESULT $($plan.Id): $verb verification GET returned HTTP $($verify.StatusCode)" -ForegroundColor Red
         $failed++

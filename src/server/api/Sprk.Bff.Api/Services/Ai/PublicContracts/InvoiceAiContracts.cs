@@ -32,6 +32,33 @@ public sealed class InvoiceAiException : Exception
     /// <summary>The completion returned JSON that does not parse into the capability's result type.</summary>
     public const string OutputInvalid = "ai.invoice.output_invalid";
 
+    // ── ReadInvoiceAsync (FR-21). These classify WHERE the read failed, not whether a retry helps. ──
+
+    /// <summary>
+    /// The service could not open the document: encrypted / password-protected, corrupt, or empty (Content
+    /// Understanding <c>FailedToExtractPageCount</c>, <c>ContentEmpty</c>).
+    /// </summary>
+    public const string ReadUnreadable = "invoice.read.unreadable";
+
+    /// <summary>The document has more pages than <c>ContentUnderstanding:MaxPages</c> (or the service's own page limit).</summary>
+    public const string ReadPageLimit = "invoice.read.page_limit";
+
+    /// <summary>The document was read but holds no invoice: no invoice number, date or total, and no fee or expense row.</summary>
+    public const string ReadNoInvoice = "invoice.read.no_invoice";
+
+    /// <summary>
+    /// The call to the service failed: transport, authentication, throttling, analyzer missing, operation failed
+    /// or timed out, or a response the client could not use. Often transient, but a missing analyzer or a missing
+    /// role assignment is not.
+    /// </summary>
+    public const string ReadServiceFailed = "invoice.read.service_failed";
+
+    /// <summary>
+    /// The <see cref="ConsumerType"/> value on read failures. Reading is a Content Understanding call, not an Action,
+    /// so this key is NOT a <see cref="ConsumerTypes"/> Binding key and is never added to <c>ConsumerTypes.All</c>.
+    /// </summary>
+    public const string ReadCapability = "invoice-read";
+
     public InvoiceAiException(string reasonCode, string consumerType, string message, Exception? innerException = null)
         : base(message, innerException)
     {
@@ -39,10 +66,17 @@ public sealed class InvoiceAiException : Exception
         ConsumerType = consumerType ?? throw new ArgumentNullException(nameof(consumerType));
     }
 
-    /// <summary>One of <see cref="BindingMissing"/>, <see cref="CompletionFailed"/>, <see cref="OutputInvalid"/>.</summary>
+    /// <summary>
+    /// One of <see cref="BindingMissing"/>, <see cref="CompletionFailed"/>, <see cref="OutputInvalid"/> (Action-backed
+    /// methods), or <see cref="ReadUnreadable"/>, <see cref="ReadPageLimit"/>, <see cref="ReadNoInvoice"/>,
+    /// <see cref="ReadServiceFailed"/> (<see cref="IInvoiceAi.ReadInvoiceAsync"/>).
+    /// </summary>
     public string ReasonCode { get; }
 
-    /// <summary>The <see cref="ConsumerTypes"/> key of the capability that failed.</summary>
+    /// <summary>
+    /// The <see cref="ConsumerTypes"/> key of the capability that failed, or <see cref="ReadCapability"/> for
+    /// <see cref="IInvoiceAi.ReadInvoiceAsync"/>.
+    /// </summary>
     public string ConsumerType { get; }
 }
 
@@ -323,4 +357,215 @@ public sealed record InvoiceFirmNoticeDraft
     public required string Subject { get; init; }
 
     public required string Body { get; init; }
+}
+
+// ── ReadInvoiceAsync (Content Understanding custom analyzer; FR-21, FR-04, D-49, D-81) ──────────────────────
+//
+// Every extracted value is an ExtractedInvoiceField<T>: the value plus where it came from and how sure the
+// analyzer was, so task 049 can write FR-04's per-field extraction-confidence JSON directly and the review UI can
+// highlight the source (prototype DocumentView contract F-4: {page, x, y, w, h}, normalised 0-1).
+
+/// <summary>Input to <see cref="IInvoiceAi.ReadInvoiceAsync"/>: one invoice document.</summary>
+public sealed record InvoiceReadRequest
+{
+    /// <summary>The document bytes (PDF or image). Sent to Content Understanding as-is; never logged.</summary>
+    public required ReadOnlyMemory<byte> Content { get; init; }
+
+    /// <summary>MIME type of <see cref="Content"/>. Default <c>application/pdf</c>.</summary>
+    public string ContentType { get; init; } = "application/pdf";
+
+    /// <summary>The document's id (for example the sprk_document id) — logged only, never sent.</summary>
+    public required Guid DocumentId { get; init; }
+}
+
+/// <summary>How a value was changed by the deterministic completion step after extraction (task 005 condition 1 / 2).</summary>
+public enum ExtractedValueRepair
+{
+    /// <summary>The value is as the analyzer returned it.</summary>
+    None,
+
+    /// <summary>Clock-notation hours read as a decimal (1:30 returned as 1.30) converted to decimal hours (1.5), because hours × rate did not equal the amount and the converted hours do.</summary>
+    ClockHoursConverted,
+
+    /// <summary>The row printed no rate; the rate is the timekeeper's rate from the invoice's own timekeeper summary. Page, box and confidence are the summary value's.</summary>
+    RateFromTimekeeperSummary,
+
+    /// <summary>The value was missing and is computed from the row's other two values (rate = amount / hours, hours = amount / rate, amount = hours × rate). Page and box are absent.</summary>
+    ComputedFromRow,
+
+    /// <summary>A date outside the billing period whose day and month, swapped, fall inside it (a day-first date read month-first).</summary>
+    DayMonthSwapped,
+}
+
+/// <summary>Where on the page a value was read: normalised 0-1 against the page's width and height, origin top-left.</summary>
+/// <param name="Page">1-based page number in the ORIGINAL file (also for page-range reads).</param>
+public sealed record ExtractedBoundingBox(int Page, decimal X, decimal Y, decimal W, decimal H);
+
+/// <summary>
+/// One extracted value. <typeparamref name="T"/> is <c>string?</c>, <c>DateOnly?</c> or <c>decimal?</c>; a value the
+/// document does not show is <c>null</c> (often still with a confidence — the analyzer's confidence that it is absent).
+/// </summary>
+public sealed record ExtractedInvoiceField<T>
+{
+    /// <summary>The value after deterministic completion; null when the document does not show it.</summary>
+    public T? Value { get; init; }
+
+    /// <summary>Analyzer confidence 0-1, or null when the analyzer returned none.</summary>
+    public decimal? Confidence { get; init; }
+
+    /// <summary>1-based page in the original file, or null when the analyzer returned no source.</summary>
+    public int? Page { get; init; }
+
+    /// <summary>Source box, or null when there is no source or the page size is unknown.</summary>
+    public ExtractedBoundingBox? BoundingBox { get; init; }
+
+    /// <summary>How the completion step changed the value; <see cref="ExtractedValueRepair.None"/> when it did not.</summary>
+    public ExtractedValueRepair Repair { get; init; }
+
+    /// <summary>The value exactly as the analyzer returned it (differs from <see cref="Value"/> only when <see cref="Repair"/> is not None).</summary>
+    public T? ReturnedValue { get; init; }
+}
+
+/// <summary>Invoice header (FR-21). Analyzer field names in brackets.</summary>
+public sealed record ExtractedInvoiceHeader
+{
+    /// <summary>[FirmName] The issuing firm.</summary>
+    public required ExtractedInvoiceField<string?> FirmName { get; init; }
+
+    /// <summary>[FirmInvoiceNumber] As printed.</summary>
+    public required ExtractedInvoiceField<string?> FirmInvoiceNumber { get; init; }
+
+    /// <summary>[InvoiceDate]</summary>
+    public required ExtractedInvoiceField<DateOnly?> InvoiceDate { get; init; }
+
+    /// <summary>[BillingPeriodStart]</summary>
+    public required ExtractedInvoiceField<DateOnly?> BillingPeriodStart { get; init; }
+
+    /// <summary>[BillingPeriodEnd]</summary>
+    public required ExtractedInvoiceField<DateOnly?> BillingPeriodEnd { get; init; }
+
+    /// <summary>[ClientName] As addressed.</summary>
+    public required ExtractedInvoiceField<string?> ClientName { get; init; }
+
+    /// <summary>[MatterName] As printed.</summary>
+    public required ExtractedInvoiceField<string?> MatterName { get; init; }
+
+    /// <summary>[FirmMatterReference] The firm's own matter reference, as printed.</summary>
+    public required ExtractedInvoiceField<string?> FirmMatterReference { get; init; }
+
+    /// <summary>[PurchaseOrderAsQuoted] PO as quoted by the firm.</summary>
+    public required ExtractedInvoiceField<string?> PurchaseOrderAsQuoted { get; init; }
+
+    /// <summary>[FeesTotal]</summary>
+    public required ExtractedInvoiceField<decimal?> FeesTotal { get; init; }
+
+    /// <summary>[ExpensesTotal]</summary>
+    public required ExtractedInvoiceField<decimal?> ExpensesTotal { get; init; }
+
+    /// <summary>[AdjustmentsTotal] Negative for a reduction.</summary>
+    public required ExtractedInvoiceField<decimal?> AdjustmentsTotal { get; init; }
+
+    /// <summary>[TotalDue]</summary>
+    public required ExtractedInvoiceField<decimal?> TotalDue { get; init; }
+
+    /// <summary>[Currency] ISO 4217 code as read. A non-USD value is returned as read, never refused here (the evaluator's finding).</summary>
+    public required ExtractedInvoiceField<string?> Currency { get; init; }
+}
+
+/// <summary>
+/// One fee row ([TimeEntries]) or expense row ([Expenses]). Fee rows use the timekeeper, title, hours, rate and
+/// task / activity codes; expense rows use quantity, unit cost and the expense code. The members a row type does
+/// not use are empty fields (null value, no confidence).
+/// </summary>
+public sealed record ExtractedInvoiceLine
+{
+    /// <summary>Fee (time entry) or Expense.</summary>
+    public required InvoiceLineType LineType { get; init; }
+
+    /// <summary>0-based position within its table, in document order (fee and expense rows are numbered separately).</summary>
+    public required int RowIndex { get; init; }
+
+    /// <summary>[Date]</summary>
+    public required ExtractedInvoiceField<DateOnly?> Date { get; init; }
+
+    /// <summary>Fee: [TimekeeperAsBilled].</summary>
+    public required ExtractedInvoiceField<string?> TimekeeperAsBilled { get; init; }
+
+    /// <summary>Fee: [TitleAsBilled] title or classification as billed.</summary>
+    public required ExtractedInvoiceField<string?> TitleAsBilled { get; init; }
+
+    /// <summary>Fee: [Hours] decimal hours.</summary>
+    public required ExtractedInvoiceField<decimal?> Hours { get; init; }
+
+    /// <summary>Fee: [Rate] hourly rate.</summary>
+    public required ExtractedInvoiceField<decimal?> Rate { get; init; }
+
+    /// <summary>Expense: [Quantity].</summary>
+    public required ExtractedInvoiceField<decimal?> Quantity { get; init; }
+
+    /// <summary>Expense: [UnitCost].</summary>
+    public required ExtractedInvoiceField<decimal?> UnitCost { get; init; }
+
+    /// <summary>[Amount] the row's amount.</summary>
+    public required ExtractedInvoiceField<decimal?> Amount { get; init; }
+
+    /// <summary>Fee: [Narrative]; Expense: [Description].</summary>
+    public required ExtractedInvoiceField<string?> Narrative { get; init; }
+
+    /// <summary>Fee: [TaskCodeAsBilled].</summary>
+    public required ExtractedInvoiceField<string?> TaskCodeAsBilled { get; init; }
+
+    /// <summary>Fee: [ActivityCodeAsBilled].</summary>
+    public required ExtractedInvoiceField<string?> ActivityCodeAsBilled { get; init; }
+
+    /// <summary>Expense: [ExpenseCodeAsBilled].</summary>
+    public required ExtractedInvoiceField<string?> ExpenseCodeAsBilled { get; init; }
+
+    /// <summary>
+    /// The row's box: the union of its values' boxes on the page of its first located value (prototype DocumentView
+    /// row box, F-4). Null when no value has a box.
+    /// </summary>
+    public ExtractedBoundingBox? RowBoundingBox { get; init; }
+}
+
+/// <summary>One row of the invoice's timekeeper summary table ([TimekeeperSummary]).</summary>
+public sealed record ExtractedTimekeeperSummaryRow
+{
+    /// <summary>[Name]</summary>
+    public required ExtractedInvoiceField<string?> Name { get; init; }
+
+    /// <summary>[Title]</summary>
+    public required ExtractedInvoiceField<string?> Title { get; init; }
+
+    /// <summary>[Hours]</summary>
+    public required ExtractedInvoiceField<decimal?> Hours { get; init; }
+
+    /// <summary>[Rate]</summary>
+    public required ExtractedInvoiceField<decimal?> Rate { get; init; }
+
+    /// <summary>[Amount]</summary>
+    public required ExtractedInvoiceField<decimal?> Amount { get; init; }
+}
+
+/// <summary>
+/// Output of <see cref="IInvoiceAi.ReadInvoiceAsync"/>: the whole invoice as the analyzer read it, after the
+/// deterministic completion step. Never partial: a read that fails anywhere raises <see cref="InvoiceAiException"/>.
+/// </summary>
+public sealed record ExtractedInvoice
+{
+    public required ExtractedInvoiceHeader Header { get; init; }
+
+    /// <summary>Fee rows first, then expense rows, each in document order.</summary>
+    public required IReadOnlyList<ExtractedInvoiceLine> Lines { get; init; }
+
+    public required IReadOnlyList<ExtractedTimekeeperSummaryRow> TimekeeperSummary { get; init; }
+
+    /// <summary>Pages analyzed (the document's page count).</summary>
+    public required int PageCount { get; init; }
+
+    /// <summary>The analyzer that produced the result (for the extraction record and evaluation).</summary>
+    public required string AnalyzerId { get; init; }
+
+    /// <summary>The api-version the analyzer ran on.</summary>
+    public required string ApiVersion { get; init; }
 }

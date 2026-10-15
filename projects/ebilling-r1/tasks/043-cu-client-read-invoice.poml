@@ -4,7 +4,7 @@
     <title>Content Understanding client and ReadInvoiceAsync</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds the project's only new NuGet package (NFR-12), a new external AI dependency with managed-identity auth, and the typed extraction contract every later step reads.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -123,7 +123,15 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-21, FR-47, NFR-11, NFR-12, D-49, D-50, D-53. The brief calls this the only new package. Bundled PDFs: follow the routing approach 005 chose (research note §"classify, segment, and analyze"); if 005 left that open, take the single-call routed form and record it. Shared append point: appsettings*.json (only if this task must add MaxPages beside 003's keys).</notes>
+  <notes>Spec FR-21, FR-47, NFR-11, NFR-12, D-49, D-50, D-53. The brief calls this the only new package. Bundled PDFs: follow the routing approach 005 chose (research note §"classify, segment, and analyze"); if 005 left that open, take the single-call routed form and record it. Shared append point: appsettings*.json (only if this task must add MaxPages beside 003's keys).
+
+    COMPLETED 2026-10-15 (FULL rigor). As built: projects/ebilling-r1/notes/043-cu-client.md.
+    - D-81 (path-A exception, spec.md ADR Tensions): preview 2026-06-01-preview + sprk_invoice_v2p primary, GA 2025-11-01 + sprk_invoice_v2 fallback, switched by ContentUnderstanding:ApiVersion + AnalyzerId only; seam tests run both; ArchTest keeps the two analyzer files in step.
+    - Supersedes the "exactly one PackageReference" criterion: NO package added (thin REST client over IHttpClientFactory + DI TokenCredential; no prerelease SDK). The csproj is unchanged; the publish-size delta is code-only (notes, BFF hygiene).
+    - Bundles: no router (spike section 7). Long documents: page ranges of PageRangeSize (default 20). Completion ports the spike complete() plus a day/month post-check.
+    - Both analyzers deployed on dev by Deploy-Analyzers.ps1; second run NO CHANGE. Spike-only analyzers deleted.
+    - Tests at KEEP paths (seam / domain / contract / ArchTests), not the POML's Services/Ai path. Code-review, adr-check and one adversarial pass done; all seven adversarial findings resolved (notes, Review findings).
+    - Not done here: setting ContentUnderstanding__Endpoint on spaarke-bff-dev (deploy work); TASK-INDEX (main session).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

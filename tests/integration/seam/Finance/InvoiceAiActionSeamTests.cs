@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Tests.Seam.ContentUnderstanding;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Finance;
@@ -296,6 +297,7 @@ public sealed class InvoiceAiActionSeamTests
             new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
             new NullActionResolver(NullLogger<NullActionResolver>.Instance),
             new NullActionRunner(NullLogger<NullActionRunner>.Instance),
+            ContentUnderstandingTestHost.Unconfigured(),
             NullLogger<InvoiceAi>.Instance);
 
         var ex = await FluentActions.Awaiting(() => sut.ClassifyAsync(ClassifyRequest())).Should().ThrowAsync<FeatureDisabledException>();
@@ -422,6 +424,7 @@ public sealed class InvoiceAiActionSeamTests
                 new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
                 resolver,
                 runner,
+                ContentUnderstandingTestHost.Unconfigured(),
                 NullLogger<InvoiceAi>.Instance);
         }
 

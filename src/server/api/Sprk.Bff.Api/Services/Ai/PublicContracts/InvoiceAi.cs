@@ -3,6 +3,7 @@ using System.Text.Json;
 using OpenAI.Chat;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.ContentUnderstanding;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
@@ -35,6 +36,7 @@ public sealed class InvoiceAi : IInvoiceAi
     private readonly IOpenAiClient _openAi;
     private readonly IActionResolver _actionResolver;
     private readonly IActionRunner _actionRunner;
+    private readonly ContentUnderstandingClient _contentUnderstanding;
     private readonly ILogger<InvoiceAi> _logger;
 
     public InvoiceAi(
@@ -42,12 +44,14 @@ public sealed class InvoiceAi : IInvoiceAi
         IOpenAiClient openAi,
         IActionResolver actionResolver,
         IActionRunner actionRunner,
+        ContentUnderstandingClient contentUnderstanding,
         ILogger<InvoiceAi> logger)
     {
         _playbook = playbook ?? throw new ArgumentNullException(nameof(playbook));
         _openAi = openAi ?? throw new ArgumentNullException(nameof(openAi));
         _actionResolver = actionResolver ?? throw new ArgumentNullException(nameof(actionResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
+        _contentUnderstanding = contentUnderstanding ?? throw new ArgumentNullException(nameof(contentUnderstanding));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -200,6 +204,92 @@ public sealed class InvoiceAi : IInvoiceAi
             ConsumerTypes.InvoiceFirmNotice, input, request.TenantId, subjectId: null, cancellationToken).ConfigureAwait(false);
         return ParseOrThrow(ConsumerTypes.InvoiceFirmNotice, output, subjectId: null, InvoiceAiOutputParser.ParseFirmNotice);
     }
+
+    // ── Invoice reading (ebilling-r1 task 043) ──────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ExtractedInvoice> ReadInvoiceAsync(
+        InvoiceReadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_contentUnderstanding.IsConfigured)
+        {
+            throw new FeatureDisabledException(
+                ReadNotConfiguredCode,
+                "Invoice reading requires ContentUnderstanding:Endpoint (the environment's AIServices resource).");
+        }
+
+        if (request.Content.IsEmpty)
+        {
+            // Nothing to send: the service would refuse it as ContentEmpty.
+            throw Fail(InvoiceAiException.ReadUnreadable, InvoiceAiException.ReadCapability, request.DocumentId, null,
+                "The invoice document is empty.");
+        }
+
+        ContentUnderstandingAnalysis analysis;
+        try
+        {
+            analysis = await _contentUnderstanding
+                .AnalyzeDocumentAsync(request.Content, request.ContentType, request.DocumentId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ContentUnderstandingException ex)
+        {
+            var code = ex.Failure switch
+            {
+                ContentUnderstandingFailure.Unreadable => InvoiceAiException.ReadUnreadable,
+                ContentUnderstandingFailure.PageLimit => InvoiceAiException.ReadPageLimit,
+                _ => InvoiceAiException.ReadServiceFailed,
+            };
+            throw Fail(code, InvoiceAiException.ReadCapability, request.DocumentId, ex,
+                $"Reading the invoice failed ({code}).");
+        }
+
+        ExtractedInvoice invoice;
+        try
+        {
+            invoice = InvoiceExtractionCompletion.Complete(InvoiceAnalyzerResultMapper.ToInvoice(analysis));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The mapper is tolerant of missing and mistyped values; reaching here means the result itself is
+            // malformed (for example a value outside the decimal range).
+            throw Fail(InvoiceAiException.ReadServiceFailed, InvoiceAiException.ReadCapability, request.DocumentId, ex,
+                "The invoice reader returned a result that could not be mapped.");
+        }
+
+        if (IsEmptyRead(invoice))
+        {
+            throw Fail(InvoiceAiException.ReadNoInvoice, InvoiceAiException.ReadCapability, request.DocumentId, null,
+                "No invoice data was found in the document.");
+        }
+
+        _logger.LogInformation(
+            "Invoice read: documentId={DocumentId} analyzer={AnalyzerId} apiVersion={ApiVersion} pages={PageCount} " +
+            "lines={LineCount} repairedValues={RepairCount}",
+            request.DocumentId, invoice.AnalyzerId, invoice.ApiVersion, invoice.PageCount, invoice.Lines.Count,
+            CountRepairs(invoice));
+        return invoice;
+    }
+
+    /// <summary>FeatureDisabledException code when <c>ContentUnderstanding:Endpoint</c> is empty.</summary>
+    internal const string ReadNotConfiguredCode = "ai.invoice.read.not_configured";
+
+    /// <summary>"No invoice": no invoice number, date or totals, and no rows (a blank page, a letter, a scan with no text).</summary>
+    private static bool IsEmptyRead(ExtractedInvoice invoice) =>
+        invoice.Lines.Count == 0
+        && invoice.Header.FirmInvoiceNumber.Value is null
+        && invoice.Header.InvoiceDate.Value is null
+        && invoice.Header.TotalDue.Value is null
+        && invoice.Header.FeesTotal.Value is null;
+
+    private static int CountRepairs(ExtractedInvoice invoice) =>
+        invoice.Lines.Sum(l =>
+            (l.Hours.Repair != ExtractedValueRepair.None ? 1 : 0)
+            + (l.Rate.Repair != ExtractedValueRepair.None ? 1 : 0)
+            + (l.Amount.Repair != ExtractedValueRepair.None ? 1 : 0)
+            + (l.Date.Repair != ExtractedValueRepair.None ? 1 : 0));
 
     /// <summary>
     /// Resolve the consumer type's Action and run it over <paramref name="input"/> on the

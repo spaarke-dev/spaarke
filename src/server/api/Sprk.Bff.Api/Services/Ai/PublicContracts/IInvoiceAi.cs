@@ -154,4 +154,31 @@ public interface IInvoiceAi
     Task<InvoiceFirmNoticeDraft> DraftFirmNoticeAsync(
         InvoiceFirmNoticeRequest request,
         CancellationToken cancellationToken = default);
+
+    // ── Invoice reading (ebilling-r1 task 043; FR-21, FR-04, D-49, D-81) ─────────────────────────────────────
+    //
+    // Reads the invoice with the configured Content Understanding custom analyzer (the D-81 preview analyzer by
+    // default; the GA twin by configuration alone), then applies the deterministic completion step (clock-notation
+    // hours, missing rates, day-first dates). It does NOT go through an Action or Binding: extraction is a
+    // document-model call, not a prompt. Fails closed: never a partial result. Reason codes (InvoiceAiException,
+    // ConsumerType InvoiceAiException.ReadCapability) classify WHERE the failure happened, not whether a retry helps:
+    //   - invoice.read.unreadable      — the service could not open the document (encrypted, corrupt, empty)
+    //   - invoice.read.page_limit      — more pages than ContentUnderstanding:MaxPages
+    //   - invoice.read.no_invoice      — the document was read but no invoice data was found
+    //   - invoice.read.service_failed  — the service call failed (transport, auth, throttling after retries, a
+    //                                    missing analyzer, the operation timing out or a malformed result)
+    //   - FeatureDisabledException(ai.invoice.read.not_configured) — no ContentUnderstanding:Endpoint
+    //   - FeatureDisabledException(ai.invoice.disabled) — AI kill switch (ADR-032)
+    //   - OperationCanceledException — the caller cancelled
+
+    /// <summary>
+    /// Read one invoice document into header fields, fee and expense lines and the timekeeper summary, each value
+    /// with its confidence, page and normalised source box (FR-21, FR-04). Non-USD currencies are returned as read.
+    /// </summary>
+    /// <exception cref="InvoiceAiException">The read failed; <see cref="InvoiceAiException.ReasonCode"/> is one of the <c>invoice.read.*</c> codes above.</exception>
+    /// <exception cref="FeatureDisabledException">The reader is not configured, or AI is disabled.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    Task<ExtractedInvoice> ReadInvoiceAsync(
+        InvoiceReadRequest request,
+        CancellationToken cancellationToken = default);
 }

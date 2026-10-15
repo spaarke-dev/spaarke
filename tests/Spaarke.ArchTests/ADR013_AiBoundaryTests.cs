@@ -31,6 +31,9 @@ public class ADR013_AiBoundaryTests
     {
         "Sprk.Bff.Api.Services.Ai.IOpenAiClient",
         "Sprk.Bff.Api.Services.Ai.IPlaybookService",
+        // ebilling-r1 task 043: the Content Understanding client is public only so the public InvoiceAi facade can
+        // take it as a ctor dependency; CRUD code reads invoices through IInvoiceAi.ReadInvoiceAsync.
+        "Sprk.Bff.Api.Services.Ai.ContentUnderstanding.ContentUnderstandingClient",
     };
 
     /// <summary>

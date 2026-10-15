@@ -47,6 +47,14 @@ public sealed class InvoiceAiContractTests
                 Findings = [],
             })
         },
+        {
+            // ebilling-r1 task 043: reading is behind the same compound kill switch.
+            "ReadInvoiceAsync", ai => ai.ReadInvoiceAsync(new InvoiceReadRequest
+            {
+                Content = new byte[] { 1 },
+                DocumentId = Guid.NewGuid(),
+            })
+        },
     };
 
     // ADR-032 P3: with the compound AI gate off, every capability method fails fast with the facade's own

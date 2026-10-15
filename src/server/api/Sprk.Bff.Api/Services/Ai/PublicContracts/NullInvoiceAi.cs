@@ -102,6 +102,14 @@ public sealed class NullInvoiceAi : IInvoiceAi
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    public Task<ExtractedInvoice> ReadInvoiceAsync(
+        InvoiceReadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(ReadInvoiceAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     private void LogDisabled(string method)
     {
         _logger.LogDebug(
