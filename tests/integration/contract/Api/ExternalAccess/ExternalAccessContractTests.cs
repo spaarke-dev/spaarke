@@ -1735,6 +1735,8 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
     public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
+    public Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeLinkedSystemUsersAsync(homeTenantId, homeObjectId, ct);
+    public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeContactsAsync(homeTenantId, homeObjectId, ct);
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct) => _inner.FindBindIntentAsync(contactId, ct);
     public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, ct);
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);

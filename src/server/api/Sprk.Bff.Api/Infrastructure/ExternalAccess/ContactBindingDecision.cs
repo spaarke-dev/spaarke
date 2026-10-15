@@ -236,6 +236,11 @@ public sealed record FlagReconciliation(FlagReconciliationAction Action, Collisi
 /// item 4, B2). It carries no identity: nothing resolves or binds by it. It is read only to tell a squatted or
 /// half-cleared mirror apart (<see cref="ContactBindingDecision.MirrorHeldWithoutBinding"/>).
 /// </param>
+/// <param name="RawExternalTenantId">
+/// ADR-028 A9 (r3 task 046): <c>sprk_externaltenantid</c> exactly as stored, or null — the home directory (<c>tid</c>) of a
+/// WorkforceHome contact. Selected only by the home contact lookup (<see cref="ContactBindingDecision.DecideHomeContact"/>);
+/// every other read leaves it null.
+/// </param>
 public sealed record ContactBindingRow(
     Guid ContactId,
     int? StateCode,
@@ -244,7 +249,8 @@ public sealed record ContactBindingRow(
     string? ETag = null,
     string? Email = null,
     CollisionFlag? Flag = null,
-    string? RawKeyMirror = null)
+    string? RawKeyMirror = null,
+    string? RawExternalTenantId = null)
 {
     /// <summary>Only <c>statecode = 0</c> resolves or binds (ADR-003).</summary>
     public bool IsActive => StateCode == 0;
@@ -278,6 +284,45 @@ public sealed record ContactLookup(LookupStatus Status, IReadOnlyList<ContactBin
     /// <summary>A lookup that read these rows.</summary>
     public static ContactLookup Of(params ContactBindingRow[] rows) => new(LookupStatus.Read, rows);
 }
+
+/// <summary>
+/// ADR-028 A9 (r3 task 046): one systemuser as the stored-link read returns it — the FIELD-SECURED home pair
+/// (<c>sprk_hometenantid</c>, <c>sprk_homeobjectid</c>) exactly as stored, and <c>isdisabled</c>. The unsecured key mirrors
+/// are never selected: nothing resolves by them (design §5).
+/// </summary>
+public sealed record HomeLinkRow(Guid SystemUserId, bool? IsDisabled, string? RawHomeTenantId, string? RawHomeObjectId);
+
+/// <summary>The stored-link read: rows, or why there are none to trust.</summary>
+public sealed record HomeLinkLookup(LookupStatus Status, IReadOnlyList<HomeLinkRow> Rows)
+{
+    /// <summary>A link read that could not be read.</summary>
+    public static HomeLinkLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<HomeLinkRow>());
+
+    /// <summary>A link read whose columns do not exist here (the A9 schema is not applied).</summary>
+    public static HomeLinkLookup ColumnMissing { get; } = new(LookupStatus.ColumnMissing, Array.Empty<HomeLinkRow>());
+
+    /// <summary>A link read that read these rows.</summary>
+    public static HomeLinkLookup Of(params HomeLinkRow[] rows) => new(LookupStatus.Read, rows);
+}
+
+/// <summary>What the stored link says about a home principal (ADR-028 A9, design §3 step 2).</summary>
+public enum HomeLinkOutcome
+{
+    /// <summary>No systemuser carries the (<c>tid</c>, <c>oid</c>) pair: go on to the contact lookup.</summary>
+    NotLinked,
+
+    /// <summary>Exactly one ENABLED systemuser carries the pair: resolve to it.</summary>
+    Enabled,
+
+    /// <summary>Only disabled systemusers carry the pair: deny <c>systemuser_disabled</c>; never fall through.</summary>
+    Disabled,
+
+    /// <summary>The read failed, or the answer is ambiguous: deny with <see cref="HomeLinkDecision.DenyCode"/>.</summary>
+    Denied,
+}
+
+/// <summary>The stored-link decision.</summary>
+public sealed record HomeLinkDecision(HomeLinkOutcome Outcome, Guid? SystemUserId = null, string? DenyCode = null);
 
 /// <summary>A systemuser whose <c>sprk_primarycontact</c> points at a contact under consideration.</summary>
 public sealed record SystemUserReference(Guid SystemUserId, Guid? Oid, Guid LinkedContactId);
@@ -559,6 +604,12 @@ public static class ContactBindingDecision
     /// failed). Retryable (503): nothing was reported as invited and no email was sent.
     /// </summary>
     public const string InviteMarkerNotWritten = "sdap.access.invite.invite_marker_not_written";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): more than one ENABLED systemuser carries the same stored home link (<c>tid</c>, <c>oid</c>).
+    /// Resolving to one of them would merge two people, so the caller is denied; an operator resolves it.
+    /// </summary>
+    public const string DenyHomeLinkAmbiguous = "sdap.access.deny.home_link_ambiguous";
 
     /// <summary>
     /// Reads a contact's binding as Unbound / Bound / Unreadable from its raw column values.
@@ -1289,6 +1340,121 @@ public static class ContactBindingDecision
     /// the marker's own query, never in <c>ContactSelect</c>. Never logged.
     /// </summary>
     public const string ExternalInviteCodeHashColumn = "sprk_externalinvitecodehash";
+
+    // ── ADR-028 A9 — home principals (r3 task 046; design notes/a9-bff-design.md §3, §4, §5) ────────────────────
+
+    /// <summary>
+    /// The <c>sprk_identityplane</c> option value WorkforceHome (task 044): a contact bound to an oid from a customer's
+    /// home directory. A raw value, not an <see cref="IdentityPlaneMarker"/> member, so <see cref="ReadBinding"/> and every
+    /// Spaarke-tenant and CIAM path keep reading it exactly as before (an unknown marker: Unreadable). Only
+    /// <see cref="DecideHomeContact"/> matches on it.
+    /// </summary>
+    public const int WorkforceHomePlaneValue = 100000002;
+
+    /// <summary><c>contact.sprk_externaltenantid</c> — the home directory of a WorkforceHome contact. FIELD-SECURED (task 044).</summary>
+    public const string ExternalTenantIdColumn = "sprk_externaltenantid";
+
+    /// <summary>
+    /// <c>systemuser.sprk_hometenantid</c> — the stored link's home directory. FIELD-SECURED (task 044). The link is looked
+    /// up by this column and <see cref="HomeObjectIdColumn"/> only, never by their unsecured key mirrors
+    /// (<c>sprk_hometenantidkey</c>, <c>sprk_homeobjectidkey</c>), so editing a mirror can block a link but never redirect
+    /// a sign-in (design §5, owner 2026-10-14).
+    /// </summary>
+    public const string HomeTenantIdColumn = "sprk_hometenantid";
+
+    /// <summary><c>systemuser.sprk_homeobjectid</c> — the stored link's home object id. FIELD-SECURED (task 044).</summary>
+    public const string HomeObjectIdColumn = "sprk_homeobjectid";
+
+    /// <summary>
+    /// Design §3 step 2: what the stored link says about the home principal (<paramref name="homeTenantId"/>,
+    /// <paramref name="homeObjectId"/>). Pure. The store's filter bounds the volume; this re-checks every row's SECURED pair,
+    /// so a row the filter should not have returned (a mirror-only match, another directory) never counts.
+    /// <list type="bullet">
+    ///   <item>A read that failed, or a column that is missing, denies (fail closed: a link cannot be ruled out).</item>
+    ///   <item>Exactly one enabled match → <see cref="HomeLinkOutcome.Enabled"/>. Two or more → denied
+    ///   <see cref="DenyHomeLinkAmbiguous"/>.</item>
+    ///   <item>Only disabled matches (a row whose <c>isdisabled</c> is absent counts as disabled) →
+    ///   <see cref="HomeLinkOutcome.Disabled"/>.</item>
+    ///   <item>No match → <see cref="HomeLinkOutcome.NotLinked"/>.</item>
+    /// </list>
+    /// </summary>
+    public static HomeLinkDecision DecideHomeLink(HomeLinkLookup lookup, Guid homeTenantId, Guid homeObjectId)
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+
+        if (lookup.Status != LookupStatus.Read)
+        {
+            return new HomeLinkDecision(HomeLinkOutcome.Denied, DenyCode: LookupDenyCode(lookup.Status));
+        }
+
+        var matches = lookup.Rows
+            .Where(r => r.SystemUserId != Guid.Empty
+                        && IsGuid(r.RawHomeTenantId, homeTenantId)
+                        && IsGuid(r.RawHomeObjectId, homeObjectId))
+            .ToList();
+        var enabled = matches.Where(r => r.IsDisabled == false).Select(r => r.SystemUserId).Distinct().ToList();
+
+        if (enabled.Count > 1)
+        {
+            return new HomeLinkDecision(HomeLinkOutcome.Denied, DenyCode: DenyHomeLinkAmbiguous);
+        }
+
+        if (enabled.Count == 1)
+        {
+            return new HomeLinkDecision(HomeLinkOutcome.Enabled, enabled[0]);
+        }
+
+        return new HomeLinkDecision(matches.Count > 0 ? HomeLinkOutcome.Disabled : HomeLinkOutcome.NotLinked);
+    }
+
+    /// <summary>
+    /// Design §3 step 3 / §4: the contact a home principal resolves to — plane WorkforceHome AND
+    /// <c>sprk_externaltenantid</c> = <paramref name="homeTenantId"/> AND <c>sprk_externalobjectid</c> =
+    /// <paramref name="homeObjectId"/>. Pure. The store's filter bounds the volume; this applies all three conditions to every
+    /// row, so a contact on plane External, on the Spaarke-tenant workforce plane, without a tenant, or in another directory
+    /// is never matched, whatever the read returned.
+    /// <list type="bullet">
+    ///   <item><c>null</c> — no contact matches (the caller is then told to register).</item>
+    ///   <item><see cref="BindingAction.ResolveByOid"/> — exactly one matches, and it is active.</item>
+    ///   <item><see cref="BindingAction.Deny"/> — the read failed; the one match is inactive (<see cref="DenyContactInactive"/>,
+    ///   as D3: deactivating a contact is how an operator removes a person); or several match
+    ///   (<see cref="DenyContactOidAmbiguous"/>). Nothing is flagged or written here.</item>
+    /// </list>
+    /// </summary>
+    public static BindingDecision? DecideHomeContact(ContactLookup lookup, Guid homeTenantId, Guid homeObjectId)
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+
+        if (lookup.Status != LookupStatus.Read)
+        {
+            return Deny(LookupDenyCode(lookup.Status));
+        }
+
+        var matches = lookup.Rows
+            .Where(r => r.ContactId != Guid.Empty
+                        && r.RawPlane == WorkforceHomePlaneValue
+                        && IsGuid(r.RawExternalTenantId, homeTenantId)
+                        && IsGuid(r.RawOid, homeObjectId))
+            .ToList();
+
+        if (matches.Count > 1)
+        {
+            return Deny(DenyContactOidAmbiguous);
+        }
+
+        if (matches.Count == 1)
+        {
+            return matches[0].IsActive
+                ? new BindingDecision(BindingAction.ResolveByOid, matches[0].ContactId)
+                : Deny(DenyContactInactive);
+        }
+
+        return null;
+    }
+
+    /// <summary>True when <paramref name="raw"/> is a non-zero GUID equal to <paramref name="expected"/> (compared parsed, not as text).</summary>
+    private static bool IsGuid(string? raw, Guid expected)
+        => expected != Guid.Empty && Guid.TryParse(raw?.Trim(), out var value) && value == expected;
 
     private static BindingDecision? DecideOnOid(ContactLookup oidLookup)
     {

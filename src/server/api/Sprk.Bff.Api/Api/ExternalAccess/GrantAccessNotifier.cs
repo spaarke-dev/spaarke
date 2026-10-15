@@ -675,8 +675,13 @@ public sealed class GrantAccessNotifier
     {
         // Never the person who gave the access. When the caller's systemuser cannot be resolved nobody is excluded: the
         // worst case is a granter told about their own share.
-        var granterId = await GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync(
-            _dataverse, CallerResolution.ResolveObjectId(caller), _logger, CancellationToken.None);
+        // ADR-028 A9 / task 046 guard (d): a WorkforceHome principal's oid is the CUSTOMER directory's, so it is never
+        // compared with systemuser.azureactivedirectoryobjectid. No lookup, nobody excluded: a home caller is not one of
+        // the systemuser recipients by oid.
+        var granterId = WorkforcePrincipalResolver.IsWorkforceHomePrincipal(caller)
+            ? null
+            : await GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync(
+                _dataverse, CallerResolution.ResolveObjectId(caller), _logger, CancellationToken.None);
         var recipients = candidates
             .Where(id => id != Guid.Empty && !string.Equals(id.ToString(), granterId, StringComparison.OrdinalIgnoreCase))
             .ToList();
