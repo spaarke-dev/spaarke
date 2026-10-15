@@ -90,6 +90,7 @@ export const FoundStep: React.FC = () => {
               tier={e.tier}
               text={e.text}
               subject={e.subject}
+              withheld={e.withheld}
               source={e.source}
               asOf={e.asOf}
               clause={e.clause}

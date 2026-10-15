@@ -735,3 +735,46 @@ describe('getWidgetContextTypeMap / getWidgetAssistantContract (task 022 registr
     expect(registry.getWidgetAssistantContract('__not_a_real_widget__')).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: worklist — the Console's Worklist tab (spaarke-ontology-platform-r1 task 059)
+// ---------------------------------------------------------------------------
+
+describe('worklist — registration (task 059)', () => {
+  beforeEach(() => {
+    loadRegistrations();
+  });
+
+  it('is registered once, as a single-instance Worklist tab', () => {
+    expect(registry.getAllWorkspaceWidgetTypes().filter((t: string) => t === 'worklist')).toEqual(['worklist']);
+    const meta = registry.getWorkspaceWidgetMetadata('worklist');
+    expect(meta).toBeDefined();
+    expect(meta!.displayName).toBe('Worklist');
+    expect(meta!.allowMultiple).toBe(false);
+    expect(meta!.contextType).toBe('dashboard');
+  });
+
+  it('its defaultOrder does not collide with any other registration', () => {
+    const order = registry.getWorkspaceWidgetMetadata('worklist')!.defaultOrder;
+    const same = registry
+      .getAllWorkspaceWidgetTypes()
+      .filter((t: string) => registry.getWorkspaceWidgetMetadata(t)?.defaultOrder === order);
+    expect(same).toEqual(['worklist']);
+  });
+
+  it('declares an explicit Assistant-contract opt-out with a reason (FR-15), not an overview tool over its lists', () => {
+    const declared = registry.getWorkspaceWidgetMetadata('worklist')!.assistantContract as {
+      optOut?: boolean;
+      reason?: string;
+    };
+    expect(declared.optOut).toBe(true);
+    expect(declared.reason).toMatch(/Signal read route/);
+    expect(registry.getWidgetAssistantContract('worklist')).toBeUndefined();
+  });
+
+  it('resolves to the real WorklistWorkspaceWidget, not the GenericTextWidget fallback', async () => {
+    const resolved = await registry.resolveWorkspaceWidget('worklist');
+    expect(resolved).not.toBe(MockGenericText);
+    expect(resolved).toBe(require('../WorklistWorkspaceWidget').WorklistWorkspaceWidget);
+  });
+});

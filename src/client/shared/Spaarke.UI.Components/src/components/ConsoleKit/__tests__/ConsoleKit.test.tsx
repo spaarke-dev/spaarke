@@ -76,6 +76,23 @@ describe('EvidenceLine', () => {
     expect(line).not.toHaveTextContent(/\b0\b/);
   });
 
+  it('a withheld line keeps its tier and says the detail is withheld, not that no value was recorded (task 038 / 059)', () => {
+    renderThemed(<EvidenceLine tier="Fact" text={null} withheld clause="all[0]" asOf="2026-10-08T00:00:00Z" />);
+    const line = screen.getByTestId('evidence-line');
+    expect(line).toHaveAttribute('data-tier', 'Fact');
+    expect(line).toHaveTextContent('Details withheld (restricted record)');
+    expect(line).not.toHaveTextContent('No value recorded');
+    expect(line).toHaveTextContent('tested: all[0]');
+  });
+
+  it('withheld without a text is not styled as Missing; the same line without the flag still is', () => {
+    const { unmount } = renderThemed(<EvidenceLine tier="Fact" text={null} />);
+    expect(screen.getByTestId('evidence-line')).toHaveAttribute('data-tier', 'Missing');
+    unmount();
+    renderThemed(<EvidenceLine tier="Fact" text={null} withheld />);
+    expect(screen.getByTestId('evidence-line')).toHaveAttribute('data-tier', 'Fact');
+  });
+
   it('treats an empty string as Missing but a real 0 as a fact', () => {
     const { unmount } = renderThemed(<EvidenceLine tier="Fact" text="" />);
     expect(screen.getByTestId('evidence-line')).toHaveAttribute('data-tier', 'Missing');
