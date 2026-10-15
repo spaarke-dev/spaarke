@@ -89,6 +89,12 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
 /// than absent. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
+/// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored: FR-48/D-23 bind what it may
+/// assert when it is written (the rule's literal text, no witness value). Null when empty. Task 154 (#1959 item 1).</param>
+/// <param name="SubjectRecordType">Do lane only (task 154, #1958): the subject's table (logical name), the table whose caller-scoped
+/// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
+/// a Decide-lane row.</param>
+/// <param name="SubjectRecordId">Do lane only: the subject's id, with <see cref="SubjectRecordType"/>. Null on a Decide-lane row.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -104,7 +110,10 @@ public sealed record WorklistItemRow(
     Guid? PolicyVersionId,
     DateTimeOffset? ResolvedOn = null,
     int? ResolutionType = null,
-    DateTimeOffset? SuppressedUntil = null);
+    DateTimeOffset? SuppressedUntil = null,
+    string? Sentence = null,
+    string? SubjectRecordType = null,
+    Guid? SubjectRecordId = null);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -124,6 +133,12 @@ public sealed record WorklistItemRow(
 /// (5) A Do-lane row is kept only when the caller's own read of its subject, filtered to "mine", returns it
 /// (<see cref="DoLaneMineRules"/>); that read also proves the caller can read the subject (D-35 as amended by D-129). A dropped
 /// row leaves no trace: no count, no placeholder, no group.</para>
+/// <para><b>What a row carries (task 154).</b> Every returned value belongs to a row the caller's own reads admitted. The rule sentence
+/// is a column of the Signal row the caller read. The subject reference (<see cref="WorklistItemRow.SubjectRecordType"/>,
+/// <see cref="WorklistItemRow.SubjectRecordId"/>) is returned on Do-lane rows only, from the step (5) read that returned the subject to
+/// the caller; a Decide-lane row has no such read and returns neither. Neither adds a request.</para>
+/// <para><b>Group order.</b> The lanes follow D-42 and the secondary sets the configuration's order; in the Do lane the "Not filed"
+/// group (D-35) is always emitted last (HANDOFF 1.2, task 154).</para>
 /// <para><b>Fail closed, honestly.</b> A row the caller cannot read is dropped; a FAULT (a 5xx, throttling, an unparseable
 /// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
 /// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
@@ -340,12 +355,13 @@ public sealed class SignalReadService
                         continue;
                     }
 
-                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact));
+                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact, mine.Table));
                 }
                 else
                 {
+                    // No subject reference on a Decide row: no caller read of its subject admitted it (task 154).
                     var decide = key != Guid.Empty && subjects.Decide.TryGetValue(key, out var found) ? found : null;
-                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact));
+                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact, SubjectTable: null));
                 }
             }
 
@@ -677,7 +693,8 @@ public sealed class SignalReadService
     // (7) subjects: Do-lane "mine", the D-42 flag, the closed sets' assignee
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact);
+    /// <param name="Table">The table whose caller read returned the subject (task 154: the Do-lane row's subject reference).</param>
+    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact, string Table);
 
     private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
 
@@ -717,7 +734,8 @@ public sealed class SignalReadService
                     {
                         mine[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null);
+                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null,
+                            rule.Table);
                     }
                 }
             }
@@ -752,7 +770,8 @@ public sealed class SignalReadService
                     {
                         decide[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null);
+                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null,
+                            table);
                     }
                 }
             }
@@ -1087,7 +1106,8 @@ public sealed class SignalReadService
     // shaping and D-42 order
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact);
+    /// <param name="SubjectTable">Do lane: the table whose caller-scoped "mine" read returned the subject; null on a Decide row.</param>
+    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact, string? SubjectTable);
 
     private static IReadOnlyList<WorklistLaneGroups> Shape(
         WorklistSet set,
@@ -1138,8 +1158,17 @@ public sealed class SignalReadService
 
             // Secondary sets keep the configuration's order (membership and order come from the row, FR-24), grouped by first
             // appearance; the closed and suppressed queries already order by the core pair first.
+
+            if (lane == DecisionLane.Do)
+            {
+                // HANDOFF 1.2 (task 154, #1959 item 3): in every set, the Do lane's "Not filed" group (D-35) comes last; every other
+                // group keeps its order above. Stable, so nothing else moves. The Decide lane has no Not filed group (no-core rows
+                // are Do-only).
+                groups = [.. groups.Where(g => g.Core is not null), .. groups.Where(g => g.Core is null)];
+            }
+
             lanes.Add(new WorklistLaneGroups(LaneName(lane), groups
-                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r.Row)).ToList()))
+                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(ToItem).ToList()))
                 .ToList()));
         }
 
@@ -1173,9 +1202,13 @@ public sealed class SignalReadService
     private static int CompareNullableOrdinal(string? a, string? b) =>
         a is null ? (b is null ? 0 : 1) : b is null ? -1 : string.CompareOrdinal(a, b);
 
-    private static WorklistItemRow ToItem(SignalRow row)
+    private static WorklistItemRow ToItem(VisibleRow visible)
     {
+        var row = visible.Row;
         var workType = row.WorkType is { } w && WorkTypeKeys.TryGetValue(w, out var key) ? key : null;
+
+        // Task 154 (#1958): the subject reference only where the caller's own "mine" read returned the subject (Do lane).
+        var subjectTable = row.Lane == DecisionLane.Do ? visible.SubjectTable : null;
         return new WorklistItemRow(
             row.SignalId,
             LaneName(row.Lane!.Value),
@@ -1191,7 +1224,10 @@ public sealed class SignalReadService
             row.PolicyVersionId,
             row.ResolvedOn,
             row.ResolutionType,
-            row.SuppressedUntil);
+            row.SuppressedUntil,
+            row.Sentence,
+            subjectTable,
+            subjectTable is null ? null : row.SubjectId);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1293,7 +1329,8 @@ public sealed class SignalReadService
         int? Severity,
         DateTimeOffset? ResolvedOn,
         int? ResolutionType,
-        DateTimeOffset? SuppressedUntil)
+        DateTimeOffset? SuppressedUntil,
+        string? Sentence)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -1330,7 +1367,9 @@ public sealed class SignalReadService
                 Int(Aliased(raw, "sprk_severity")),
                 Instant(raw, "sprk_resolvedon"),
                 Int(raw, "sprk_resolutiontype"),
-                Instant(raw, "sprk_suppresseduntil"));
+                Instant(raw, "sprk_suppresseduntil"),
+                // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
+                ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null);
             return true;
         }
 

@@ -337,6 +337,106 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // Task 154: the row's sentence and subject reference; Not filed last; no request of their own
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static bool IsNull(JsonElement item, string property) =>
+        !item.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null;
+
+    private static JsonElement ItemOf(JsonElement body, Guid signalId) =>
+        AllItems(body).Single(i => i.GetProperty("signalId").GetGuid() == signalId);
+
+    [Fact]
+    public async Task EveryRow_CarriesItsSentenceAsStored_AndNullWhenEmpty()
+    {
+        // The route runs the configuration's FetchXML verbatim and the fake returns sprk_sentence only when a query selects it,
+        // so this also proves the seed selects it.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var todo = world.Todo(owner: Alice);
+        var decide = world.Signal(Decide, core: (MatterType, m), sentence: "Fees changed on 3 Oct with no budget revision.");
+        var doRow = world.Signal(Do, core: (MatterType, m), subject: (TodoType, todo), sentence: "  Record the outcome by Friday.  ");
+        var blank = world.Signal(Decide, core: (MatterType, m), sentence: "   ");
+        var none = world.Signal(Decide, core: (MatterType, m));
+
+        var body = await OkAsync(world, Alice);
+
+        ItemOf(body, decide).GetProperty("sentence").GetString().Should().Be("Fees changed on 3 Oct with no budget revision.");
+        ItemOf(body, doRow).GetProperty("sentence").GetString().Should().Be("  Record the outcome by Friday.  ", "as stored, never rewritten");
+        IsNull(ItemOf(body, blank), "sentence").Should().BeTrue();
+        IsNull(ItemOf(body, none), "sentence").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ADoRow_CarriesItsSubjectReference_FromTheTableWhoseMineReadReturnedIt_ADecideRowDoesNot()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var todo = world.Todo(owner: Alice);
+        var ev = world.Event(owner: Alice);
+        var typedTodo = world.Signal(Do, core: (MatterType, m), subject: (TodoType, todo));
+        var untypedEvent = world.Signal(Do, core: (MatterType, m), subject: (null, ev));
+        var notFiled = world.Signal(Do, core: null, subject: (TodoType, todo));
+        var decide = world.Signal(Decide, core: (MatterType, m), subject: (MatterType, m));
+
+        var body = await OkAsync(world, Alice);
+
+        ItemOf(body, typedTodo).GetProperty("subjectRecordType").GetString().Should().Be("sprk_todo");
+        ItemOf(body, typedTodo).GetProperty("subjectRecordId").GetGuid().Should().Be(todo);
+        ItemOf(body, untypedEvent).GetProperty("subjectRecordType").GetString().Should().Be("sprk_event", "whichever Do table holds it");
+        ItemOf(body, untypedEvent).GetProperty("subjectRecordId").GetGuid().Should().Be(ev);
+        ItemOf(body, notFiled).GetProperty("subjectRecordType").GetString().Should().Be("sprk_todo");
+        ItemOf(body, notFiled).GetProperty("subjectRecordId").GetGuid().Should().Be(todo);
+        IsNull(ItemOf(body, decide), "subjectRecordType").Should().BeTrue("a Decide row's subject is not offered for opening");
+        IsNull(ItemOf(body, decide), "subjectRecordId").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task NotFiled_IsLastInTheDoLane_EvenWhenItsItemOutranksEveryFiledGroup()
+    {
+        var world = new World();
+        var mA = world.Matter(readers: [Alice], number: "MAT-0002");
+        var mB = world.Matter(readers: [Alice], number: "MAT-0001");
+        var loose = world.Todo(owner: Alice);
+        var notFiled = world.Signal(Do, core: null, subject: (TodoType, loose), severity: Critical, firstDetected: "2026-01-01T00:00:00Z");
+        world.Signal(Do, core: (MatterType, mA), subject: (TodoType, world.Todo(owner: Alice)), severity: Warning);
+        world.Signal(Do, core: (MatterType, mB), subject: (TodoType, world.Todo(owner: Alice)), severity: Info);
+
+        var groups = Lane(await OkAsync(world, Alice), "Do").GetProperty("groups").EnumerateArray().ToList();
+
+        groups.Select(g => g.GetProperty("notFiled").GetBoolean()).Should().Equal(false, false, true);
+        groups.Take(2).Select(g => g.GetProperty("core").GetProperty("recordId").GetGuid()).Should().Equal([mA, mB], "filed groups keep D-42 order");
+        groups[2].GetProperty("items")[0].GetProperty("signalId").GetGuid().Should().Be(notFiled);
+    }
+
+    [Fact]
+    public async Task TheNewFields_AddNoRequest_OneRowPerLaneAndManyRowsSendTheSameRequests()
+    {
+        static World Build(int perLane)
+        {
+            var world = new World();
+            var m = world.Matter(readers: [Alice]);
+            for (var i = 0; i < perLane; i++)
+            {
+                world.Signal(Decide, core: (MatterType, m), sentence: $"Decide {i}");
+                world.Signal(Do, core: (MatterType, m), subject: (TodoType, world.Todo(owner: Alice)), sentence: $"Do {i}");
+            }
+
+            return world;
+        }
+
+        var one = Build(1);
+        var many = Build(40);
+
+        AllItems(await OkAsync(one, Alice)).Should().HaveCount(2);
+        var body = await OkAsync(many, Alice);
+        AllItems(body).Should().HaveCount(80);
+        AllItems(body).Should().OnlyContain(i => i.GetProperty("sentence").GetString()!.Length > 0
+            && (i.GetProperty("lane").GetString() == "Decide" || i.GetProperty("subjectRecordType").GetString() == "sprk_todo"));
+        many.Requests.Count.Should().Be(one.Requests.Count, "the sentence and subject reference add no per-row read");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // D-42 order
     // ---------------------------------------------------------------------------------------------------------------
 
@@ -1102,7 +1202,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             string? evidence = null,
             string[]? sets = null,
             DateTimeOffset? resolvedOn = null,
-            DateTimeOffset? suppressedUntil = null)
+            DateTimeOffset? suppressedUntil = null,
+            string? sentence = null)
         {
             var id = Guid.NewGuid();
             var subjectPair = subject ?? (core is { } c ? (c.Type, c.Id) : (null, Guid.NewGuid()));
@@ -1118,6 +1219,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 ["sprk_regardingrecordname"] = subjectName,
                 ["_sprk_policyversion_value"] = Guid.NewGuid(),
                 ["sprk_evidencerefs"] = evidence,
+                ["sprk_sentence"] = sentence,
                 ["policy.sprk_shortname"] = shortName,
                 ["policy.sprk_worktype"] = workType,
                 ["policy.sprk_severity"] = severity,
@@ -1324,6 +1426,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             }
 
             var slice = all.Skip((page - 1) * PageSize).Take(PageSize).ToList();
+            // Task 154: like Dataverse, a column comes back only when the query selects it (the route runs the FetchXML verbatim).
+            if (!text.Contains("<attribute name=\"sprk_sentence\" />", StringComparison.Ordinal))
+            {
+                slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_sentence").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+            }
             var body = new Dictionary<string, object?> { ["value"] = slice };
             if (all.Count > page * PageSize)
             {
