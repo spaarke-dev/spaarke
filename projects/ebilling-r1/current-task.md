@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done: 001-004, 010, 012, 018-021, 040, 041. 017 waiting on owner (classification A/B/C; stub delete OK). Running: 005 (spike; owner go/no-go), 022, 023, schema-script hardening (shared module scripts/ebilling/EbillingSchema.psm1, DEF-006..010, dev re-run). TASK-INDEX uses [open]/[wip]/[done] tokens (drift checker) |
+| **Task** | Parallel mode. Done: 001-005, 010, 012, 014, 016-025, 027, 040, 041. Running (isolated worktrees, cherry-pick back): 043 (opus, D-81 CU client), 028 (opus, containers; 2 adversarial passes), 013 (opus, core-ancestor; 2 passes; uac-r2 reviews), 108 (bounding-box viewer). ADR-010 1:1 ceiling on branch = 162: sum increments when merging. Agent worktrees sometimes start on master: prompts include a base check. TASK-INDEX tokens [open]/[wip]/[done] |
 | **Step** | — |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | Collect results, commit per task. Next schema: 020, 021, 022, 023, 024, 025, 027, 028; then 014, 016, 011*, 013*, 029. Remove stale worktree C:/code_files/spaarke/.claude/worktrees/agent-ac329e6ec2c0269e7 (locked by a process) and branch worktree-agent-ac329e6ec2c0269e7 |
+| **Next Action** | Collect results, cherry-pick + build + ADR010/Finance tests, mark done. Then: 042 (after 043; IInvoiceAi overlap), 011 (after 013; shared census test; owner OK before delete), 109, then 029 (deps 011, 028). Pending: #1954 (Console moves sprk_primaryrole to sprk_contacttype_ref) gates deleting the 10 non-LEDES sprk_timekeeperrole options (D-83). Stale worktree dirs locked: agent-ac329e6ec2c0269e7, agent-abb21235b9e0d78f5 (+ its branch) under C:/code_files/spaarke/.claude/worktrees |
 
 ### Files Modified This Session
 - Pipeline output only (README, plan, CLAUDE.md, tasks/). See the pipeline commit.
