@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -84,8 +85,9 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 
 /// <summary>One Work Item: display columns only (D-23, task 051 #1513, task 052 #1536 F4).</summary>
 /// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
-/// witness rule (D-123): a line whose witness is not in the Signal's own known secure family has no <c>text</c> or <c>source</c> and
-/// carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather than absent. Null when nothing is stored or the
+/// witness rules (D-123, D-142): a line whose witness the caller cannot read, or whose witness is not in the Signal's own known secure
+/// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
+/// than absent. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
@@ -127,8 +129,9 @@ public sealed record WorklistItemRow(
 /// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
 /// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
 /// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
-/// catalog query; and, only for returned rows whose evidence carries detail, the app-only secure-family placement of those
-/// Signals and their witnesses (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
+/// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
+/// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -141,6 +144,9 @@ public sealed class SignalReadService
 
     /// <summary>Ids per batched caller read (keeps the GET URL well under Dataverse's limit).</summary>
     internal const int IdChunk = 100;
+
+    /// <summary>Witness ids per batched caller read (task 151, D-142: In lists of at most 200 ids).</summary>
+    internal const int WitnessIdChunk = 200;
 
     internal const string SignalEntitySet = "sprk_signals";
     internal const string HighPriorityColumn = "sprk_highpriority";
@@ -375,8 +381,8 @@ public sealed class SignalReadService
                 visible = await PartitionClosedAsync(visible, set == WorklistSet.ClosedToday, ct).ConfigureAwait(false);
             }
 
-            // (9) The witness rule at read time (D-123; task 145 review F1, option B): a stored line keeps its subject and sender only
-            // while its witness is in the Signal's own known secure family.
+            // (9) The witness rules at read time (D-123; task 145 review F1, option B; D-142, task 151): a stored line keeps its subject
+            // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -861,9 +867,10 @@ public sealed class SignalReadService
 
     /// <summary>
     /// Each returned row's stored witness lines, judged now (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>): a
-    /// line that carries a <c>text</c> or <c>source</c> keeps them only when its witness is in the Signal's own known secure family;
+    /// line that carries a <c>text</c> or <c>source</c> keeps them only when the caller's own read returns its witness
+    /// (<see cref="WitnessesTheCallerReadsAsync"/>, D-142) AND its witness is in the Signal's own known secure family (D-123);
     /// otherwise both are removed and the line carries <c>"withheld": true</c> (kind, ref, tier, as-of and clause stay). A fault in
-    /// that judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
+    /// either judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
     /// is returned as null: what it holds cannot be judged line by line.
     /// </summary>
     private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
@@ -891,7 +898,14 @@ public sealed class SignalReadService
             return rows;
         }
 
-        var shown = asked.Count == 0 ? new Dictionary<Guid, IReadOnlySet<string>>() : await _families.WitnessDetailShownOnReadAsync(asked, ct).ConfigureAwait(false);
+        // D-142 (task 151): the caller's own read of the witness rows first; a fault there withholds every detail on the page.
+        IReadOnlyDictionary<Guid, IReadOnlySet<string>>? shown = new Dictionary<Guid, IReadOnlySet<string>>();
+        if (asked.Count > 0)
+        {
+            var readable = await WitnessesTheCallerReadsAsync(asked.SelectMany(a => a.References), ct).ConfigureAwait(false);
+            shown = readable is null ? null : await _families.WitnessDetailShownOnReadAsync(asked, readable, ct).ConfigureAwait(false);
+        }
+
         var withheld = 0;
         var result = new List<VisibleRow>(rows.Count);
         foreach (var row in rows)
@@ -928,7 +942,7 @@ public sealed class SignalReadService
 
         if (withheld > 0)
         {
-            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (another or an undetermined secure family; D-123).", withheld);
+            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (a witness the caller cannot read, or another or an undetermined secure family; D-142, D-123).", withheld);
         }
 
         return result;
@@ -936,6 +950,71 @@ public sealed class SignalReadService
         static bool HasDetail(JsonObject line) => line["text"] is not null || line["source"] is not null;
 
         static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    /// <summary>
+    /// D-142 (task 151): the witnesses (<see cref="SignalSuppressionService.WitnessOf"/>) the CALLER's own read returns. One batched
+    /// read per witness table per request, in lists of at most <see cref="WitnessIdChunk"/> ids, never one per witness. The table's
+    /// entity set and key come from uac-r2's lineage (<see cref="SecureChildLineage"/>), the only tables a witness can name. A table
+    /// the caller has no Read on (403) returns none of its rows. Any other failure (a 5xx, throttling, an unparseable body, an
+    /// exception) returns null: the caller then withholds every detail on the page, and the list itself is unchanged (fail closed,
+    /// logged at Warning with the table and the error code only).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: the core-record and subject reads above (batched caller
+    /// reads through <see cref="IDataverseUserClient"/>, <see cref="InFilter"/>). Extension: they read core and subject tables, never
+    /// the rows a Signal's evidence quotes, so this applies the same caller read to the witness rows. Cost of doing nothing: a reader
+    /// sees the subject and sender of a communication they cannot open (re-filed to another business unit's matter, or unfiled and
+    /// privately owned), contrary to D-142.</remarks>
+    private async Task<IReadOnlySet<(string Table, Guid Id)>?> WitnessesTheCallerReadsAsync(IEnumerable<string> references, CancellationToken ct)
+    {
+        var readable = new HashSet<(string Table, Guid Id)>();
+        foreach (var byTable in references.Select(SignalSuppressionService.WitnessOf).OfType<(string Table, Guid Id)>().Distinct()
+                     .GroupBy(w => w.Table, StringComparer.Ordinal))
+        {
+            var lineage = SecureChildLineage.Children[byTable.Key];
+            var pk = lineage.IdColumn;
+            foreach (var chunk in byTable.Select(w => w.Id).Chunk(WitnessIdChunk))
+            {
+                DataverseUserResponse response;
+                try
+                {
+                    response = await _user.GetAsync($"{lineage.EntitySet}?$select={pk}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                        "Signal read: the caller's read of {Table} witnesses faulted ({ExceptionType}); every witness line is shown without its detail (D-142, fail closed).",
+                        byTable.Key, ex.GetType().Name);
+                    return null;
+                }
+
+                if (response.IsSuccess
+                    && response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in value.EnumerateArray())
+                    {
+                        if (TryReadGuid(row, pk, out var id) && chunk.Contains(id))
+                        {
+                            readable.Add((byTable.Key, id));
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+                {
+                    continue; // No Read on the table at all: none of its witnesses is readable.
+                }
+
+                _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                    "Signal read: the caller's read of {Table} witnesses failed ({ErrorCode}); every witness line is shown without its detail (D-142, fail closed).",
+                    byTable.Key, response.IsSuccess ? "unparseable" : response.ErrorCode);
+                return null;
+            }
+        }
+
+        return readable;
     }
 
     /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
