@@ -712,6 +712,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
     [InlineData("https://sprk-abcdefgh-staging-search.search.windows.net")]
     [InlineData("https://sprk-abcdefgh-staging-kv.vault.azure.net/")]
     [InlineData("spaarke-abcdefgh-staging-sbus.servicebus.windows.net")]
+    [InlineData("sprk-abcdefgh-staging-redis.westus2.redis.azure.net:10000")]   // T186 L25: Azure Managed Redis host:port
+    [InlineData("https://sprk-abcdefgh-staging-contentsafety.cognitiveservices.azure.com/")]
     [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-spaarke-abcdefgh-staging/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-spaarke-abcdefgh-staging")]
     public void AC28b_IsCleartextSecretPattern_RealH2aOutputs_DoNotTrip(string value)
         => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeFalse();
@@ -720,6 +722,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
     [InlineData("https://sprk-acme-prod-search.search.windows.net/?api-key=Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
     [InlineData("https://sprk-acme-prod-kv.vault.azure.net/Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
     [InlineData("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0")]
+    [InlineData("sprk-acme-prod-redis.westus2.redis.azure.net:Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
+    [InlineData("Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AbCdEfGh:10000")]
     public void AC28c_IsCleartextSecretPattern_SecretInsideAUriOrDotted_StillTrips(string value)
         => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeTrue(
             "only a lowercase DNS host is exempt — a URI's path / query and dotted tokens are still scanned");
@@ -733,6 +737,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         run.InterStepState.AiSearchEndpoint = "https://sprk-abcdefgh-staging-search.search.windows.net";
         run.InterStepState.KeyVaultUri = "https://sprk-abcdefgh-staging-kv.vault.azure.net/";
         run.InterStepState.ServiceBusFullyQualifiedNamespace = "spaarke-abcdefgh-staging-sbus.servicebus.windows.net";
+        run.InterStepState.RedisEndpoint = "sprk-abcdefgh-staging-redis.westus2.redis.azure.net:10000";   // T186 L25
+        run.InterStepState.ContentSafetyEndpoint = "https://sprk-abcdefgh-staging-contentsafety.cognitiveservices.azure.com/";
         var repo = new FakeRepository(run, etag: "etag-28d");
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
             FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
