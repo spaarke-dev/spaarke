@@ -4,7 +4,7 @@
     <title>ConsoleKit additions: outcome cards, count filters, disclosure, status labels</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Small presentational additions to an existing shared kit; existing ConsoleKit behaviour must stay unchanged (ontology-r1 consumers).</rigor-reason>
     <model-tier>sonnet</model-tier>

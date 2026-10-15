@@ -91,8 +91,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 105 | 🔲 [open] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | 🔲 [open] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | 🔲 [open] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
-| 108 | 🟡 [wip] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
-| 109 | 🔲 [open] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
+| 108 | ✅ [done] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
+| 109 | 🟡 [wip] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | 🔲 [open] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |
 | 111 | 🔲 [open] | Invoice decision wizard and context / related / history panes | STANDARD | sonnet / high | none | 110, 103, 104, 105, 106, 107 |
 | 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079 |
