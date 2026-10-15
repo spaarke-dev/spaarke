@@ -246,7 +246,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             counts.AddClosure(superseded.Outcome, retired: false);
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
             // found at the threshold and withdraw a stamp its partition no longer justifies, so the planner below sees the result.
-            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct).ConfigureAwait(false);
+            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct,
+                doLane: lane == SignalWriter.LaneDo).ConfigureAwait(false);
             counts.PolicyFailures += reconciled.Failures;
             if (reconciled.PartitionsUnavailable)
             {
@@ -261,8 +262,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             // #1661 R1 (D-123): a hit's new episode belongs to the partition the writer's truth gives it NOW, never its previous
             // episode's. Asked only for hits on a record that carries a live stamp (where the answer can change the outcome).
             var now = _timeProvider.GetUtcNow();
-            var hitPartitions = await _suppression.PartitionsOfHitsAsync(
-                policy.Code, SignalEpisodePlanner.HitsOnStampedGrains(evaluation.Hits, existing, now), ct).ConfigureAwait(false);
+            var stampedHits = SignalEpisodePlanner.HitsOnStampedGrains(evaluation.Hits, existing, now);
+            var hitPartitions = await _suppression.PartitionsOfHitsAsync(policy.Code, stampedHits, ct).ConfigureAwait(false);
             if (hitPartitions is null)
             {
                 // #1661 round 2 F2: a fault is never answered per hit (that would depend on which record carries a stamp): the whole
@@ -273,9 +274,24 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 return;
             }
 
+            // D-145a (task 152): a Do-lane stamp mutes only the same person's (or item's) Do items, so each such hit's holder is read from
+            // its subject now. A fault is answered like a partition fault: the whole policy waits for the next pass.
+            IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionHolder>? hitHolders = null;
+            if (lane == SignalWriter.LaneDo)
+            {
+                hitHolders = await _suppression.HoldersOfHitsAsync(policy.Code, stampedHits, ct).ConfigureAwait(false);
+                if (hitHolders is null)
+                {
+                    counts.PolicyFailures++;
+                    SkipForPartitions(policy, counts, 1,
+                        "whose Do items its hits are could not be read (the suppression pass before it completed and wrote only justified stamps)");
+                    return;
+                }
+            }
+
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, now, evaluation.Hits, existing, hitPartitions,
                 isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold,
-                unjudged: unjudged);
+                unjudged: unjudged, hitHolders: hitHolders);
             if (superseded.NotClosed.Count > 0)
             {
                 // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
@@ -1007,7 +1023,9 @@ public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed
 /// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031). <c>Partition</c> (#1661, D-123): the Signal's
 /// secure-family partition, set by <see cref="SignalSuppressionService.ReconcileAsync"/> for every Signal of a record that carries a live
 /// stamp (null: not placed, read as ordinary by the pure planner), so the planner reads a stamp only within the partition it was written
-/// for. <c>LineageRow</c>: the row as read, with its lineage lookups (the partition's input).</summary>
+/// for. <c>LineageRow</c>: the row as read, with its lineage lookups (the partition's input). <c>Holder</c> (D-145a, task 152): whose Do
+/// item the Signal is, set with <c>Partition</c> for a Do-lane policy (<see cref="SuppressionHolder.Everyone"/> in the Decide lane; null:
+/// not placed, read as everyone), so the planner reads a Do-lane stamp only within the same person's (or item's) Do items.</summary>
 internal sealed record ExistingSignal(
     Guid Id,
     string? RowVersion,
@@ -1026,7 +1044,8 @@ internal sealed record ExistingSignal(
     DateTime? LastEvaluated = null,
     Guid? DecisionRecordId = null,
     SuppressionPartition? Partition = null,
-    Entity? LineageRow = null)
+    Entity? LineageRow = null,
+    SuppressionHolder? Holder = null)
 {
     /// <summary>D-120: how much later than <c>sprk_resolvedon</c> <c>sprk_lastevaluated</c> must be to read as "the job observed the
     /// condition cleared after the resolution" (a person's commit may stamp both within moments of each other).</summary>
@@ -1105,10 +1124,14 @@ internal static class SignalEpisodePlanner
     /// <param name="hitPartitions">#1661 R1: each hit's partition from the truth (<see cref="SignalSuppressionService.PartitionsOfHitsAsync"/>);
     /// a hit that is absent or undetermined is live (round 2 F2). Null only for callers with no partition truth at all (the pure rule
     /// tests): every hit and every unplaced Signal is then ordinary.</param>
+    /// <param name="hitHolders">D-145a (task 152): each Do-lane hit's holder (<see cref="SignalSuppressionService.HoldersOfHitsAsync"/>);
+    /// a stamp mutes a hit only when it sits on a row of the same holder. Null (the Decide lane, and the pure rule tests): every hit and
+    /// every row with no holder is <see cref="SuppressionHolder.Everyone"/>.</param>
     public static EpisodePlan Plan(
         int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing,
         IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionPartition>? hitPartitions = null,
-        bool isThreshold = false, IReadOnlySet<(string, Guid)>? unjudged = null)
+        bool isThreshold = false, IReadOnlySet<(string, Guid)>? unjudged = null,
+        IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionHolder>? hitHolders = null)
     {
         var plan = new EpisodePlan();
         var now = nowUtc.UtcDateTime;
@@ -1129,7 +1152,11 @@ internal static class SignalEpisodePlanner
             var partition = hitPartitions is null
                 ? SuppressionPartition.Ordinary
                 : hitPartitions.GetValueOrDefault((hit.SubjectEntity, hit.SubjectId), SuppressionPartition.Undetermined);
-            return stamped.Contains(partition); // StampedPartitions never holds the undetermined bucket
+            // D-145a: and only within the hit's own holder (a hit not placed is everyone, which no Do-lane row is: it is live).
+            var holder = hitHolders is not null && hitHolders.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var placed)
+                ? placed
+                : SuppressionHolder.Everyone;
+            return stamped.Contains((partition, holder)); // StampedPartitions never holds the undetermined bucket
         }
 
         foreach (var hit in hits)
@@ -1271,13 +1298,14 @@ internal static class SignalEpisodePlanner
 
     private enum EvidenceVerdict { Newer, Older, Undated }
 
-    /// <summary>The partitions that carry a live stamp on <paramref name="grain"/> (an unplaced Signal reads as ordinary; the
-    /// undetermined bucket never mutes).</summary>
-    private static HashSet<SuppressionPartition> StampedPartitions(IReadOnlyList<ExistingSignal> existing, Grain grain, DateTime now) =>
+    /// <summary>The (partition, holder) pairs that carry a live stamp on <paramref name="grain"/> (an unplaced Signal reads as ordinary
+    /// and everyone; the undetermined bucket never mutes). A holder splits only Do-lane rows (D-145a).</summary>
+    private static HashSet<(SuppressionPartition Partition, SuppressionHolder Holder)> StampedPartitions(
+        IReadOnlyList<ExistingSignal> existing, Grain grain, DateTime now) =>
         existing
             .Where(s => GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now)
-            .Select(s => s.Partition ?? SuppressionPartition.Ordinary)
-            .Where(p => !p.IsUndetermined)
+            .Select(s => (Partition: s.Partition ?? SuppressionPartition.Ordinary, Holder: s.Holder ?? SuppressionHolder.Everyone))
+            .Where(p => !p.Partition.IsUndetermined)
             .ToHashSet();
 
     /// <summary>#1661 R1: the hits whose partition can change the outcome, those on a record (or item) that carries a live stamp. Only

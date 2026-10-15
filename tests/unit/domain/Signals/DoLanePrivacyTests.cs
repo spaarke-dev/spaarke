@@ -86,6 +86,15 @@ public sealed class DoLanePrivacyTests
             .Should().Be(allowed ? SignalAccessOutcome.Allowed : SignalAccessOutcome.NotFound);
     }
 
+    [Fact]
+    public async Task AnAllowedDoItem_CarriesTheCallersContact_SoTheSuppressionCountIsTheirOwn_152()
+    {
+        // Task 152 (D-145a): GET /suppression passes this contact to the count, which reports a Do item's count only to its own person.
+        var world = new World("sprk_todo", hasCore: true) { Subject = { [PersonColumn("sprk_todo")] = AliceContact, ["_ownerid_value"] = Team } };
+
+        (await world.As(Alice).AuthorizeAsync(SignalId, CancellationToken.None)).CallerContactId.Should().Be(AliceContact);
+    }
+
     // ---- The colleague: every per-Signal route answers exactly as for an unreadable Signal ------------------------------------
 
     [Fact]

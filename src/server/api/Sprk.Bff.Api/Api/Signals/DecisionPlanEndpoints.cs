@@ -53,7 +53,8 @@ public static class DecisionPlanEndpoints
             .WithName("GetSignalSuppression")
             .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
             .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
-                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
+                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil; for a Do item, only the dismissals "
+                + "of that item's person's own Do items, reported only to that person (D-145a). 404 when the Signal or its "
                 + "core record is not readable by the caller, or a Do item is not the caller's own work (D-141); 403 when the caller cannot be "
                 + "resolved; 503 when access could not be checked or an authorized caller's count cannot be read.")
             .Produces<SuppressionResponse>(200)
@@ -93,7 +94,8 @@ public static class DecisionPlanEndpoints
         SuppressionStatus? status;
         try
         {
-            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct);
+            // D-145a (task 152): a Do item's count is its person's own, and only that person is told it.
+            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct, decision.CallerContactId);
         }
         catch (SuppressionPartitionUndeterminedException)
         {
