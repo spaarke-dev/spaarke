@@ -11,15 +11,15 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Running: 154 implementer, 146 record fix round, and uac-r2's re-check of #1953. 059 merged. |
+| **Task** | 154 (#1982) Opus pass 2 running. Merged today: 151, 150, 149, 152, 059, 146, 153. |
 | **Blocker** | None. |
-| **Next Action** | (1) uac-r2 verdict on #1953, then merge on green. (2) 154 PR, then Opus review, a fix round, uac-r2, and merge; then launch 155. (3) 146 fix round, then a re-check, then merge #1933; then decide on K-1 (a possible suppression defect) and the 144/148 report-only pass. (4) Docs branch to master, then 055 (needs 154). |
+| **Next Action** | (1) 154 pass 2, then fixes, then uac-r2, then merge; then launch 155 (sonnet/high, worktree from the docs branch). (2) Docs branch to master: open a PR to master once 154 is in (D-126; tell uac-r2 for their ledger). (3) 055 Console + BFF deploy from master, plus the grid configuration apply. (4) After the owner answers: enable the dev policies, then the 144/148 report-only pass, then uac-r2, then the writes; and 049 role removals. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 154 worklist route fields + inquiry lookup | #1982 | `954faa8b3` → fix | `C:\wts-154` | Pass 1 found three fix-now defects in the guard: (1) it ignores a closed inquiry, leaving the item stuck; (2) the hint is accepted only on the first line; (3) a for-todo timeout gives 500. Also the Not filed test gap, plus K2 and K3. Opus fix round running. Pre-existing problems filed: DI-99 #1984 (TodoDetail Complete bypass) and DI-100 #1985 (predictable To Do id). Next: pass 2, then uac-r2. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1` (WhatIf, then Verify for drift, then apply, then Verify). |
+| 154 worklist route fields + inquiry lookup | #1982 | `b579e77f6` | `C:\wts-154` | Pass 1 fixed in `d23dc4521`: the guard applies only to an open, outbound inquiry; the hint is matched on any line, with a matter fallback on commit; 503 on timeout; K2 and K3. The docs branch with #1953 merged in cleanly (831 + 53 filtered tests pass). Opus pass 2 running, then uac-r2, then merge, then launch 155. **Live step at the 055 deploy:** `Apply-WorklistGridConfiguration.ps1`. |
 
 Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed), #1964 (059, `930c02c7f`), #1933 (146, `495faf82c`), #1953 (153, `53f19f0a2`).
 
