@@ -468,6 +468,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx jest --ci --maxWorkers=2
 
+      # sprk_/scripts/bff_auth.js (Spaarke.BffAuth, the form scripts' sign-in) is BUILT from this library
+      # (#1655). A library change that is not rebuilt into it, or a hand edit of the generated file, fails here.
+      - name: "Check the bff_auth.js web resource is a current build of @spaarke/auth"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm run check:webresource
+
       - name: Install dependencies
         working-directory: src/client/office-addins
         # NOT `npm ci` (root CLAUDE.md §12); a bare `npm install` also fails here

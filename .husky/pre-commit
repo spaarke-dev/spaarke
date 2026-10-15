@@ -29,4 +29,12 @@ if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
   exit 0
 fi
 
+# Project-archive guard (added 2026-10-14): fail a commit that adds/renames a project folder to x-<slug>.
+# Fast shell check, no dotnet. The Arch Test with the same rule does not run on a projects/-only PR
+# (the router treats it as docs-only), so this is where the rename is caught. Skipped for merge commits
+# above and for CI (the projects-layout-guard workflow covers PRs).
+if ! git diff --cached --name-only -M --diff-filter=AR | sh scripts/quality/check-project-archive-prefix.sh; then
+  exit 1
+fi
+
 npx lint-staged

@@ -4,14 +4,14 @@ tags: [devops, project-archive, gh-cli, git]
 techStack: [gh-cli, graphql, git, python]
 appliesTo: ["/devops-project-archive", "archive project", "close project"]
 alwaysApply: false
-last-reviewed: 2026-06-25
+last-reviewed: 2026-10-12
 ---
 
 # devops-project-archive
 
 > **Category**: DevOps / Portfolio
 > **Tier**: Non-destructive — closes Issue state only. Worktree preserved.
-> **Last Reviewed**: 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
+> **Last Reviewed**: 2026-10-12 (final AI spend captured at close-out, Step 3); 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
 
 ## What this skill does (and doesn't)
 
@@ -37,7 +37,7 @@ Close out a project cleanly:
 2. Set `Closed Date` field (from PR merge date if provided, else today)
 3. Capture final `Task Count` / `Tasks Completed` values (via `/devops-project-sync`)
 4. Close the GitHub Issue with appropriate state (`Status=Done` or label `cancelled`)
-5. **Retain** `projects/{name}/` folder + worktree (no destructive operations)
+5. **Retain** `projects/{name}/` folder + worktree (no destructive operations). **Never rename or move the folder** — no `x-` prefix, no `projects/_archive/`. A rename breaks every link to the project (the Issue's Quick Links, the board's Project Folder field, links from other projects and skills) and makes history tools see a new project on archive day. "Archived" is the `.archived` marker plus board Status, not the folder name. The 37 older `x-` folders keep their names (renaming them back would break the links that now point at them). Enforced by: the pre-commit hook and the `projects-layout-guard` workflow (both run `scripts/quality/check-project-archive-prefix.sh` on added or renamed paths, so the PR that renames is the one that fails), and `tests/Spaarke.ArchTests/ProjectFolderArchivePrefixGuardTests.cs` over the whole tree when Arch Tests run. A `projects/`-only PR counts as docs-only and skips Arch Tests, which is why the first two exist.
 6. Write `.archived` marker file with archive date + final status + closing PR # (if any) + note that worktree is intentionally preserved
 
 Remote branch is preserved — branch history stays on GitHub for audit.
@@ -79,6 +79,15 @@ Default: Y (non-destructive). Operator can still N to cancel.
 
 Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks Completed) BEFORE we close the Issue.
 
+**Then capture the final AI spend** (added 2026-10-11 — costs are computed from local transcripts, so close-out is the last moment they are complete for this project):
+
+```bash
+python scripts/ai-cost/spend-report.py --project {slug} --since {project start date} --archive   # folds every project's days in that range into the durable archive (--project only filters the printed report)
+python scripts/ai-cost/update-board-spend.py {slug}                                              # final AI Spend / AI Calls / As Of (never lowers a value)
+```
+
+`{project start date}` is `YYYY-MM-DD` (the project README's created date). Over a long range expect one `WARN archive: ...` line per already-pruned day — the archived rows are kept, which is the point. Note the resulting `AI Spend (est.)` and `AI Calls` for the Step 4 Issue comment. Do **not** write cost figures into `projects/{name}/` or any other committed file — the repo keeps costs out of version control (`scripts/ai-cost/README.md`); the board and the Issue are where they live. If the project has no local transcript history on this machine, say so in the comment instead of a number.
+
 ### Step 4: Update Issue fields + close
 
 - Set `Status` field to `Completed` or `Cancelled` (per --status)
@@ -86,7 +95,7 @@ Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks 
   - If `--pr-number #M` provided: use the PR's merge date (`gh pr view #M --json mergedAt --jq .mergedAt`, take the date prefix YYYY-MM-DD). This is the truest "actual end".
   - Else: use today's date.
   - Mutation: `updateProjectV2ItemFieldValue` with `value: { date: "YYYY-MM-DD" }`.
-- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M. Closed Date set to {merge-or-today}. Worktree at {worktree-path} preserved.`
+- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M. Closed Date set to {merge-or-today}. Final AI spend (est., list price, this machine): ${spend} over {calls} calls. Worktree at {worktree-path} preserved.`
 - For Completed: `gh project item-edit ... --status Done` (or analogous mutation)
 - For Cancelled: add label `cancelled`
 - Close Issue: `gh issue close <#N> --comment "..."`
@@ -131,7 +140,7 @@ Archived project: projects/{name}/
 |---|---|---|
 | Issue close fails (rate limit) | Concurrent operations | Re-run skill — idempotency ensures state is healed |
 | `.archived` marker write fails | Permission issue | Skill warns; user manually creates the marker |
-| Skill run twice on same project | User unsure if first run completed | Idempotent — second run detects Issue already closed + `.archived` already present; reports no-op |
+| Skill run twice on same project | User unsure if first run completed | Idempotent — second run detects Issue already closed + `.archived` already present; reports no-op. The 37 older `x-` folders got their `.archived` marker on 2026-10-14 without any board change: for those, the marker alone does not mean the board was updated, so check the Issue and Status and run the board steps if they are still open |
 | Project has no portfolio pointer block | Project never registered | Run `/devops-project-register --from-folder` first |
 | `--pr-number` references a non-merged PR | Wrong PR number provided | Skill warns; uses today's date as Closed Date fallback |
 

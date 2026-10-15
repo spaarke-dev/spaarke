@@ -34,7 +34,7 @@
     Read the manifest and the environment, print the plan and the pac command; import nothing.
 
 .EXAMPLE
-    ./scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged -WhatIf
+    ./scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://myenv.crm.dynamics.com -PackageType unmanaged -WhatIf
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]

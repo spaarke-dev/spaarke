@@ -75,6 +75,8 @@ public sealed class RuleBodyDescriber
         ["sprk_revisedon"] = "revised on",
         ["sprk_duedate"] = "due date",
         ["sprk_responseduedate"] = "response due date",
+        // Read as "it has no response recorded" / "it has a response recorded" by a null test (task 061, D-54).
+        ["sprk_respondedon"] = "response recorded",
         ["sprk_eventtype_ref"] = "event type",
         ["statuscode"] = "status",
         ["statecode"] = "state",
@@ -333,6 +335,16 @@ public sealed class RuleBodyDescriber
             if (value.ValueKind == JsonValueKind.Object)
             {
                 var ops = value.EnumerateObject().ToList();
+                if (ops.Count == 1 && ops[0].Name is PredicateCompiler.NullTestMember or PredicateCompiler.NotNullTestMember)
+                {
+                    // Task 061 (D-54): a null test names no value. "it has no response recorded" / "it has a response recorded";
+                    // the formal form is the test itself.
+                    var isNull = ops[0].Name == PredicateCompiler.NullTestMember;
+                    words.Add(isNull ? $"it has no {label}" : $"it has a {label}");
+                    formal.Add($"{field.Name} is {(isNull ? "null" : "not null")}");
+                    continue;
+                }
+
                 words.Add(ops.Count == 2 ? RangeWords(label, ops) : $"{label} {OperatorWords(ops[0].Name, ops[0].Value, field.Name, isLookup, names)}");
                 formal.AddRange(ops.Select(o => $"{field.Name} {o.Name} {Raw(o.Value)}"));
                 continue;

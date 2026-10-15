@@ -120,9 +120,10 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 
         var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
         content!.Metadata.Should().NotBeNull();
-        content.Metadata.TotalResults.Should().BeGreaterOrEqualTo(0);
-        content.Metadata.ReturnedResults.Should().BeGreaterOrEqualTo(0);
-        content.Metadata.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
+        // MockSemanticSearchService returns an empty page with a 10 ms search duration.
+        content.Metadata.TotalResults.Should().Be(0);
+        content.Metadata.ReturnedResults.Should().Be(0);
+        content.Metadata.SearchDurationMs.Should().Be(10);
     }
 
     [Fact]
@@ -175,7 +176,7 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 
         var content = await response.Content.ReadFromJsonAsync<SemanticSearchCountResponse>(_jsonOptions);
         content.Should().NotBeNull();
-        content!.Count.Should().BeGreaterOrEqualTo(0);
+        content!.Count.Should().Be(42); // MockSemanticSearchService.CountAsync
     }
 
     [Fact]

@@ -169,4 +169,51 @@ public sealed class Tier2ScopeFilterInjectorTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    // ---- EnsureProjected (r3 task 039 fix round 2, K3) ----
+
+    [Fact]
+    public void EnsureProjected_AddsOnlyTheMissingAttributes_AfterTheLastExistingOne_AndBeforeFilterAndOrder()
+    {
+        var scoped = Tier2ScopeFilterInjector.Inject(ProjectFetchXml, "sprk_projectid", new HashSet<Guid> { IdA });
+
+        var result = Tier2ScopeFilterInjector.EnsureProjected(
+            scoped, new[] { "sprk_projectname", "sprk_relatedmatter", "SPRK_RELATEDMATTER", "sprk_relatedproject" });
+
+        var entity = XDocument.Parse(result).Root!.Element("entity")!;
+        entity.Elements("attribute").Select(a => a.Attribute("name")!.Value).Should().Equal(
+            "sprk_projectid", "sprk_projectname", "sprk_relatedmatter", "sprk_relatedproject");
+        entity.Elements().Select(e => e.Name.LocalName).Should().Equal(
+            "attribute", "attribute", "attribute", "attribute", "filter", "order");
+    }
+
+    [Fact]
+    public void EnsureProjected_OnAFetchWithNoAttribute_AddsThemFirst()
+    {
+        var result = Tier2ScopeFilterInjector.EnsureProjected(
+            "<fetch><entity name=\"sprk_document\"><order attribute=\"sprk_documentname\"/></entity></fetch>",
+            new[] { "sprk_relatedmatter" });
+
+        XDocument.Parse(result).Root!.Element("entity")!.Elements().Select(e => e.Name.LocalName)
+            .Should().Equal("attribute", "order");
+    }
+
+    [Fact]
+    public void EnsureProjected_ReportsExactlyTheAttributesItAdded_SoTheCallerCanStripThem()
+    {
+        var scoped = Tier2ScopeFilterInjector.Inject(ProjectFetchXml, "sprk_projectid", new HashSet<Guid> { IdA });
+
+        Tier2ScopeFilterInjector.EnsureProjected(
+            scoped, new[] { "SPRK_PROJECTID", "sprk_matter", "sprk_matter", "sprk_workassignment" }, out var added);
+
+        added.Should().Equal("sprk_matter", "sprk_workassignment");
+    }
+
+    [Fact]
+    public void EnsureProjected_RefusesAMalformedFetch()
+    {
+        var act = () => Tier2ScopeFilterInjector.EnsureProjected("<fetch>", new[] { "a" });
+
+        act.Should().Throw<FetchXmlParseException>();
+    }
 }

@@ -216,12 +216,15 @@ public sealed class EventRoutesLiveTests
                 factory.Services.GetRequiredService<ILogger<ExternalDataService>>());
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
             var ext = await external.CreateEventAsync(projectId,
-                new CreateExternalEventRequest { SprkName = "zz-097-test external create", SprkDuedate = "2026-10-21" }, projectTeam);
+                new CreateExternalEventRequest { SprkName = "zz-097-test external create", SprkDuedate = "2026-10-21" }, projectTeam,
+                OperatorAsCreator(operatorId)); // R3 task 030 (FR-25): every external create carries its creator stamp
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
             _out.WriteLine($"ExternalDataService.CreateEventAsync -> id={ext.SprkEventid} sprk_status={ext.SprkStatus}");
             ext.SprkStatus.Should().Be(EventStatusCode.Open);
-            var listedExternal = (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid);
+            var listedExternal = (await external.GetEventsAsync(ExternalDataService.TodoRootKind.Project, projectId, OperatorReading(operatorId, projectId))).Value.Single(e => e.SprkEventid == ext.SprkEventid);
             listedExternal.SprkName.Should().Be("zz-097-test external create");
+            (await ReadEventAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
 
             // ── A REAL child-BU user: denied on the operator's root-BU event, allowed on its own ─────────────────
             if (otherUser is { } child)
@@ -399,12 +402,15 @@ public sealed class EventRoutesLiveTests
                 factory.Services.GetRequiredService<ILogger<ExternalDataService>>());
             var ext = await external.CreateEventAsync(projectId,
                 new CreateExternalEventRequest { SprkName = "zz-098-test external legacy date", SprkDuedate = "2026-10-21T00:00:00.000Z" },
-                await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId));
+                await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId),
+                OperatorAsCreator(operatorId)); // R3 task 030 (FR-25)
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
             _out.WriteLine($"ExternalDataService.CreateEventAsync(sprk_duedate 2026-10-21T00:00:00.000Z) -> id={ext.SprkEventid} sprk_duedate={ext.SprkDuedate}");
             ext.SprkDuedate.Should().Be("2026-10-21");
+            (await ReadEventAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
             (await ReadDatesAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
-            (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid)
+            (await external.GetEventsAsync(ExternalDataService.TodoRootKind.Project, projectId, OperatorReading(operatorId, projectId))).Value.Single(e => e.SprkEventid == ext.SprkEventid)
                 .SprkDuedate.Should().Be("2026-10-21");
         }
         finally
@@ -569,7 +575,7 @@ public sealed class EventRoutesLiveTests
         var leaks = new List<string>();
 
         async Task<JsonElement> ReadTodoAsync(Guid id) =>
-            await dv.GetFromJsonAsync<JsonElement>($"sprk_todos({id})?$select=sprk_duedate,statuscode,statecode");
+            await dv.GetFromJsonAsync<JsonElement>($"sprk_todos({id})?$select=sprk_duedate,statuscode,statecode,_sprk_createdbyperson_value");
 
         try
         {
@@ -583,15 +589,19 @@ public sealed class EventRoutesLiveTests
             var external = new ExternalDataService(new HttpClient(), liveConfiguration, credential,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalDataService>.Instance);
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
+            var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
 
             // Create, as an earlier SPA build sent it: toISOString() of the picked day's NOON UTC.
             var ext = await external.CreateTodoAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalTodoRequest { SprkName = "zz-106-test external legacy date", SprkDuedate = "2026-10-21T12:00:00.000Z" },
-                projectTeam, callerContactId: null);
+                projectTeam, callerContactId: null,
+                creator: OperatorAsCreator(operatorId)); // R3 task 030 (FR-25)
             var extId = Guid.Parse(ext.SprkTodoid);
             _out.WriteLine($"ExternalDataService.CreateTodoAsync(sprk_duedate 2026-10-21T12:00:00.000Z) -> id={extId} sprk_duedate={ext.SprkDuedate}");
             ext.SprkDuedate.Should().Be("2026-10-21");
             (await ReadTodoAsync(extId)).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
+            (await ReadTodoAsync(extId)).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
 
             // Reschedule (the SPA's PATCH with a new due date).
             await external.UpdateTodoAsync(extId, new UpdateExternalTodoRequest { SprkDuedate = "2026-10-23" });
@@ -617,7 +627,7 @@ public sealed class EventRoutesLiveTests
             reopened.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-23");
 
             // The list read the SPA renders.
-            (await external.GetTodosAsync(ExternalDataService.TodoRootKind.Project, projectId)).Value
+            (await external.GetTodosAsync(ExternalDataService.TodoRootKind.Project, projectId, OperatorReading(operatorId, projectId))).Value
                 .Single(t => t.SprkTodoid == ext.SprkTodoid).SprkDuedate.Should().Be("2026-10-23");
 
             // ── The SDK writers (production DataverseServiceClientImpl) ────────────────────────────────────────
@@ -744,6 +754,21 @@ public sealed class EventRoutesLiveTests
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
+
+    /// <summary>The operator as the external create's creator (R3 task 030, FR-25): a systemuser principal, so the live
+    /// create stamps <c>sprk_createdbyperson</c> — a real systemuser the bind resolves.</summary>
+    private static CallerPrincipal OperatorAsCreator(Guid operatorId) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
+    /// <summary>R3 task 039: the operator as a READER of <paramref name="projectId"/> (the external event list takes the caller).</summary>
+    private static CallerPrincipal OperatorReading(Guid operatorId, Guid projectId) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(projectId, ExternalAccessLevel.ViewOnly) },
+    };
 
     /// <summary>Expected owner (I-6), computed independently: the record's business unit's default owner team.</summary>
     private static async Task<Guid> DefaultOwnerTeamOfRecordAsync(HttpClient dv, string set, Guid id)

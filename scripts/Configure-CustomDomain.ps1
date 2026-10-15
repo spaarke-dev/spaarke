@@ -70,7 +70,7 @@
 
 .EXAMPLE
     # Custom CORS origins (multiple Dataverse environments)
-    .\Configure-CustomDomain.ps1 -CorsOrigins "https://spaarke-demo.crm.dynamics.com,https://spaarke-customer1.crm.dynamics.com"
+    .\Configure-CustomDomain.ps1 -CorsOrigins "https://spaarkedev1.crm.dynamics.com,https://spaarke-customer1.crm.dynamics.com"
 #>
 
 [CmdletBinding()]

@@ -87,7 +87,7 @@
 .EXAMPLE
     # Custom output paths
     .\Audit-MultiContainerMultiIndex-Drift.ps1 `
-        -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+        -EnvironmentUrl "https://myenv.crm.dynamics.com" `
         -OutputCsvPath "./reports/drift-2026-06-07.csv" `
         -OutputMarkdownPath "./reports/drift-2026-06-07.md"
 

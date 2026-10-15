@@ -35,7 +35,7 @@ For SPA development, see [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUID
 | CIAM external tenant | `spaarkeextid` (`spaarkeextid.onmicrosoft.com`) — tenant ID `7052feba-bfc4-43e0-b09e-65014b429131` |
 | CIAM authority | `https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131` |
 | SPA public client (CIAM) | `bd57e54e-b339-4500-b55c-e451009fd907` |
-| BFF API app (CIAM) | `4a4d5126-91b0-4865-8e3a-134b7209013e` — App ID URI `api://4a4d5126-…`, scope `SDAP.Access` |
+| BFF API app (CIAM) | `4a4d5126-91b0-4865-8e3a-134b7209013e` — App ID URI `api://4a4d5126-…`, scope `user_impersonation` (the former `SDAP.Access` is retired - ADR-028 A8, task 041) |
 | CIAM Graph provisioner app | `e63e6eb1-be25-4214-80a8-a6d609034bb9` (`User.ReadWrite.All`, cert credential) |
 | Contact ↔ CIAM link column | `Contact.sprk_externalobjectid` (String/100) — stable CIAM `oid` |
 
@@ -57,12 +57,12 @@ External users are **local accounts in a dedicated CIAM external tenant** (`spaa
 - Platform: **Single-page application (SPA)** — not Web.
 - Redirect URIs: the SWA origin (`https://green-dune-0c4f1221e.7.azurestaticapps.net`) and `http://localhost:3000` (local dev). MSAL uses `window.location.origin`.
 - Implicit grant: **disabled** (authorization code + PKCE only).
-- API permission (delegated): `api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access` — grant admin consent.
+- API permission (delegated): `api://4a4d5126-91b0-4865-8e3a-134b7209013e/user_impersonation` — grant admin consent. (`SDAP.Access` is retired by ADR-028 A8 / task 041: the SPA refuses any CIAM scope other than `api://{app id}/user_impersonation`.)
 
 ### 1.3 BFF API App Registration (CIAM tenant)
 
 - App ID: `4a4d5126-91b0-4865-8e3a-134b7209013e`
-- Expose an API: Application ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e`, scope `SDAP.Access`, authorized client = the SPA (`bd57e54e-…`).
+- Expose an API: Application ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e`, scope `user_impersonation` (`SDAP.Access` is retired by ADR-028 A8 / task 041), authorized client = the SPA (`bd57e54e-…`).
 - **Manifest**: set `requestedAccessTokenVersion: 2` so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`). This is exactly what the BFF validates as `Ciam:Audience`.
 
 ### 1.4 Graph Provisioner App Registration (CIAM tenant)

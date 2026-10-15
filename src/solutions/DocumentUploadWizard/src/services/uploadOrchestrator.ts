@@ -286,11 +286,12 @@ export async function orchestrateUpload(
         },
     );
 
-    // Map upload results back to fileResults
-    const uploadedFileMap = new Map<string, SpeFileMetadata>();
-    for (const uploaded of uploadResult.uploadedFiles) {
-        uploadedFileMap.set(uploaded.name, uploaded);
-    }
+    // Results are attributed to the file the user PICKED (`sourceFileName`), never to the name SPE
+    // stored: on a "keep both" retry SPE stores `a.docx` as `a 1.docx`, and matching on the stored
+    // name left the picked file's row at "Uploading (100%)" and counted a created document as a
+    // failure (owner UAT 2026-10-11, task 128). Every progress event and fileResult below is keyed
+    // by the source name; the stored name is only carried in `speMetadata` / `createResult`.
+    const uploads = uploadResult.uploads;
 
     // Mark failed uploads in fileResults
     for (const err of uploadResult.errors) {
@@ -311,12 +312,12 @@ export async function orchestrateUpload(
     }
 
     // Mark successful uploads
-    for (const [name, metadata] of uploadedFileMap) {
-        const idx = fileResults.findIndex((r) => r.fileName === name);
+    for (const { sourceFileName, metadata } of uploads) {
+        const idx = fileResults.findIndex((r) => r.fileName === sourceFileName);
         if (idx >= 0) {
             fileResults[idx].speMetadata = metadata;
             onProgress?.({
-                fileName: name,
+                fileName: sourceFileName,
                 phase: "uploading",
                 uploadPercent: 100,
             });
@@ -324,15 +325,15 @@ export async function orchestrateUpload(
     }
 
     // ── Phase 2: Create Dataverse records ───────────────────────────────────
-    const successfulUploads = uploadResult.uploadedFiles;
+    const successfulUploads = uploads.map((u) => u.metadata);
 
     if (successfulUploads.length > 0) {
         logger.info("UploadOrchestrator", `Phase 2: Creating ${successfulUploads.length} Dataverse records`);
 
         // Emit creating-record status
-        for (const uploaded of successfulUploads) {
+        for (const { sourceFileName } of uploads) {
             onProgress?.({
-                fileName: uploaded.name,
+                fileName: sourceFileName,
                 phase: "creating-record",
                 uploadPercent: 100,
             });
@@ -385,16 +386,29 @@ export async function orchestrateUpload(
             resolvedSearchIndexName || undefined,
         );
 
-        // Map creation results back to fileResults
-        for (const cr of createResults) {
-            const idx = fileResults.findIndex((r) => r.fileName === cr.fileName);
+        // Map creation results back to fileResults. `createDocuments` creates sequentially and
+        // returns one result per input, in input order, so `createResults[i]` belongs to
+        // `uploads[i]`. Its `fileName` is the STORED name, which is why it is not the key.
+        if (createResults.length !== uploads.length) {
+            logger.warn(
+                "UploadOrchestrator",
+                `Record create returned ${createResults.length} results for ${uploads.length} uploads; unmatched results fall back to the stored name`,
+            );
+        }
+        const created = createResults.map((cr, i) => ({
+            cr,
+            sourceFileName: uploads[i]?.sourceFileName ?? cr.fileName,
+        }));
+
+        for (const { cr, sourceFileName } of created) {
+            const idx = fileResults.findIndex((r) => r.fileName === sourceFileName);
             if (idx >= 0) {
                 fileResults[idx].createResult = cr;
                 if (cr.success) {
                     fileResults[idx].success = true;
                     fileResults[idx].errorMessage = undefined;
                     onProgress?.({
-                        fileName: cr.fileName,
+                        fileName: sourceFileName,
                         phase: "creating-record",
                         uploadPercent: 100,
                         documentRecordId: cr.recordId,
@@ -402,7 +416,7 @@ export async function orchestrateUpload(
                 } else {
                     fileResults[idx].errorMessage = cr.error;
                     onProgress?.({
-                        fileName: cr.fileName,
+                        fileName: sourceFileName,
                         phase: "error",
                         uploadPercent: 100,
                         errorMessage: cr.error,
@@ -412,20 +426,25 @@ export async function orchestrateUpload(
         }
 
         // ── Phase 3 & 4: Background tasks (fire-and-forget) ────────────────
-        const successfulRecords = createResults.filter((r) => r.success);
+        const successfulCreated = created.filter(({ cr }) => cr.success);
+        const successfulRecords = successfulCreated.map(({ cr }) => cr);
 
         if (successfulRecords.length > 0) {
             logger.info("UploadOrchestrator", `Phase 3-4: Kicking off background tasks for ${successfulRecords.length} files`);
 
+            const emitForSuccessful = (phase: FileUploadPhase): void => {
+                for (const { cr, sourceFileName } of successfulCreated) {
+                    onProgress?.({
+                        fileName: sourceFileName,
+                        phase,
+                        uploadPercent: 100,
+                        documentRecordId: cr.recordId,
+                    });
+                }
+            };
+
             // Update progress to "profiling" for successful records
-            for (const cr of successfulRecords) {
-                onProgress?.({
-                    fileName: cr.fileName,
-                    phase: "profiling",
-                    uploadPercent: 100,
-                    documentRecordId: cr.recordId,
-                });
-            }
+            emitForSuccessful("profiling");
 
             // Fire-and-forget: don't await, don't block wizard
             void kickOffBackgroundTasks(
@@ -435,40 +454,16 @@ export async function orchestrateUpload(
                 resolvedSearchIndexName || undefined,
             ).then(() => {
                 // Update progress to "complete" for all successful files
-                for (const cr of successfulRecords) {
-                    onProgress?.({
-                        fileName: cr.fileName,
-                        phase: "complete",
-                        uploadPercent: 100,
-                        documentRecordId: cr.recordId,
-                    });
-                }
+                emitForSuccessful("complete");
             }).catch((err) => {
                 // Background task errors are non-critical
                 logger.warn("UploadOrchestrator", "Background tasks encountered errors (non-critical)", err);
                 // Still mark as complete since Phases 1 & 2 succeeded
-                for (const cr of successfulRecords) {
-                    onProgress?.({
-                        fileName: cr.fileName,
-                        phase: "complete",
-                        uploadPercent: 100,
-                        documentRecordId: cr.recordId,
-                    });
-                }
+                emitForSuccessful("complete");
             });
 
             // Immediately mark successful records as complete (don't wait for background)
-            for (const cr of successfulRecords) {
-                const idx = fileResults.findIndex((r) => r.fileName === cr.fileName);
-                if (idx >= 0) {
-                    onProgress?.({
-                        fileName: cr.fileName,
-                        phase: "complete",
-                        uploadPercent: 100,
-                        documentRecordId: cr.recordId,
-                    });
-                }
-            }
+            emitForSuccessful("complete");
         }
     }
 

@@ -21,6 +21,8 @@ import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/x
 // #1416: the REAL cleanGuid (ADR-044: strip braces, trim, lowercase) — dependency-free deep import,
 // same pattern as realGetXrm. Never re-implement it here: an identity stub hides brace/case bugs.
 import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/utils/guid';
+import type { DataGridConfiguration } from '../../../Spaarke.UI.Components/src/types/DataGridConfiguration';
+import type { SavedQueryResult } from '../../../Spaarke.UI.Components/src/services/IDataverseClient';
 
 // C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet and HighPrioritySection render their row menu through the
 // shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
@@ -61,6 +63,11 @@ export interface ISendEmailDialogMockProps {
   [k: string]: any;
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
+// `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
+export const describeSendFailure: (...args: unknown[]) => { title: string; message: string; reference?: string } = () => ({
+  title: 'Email not sent',
+  message: '',
+});
 
 // ---------------------------------------------------------------------------
 // messaging-communication-app (task 092, 2026-10-04): `sectionRegistry.ts`
@@ -130,9 +137,7 @@ export const PanelSplitter: React.FC<any> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const useTwoPanelLayout: (...args: any[]) => any = () => ({});
 
-// `RichFilePreviewDialog` — also the originally-reported missing export for
-// DailyBriefingApp.smoke.test.tsx / CountReconciliation.smoke.test.tsx
-// (DailyBriefingApp.tsx itself imports it directly).
+// `RichFilePreviewDialog` — DailyBriefingApp.tsx imports it directly.
 export interface IRichFilePreviewDialogMockProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onOpenFile?: (mode: string) => any;
@@ -163,6 +168,33 @@ export interface IDataverseClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [k: string]: any;
 }
+// `fetchConfigRecord` / `resolveSource` (ontology task 054): Communication.Components' `needsReviewCount.ts` imports both,
+// and the LegalWorkspace section registry reaches it transitively. Signatures mirror
+// Spaarke.UI.Components/src/components/DataGrid/resolveGridSource.ts (its types are imported type-only, so nothing loads
+// at runtime). Each stub resolves null: the real "no config record / unresolvable source" result, which the count
+// treats as "no count".
+export type GridSourceHost = 'internal' | 'external';
+export const fetchConfigRecord: (
+  dataverseClient: IDataverseClient,
+  configId: string
+) => Promise<DataGridConfiguration | null> = async () => null;
+export const resolveSource: (
+  dataverseClient: IDataverseClient,
+  configRecord: DataGridConfiguration | null,
+  fallbackEntityName: string | undefined,
+  host: GridSourceHost
+) => Promise<SavedQueryResult | null> = async () => null;
+// `AggregateCard` (ConsoleKit, ontology task 054): `ReconciliationAggregateCard.tsx`, on the same transitive path, renders it.
+// The props mirror ConsoleKit/AggregateCard.tsx's AggregateCardProps; nothing here renders it.
+export interface AggregateCardProps {
+  count: number | null | undefined;
+  label: string;
+  linkLabel: string;
+  onOpen: () => void;
+  icon?: React.ReactElement;
+  className?: string;
+}
+export const AggregateCard: React.FC<AggregateCardProps> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —

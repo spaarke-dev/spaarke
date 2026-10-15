@@ -68,7 +68,7 @@ A per-stamp registration (`spaarke-bff-api-{customerId}-{env}`), or intake refus
 
 | Field | Value |
 |---|---|
-| **Status** | Open — investigate (known limit; no cross-customer data path found) |
+| **Status** | Owner approved the fix 2026-10-14 (plan D37): `appRoleAssignmentRequired` on each stamp BFF service principal, assigned to `sprk-{customerId}-users`. Built after the A9 design settles home-directory workforce admission |
 | **Urgency** | before the first external customer |
 | **Filed** | 2026-10-07 |
 | **Source** | T240a review, verifier pass 2 |
@@ -141,7 +141,7 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 
 | Field | Value |
 |---|---|
-| **Status** | Open — before T186; needs an owner-approved live step |
+| **Status** | Fix applied live — dev Api `CustomerRunGuard__Enabled=True` (deployed 2026-10-13 from `67c80623f`). Open only for the live proof at T186: a second concurrent POST for the same customer is refused |
 | **Urgency** | before T186 |
 | **Filed** | 2026-10-09 (punch-list re-verification, 203b row A27) |
 | **Source** | `infrastructure/bicep/platform-controlplane.bicep` `customerRunGuardEnabled` default false; no `.bicepparam` sets it; live dev Api `CustomerRunGuard__Enabled = False` |
@@ -301,7 +301,7 @@ the BFF's owning project.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Open; F3 resolved, F6 code-fixed 2026-10-14 |
 | **Urgency** | F3 and F6 before T186 (F3 blocks H3 and H10 outright); F2/F4/F5 low |
 | **Filed** | 2026-10-09 (T261) |
 | **Source** | T261 inventory — `notes/t261-stamp-graph-least-privilege.md` §8 (call sites, Learn citations, live reads) |
@@ -334,11 +334,18 @@ the BFF's owning project.
 **Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
 (F6).
 
+**Update 2026-10-14.** F3 resolved: read live, `sprk-controlplane-dev-uami` (principal `38f7693f…`) holds
+`Application.ReadWrite.OwnedBy` and `AppRoleAssignment.ReadWrite.All`. The optional removal of the roles it no longer
+needs is still open; it holds `Mail.ReadWrite`, `Mail.Send` and `MailboxSettings.Read` by owner decision D33. F6 is
+fixed in code (e3f13d6b4; live proof at T186 H3): the delegated Files.ReadWrite.All id becomes `863451e7-0667-486c-a5d6-d135439485f0`, and
+delegated FileStorageContainer.Selected (`085ca537-…`) is added. Both ids were read live from the Graph service
+principal. F2, F4 and F5 are unchanged.
+
 ### ISS-022 — Three BFF secrets absent from the canonical catalog: `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`
 
 | Field | Value |
 |---|---|
-| **Status** | Open — recommendations below; owner decides |
+| **Status** | Owner approved all three recommendations 2026-10-14 (plan D36). Open for the build: the H4b SignalR managed-identity string and the manifest note |
 | **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
 | **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
 | **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
@@ -391,6 +398,102 @@ caller on a stamp; none is a boot failure.
 `$mustResolveTokens` (Step 1e-ter) includes `environmentSecurityGroupId`, which only B2BGuest fills; a NativeAccount run stops
 with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
 PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
+
+### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet — CLOSED 2026-10-13
+
+| Field | Value |
+|---|---|
+| **Status** | **Closed 2026-10-13.** D32 approved 2026-10-10 and applied 2026-10-13 (M1 PASS). Live checks as the app (Worker UAMI → MI-FIC → Spaarke Exchange Admin) the same day: M2, M3, M4a/b, M5, M7 PASS; M6 not run (optional). Results: `notes/t263-customer-shared-mailbox.md` §5. The full ensure route (M4 `Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles) is proven by T186 at H14m |
+| **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
+
+T263 built H14m: `sprk-{customerId}-mail` is created as a shared mailbox, added to `Spaarke-AppAccess-{customerId}`,
+authorization-tested, and recorded as the stamp's verified `sprk_communicationaccount` row. H13 re-checks all of it.
+`Spaarke Exchange Admin` holds only `Spaarke App RBAC Admin` plus `View-Only Recipients`, so it cannot run `New-Mailbox`
+or `Add-DistributionGroupMember`. Widening it is an owner decision (D25; `provisioning.md`).
+
+The sidecar detects the missing cmdlets before any write, so every run fails Resumable at H14m with
+`h14m-mailbox-ensure-failed` ("PRQ-E-16 … not applied") and creates nothing.
+
+**Needs**:
+1. The owner approves D32: the two custom roles plus one scope in `notes/t263-customer-shared-mailbox.md` §5, with
+   the exact cmdlets and parameters.
+2. An Organization Management admin applies them (deployment guide §4.2.1 step 5).
+3. Run live checks M1–M7, notably M5: whether `Get-Recipient -Filter "Members -eq '<DN>'"` works. If it does not, use
+   the one-line fallback in the note.
+
+Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
+
+### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` (and, with UAC 185, `sprk_externalinvitecodehash`) field locks on stamps
+
+| Field | Value |
+|---|---|
+| **Status** | Code complete 2026-10-14 (worktree commit bed40c9cc); live proof at T186 H7b (invitedon); codehash proof after the SpaarkeMaster release that carries it |
+| **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
+
+UAC-r2 task 184 adds `contact.sprk_externalinvitedon`, the pending-invite marker E11 trusts on the CIAM plane. It is
+field-secured through the existing `Spaarke BFF-Managed Field Readers` (Read) and `Writers` (Read/Create/Update) profiles and
+ships in SpaarkeMaster. A user who could write it could open E11's email bind, so a stamp where the lock did not arrive is
+a tenant-isolation gap. H7b (`SecureRecordSetupProcedure`) already verifies the other BFF-managed column locks but not this
+one. **Fix:** add the column to H7b's lock verification (reuse `scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify`'s
+checks); H7b never secures a column itself. If a check ever writes field-security rows, allow for `0x80041103`
+(MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
+**Widened 2026-10-13 (UAC task 185 design):** UAC task 185 adds `contact.sprk_externalinvitecodehash`, the invite-code
+hash, through `scripts/Set-ExternalInviteCodeHashSchema.ps1`. H7b must verify it too, with different grants: Readers
+have **no** permission row for it (UAC's script, `48db7adb3`, never creates one; a missing row and a 0/0/0 row both
+mean no access), and Writers 4/4/4. Any Readers access is a FAIL. The script refuses to run without 184's marker column.
+
+Follow-up (2026-10-14 review): H7b does not check auditing-off / Advanced-Find-off on `sprk_externalinvitecodehash` (the Dataverse seam reads only IsSecured); add with the release that carries the column.
+
+### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner/business action; **before the first production customer** |
+| **Filed** | 2026-10-13 (ADR-028 A9, owner decision relayed by SPA-r3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1811 |
+
+Under A9, workforce contacts consent to, and sign in through, Spaarke's multitenant workforce SPA client and each
+stamp's multitenant BFF app. Unverified multitenant apps meet risk-based step-up consent and show "unverified" to
+customer admins. **Needs:** a Microsoft AI Cloud Partner Program account, and a verified publisher domain (not
+`*.onmicrosoft.com`) set on those apps. Provisioning's A9 work (H3 v2 tokens + `knownClientApplications`, intake
+`customerWorkforceTenantIds`, admin-consent link): `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
+
+**Update 2026-10-14 (owner + research).** Spaarke has a Partner Program account: Partner ID `7011236`, publisher name
+"Spaarke Legal Collaboration Platform". Research on Microsoft Learn (researcher note
+`.claude/agent-memory/researcher/publisher-verification-2026-10-14.md`):
+- The ID must be the partner **global** account (`PartnerGlobal`); a location ID is rejected.
+- The Spaarke tenant must be associated with that account in Partner Center (Settings → Account settings → Tenants).
+- The Partner Center primary-contact email domain must be `spaarke.com`; it is the tenant's verified default domain and
+  the apps' `publisherDomain`.
+- `setVerifiedPublisher` is **delegated-only**: a person with Cloud Application Administrator in Entra and Accounts
+  Admin (or Cloud Partner Program Admin) in Partner Center, with fresh MFA. H3's app-only identity cannot set it, so
+  each customer's BFF app needs an operator step after provisioning.
+- Admin consent is **not** blocked for unverified apps (the prompt shows "Unverified"). Risk-based step-up affects user
+  consent only. So verification does not gate onboarding or T186.
+
+**Plan:** (1) An operator confirms the three Partner Center facts above. (2) One-time: set the Partner ID on the shared
+workforce SPA client, the Office add-in apps and the Teams app (portal: App registrations → Branding & properties →
+Partner ID). (3) Per customer: an operator step in the hand-off checklist (`POST /applications/{id}/setVerifiedPublisher`
+`{"verifiedPublisherId":"7011236"}`), verified with `GET ?$select=verifiedPublisher`. (4) Test whether an unverified
+per-customer API app (a resource, not the client) changes the consent prompt at all. If it does not, step 3 is optional.
+
+### ISS-027 — SpaarkeMaster ships an orphan web resource `sprk_DocumentDelete.js` with hard-coded deleted BFF hosts
+
+| Field | Value |
+|---|---|
+| **Status** | Open — fix in the next SpaarkeMaster release (low: unreachable today) |
+| **Filed** | 2026-10-14 (found during the old-demo retirement, D35) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1866 |
+
+`sprk_DocumentDelete.js` ships in SpaarkeMaster, but no ribbon, form or other web resource references it. It maps org
+URLs to BFF hosts and defaults to the deleted `spe-api-dev-67e2xz`. The non-shipped
+`src/dataverse/webresources/spaarke_documents/DocumentOperations.js` keeps the same stale mapping. The shipped
+`sprk_DocumentOperations.js` is correct, because it reads `sprk_BffApiBaseUrl`. **Fix:**
+1. Run a dependency check in spaarkedev1.
+2. Remove the file from SpaarkeMaster, and list it as a removed component in the release note.
+3. Delete the stale repo copy.
 
 ## Resolved
 

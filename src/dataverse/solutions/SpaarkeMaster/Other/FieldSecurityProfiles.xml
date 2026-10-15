@@ -83,6 +83,38 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_servicerequest</EntityName>
+        <AttributeName>sprk_intakedata</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_communication</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitedon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_budgetrevision</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_project</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -179,6 +211,54 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordtype</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_document</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_todo</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_signal</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_decisionrecord</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_todo</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -251,6 +331,14 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_event</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_matter</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -309,22 +397,6 @@
       <FieldPermission>
         <EntityName>sprk_report</EntityName>
         <AttributeName>sprk_datasetid</AttributeName>
-        <CanRead>4</CanRead>
-        <CanUpdate>0</CanUpdate>
-        <CanCreate>0</CanCreate>
-        <CanReadUnmasked>0</CanReadUnmasked>
-      </FieldPermission>
-      <FieldPermission>
-        <EntityName>sprk_project</EntityName>
-        <AttributeName>sprk_regardingrecordid</AttributeName>
-        <CanRead>4</CanRead>
-        <CanUpdate>0</CanUpdate>
-        <CanCreate>0</CanCreate>
-        <CanReadUnmasked>0</CanReadUnmasked>
-      </FieldPermission>
-      <FieldPermission>
-        <EntityName>sprk_project</EntityName>
-        <AttributeName>sprk_regardingrecordtype</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>0</CanUpdate>
         <CanCreate>0</CanCreate>
@@ -409,6 +481,30 @@
       <FieldPermission>
         <EntityName>sprk_document</EntityName>
         <AttributeName>sprk_graphitemidbound</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_signal</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitedon</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>
@@ -519,6 +615,78 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_workassignment</EntityName>
+        <AttributeName>sprk_accessinheritance</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordtype</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_servicerequest</EntityName>
+        <AttributeName>sprk_intakedata</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_document</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_todo</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_event</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_communication</EntityName>
+        <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_decisionrecord</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitecodehash</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_eventlog</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -615,6 +783,14 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_accessinheritance</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_externalrecordaccess</EntityName>
         <AttributeName>sprk_grantedbycontact</AttributeName>
         <CanRead>4</CanRead>
@@ -647,16 +823,8 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
-        <EntityName>sprk_project</EntityName>
-        <AttributeName>sprk_regardingrecordid</AttributeName>
-        <CanRead>4</CanRead>
-        <CanUpdate>4</CanUpdate>
-        <CanCreate>4</CanCreate>
-        <CanReadUnmasked>0</CanReadUnmasked>
-      </FieldPermission>
-      <FieldPermission>
-        <EntityName>sprk_project</EntityName>
-        <AttributeName>sprk_regardingrecordtype</AttributeName>
+        <EntityName>sprk_budgetrevision</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>
@@ -704,7 +872,7 @@
       </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
-  <FieldSecurityProfile name="Spaarke Ontology Writer Field Writers" description="Read/Create/Update on sprk_createdbyperson for sprk_budgetrevision, sprk_decisionrecord and sprk_signal ONLY. Members: the ontology writer application user (# mi-ontology-writer) ONLY; membership is per environment and is set by scripts/Set-ChildRecordCreatorPersonSchema.ps1, not by this solution. ontology-platform-r1 D-136 (task 147)." fieldsecurityprofileid="{b710d90c-0f27-4d6a-a146-2769c8aa921f}">
+  <FieldSecurityProfile name="Spaarke Ontology Writer Field Writers" description="Read/Create/Update on sprk_createdbyperson for sprk_budgetrevision, sprk_decisionrecord, sprk_signal ONLY. Members: the ontology writer application user ONLY. ontology-platform-r1 D-136 (task 147)." fieldsecurityprofileid="{b710d90c-0f27-4d6a-a146-2769c8aa921f}">
     <FieldPermissions>
       <FieldPermission>
         <EntityName>sprk_budgetrevision</EntityName>

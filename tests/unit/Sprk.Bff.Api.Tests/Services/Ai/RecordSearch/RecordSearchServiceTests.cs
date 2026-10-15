@@ -180,22 +180,6 @@ public class RecordSearchServiceTests
         result.Metadata.HybridMode.Should().Be(RecordHybridSearchMode.Rrf);
     }
 
-    [Fact]
-    public async Task SearchAsync_WithValidRequest_ReturnsSearchTimeMetric()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = CreateValidRequest();
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Metadata.SearchTime.Should().BeGreaterOrEqualTo(0);
-    }
 
     #endregion
 

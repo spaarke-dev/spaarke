@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Both-plane E2E on dev against success criteria 1–12 (incl. FR-10 Teams parity)</title>
+    <phase>7 Deploy and verify</phase>
+    <gate>after 070, 071 and 002</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Integration/E2E verification (tags e2e-test)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted verification against a written checklist</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live E2E on shared dev</parallel-reason>
+    <deps>002, 070, 071</deps>
+    <tags>e2e-test, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the spec's success criteria 1–12 on dev for a CIAM partner (browser), a licensed workforce user and a workforce contact (browser and Teams), including every negative case, and record the evidence.</prompt>
+  <role>SPAARKE platform developer. QA lead. Follow ADRs strictly.</role>
+  <goal>projects/spaarke-SPA-external-access-platform-r3/notes/e2e-results.md has one row per success criterion and persona with pass/fail and evidence; every failure is fixed in its owning task or filed via /project-defer-issue-tracking.</goal>
+
+  <context>
+    <background>Spec §Success Criteria 1–12; FR-10 (Teams parity for workforce). NFR-07: C7/FR-15 checks use a stamp-shaped customer configuration (a test customer tenant), not dev's CustomerTenantIds. If task 060 handed FR-14 to R4, criterion 6 is verified as 'hand-off written, join flagged off'.</background>
+    <relevant-files>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/e2e-results.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use test identities and test records only; delete test rows afterwards (owner-approved list).</constraint>
+    <constraint source="project">Every defect found is fixed in scope or filed (notes/defer-issues.md + GitHub issue) — root CLAUDE.md §8.5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>end-to-end verification</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Write the checklist (criteria × personas × hosts).</step>
+    <step order="2">Run it; capture evidence (screens, status codes, masked claims).</step>
+    <step order="3">For each failure: fix in the owning task (reopen it) or file it.</step>
+    <step order="4">Get the owner to review the grid columns (criterion 4) and the notification copy.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="6">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-072-notes.md.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Partner end to end">
+      <steps><step>Sign in as partner</step><step>Open a granted matter</step><step>Read and send a message</step><step>Upload and delete own document</step><step>Try an ungranted record</step></steps>
+      <expected>All succeed; the ungranted record is denied</expected>
+    </test>
+    <test name="Workforce in Teams">
+      <steps><step>Open the Teams tab as the test guest</step><step>Open a record</step><step>Submit a wizard</step><step>Check the bell</step></steps>
+      <expected>Same behaviour as the browser</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of success criteria 1–12 has a recorded result for each applicable persona and host.</criterion>
+    <criterion testable="true">Every negative case in the criteria (ungranted record, outside-set send, ViewOnly upload, non-creator delete, partner switch off, non-listed tenant) is recorded as denied.</criterion>
+    <criterion testable="true">No failure remains without a fix or a filed issue.</criterion>
+    <criterion testable="true">The owner's review of grid columns and notification copy is recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §Success Criteria; FR-10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

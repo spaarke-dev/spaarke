@@ -178,6 +178,59 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         row.GetAttributeValue<string>("sprk_reason").Should().StartWith(Marker);
     }
 
+    // ── Task 042 (FR-23): the communications gate's decision, authorize and deny, against the LIVE schema (opt-in like the rest) ──
+
+    private const string GateMarker = "zz-042-seam";
+
+    /// <summary>A real <c>sprk_communication</c> on spaarkedev1 filed under <see cref="PositiveMatter"/> (read-only reference: the test never writes it).</summary>
+    private static readonly Guid FiledCommunication = Guid.Parse("f00b6389-8fbf-f111-aaaf-0022482913fc");
+
+    private static GateDecisionRecordRequest GateRequest(bool authorize) => new(
+        FiledCommunication, Guid.NewGuid(), authorize, $"{GateMarker} - {(authorize ? "rule-matched-confidence-met" : "rule-matched-confidence-below-threshold")}",
+        "communication-ri-action", "Create a review task and notify the communication's owner",
+        new Dictionary<string, object?> { ["communicationId"] = FiledCommunication, ["confidence"] = authorize ? 0.9 : 0.4, ["threshold"] = 0.7 },
+        DirectFiledUnderId: PositiveMatter);
+
+    [Fact]
+    public async Task WriteGateDecisionAsync_BothOutcomes_AsTheWriter_PersistWithNullConfirmerAndPolicyVersion_AndAreQueryablePerMatter()
+    {
+        if (!_dv.IsLive) return;
+
+        var writer = BuildWriter();
+        var authorized = await writer.WriteGateDecisionAsync(GateRequest(authorize: true));
+        var denied = await writer.WriteGateDecisionAsync(GateRequest(authorize: false));
+
+        var columns = new ColumnSet(Columns.Concat(new[] { "sprk_gatesessionid", "sprk_regardingcommunication", "sprk_regardingmatter", "sprk_assignedtointernal" }).ToArray());
+        var a = await _dv.OperatorClient.RetrieveAsync("sprk_decisionrecord", authorized.RecordId, columns);
+        var d = await _dv.OperatorClient.RetrieveAsync("sprk_decisionrecord", denied.RecordId, columns);
+
+        foreach (var row in new[] { a, d })
+        {
+            row.GetAttributeValue<OptionSetValue>("sprk_recordclass").Value.Should().Be(100000000, "Judgement on both paths");
+            row.GetAttributeValue<EntityReference>("sprk_confirmedby").Should().BeNull("no human decided; the column is nullable live");
+            row.GetAttributeValue<EntityReference>("sprk_policyversion").Should().BeNull("the gate's rules are sprk_communicationrule rows");
+            row.GetAttributeValue<string>("sprk_gatesessionid").Should().BeNull();
+            row.GetAttributeValue<EntityReference>("sprk_action").Should().BeNull();
+            row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(FiledCommunication);
+            row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(PositiveMatter);
+            row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(PositiveMatter);
+            row.GetAttributeValue<EntityReference>("owningteam").Should().NotBeNull("D-129: owned by a team");
+            row.GetAttributeValue<EntityReference>("owninguser").Should().BeNull();
+        }
+
+        a.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000000);
+        a.GetAttributeValue<string>("sprk_actioncode").Should().Be("communication-ri-action");
+        d.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000001);
+        d.GetAttributeValue<string>("sprk_actioncode").Should().BeNull();
+
+        // Success criterion 3: FetchXML per matter over both outcomes returns both.
+        var fetch = $@"<fetch><entity name='sprk_decisionrecord'><attribute name='sprk_decisionoutcome' />
+            <filter type='and'><condition attribute='sprk_regardingmatter' operator='eq' value='{PositiveMatter}' />
+            <condition attribute='sprk_reason' operator='begins-with' value='{GateMarker}' /></filter></entity></fetch>";
+        var found = (await _dv.OperatorClient.RetrieveMultipleAsync(new FetchExpression(fetch))).Entities;
+        found.Select(e => e.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value).Should().BeEquivalentTo(new[] { 100000000, 100000001 });
+    }
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     /// <summary>Sweeps by the <c>zz-040-</c> marker in <c>sprk_reason</c>, with the operator client (the writer cannot delete).</summary>
@@ -187,12 +240,15 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
 
         try
         {
-            var query = new QueryExpression("sprk_decisionrecord") { ColumnSet = new ColumnSet("sprk_decisionrecordid") };
-            query.Criteria.AddCondition("sprk_reason", ConditionOperator.BeginsWith, "zz-040-");
-            foreach (var row in (await _dv.OperatorClient.RetrieveMultipleAsync(query)).Entities)
+            foreach (var prefix in new[] { "zz-040-", "zz-042-" })
             {
-                try { await _dv.OperatorClient.DeleteAsync("sprk_decisionrecord", row.Id); }
-                catch { /* best effort: must not mask the assertion failure */ }
+                var query = new QueryExpression("sprk_decisionrecord") { ColumnSet = new ColumnSet("sprk_decisionrecordid") };
+                query.Criteria.AddCondition("sprk_reason", ConditionOperator.BeginsWith, prefix);
+                foreach (var row in (await _dv.OperatorClient.RetrieveMultipleAsync(query)).Entities)
+                {
+                    try { await _dv.OperatorClient.DeleteAsync("sprk_decisionrecord", row.Id); }
+                    catch { /* best effort: must not mask the assertion failure */ }
+                }
             }
         }
         catch

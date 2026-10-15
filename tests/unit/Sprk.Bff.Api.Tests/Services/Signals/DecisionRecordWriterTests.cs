@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Signals;
 /// sprk_workassignment, sprk_corerecordtype (-> sprk_recordtype_ref), sprk_corerecordid, sprk_steps, sprk_followons,
 /// sprk_gatetier, sprk_actioncode, sprk_action (nullable), sprk_confirmedby, sprk_decidedon, sprk_privilegeflagged.
 /// </remarks>
-public sealed class DecisionRecordWriterTests
+public sealed partial class DecisionRecordWriterTests
 {
     private static readonly Guid Review = Guid.NewGuid();
     private static readonly Guid PolicyVersion = Guid.NewGuid();
@@ -46,7 +46,7 @@ public sealed class DecisionRecordWriterTests
 
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
         public Mock<IRecordOwnershipResolver> Ownership { get; } = new();
@@ -1076,7 +1076,7 @@ public sealed class DecisionRecordWriterTests
         h.Row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(CommunicationId.ToString("D").ToLowerInvariant());
         h.Row.Contains("sprk_regardingrecordtype").Should().BeFalse("spaarkedev1 has no sprk_communication catalog row: the pair is untyped (D-133)");
         h.RecordTypes.Queried.Should().Equal("sprk_communication");
-        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the typed lineage column stays populated until task 145");
+        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the typed core column is decision context and stays populated (task 145)");
         h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
         result.SecureOwnerTeamId.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
     }
@@ -1118,6 +1118,7 @@ public sealed class DecisionRecordWriterTests
         var asked = h.OwnerAsks.Should().ContainSingle().Subject;
         asked.Parents.Should().Equal(Parent("sprk_todo", TodoId), Parent("sprk_project", project), Parent("sprk_document", signalSubject));
         asked.RequestedBy!.SystemUserId.Should().Be(User, "#1783 / D-135: the deciding user is the person who asked");
+        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeFalse("task 042: only a gate decision asks as the content of a communication; the review route is unchanged");
         h.Row.GetAttributeValue<EntityReference>("sprk_regardingtodo").Id.Should().Be(TodoId);
         h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(project, "the stamp the derived core gave");
     }

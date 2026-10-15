@@ -203,6 +203,10 @@ const ENTITY_LABELS: Record<string, string> = {
   sprk_servicerequest: 'Service Request',
   sprk_workassignment: 'Work Assignment',
   sprk_budget: 'Budget',
+  sprk_analysis: 'Analysis',
+  sprk_reportcard: 'Report Card',
+  sprk_document: 'Document',
+  sprk_communication: 'Communication',
 };
 
 export function entityLabel(entity: string): string {

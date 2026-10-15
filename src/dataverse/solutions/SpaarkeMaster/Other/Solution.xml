@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<ImportExportXml version="9.2.26094.133" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26094.133" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26094.00142">
+<ImportExportXml version="9.2.26101.136" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26101.136" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26101.00138">
   <SolutionManifest>
     <UniqueName>SpaarkeMaster</UniqueName>
     <LocalizedNames>
@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Complete Spaarke platform solution - all sprk_ components plus customized standard entities" languagecode="1033" />
     </Descriptions>
-    <Version>1.2.1.0</Version>
+    <Version>1.2.3.0</Version>
     <Managed>2</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
@@ -460,7 +460,9 @@
       <RootComponent type="61" schemaName="sprk_wizard_commands" behavior="0" />
       <RootComponent type="61" schemaName="sprk_workspacelayoutwizard" behavior="0" />
       <RootComponent type="62" schemaName="sprk_MatterManagement" behavior="0" />
+      <RootComponent type="62" schemaName="sprk_SpaarkeAdministration" behavior="0" />
       <RootComponent type="62" schemaName="sprk_SpaarkeAISetup" behavior="0" />
+      <RootComponent type="62" schemaName="sprk_SpaarkeDocumentManagement" behavior="0" />
       <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationActions" behavior="0" />
       <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationAttachments" behavior="0" />
       <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationConnections" behavior="0" />
@@ -488,7 +490,9 @@
       <RootComponent type="70" id="{b710d90c-0f27-4d6a-a146-2769c8aa921f}" behavior="0" />
       <RootComponent type="70" id="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}" behavior="0" />
       <RootComponent type="80" schemaName="sprk_MatterManagement" behavior="0" />
+      <RootComponent type="80" schemaName="sprk_SpaarkeAdministration" behavior="0" />
       <RootComponent type="80" schemaName="sprk_SpaarkeAISetup" behavior="0" />
+      <RootComponent type="80" schemaName="sprk_SpaarkeDocumentManagement" behavior="0" />
       <RootComponent type="9" schemaName="sprk_accesspermission" behavior="0" />
       <RootComponent type="9" schemaName="sprk_accessrights" behavior="0" />
       <RootComponent type="9" schemaName="sprk_aggregationtype" behavior="0" />
@@ -815,12 +819,6 @@
         <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
       </MissingDependency>
       <MissingDependency>
-        <Required type="60" displayName="Contact Card form" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{bc0f68dd-a4b1-4a8f-bed3-c8f5db2f89cf}">
-          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
-        </Required>
-        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
-      </MissingDependency>
-      <MissingDependency>
         <Required type="60" displayName="Contact Quick Form" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{bdb0ae1c-32fa-4374-b637-8dafe107bc44}">
           <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
         </Required>
@@ -835,12 +833,6 @@
       </MissingDependency>
       <MissingDependency>
         <Required type="60" displayName="Account Quick Create" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{c9e7ec2d-efca-4e4c-b3e3-f63c4bba5e4b}">
-          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
-        </Required>
-        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
-      </MissingDependency>
-      <MissingDependency>
-        <Required type="60" displayName="Account Card form" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{cccff382-2b92-467e-bf1b-3db179512af8}">
           <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
         </Required>
         <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
@@ -861,7 +853,19 @@
         <Required type="61" schemaName="msdyn_/Images/AppModule_Default_Icon.png" displayName="msdyn_/Images/AppModule_Default_Icon.png" solution="AppModuleWebResources (2.5)">
           <package appName="AppModule Web Resources Package" version="2.5">AppModuleWebResources (2.5)</package>
         </Required>
+        <Dependent type="80" schemaName="sprk_SpaarkeAdministration" displayName="Spaarke Administration" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="msdyn_/Images/AppModule_Default_Icon.png" displayName="msdyn_/Images/AppModule_Default_Icon.png" solution="AppModuleWebResources (2.5)">
+          <package appName="AppModule Web Resources Package" version="2.5">AppModuleWebResources (2.5)</package>
+        </Required>
         <Dependent type="80" schemaName="sprk_SpaarkeAISetup" displayName="Spaarke AI Setup" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="msdyn_/Images/AppModule_Default_Icon.png" displayName="msdyn_/Images/AppModule_Default_Icon.png" solution="AppModuleWebResources (2.5)">
+          <package appName="AppModule Web Resources Package" version="2.5">AppModuleWebResources (2.5)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_SpaarkeDocumentManagement" displayName="Spaarke Document Management" />
       </MissingDependency>
       <MissingDependency>
         <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
@@ -1150,12 +1154,24 @@
         <Required type="SettingDefinition" displayName="AppChannel" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="AppChannel">
           <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
         </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_SpaarkeAdministration,settingdefinitionid.uniquename=AppChannel" id.parentappmoduleid.uniquename="sprk_SpaarkeAdministration" id.settingdefinitionid.uniquename="AppChannel" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="AppChannel" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="AppChannel">
+          <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
+        </Required>
         <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_SpaarkeAISetup,settingdefinitionid.uniquename=AppChannel" id.parentappmoduleid.uniquename="sprk_SpaarkeAISetup" id.settingdefinitionid.uniquename="AppChannel" />
       </MissingDependency>
       <MissingDependency>
-        <Required type="SettingDefinition" displayName="appcopilotenabled" solution="msdyn_AppCopilotAppInfraSettings (9.2.2026084.260813071)" id.uniquename="appcopilotenabled">
+        <Required type="SettingDefinition" displayName="AppChannel" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="AppChannel">
+          <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_SpaarkeDocumentManagement,settingdefinitionid.uniquename=AppChannel" id.parentappmoduleid.uniquename="sprk_SpaarkeDocumentManagement" id.settingdefinitionid.uniquename="AppChannel" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="appcopilotenabled" solution="msdyn_AppCopilotAppInfraSettings (9.2.2026095.260925087)" id.uniquename="appcopilotenabled">
           <package appName="PowerAppsAppCopilotApp Package" version="1.0.0.2">msdyn_SuggestedAction (1.0.0.2)</package>
-          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.5">msdyn_M365CopilotAppInfraSettings (9.2.0.5)</package>
+          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.9">msdyn_M365CopilotAppInfraSettings (9.2.0.9)</package>
         </Required>
         <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=appcopilotenabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="appcopilotenabled" />
       </MissingDependency>
@@ -1192,8 +1208,8 @@
         <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=IsSmartEmailAddressValidationControlEnabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="IsSmartEmailAddressValidationControlEnabled" />
       </MissingDependency>
       <MissingDependency>
-        <Required type="SettingDefinition" displayName="m365copilotmodelappenabled" solution="msdyn_M365CopilotAppInfraSettings (9.2.0.5)" id.uniquename="m365copilotmodelappenabled">
-          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.5">msdyn_M365CopilotAppInfraSettings (9.2.0.5)</package>
+        <Required type="SettingDefinition" displayName="m365copilotmodelappenabled" solution="msdyn_M365CopilotAppInfraSettings (9.2.0.9)" id.uniquename="m365copilotmodelappenabled">
+          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.9">msdyn_M365CopilotAppInfraSettings (9.2.0.9)</package>
         </Required>
         <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=m365copilotmodelappenabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="m365copilotmodelappenabled" />
       </MissingDependency>

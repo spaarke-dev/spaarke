@@ -368,6 +368,18 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(() => fireEvent.click(items[0])).not.toThrow();
   });
 
+  it('the record-type menu shows friendly names and omits Communication and Document (owner 2026-10-13)', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /link another record/i }));
+    const labels = (await screen.findAllByRole('menuitem')).map(i => i.textContent?.trim());
+
+    expect(labels).toEqual(expect.arrayContaining(['Matter', 'Analysis', 'Report Card', 'Contact']));
+    expect(labels).not.toContain('Communication');
+    expect(labels).not.toContain('Document');
+    expect(labels.some(l => l?.startsWith('sprk_'))).toBe(false);
+  });
+
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />, webDarkTheme);

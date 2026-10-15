@@ -51,7 +51,7 @@ public class DemoEnvironmentConfig
     public required string Name { get; set; }
 
     /// <summary>
-    /// Dataverse environment URL (e.g., "https://spaarke-demo.crm.dynamics.com").
+    /// Dataverse environment URL (e.g., "https://myenv.crm.dynamics.com").
     /// </summary>
     [Required]
     [Url]

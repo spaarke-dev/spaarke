@@ -1183,12 +1183,55 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 "An impersonated read requires a non-empty caller systemuserid; refusing to issue an app-only query on the access-scoped read path (fail closed).",
                 nameof(callerSystemUserId));
 
+        _logger.LogDebug(
+            "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
+
+        return await RetrieveMultipleRowsAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+    }
+
+    /// <summary>
+    /// Runs an OData GET against <paramref name="entitySetName"/> APP-ONLY (the BFF's own identity, no
+    /// <c>MSCRMCallerID</c>), returning the raw rows with FormattedValue annotations — the same row shape as
+    /// <see cref="RetrieveMultipleImpersonatedAsync"/>. Added for the external-plane message read
+    /// (spaarke-SPA-external-access-platform-r3 task 033, FR-04): a contact caller has no <c>systemuser</c> to
+    /// impersonate, and the external plane forbids OBO (ADR-028 / NFR-01).
+    /// <para>
+    /// SECURITY: an app-only read sees every row the application user can read. It is NOT an access-scoped read and
+    /// MUST NOT be used as a fallback for an unresolved impersonated caller. A caller of this method authorizes the
+    /// record first (the external plane checks it against the caller's composed accessible set) and scopes
+    /// <paramref name="odataQuery"/> to that record.
+    /// </para>
+    /// </summary>
+    /// <param name="entitySetName">The OData entity SET name, e.g. <c>sprk_communications</c>.</param>
+    /// <param name="odataQuery">The OData query string WITHOUT a leading <c>?</c>; the caller OData-escapes values.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The rows as attribute-keyed dictionaries (empty when none match).</returns>
+    public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> RetrieveMultipleAppOnlyAsync(
+        string entitySetName,
+        string? odataQuery,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entitySetName))
+            throw new ArgumentException("Entity set name must be provided.", nameof(entitySetName));
+
+        _logger.LogDebug("[DATAVERSE-APPONLY] GET {EntitySet}", entitySetName);
+
+        return await RetrieveMultipleRowsAsync(entitySetName, odataQuery, impersonateSystemUserId: null, ct);
+    }
+
+    /// <summary>
+    /// The shared GET behind <see cref="RetrieveMultipleImpersonatedAsync"/> and <see cref="RetrieveMultipleAppOnlyAsync"/>:
+    /// impersonated when <paramref name="impersonateSystemUserId"/> is set, app-only when it is null.
+    /// </summary>
+    private async Task<IReadOnlyList<Dictionary<string, JsonElement>>> RetrieveMultipleRowsAsync(
+        string entitySetName,
+        string? odataQuery,
+        Guid? impersonateSystemUserId,
+        CancellationToken ct)
+    {
         var url = string.IsNullOrWhiteSpace(odataQuery)
             ? entitySetName
             : $"{entitySetName}?{odataQuery}";
-
-        _logger.LogDebug(
-            "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
 
         // Request FormattedValue annotations so a lookup's display name (e.g. sprk_sentby → the sender's
         // systemuser display name) rides the SAME impersonated row as the lookup value itself. This is the
@@ -1197,7 +1240,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         // sprk_sentbyname column). Annotations are additive extra keys ("{field}@OData.Community.Display.
         // V1.FormattedValue") that non-communication readers of this impersonated seam simply ignore.
         using var request = await CreateAuthenticatedRequestAsync(
-            HttpMethod.Get, url, ct, impersonateSystemUserId: callerSystemUserId);
+            HttpMethod.Get, url, ct, impersonateSystemUserId);
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
         var response = await _httpClient.SendAsync(request, ct);

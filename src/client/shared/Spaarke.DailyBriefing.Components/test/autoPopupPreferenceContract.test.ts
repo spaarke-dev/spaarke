@@ -6,10 +6,9 @@
  *   (`src/solutions/LegalWorkspace/src/hooks/useDailyDigestAutoPopup.ts`)
  *   reads the SAME `sprk_userpreference` row that the in-widget
  *   `PreferencesDropdown` writes via `saveDigestPreferences`. The hook
- *   intentionally inlines its own copy of the preference type ID + a small
- *   parser helper (`parseAutoPopupFromPreferenceJson`) rather than depending
- *   on `@spaarke/daily-briefing-components` directly (LegalWorkspace must not
- *   acquire a new package dep per task 043 constraints).
+ *   intentionally inlines its own copy of the preference type ID rather than
+ *   depending on `@spaarke/daily-briefing-components` directly (LegalWorkspace
+ *   must not acquire a new package dep per task 043 constraints).
  *
  *   These tests enforce the contract the hook depends on:
  *     1. `PREFERENCE_TYPE_DAILY_DIGEST === 100000002` (the value the hook
@@ -56,24 +55,6 @@ function makeWebApi(): IWebApi {
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
-// Pure-helper: replicates the LegalWorkspace inlined parser
-// (`parseAutoPopupFromPreferenceJson`) so this package's tests own the
-// canonical contract. If the hook's inlined copy diverges, the LegalWorkspace
-// build is unaffected, but a follow-up review should align them.
-// ---------------------------------------------------------------------------
-
-function parseAutoPopupFromPreferenceJson(rawValue: string | undefined | null): boolean {
-  if (!rawValue) return true;
-  try {
-    const parsed = JSON.parse(rawValue) as { autoPopup?: unknown };
-    if (typeof parsed.autoPopup === 'boolean') return parsed.autoPopup;
-    return true;
-  } catch {
-    return true;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -102,44 +83,6 @@ describe('autoPopup preference — schema contract (FR-17d)', () => {
         autoPopup: false,
       };
       expect(prefs.autoPopup).toBe(false);
-    });
-  });
-
-  describe('parseAutoPopupFromPreferenceJson — parser contract', () => {
-    it('returns true when autoPopup is explicitly true', () => {
-      const json = JSON.stringify({ autoPopup: true, disabledChannels: [] });
-      expect(parseAutoPopupFromPreferenceJson(json)).toBe(true);
-    });
-
-    it('returns false when autoPopup is explicitly false', () => {
-      const json = JSON.stringify({ autoPopup: false, disabledChannels: [] });
-      expect(parseAutoPopupFromPreferenceJson(json)).toBe(false);
-    });
-
-    it('returns true (opt-out default) when JSON is missing autoPopup', () => {
-      const json = JSON.stringify({ disabledChannels: ['tasks-overdue'] });
-      expect(parseAutoPopupFromPreferenceJson(json)).toBe(true);
-    });
-
-    it('returns true (opt-out default) when raw value is undefined', () => {
-      expect(parseAutoPopupFromPreferenceJson(undefined)).toBe(true);
-    });
-
-    it('returns true (opt-out default) when raw value is null', () => {
-      expect(parseAutoPopupFromPreferenceJson(null)).toBe(true);
-    });
-
-    it('returns true (opt-out default) when raw value is empty string', () => {
-      expect(parseAutoPopupFromPreferenceJson('')).toBe(true);
-    });
-
-    it('returns true (defensive default) when JSON is malformed', () => {
-      expect(parseAutoPopupFromPreferenceJson('{ not valid json')).toBe(true);
-    });
-
-    it('returns true (defensive default) when autoPopup is non-boolean', () => {
-      const json = JSON.stringify({ autoPopup: 'yes', disabledChannels: [] });
-      expect(parseAutoPopupFromPreferenceJson(json)).toBe(true);
     });
   });
 

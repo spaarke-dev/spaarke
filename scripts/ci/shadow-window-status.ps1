@@ -125,7 +125,10 @@ Write-Host ('=' * 72)
 $repo = (gh repo view --json nameWithOwner --jq .nameWithOwner)
 if (-not $repo) { throw 'Could not resolve the repository. Is `gh` authenticated?' }
 
-$prsJson = gh pr list --state merged --limit $Limit --json number,title,mergeCommit,mergedAt
+# Only PRs into master count (owner ruling 2026-10-13, #1585): the merge rule this window
+# measures protects master. A PR into a project branch (#1585 merged into the ontology branch)
+# is not a master merge decision, so its verdicts are not comparable.
+$prsJson = gh pr list --state merged --base master --limit $Limit --json number,title,mergeCommit,mergedAt
 $prs = $prsJson | ConvertFrom-Json
 
 $rows = [System.Collections.Generic.List[object]]::new()
@@ -141,18 +144,26 @@ foreach ($pr in $prs) {
     if ([datetime]$pr.mergedAt -lt $Since) { $excludedAsPreWindow++; continue }
 
     # All workflow runs for this exact commit, both systems in one call.
-    $runs = (gh api "repos/$repo/actions/runs?head_sha=$sha&per_page=50" --jq '.workflow_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"') -split "`n" |
+    $runs = (gh api "repos/$repo/actions/runs?head_sha=$sha&per_page=50" --jq '.workflow_runs[] | "\(.name)\t\(.status)\t\(.conclusion)\t\(.id)"') -split "`n" |
             Where-Object { $_ }
 
-    $legacy = $null; $new = $null
+    $legacy = $null; $new = $null; $legacyRunId = $null
     foreach ($r in $runs) {
         $parts = $r -split "`t"
-        if ($parts[0] -eq $LegacyWorkflow -and $parts[1] -eq 'completed') { $legacy = $parts[2] }
+        if ($parts[0] -eq $LegacyWorkflow -and $parts[1] -eq 'completed') { $legacy = $parts[2]; $legacyRunId = $parts[3] }
         if ($parts[0] -eq $NewWorkflow    -and $parts[1] -eq 'completed') { $new    = $parts[2] }
     }
 
+    # A legacy 'failure' in which no job that actually ran failed is infrastructure, not a verdict:
+    # #1357's run failed only because its Code Quality job never got a runner (no conclusion,
+    # never completed) while every job that ran passed. Treat it like a cancelled run.
+    if ($legacy -eq 'failure' -and $legacyRunId) {
+        $failedJobs = @(gh api "repos/$repo/actions/runs/$legacyRunId/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure") | .name' | Where-Object { $_ })
+        if ($failedJobs.Count -eq 0) { $legacy = 'no-verdict' }
+    }
+
     # Cancelled runs are not verdicts -- they are absent data. Treat as no-compare.
-    if ($legacy -in @($null, 'cancelled') -or $new -in @($null, 'cancelled')) { continue }
+    if ($legacy -in @($null, 'cancelled', 'no-verdict') -or $new -in @($null, 'cancelled')) { continue }
 
     $legacyGreen = ($legacy -eq 'success')
     $newGreen    = ($new    -eq 'success')
@@ -264,7 +275,7 @@ $ready = ($counting.Count -ge $TargetPrs) -and ($daySpan -ge $MinDaySpan) -and (
 Write-Host ''
 if ($ready) {
     Write-Host '  WINDOW SATISFIED -- sdap-ci.yml may be retired (tasks 071/075/077),' -ForegroundColor Green
-    Write-Host '  then branch protection with `CI / Router` as the required check.' -ForegroundColor Green
+    Write-Host '  then branch protection with `Router` as the required check (the check-run name; not `CI / Router`).' -ForegroundColor Green
 } else {
     Write-Host '  Window still open. Nothing to do -- keep merging normally.' -ForegroundColor Cyan
     Write-Host '  Do NOT edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml' -ForegroundColor Cyan

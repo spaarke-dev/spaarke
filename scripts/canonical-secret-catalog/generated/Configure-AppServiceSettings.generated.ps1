@@ -22,7 +22,7 @@
     Resource group.
 
 .PARAMETER AppServiceName
-    App Service name (e.g. spaarke-bff-demo).
+    App Service name (e.g. spaarke-bff-dev).
 
 .PARAMETER VaultName
     Key Vault name (canonical sprk-{env}-kv, or spaarke-spekvcert dev exception).
@@ -118,6 +118,9 @@ $settings = @(
     "AzureAd__TenantId=$TenantId",
     "AzureOpenAI__ChatModelName=gpt-4o-mini",
     "AzureOpenAI__Endpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
+    "Communication__ApprovedSenders__0__DisplayName=Spaarke Central",
+    "Communication__ApprovedSenders__0__Email=$(Format-KvRef 'Communication-DefaultMailbox')",
+    "Communication__ApprovedSenders__0__IsDefault=true",
     "Communication__ArchiveContainerId=$SpeContainerId",
     "Communication__DefaultMailbox=$(Format-KvRef 'Communication-DefaultMailbox')",
     "Communication__WebhookClientState=$(Format-KvRef 'Communication-WebhookClientState')",

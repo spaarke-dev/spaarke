@@ -1,11 +1,12 @@
 # ============================================================================
-# Client Tests (Jest) — Phase 1: BASELINE ONLY
+# Client Tests — Phase 1: BASELINE ONLY
 # ============================================================================
 # ci-cd-unit-test-remediation-r1 · task CICD-095 · issue #851
 #
 # WHY THIS EXISTS
 # ---------------
-# 730 tracked client test files across 40 packages, and BEFORE this workflow
+# 730 tracked client test files across ~40 packages (the count is discovered at
+# runtime, never hard-coded; 43 on 2026-10-12), and BEFORE this workflow
 # not one of them ran in CI — while 923 server .cs files did. One package has
 # been red since 2026-06-11 under a board that showed all green. A test nobody
 # runs is not a test; it is a file.
@@ -24,7 +25,7 @@
 #
 # WHY IT DOES NOT RUN ON pull_request (deliberate, revisit at promotion)
 # ----------------------------------------------------------------------
-# 40 packages with no npm workspace root means 40 independent `npm install`s.
+# ~40 packages with no npm workspace root means ~40 independent `npm install`s.
 # Hanging that off every PR would contend for runners with the very PRs the
 # CI shadow window is trying to accumulate (20 agreeing PRs), which works
 # directly against the owner north star "CI must not hold up high-frequency
@@ -42,7 +43,7 @@
 # filter. Do not add it to ci-tier1-blocking.yml or ci-tier2-advisory.yml.
 # ============================================================================
 
-name: Client Tests (Jest)
+name: Client Tests
 
 on:
   # Nightly baseline. 07:00 UTC — deliberately one hour after nightly-health.yml
@@ -86,9 +87,11 @@ jobs:
       - name: Find packages with a jest test script
         id: find
         shell: bash
+        env:
+          PACKAGE_FILTER: ${{ inputs.package_filter }}
         run: |
           set -euo pipefail
-          filter='${{ inputs.package_filter }}'
+          filter="$PACKAGE_FILTER"
           pkgs=()
 
           while IFS= read -r pkgjson; do
@@ -158,31 +161,225 @@ jobs:
         # carry stale package-lock.json files and `npm ci` fails outright on them.
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
-      - name: Run jest
+      # Shared-library dependencies.
+      #
+      # A package that imports `@spaarke/ui-components`, `@spaarke/auth`, ... via
+      # `file:` dependencies gets a SYMLINK to the library source and nothing
+      # else: the library has no `dist/` (main points at dist/index.js) and no
+      # node_modules of its own. Suites then die at import time ("Cannot find
+      # module '@spaarke/auth'", "Cannot find module '@fluentui/react-icons'
+      # from ../Spaarke.UI.Components/src/...") before a single assertion runs.
+      # That is not a test failure and must not be reported as one.
+      #
+      # So, before jest: install + (where the library ships dist/) build every
+      # library the package depends on, TRANSITIVELY. The set is derived, never
+      # hard-coded:
+      #   1. `file:`/`link:` entries in dependencies/devDependencies/
+      #      optionalDependencies (recursively; built when main/types point at
+      #      dist/), and
+      #   2. sibling packages a tsconfig `paths` entry points INTO the dist/ of
+      #      (build-time dependency of that package's own `tsc`), and
+      #   3. sibling packages whose source the package under test imports by
+      #      relative path WITHOUT declaring them (install only, no build).
+      # Deliberately NOT derived from jest `moduleNameMapper`: those are written
+      # for a world where the mapped-to library has no node_modules of its own;
+      # installing one there gives it a second copy of react (office-addins:
+      # "Cannot read properties of null (reading 'useContext')"). A package whose
+      # generated PCF types are missing gets `npm run refreshTypes`
+      # (pcf-scripts) first.
+      # Libraries are processed dependencies-first. A failure here is recorded as
+      # `deps-build-failed`, NOT `fail` — the tests never got a chance to run.
+      - name: Install and build shared-library dependencies
+        id: deps
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          PKG: ${{ matrix.package }}
+        run: |
+          set -uo pipefail
+          # Explicit failure handler instead of `-e`: the rest of this step
+          # accumulates failures in $failed and must keep going. A Node crash
+          # here would otherwise leave an empty TSV and the leg would run with
+          # no libs built, silently.
+          if ! node - "$PKG" > "$RUNNER_TEMP/deps-order.tsv" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.cwd();
+          const self = path.resolve(root, process.argv[2]);
+
+          const readPkg = (d) => {
+            try { return JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')); }
+            catch { return null; }
+          };
+          // Nearest ancestor directory (inside the repo, never the repo root)
+          // that owns a package.json.
+          const owner = (p) => {
+            let d = p;
+            while (d.startsWith(root + path.sep)) {
+              if (fs.existsSync(path.join(d, 'package.json'))) return d;
+              d = path.dirname(d);
+            }
+            return null;
+          };
+          // Does the package publish a built dist/ that consumers resolve?
+          const emitsDist = (pj) =>
+            !!(pj && pj.scripts && pj.scripts.build) &&
+            /(^|[^\w])dist\//.test(JSON.stringify([pj.main, pj.types, pj.module, pj.exports]));
+
+          // Source files of the package under test that import (relative path)
+          // a SIBLING package's source without declaring it as a dependency,
+          // e.g. `from '../../../solutions/LegalWorkspace/src/...'`. Jest then
+          // loads that source from where it lives, and its own imports resolve
+          // from ITS node_modules — so that package has to be installed too.
+          // CAVEAT: installing node_modules into a sibling of a different React
+          // major (e.g. pcf/VisualHost on React 16/17) is safe only while the
+          // imported files are plain utilities. A test importing a hook-using
+          // component across such a path fails with "useContext of null" (two
+          // React copies). That symptom means a duplicate-React problem, not a
+          // test bug.
+          const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'generated', '.git', '__snapshots__']);
+          const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bjest\.(?:mock|doMock|requireActual)\s*\(\s*)['"]((?:\.\.\/)+[^'"]*)['"]/g;
+          const sourceNeighbours = (dir) => {
+            const found = new Set();
+            const walk = (d) => {
+              for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+                if (ent.isDirectory()) { if (!SKIP_DIRS.has(ent.name)) walk(path.join(d, ent.name)); continue; }
+                if (!/\.(?:[cm]?[jt]sx?)$/.test(ent.name) || ent.name.endsWith('.d.ts')) continue;
+                const text = fs.readFileSync(path.join(d, ent.name), 'utf8');
+                for (const m of text.matchAll(SPEC)) {
+                  const target = path.resolve(d, m[1]);
+                  if (target === dir || target.startsWith(dir + path.sep)) continue;
+                  const o = owner(target);
+                  if (o && o !== dir && !dir.startsWith(o + path.sep) && readPkg(o)) found.add(o);
+                }
+              }
+            };
+            walk(dir);
+            return found;
+          };
+
+          // Direct dependency edges of one package: Map<absDir, {build:boolean}>.
+          const edges = (dir, withSources) => {
+            const out = new Map();
+            const add = (d, build) => {
+              if (!d || d === dir || d === root || dir.startsWith(d + path.sep)) return;
+              if (d.split(path.sep).includes('node_modules')) return;
+              const prev = out.get(d);
+              out.set(d, { build: (prev && prev.build) || build });
+            };
+            const pj = readPkg(dir) || {};
+            for (const k of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+              for (const v of Object.values(pj[k] || {})) {
+                const m = /^(?:file|link):(.+)$/.exec(v);
+                if (!m) continue;
+                const d = path.resolve(dir, m[1]);
+                const dp = readPkg(d);
+                if (dp) add(d, emitsDist(dp));
+              }
+            }
+            // tsconfig `paths` that point INTO a sibling's dist/ are build-time
+            // dependencies (e.g. AI.Widgets -> ../Spaarke.AI.Context/dist/index.d.ts):
+            // that sibling must be built before this package's own `tsc` runs.
+            for (const f of fs.readdirSync(dir).filter((n) => /^tsconfig[\w.-]*\.json$/.test(n))) {
+              const text = fs.readFileSync(path.join(dir, f), 'utf8');
+              for (const m of text.matchAll(/["']((?:\.\.\/)+[^"']*?\/dist(?:\/[^"']*)?)["']/g)) {
+                const o = owner(path.resolve(dir, m[1]));
+                const op = o && readPkg(o);
+                if (op) add(o, !!(op.scripts && op.scripts.build));
+              }
+            }
+            if (withSources) for (const d of sourceNeighbours(dir)) add(d, false);
+            return out;
+          };
+
+          // Post-order DFS: dependencies before dependents.
+          const build = new Map();
+          const post = [];
+          const seen = new Set([self]);
+          const visit = (dir) => {
+            for (const [d, e] of edges(dir, dir === self)) {
+              build.set(d, !!build.get(d) || e.build);
+              if (seen.has(d)) continue;
+              seen.add(d);
+              visit(d);
+              post.push(d);
+            }
+          };
+          visit(self);
+          for (const d of post) {
+            const rel = path.relative(root, d).split(path.sep).join('/');
+            process.stdout.write(rel + '\t' + (build.get(d) ? 1 : 0) + '\n');
+          }
+          NODE
+          then
+            echo "::error::deriving shared-library dependencies of $PKG failed (node crashed)"
+            exit 1
+          fi
+          echo "Shared-library dependencies of $PKG (dependencies first):"
+          sed 's/^/  /' "$RUNNER_TEMP/deps-order.tsv"
+
+          failed=0
+          # PCF controls: generated/ManifestTypes.d.ts is gitignored and written
+          # by pcf-scripts. Tests import it (`./generated/ManifestTypes`), so
+          # without it ts-jest dies on TS2307 before any assertion runs.
+          if (cd "$PKG" && node -e "process.exit(require('./package.json').scripts?.refreshTypes ? 0 : 1)"); then
+            echo "::group::refreshTypes: $PKG"
+            (cd "$PKG" && npm run refreshTypes) || { echo "::error::npm run refreshTypes failed in $PKG"; failed=1; }
+            echo "::endgroup::"
+          fi
+          while IFS=$'\t' read -r dep build; do
+            [ -n "$dep" ] || continue
+            echo "::group::deps: $dep (build=$build)"
+            if ! (cd "$dep" && npm install --legacy-peer-deps --no-audit --no-fund); then
+              echo "::error::npm install failed in shared dependency $dep"; failed=1
+            elif [ "$build" = "1" ] && ! (cd "$dep" && npm run build); then
+              echo "::error::npm run build failed in shared dependency $dep"; failed=1
+            fi
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/deps-order.tsv"
+          exit $failed
+
+      - name: Run tests
         id: jest
+        if: steps.install.outcome == 'success' && steps.deps.outcome == 'success'
         continue-on-error: true
         working-directory: ${{ matrix.package }}
-        run: npm test -- --ci --reporters=default --passWithNoTests=false
+        shell: bash
+        run: |
+          # Packages are not all jest: vitest rejects jest's --ci/--reporters
+          # flags outright ("Unknown option `--ci`"), which would fail the leg
+          # before a single test ran. vitest already detects CI from $CI.
+          if node -e "process.exit(/vitest/.test(require('./package.json').scripts.test) ? 0 : 1)"; then
+            npm test -- --passWithNoTests=false
+          else
+            npm test -- --ci --reporters=default --passWithNoTests=false
+          fi
 
       - name: Record result
         if: always()
         shell: bash
+        env:
+          PKG: ${{ matrix.package }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/results"
           # Distinguish install failure from test failure. Collapsing them would
           # report a broken lockfile as "tests failing", sending the next person
-          # to debug the wrong thing.
+          # to debug the wrong thing. Same for a shared library that would not
+          # install/build: the package's tests never ran.
           if [ "${{ steps.install.outcome }}" != "success" ]; then
             status="install-failed"
+          elif [ "${{ steps.deps.outcome }}" != "success" ]; then
+            status="deps-build-failed"
           elif [ "${{ steps.jest.outcome }}" = "success" ]; then
             status="pass"
           else
             status="fail"
           fi
-          slug="$(printf '%s' '${{ matrix.package }}' | tr '/' '_')"
-          printf '%s\t%s\n' '${{ matrix.package }}' "$status" > "$RUNNER_TEMP/results/$slug.tsv"
-          echo "$status  ${{ matrix.package }}"
+          slug="$(printf '%s' "$PKG" | tr '/' '_')"
+          printf '%s\t%s\n' "$PKG" "$status" > "$RUNNER_TEMP/results/$slug.tsv"
+          echo "$status  $PKG"
 
       - name: Upload result
         if: always()
@@ -221,6 +418,7 @@ jobs:
           pass=$(awk -F'\t' '$2=="pass"'          all.tsv | wc -l | tr -d ' ')
           fail=$(awk -F'\t' '$2=="fail"'          all.tsv | wc -l | tr -d ' ')
           inst=$(awk -F'\t' '$2=="install-failed"' all.tsv | wc -l | tr -d ' ')
+          deps=$(awk -F'\t' '$2=="deps-build-failed"' all.tsv | wc -l | tr -d ' ')
 
           {
             echo "# Client Test Baseline (Phase 1)"
@@ -233,6 +431,7 @@ jobs:
             echo "| ✅ pass | $pass |"
             echo "| ❌ fail | $fail |"
             echo "| ⚠️ install-failed | $inst |"
+            echo "| 🔧 deps-build-failed | $deps |"
             echo "| **discovered** | **$discovered** |"
             echo
 
@@ -249,12 +448,12 @@ jobs:
             echo "| Package | Result |"
             echo "|---|---|"
             awk -F'\t' '{
-              icon = ($2=="pass") ? "✅" : ($2=="fail") ? "❌" : "⚠️";
+              icon = ($2=="pass") ? "✅" : ($2=="fail") ? "❌" : ($2=="deps-build-failed") ? "🔧" : "⚠️";
               printf "| `%s` | %s %s |\n", $1, icon, $2
             }' all.tsv
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Baseline: $pass pass / $fail fail / $inst install-failed of $discovered discovered"
+          echo "Baseline: $pass pass / $fail fail / $inst install-failed / $deps deps-build-failed of $discovered discovered"
 
       - name: Upload combined baseline
         uses: actions/upload-artifact@v4

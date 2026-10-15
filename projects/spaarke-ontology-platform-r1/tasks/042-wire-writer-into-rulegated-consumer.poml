@@ -4,7 +4,7 @@
     <title>Wire the Decision Record writer into the consumer on both paths</title>
     <phase>4 The Decision Record</phase>
     <gate>040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shipped consumer; missing the deny path loses half the record and the gate must not be touched.</rigor-reason>
     <model-tier>sonnet</model-tier>

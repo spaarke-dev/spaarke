@@ -304,8 +304,8 @@ public class CircuitBreakerRegistryTests
         // Arrange
         const string serviceName = "TestService";
         _registry.RegisterCircuit(serviceName);
-        _registry.RecordStateChange(serviceName, CircuitState.Open, TimeSpan.FromMilliseconds(1));
-        Thread.Sleep(10); // Wait for expiry
+        // A break window that has already elapsed (OpenUntil is in the past) — no sleeping for expiry.
+        _registry.RecordStateChange(serviceName, CircuitState.Open, TimeSpan.FromSeconds(-1));
 
         // Act
         var isAvailable = _registry.IsServiceAvailable(serviceName);

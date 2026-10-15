@@ -140,18 +140,6 @@ public class SpeContainerOwnershipGuard
         }
     }
 
-    /// <summary>
-    /// As <see cref="EnsureOwnedAsync"/>, for a container in the deleted-containers bin (restore, permanent
-    /// delete). A plain container read answers 404 for those, so the marker is read from the bin.
-    /// </summary>
-    public async Task EnsureDeletedContainerOwnedAsync(string containerId, CancellationToken ct = default)
-    {
-        if (!await IsDeletedContainerOwnedAsync(containerId, ct).ConfigureAwait(false))
-        {
-            Refuse(containerId);
-        }
-    }
-
     private void Refuse(string containerOrDriveId)
     {
         _logger.LogWarning(
@@ -174,12 +162,10 @@ public class SpeContainerOwnershipGuard
     public virtual Task<bool> IsOwnedAsync(string containerOrDriveId, CancellationToken ct = default)
         => IsOwnedCoreAsync(containerOrDriveId, deleted: false, ct);
 
-    /// <summary>
-    /// <see cref="IsOwnedAsync"/> for a container in the deleted-containers bin: the marker is read from
-    /// <c>/storage/fileStorage/deletedContainers/{id}</c>. Cached separately from live containers.
-    /// </summary>
-    public virtual Task<bool> IsDeletedContainerOwnedAsync(string containerId, CancellationToken ct = default)
-        => IsOwnedCoreAsync(containerId, deleted: true, ct);
+    // There is deliberately no "is this DELETED container owned" read (#1652): Graph discards a container's
+    // customProperties on soft delete (measured on dev 2026-10-11/12), so the marker is never there to read. SPE Admin's
+    // recycle bin trusts the ownership record the BFF writes before it soft-deletes
+    // (Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordStore).
 
     private async Task<bool> IsOwnedCoreAsync(string containerOrDriveId, bool deleted, CancellationToken ct)
     {

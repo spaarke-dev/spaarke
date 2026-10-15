@@ -46,6 +46,8 @@ query {
               # AI Spend (est.) (added 2026-10-04, reuse-governance finding — estimated local-transcript
               # cost; refreshed on-demand by /project-spend-update, not by this skill. May be stale -
               # check "AI Spend As Of" per project before reporting totals as current.)
+              # Tasks Planned (added 2026-10-13 — task count when the tasks were first created; set once by
+              # project-pipeline, never overwritten. Compare with Task Count for scope growth.)
             }
           }
         }
@@ -77,6 +79,10 @@ per_epic_rollup = {
         "ai_spend_est": sum_field(epic_to_projects[epic.number], "AI Spend (est.)"),  # added 2026-10-04
     } for epic in epics
 }
+
+# Scope growth per project (added 2026-10-13). Blank when either field is missing or Tasks Planned is 0.
+for p in projects:
+    p.scope_growth = p.task_count / p.tasks_planned if p.task_count and p.tasks_planned else None
 ```
 
 ### Step 2 (terminal mode): Print concise dashboard
@@ -92,6 +98,10 @@ Smart Todo                    #423 |    3  |    1    |    0    |  0   |  2   |  
 ...
 
 Totals: 30 projects (12 in progress, 8 planned, 3 on hold, 7 done, 0 cancelled)
+
+Scope growth (top 5 at 1.5x or more):
+  unified-access-control-r2  3.2x (58 planned -> 183 now)
+  ...
 ```
 
 ### Step 3 (snapshot mode): Write stakeholder markdown
@@ -109,7 +119,7 @@ This snapshot summarizes active engineering work across Spaarke. Each Epic repre
 
 Active work:
 - [Chat routing redesign](url) — 60% complete (12/20 tasks), in progress
-- [Capability router](url) — 40% complete (8/20 tasks), in progress
+- [Capability router](url) — 40% complete (8/20 tasks), in progress. Scope: 12 planned -> 20 now (1.7x)
 - [Foundry grounding](url) — 20% complete, in progress
 
 In planning:

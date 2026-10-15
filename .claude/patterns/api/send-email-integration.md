@@ -10,7 +10,7 @@ Adding email sending capability to any module (UI, AI playbook, or server-side).
 ## Read These Files
 1. `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs` — Core send pipeline
 2. `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` — REST endpoint (POST /api/communications/send)
-3. `src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs` — AI tool handler
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` — AI playbook send-email node (the former `SendCommunicationToolHandler` was deleted in `7756da796`)
 4. `src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs` — Request model
 5. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs` — DI registration
 

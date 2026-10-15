@@ -128,7 +128,8 @@ public static class CommunicationEndpoints
         // shape checked first), then the ONE re-file core (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved
         // under, F3 on a move out of a secure record, the owner decided and assigned; an unfiled communication keeps its
         // creator, E1), the core-ancestor re-stamp, and SecureChildReconciler.AfterRefileAsync (its mirror, and 148's pass over
-        // what is filed under it when it moved under, out of or between secure records).
+        // what is filed under it when it moved under, out of or between secure records — and, spaarkeai-word-add-in-r1 task
+        // 129, the email's thread following the filing).
         group.MapPatch("/{id:guid}/filing", (
                 Guid id,
                 [Microsoft.AspNetCore.Mvc.FromBody] System.Text.Json.JsonElement body,

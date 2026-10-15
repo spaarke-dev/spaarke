@@ -164,6 +164,12 @@ internal sealed class ParentLineageWalk
     /// <summary>The filing map this walk follows.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Filing => _filing;
 
+    /// <summary>The filing queries this walk has sent (one per table and chunk of ids). Task 187 fix round 2, K1: logged.</summary>
+    internal int QueriesSent { get; private set; }
+
+    /// <summary>The records this walk has asked Dataverse for (found or not).</summary>
+    internal int RecordsAsked { get; private set; }
+
     /// <summary>
     /// The columns to select for a row of <paramref name="table"/> so that <see cref="Remember"/> can take it: its filing
     /// lookups and the value columns, each only when the table has it. A metadata fault propagates.
@@ -267,6 +273,140 @@ internal sealed class ParentLineageWalk
         }
     }
 
+    /// <summary>
+    /// Task 187 (owner round 99, D-123): the BATCHED counterpart of <see cref="TopsAsync"/> for the parents of a whole page of
+    /// rows: one breadth-first walk over the UNION of <paramref name="starts"/>, each level read in one query per table
+    /// (<c>id IN (…)</c>, chunked), then each start's tops decided from what was read, with no further query.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Terminal records are not read.</b> A record <paramref name="isTerminal"/> names (the external read path passes
+    /// the three roots) is a top without a query: its existence and its secure state are the caller's next read to decide (the
+    /// external secure-flag read counts a root it cannot read as secure).</para>
+    /// <para><b>Bounded, fail closed.</b> At most <paramref name="maxReads"/> distinct non-terminal records are read and at most
+    /// <see cref="MaxDepth"/> levels are followed; a level the bound cuts is read up to the bound, in frontier order. A start
+    /// whose filing reaches a record that was not read (past either bound),
+    /// a record that did not come back, or a read that faulted is <see cref="ParentTopsStatus.Undetermined"/>; it never
+    /// guesses a top. A loop that reaches no top is Undetermined too. Never throws (cancellation aside): a fault is reported
+    /// through <c>Faulted</c>.</para>
+    /// </remarks>
+    /// <param name="starts">The parents of every row (table, id). Empty ids are ignored.</param>
+    /// <param name="isTerminal">Whether a table is a top that is never read.</param>
+    /// <param name="maxReads">The most distinct non-terminal records the walk reads.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal async Task<(IReadOnlyDictionary<(string Table, Guid Id), ParentTops> Tops, bool Faulted)> TopsOfManyAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> starts, Func<string, bool> isTerminal, int maxReads, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(starts);
+        ArgumentNullException.ThrowIfNull(isTerminal);
+        var distinct = starts
+            .Where(s => s.Id != Guid.Empty && !string.IsNullOrWhiteSpace(s.Table))
+            .Select(s => (Table: s.Table.ToLowerInvariant(), s.Id))
+            .Distinct()
+            .ToList();
+
+        // What each record read is filed under; a record absent here was not read (bound, fault) or did not come back.
+        var above = new Dictionary<(string Table, Guid Id), IReadOnlyList<(string Table, Guid Id)>>();
+        var faulted = false;
+        try
+        {
+            var seen = new HashSet<(string, Guid)>(distinct);
+            var frontier = distinct.Where(s => !isTerminal(s.Table)).ToList();
+            var read = 0;
+            for (var depth = 1; frontier.Count > 0 && depth <= MaxDepth; depth++)
+            {
+                // The bound (task 187 fix round 1, R1): the part of the level that fits is read; the rest is not, and only a
+                // start whose filing reaches an unread record is Undetermined. (Stopping the WHOLE level emptied a normal list:
+                // 251 to-dos, each under its own communication and thread, read 251 + 251 and listed none.)
+                var remaining = maxReads - read;
+                if (remaining <= 0)
+                    break;
+                if (frontier.Count > remaining)
+                    frontier = frontier.Take(remaining).ToList();
+
+                await LoadAsync(frontier, ct).ConfigureAwait(false);
+                read += frontier.Count;
+                var next = new List<(string Table, Guid Id)>();
+                foreach (var node in frontier)
+                {
+                    if (_rows[node] is not { } row)
+                        continue; // did not come back: Undetermined for every start that reaches it
+
+                    var lookups = (await ColumnsAsync(node.Table, ct).ConfigureAwait(false)).Lookups;
+                    var parents = ParentsOf(node.Table, row, lookups);
+                    above[node] = parents;
+                    foreach (var parent in parents)
+                    {
+                        if (seen.Add(parent) && !isTerminal(parent.Table))
+                            next.Add(parent);
+                    }
+                }
+
+                frontier = next;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            faulted = true; // every start whose filing reaches an unread record is Undetermined below
+        }
+
+        var tops = new Dictionary<(string Table, Guid Id), ParentTops>();
+        foreach (var start in distinct)
+            tops[start] = TopsFromRead(start, above, isTerminal, faulted);
+        return (tops, faulted);
+    }
+
+    /// <summary>One start's tops from the records <see cref="TopsOfManyAsync"/> read (no query), with <see cref="TopsAsync"/>'s depth rule.</summary>
+    private static ParentTops TopsFromRead(
+        (string Table, Guid Id) start,
+        IReadOnlyDictionary<(string Table, Guid Id), IReadOnlyList<(string Table, Guid Id)>> above,
+        Func<string, bool> isTerminal,
+        bool faulted)
+    {
+        var visited = new HashSet<(string, Guid)> { start };
+        var frontier = new List<(string Table, Guid Id)> { start };
+        var tops = new List<ParentTop>();
+        for (var depth = 1; frontier.Count > 0; depth++)
+        {
+            if (depth > MaxDepth)
+                return ParentTops.Undetermined($"its filing runs deeper than {MaxDepth} levels");
+
+            var next = new List<(string Table, Guid Id)>();
+            foreach (var node in frontier)
+            {
+                if (isTerminal(node.Table))
+                {
+                    tops.Add(new ParentTop(node.Table, node.Id, new Entity(node.Table, node.Id)));
+                    continue;
+                }
+
+                if (!above.TryGetValue(node, out var parents))
+                {
+                    return ParentTops.Undetermined(faulted
+                        ? $"{node.Table} {node.Id:D} on its filing could not be read"
+                        : $"{node.Table} {node.Id:D} on its filing was not read or does not exist");
+                }
+
+                if (parents.Count == 0)
+                {
+                    tops.Add(new ParentTop(node.Table, node.Id, new Entity(node.Table, node.Id)));
+                    continue;
+                }
+
+                foreach (var parent in parents)
+                {
+                    if (visited.Add(parent))
+                        next.Add(parent);
+                }
+            }
+
+            frontier = next;
+        }
+
+        return tops.Count == 0
+            ? ParentTops.Undetermined("its filing loops back on itself and reaches no record without a parent")
+            : new ParentTops(ParentTopsStatus.Found, tops, null);
+    }
+
     private IReadOnlyList<(string Table, Guid Id)> ParentsOf(string table, Entity row, IReadOnlyList<string> lookups)
     {
         if (!_filing.TryGetValue(table, out var map))
@@ -308,6 +448,8 @@ internal sealed class ParentLineageWalk
                 };
                 query.Criteria.AddCondition(table + "id", ConditionOperator.In, chunk.Cast<object>().ToArray());
 
+                QueriesSent++;
+                RecordsAsked += chunk.Length;
                 var found = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
                 foreach (var id in chunk)
                     _rows[(table, id)] = found.FirstOrDefault(e => e.Id == id);

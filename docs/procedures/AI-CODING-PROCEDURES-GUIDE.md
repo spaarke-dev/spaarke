@@ -590,12 +590,12 @@ The following 7 scenarios use the 9 `/devops-*` skills + hook automation. Each f
 - On Y: `/devops-project-archive --status Completed --pr-number #M` runs:
   1. Sets `Project Status = Completed`
   2. Closes Issue with `Status=Done`
-  3. **Deletes the local git worktree** (per D-18; refuses if dirty unless `--force`)
-  4. Retains `projects/{name}/` folder with new `.archived` marker file
+  3. **Preserves the local git worktree** (operator workflow; remove it separately with `git worktree remove`)
+  4. Retains `projects/{name}/` folder with new `.archived` marker file. Archiving never renames the folder (no `x-` prefix)
   5. Preserves the remote branch (NFR-09)
 
 **What to check**:
-- `git worktree list` does NOT include the archived worktree
+- `git worktree list` STILL includes the archived worktree (archiving preserves it)
 - `projects/{name}/.archived` exists with date + final status + PR ref
 - `gh issue view <#N>` shows state=closed, comments include archive note
 

@@ -41,6 +41,8 @@ oob_entities:
       - sprk_standinggrant # BIT
       - sprk_systemuser # LOOKUP -> systemuser
       - sprk_externalobjectidkey # identity binding (T255 / UAC-r2)
+      - sprk_externalinvitedon # pending-invite marker, DATETIME (UTC), field-secured (UAC-r2 task 184, owner round 96)
+      - sprk_externalinvitecodehash # invite-code hash, NVARCHAR(100), field-secured BFF-only read+write, not audited (UAC-r2 task 185, owner round 98)
       - sprk_identitycollisionoid # identity binding
       - sprk_identitycollisionon # identity binding
       - sprk_identitycollisionparties # identity binding

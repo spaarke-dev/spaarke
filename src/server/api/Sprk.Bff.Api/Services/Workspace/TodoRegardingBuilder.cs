@@ -141,9 +141,11 @@ internal sealed class TodoRegardingBuilder
     private readonly ILogger _logger;
 
     /// <summary>
-    /// Lazy cache for <c>sprk_recordtype_ref</c> lookups (entity logical name → GUID + display name).
+    /// Lazy cache for <c>sprk_recordtype_ref</c> lookups (entity logical name → GUID + display name). Concurrent since ontology
+    /// task 042 (K2): the Decision Record writer, a singleton called from many enrichment runs, keeps ONE builder so its catalog reads
+    /// are paid once per type, not once per record.
     /// </summary>
-    private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
 
     /// <param name="communicationService">The <c>sprk_recordtype_ref</c> lookup (<c>QueryRecordTypeRefAsync</c>).</param>
     /// <param name="coreAncestors">The FR-26 core-ancestor stamp (step 3 of <see cref="ApplyResolverFieldsAsync"/>).</param>
@@ -373,13 +375,13 @@ internal sealed class TodoRegardingBuilder
     /// logical name. Cached for the lifetime of the builder instance.
     /// </summary>
     /// <remarks>
-    /// Only an ANSWER is cached: a row (typed) or a read that succeeded and found no row (untyped, D-133). A read that
+    /// Only a FOUND row is cached (task 042: a read that succeeded and found no row is answered untyped, D-133, but not remembered, so a catalog row added later is picked up). A read that
     /// FAULTS (a 429, a timeout) is not an answer: it propagates and is never cached, so one transient fault cannot type
     /// every later pair of that parent table as untyped for the builder's lifetime (task 141 review F1; the
     /// <c>TodoGenerationService</c> builder lives as long as its singleton job). Caller cancellation propagates as itself.
     /// Every caller treats a throw from the builder as "do not create".
     /// </remarks>
-    private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
+    internal async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
         string entityLogicalName, CancellationToken ct)
     {
         if (_recordTypeRefCache.TryGetValue(entityLogicalName, out var cached))
@@ -389,7 +391,13 @@ internal sealed class TodoRegardingBuilder
         (Guid Id, string DisplayName)? entry = record is null
             ? null
             : (record.Id, record.GetAttributeValue<string>("sprk_recorddisplayname") ?? entityLogicalName);
-        _recordTypeRefCache[entityLogicalName] = entry;
+        // Only a FOUND row is cached (ontology task 042, uac-r2 re-check K2): a catalog row added after a miss is picked up on the next
+        // call instead of leaving that type untyped until the process restarts (the Decision Record writer keeps one builder for its life).
+        if (entry is not null)
+        {
+            _recordTypeRefCache[entityLogicalName] = entry;
+        }
+
         return entry;
     }
 

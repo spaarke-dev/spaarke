@@ -2,7 +2,8 @@
 //
 // One pure decision shared by every path that binds a person to a Dataverse contact:
 //   • the workforce token plane (a customer employee with no Power Apps licence — "Type 2"),
-//   • the CIAM token plane (an invited external user; the email bind is kept only as the invite-repair path),
+//   • the CIAM token plane (an invited external user; the email bind is kept for the invite-repair path and the
+//     existing-CIAM-account invite, and since task 184 binds only on this environment's intent — E11),
 //   • the systemuser plane (a licensed user linked without a token: the reconciliation job, registration,
 //     and the inline link at first resolution),
 //   • the invite path (which never binds, but must refuse a contact another plane already owns).
@@ -291,6 +292,50 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
     public static ReferenceLookup Of(params SystemUserReference[] references) => new(LookupStatus.Read, references);
 }
 
+/// <summary>
+/// Task 184 (owner round 96) — whether THIS environment intends an unbound contact to be email-bound on the CIAM plane.
+/// The pending-invite marker and its stored invite-code hash, read together in the marker's own query
+/// (<c>IContactIdentityStore.FindBindIntentAsync</c>), raw, interpreted by the decision
+/// (<see cref="ContactBindingDecision.Decide"/>, E11). Task 185 (option (c)): no grant is read; a grant is no bind evidence.
+/// </summary>
+/// <remarks>
+/// Why it exists: any CIAM user can obtain a token for any customer's audience (the SPA client is pre-authorized for
+/// every customer — provisioning spike S1), so an email match alone would bind a person customer Y never invited onto Y's
+/// contact. Task 185 (owner round 98): Y's own pending invite, proved by the invite code from Y's own invite email, is the
+/// only evidence; a grant alone is not.
+/// </remarks>
+/// <param name="ContactId">The contact the facts were read for; a lookup for any other contact is never used.</param>
+/// <param name="InviteStatus">
+/// How the marker read ended. <see cref="LookupStatus.ColumnMissing"/> (the marker or the hash column is not provisioned)
+/// is "no invite evidence", NOT a fault (a BFF deployed before the columns denies <c>contact_not_invited</c>). A <see cref="LookupStatus.Failed"/> read denies
+/// <c>contact_lookup_failed</c>.
+/// </param>
+/// <param name="InvitedOn"><c>contact.sprk_externalinvitedon</c> — when the BFF's invite flow last invited the contact.</param>
+public sealed record BindIntentLookup(
+    Guid ContactId,
+    LookupStatus InviteStatus,
+    DateTimeOffset? InvitedOn)
+{
+    /// <summary>
+    /// Task 184 (owner round 97) — the decision time the marker's age is measured at: the binder's
+    /// <see cref="TimeProvider"/>, stamped when it hands the lookup to the decision, so the decision stays pure. Left
+    /// unset (<see cref="DateTimeOffset.MinValue"/>), every marker reads as dated in the future and counts for nothing —
+    /// fail closed.
+    /// </summary>
+    public DateTimeOffset AsOf { get; init; }
+
+    /// <summary>
+    /// Task 185: <c>contact.sprk_externalinvitecodehash</c> as stored (<see cref="InviteCode"/>'s <c>v1.</c> value), or
+    /// null. The marker leg binds only when the presented code matches it. INTERNAL so the compiler-generated
+    /// <see cref="object.ToString"/> of this record never prints it (never log a hash, CLAUDE.md §9).
+    /// </summary>
+    internal string? InviteCodeHash { get; init; }
+
+    /// <summary>The marker read failed.</summary>
+    public static BindIntentLookup Failed(Guid contactId) =>
+        new(contactId, LookupStatus.Failed, null);
+}
+
 /// <summary>The facts of one binding request, as the calling plane establishes them.</summary>
 /// <param name="Plane">Which plane is asking.</param>
 /// <param name="CallerOid">The caller's oid, already parsed. <see cref="Guid.Empty"/> = unusable.</param>
@@ -304,6 +349,12 @@ public sealed record BindingRequest(
     BindingEligibility Eligibility,
     string? IneligibleDenyCode = null)
 {
+    /// <summary>
+    /// Task 185: the invite code the caller presented (CIAM plane only), or null for "no code presented". INTERNAL so the
+    /// compiler-generated <see cref="object.ToString"/> of this record never prints it (never log a code, CLAUDE.md §9).
+    /// </summary>
+    internal string? InviteCode { get; init; }
+
     /// <summary>The plane marker this caller's oid belongs to.</summary>
     public IdentityPlaneMarker CallerPlane =>
         Plane == BindingPlane.CiamToken ? IdentityPlaneMarker.External : IdentityPlaneMarker.Workforce;
@@ -341,6 +392,12 @@ public enum BindingAction
 
     /// <summary>The decision needs the systemuser's linked contact row before it can finish.</summary>
     NeedLinkedContact,
+
+    /// <summary>
+    /// The CIAM plane's E11 needs this environment's intent for <see cref="BindingDecision.ContactId"/> (a pending invite and
+    /// its stored invite-code hash) before it can bind (tasks 184 and 185).
+    /// </summary>
+    NeedIntentLookup,
 }
 
 /// <summary>One decision step's answer.</summary>
@@ -351,9 +408,15 @@ public sealed record BindingDecision(
     IdentityCollisionReason? Reason = null,
     IReadOnlyList<Guid>? FlagContactIds = null)
 {
+    /// <summary>
+    /// Task 185: set on a CIAM-plane <see cref="BindingAction.BindByEmail"/> made through E11's marker leg. The binder must
+    /// clear the contact's invite-code hash in the SAME conditional write as the oid bind, so the code is single-use.
+    /// </summary>
+    public bool ConsumeInviteCode { get; init; }
+
     /// <summary>True for an outcome that ends the decision.</summary>
     public bool IsTerminal => Action is not (BindingAction.NeedEmailLookup or BindingAction.NeedReferenceLookup
-        or BindingAction.NeedLinkedContact);
+        or BindingAction.NeedLinkedContact or BindingAction.NeedIntentLookup);
 }
 
 /// <summary>How the invite path must treat the contact its email resolves to.</summary>
@@ -465,6 +528,14 @@ public static class ContactBindingDecision
     /// </summary>
     public const string DenyContactKeyConflict = "sdap.access.deny.contact_key_conflict";
 
+    /// <summary>
+    /// CIAM plane, E11 (task 184, owner round 96; task 185, owner round 98): the email matches one unbound, active, unlinked
+    /// contact, but the caller did not prove THIS environment's invite: a pending invite (<c>sprk_externalinvitedon</c> set
+    /// within the last 30 days, owner round 97) together with its matching invite code. A grant alone is not an invite.
+    /// Nothing is written and nothing is flagged: no other person is involved.
+    /// </summary>
+    public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
+
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>The invite email matches a contact bound on the workforce plane.</summary>
@@ -481,6 +552,13 @@ public static class ContactBindingDecision
 
     /// <summary>The invite's contact lookup could not be read.</summary>
     public const string InviteContactLookupFailed = "sdap.access.invite.contact_lookup_failed";
+
+    /// <summary>
+    /// Task 184 — the invite needed the pending-invite marker (<see cref="ExternalInvitedOnColumn"/>) as the contact's ONLY
+    /// evidence of this environment's intent, and the marker did not land (the column is not provisioned yet, or the write
+    /// failed). Retryable (503): nothing was reported as invited and no email was sent.
+    /// </summary>
+    public const string InviteMarkerNotWritten = "sdap.access.invite.invite_marker_not_written";
 
     /// <summary>
     /// Reads a contact's binding as Unbound / Bound / Unreadable from its raw column values.
@@ -543,7 +621,8 @@ public static class ContactBindingDecision
         BindingRequest request,
         ContactLookup oidLookup,
         ContactLookup? emailLookup = null,
-        ReferenceLookup? references = null)
+        ReferenceLookup? references = null,
+        BindIntentLookup? intent = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(oidLookup);
@@ -656,9 +735,92 @@ public static class ContactBindingDecision
             return Collide(IdentityCollisionReason.LinkedToOtherUser, DenyContactLinkedToOtherUser, row.ContactId);
         }
 
-        // E11
+        // E11 — the CIAM plane binds only on THIS environment's intent (task 184, owner round 96). A CIAM token for this
+        // customer's audience is obtainable by any CIAM user, so an email match alone is no evidence this customer means
+        // this person. The workforce and systemuser planes are unchanged: their callers are admitted by the member test
+        // or are directory-synced licensed users (Model 1 workforce sign-in is under separate owner discussion).
+        if (request.Plane == BindingPlane.CiamToken)
+        {
+            if (intent is null)
+            {
+                return new BindingDecision(BindingAction.NeedIntentLookup, row.ContactId);
+            }
+
+            return DecideIntent(request, intent, row.ContactId);
+        }
+
         return new BindingDecision(BindingAction.BindByEmail, row.ContactId);
     }
+
+    /// <summary>
+    /// E11's marker leg on the CIAM plane (task 185, owner round 98). It binds, and tells the binder to consume the code,
+    /// only when the marker is current (<see cref="IsInviteMarkerCurrent"/>: at most 30 days old, at most 5 minutes in the
+    /// future) AND the presented code matches the contact's stored hash (<see cref="InviteCode.Matches"/>, constant time).
+    /// FAIL CLOSED: a lookup for another contact, or a marker read that FAILED, denies <see cref="DenyContactLookupFailed"/>.
+    /// Every other non-match (no code, a wrong or superseded code, no stored hash, an expired or far-future marker, a marker
+    /// column not provisioned yet) denies <see cref="DenyContactNotInvited"/>, and the answer does not tell them apart. A
+    /// grant is NOT evidence (option (c)): a grant alone never binds.
+    /// </summary>
+    private static BindingDecision DecideIntent(BindingRequest request, BindIntentLookup intent, Guid contactId)
+    {
+        if (intent.ContactId != contactId
+            || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+        {
+            return Deny(DenyContactLookupFailed);
+        }
+
+        var invited = intent.InviteStatus == LookupStatus.Read
+            && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf)
+            && InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId);
+        return invited
+            ? new BindingDecision(BindingAction.BindByEmail, contactId) { ConsumeInviteCode = true }
+            : Deny(DenyContactNotInvited);
+    }
+
+    /// <summary>
+    /// Task 185 (design note §5.1): the OPERATOR-only reason E11's marker leg answered <see cref="DenyContactNotInvited"/> —
+    /// <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>, in
+    /// the order <see cref="DecideIntent"/> tests them. For the binder's log line only: it names no code and no hash, and
+    /// the HTTP answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
+    /// </summary>
+    internal static string? NotInvitedReason(BindingRequest request, BindIntentLookup intent, Guid contactId)
+    {
+        if (intent.ContactId != contactId || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+            return null;
+        if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
+            return "no-marker";
+        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+            return "marker-expired";
+        if (string.IsNullOrEmpty(intent.InviteCodeHash))
+            return "no-stored-hash";
+        if (string.IsNullOrEmpty(request.InviteCode))
+            return "no-code-presented";
+        return InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId) ? null : "code-mismatch";
+    }
+
+    /// <summary>
+    /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the
+    /// invite: an invite nobody acted on for a month is no longer this environment's intent. A re-invite overwrites the
+    /// marker and so restarts the window.
+    /// </summary>
+    public static readonly TimeSpan InviteMarkerWindow = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Task 184 (owner round 97) — how far in the future a marker may be dated and still count: clock skew between the
+    /// BFF instance that stamped it and the one deciding. Anything later is not an invite this BFF wrote "now" (only the
+    /// BFF writes the column, from its own clock), so it is treated as tampering and counts for nothing.
+    /// </summary>
+    public static readonly TimeSpan InviteMarkerClockSkew = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// True when <paramref name="invitedOn"/> is evidence at <paramref name="asOf"/>: no more than
+    /// <see cref="InviteMarkerWindow"/> old (exactly 30 days counts) and no more than <see cref="InviteMarkerClockSkew"/> in
+    /// the future (exactly 5 minutes counts). An expired or far-future marker is "no invite evidence", not a fault. Pure.
+    /// </summary>
+    public static bool IsInviteMarkerCurrent(DateTimeOffset? invitedOn, DateTimeOffset asOf)
+        => invitedOn is { } on
+           && on - asOf <= InviteMarkerClockSkew
+           && asOf - on <= InviteMarkerWindow;
 
     /// <summary>
     /// The existing-link flow: a systemuser whose <c>sprk_primarycontact</c> is <paramref name="linkedContactId"/>.
@@ -1108,6 +1270,25 @@ public static class ContactBindingDecision
 
     /// <summary><c>contact.sprk_identityplane</c> — which plane wrote the binding.</summary>
     public const string IdentityPlaneColumn = "sprk_identityplane";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedon</c> — the pending-invite marker (task 184, owner round 96: the one column the
+    /// no-schema rule was lifted for). A UTC date-and-time the BFF's invite flow writes BEFORE it creates the CIAM account,
+    /// overwritten by a re-invite, never cleared. "Pending" = set AND no oid binding. FIELD-SECURED so only the BFF can
+    /// write it (<c>scripts/Set-ExternalInviteMarkerSchema.ps1</c>): a user who could set it could open E11's email bind.
+    /// Read in its OWN query, never in <c>ContactSelect</c>, so a BFF deployed before the column keeps every binding read.
+    /// It is NOT a binding and never touches <see cref="IdentityPlaneColumn"/>: "plane marker with no oid" stays Unreadable.
+    /// </summary>
+    public const string ExternalInvitedOnColumn = "sprk_externalinvitedon";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitecodehash</c> — task 185: the stored value of the current invite's code
+    /// (<see cref="InviteCode"/>'s <c>v1.</c> salted SHA-256, never the code). Written in the SAME request as
+    /// <see cref="ExternalInvitedOnColumn"/> (a re-invite replaces both), cleared in the SAME request as the oid bind that
+    /// consumes it. FIELD-SECURED with no Reader access (<c>scripts/Set-ExternalInviteCodeHashSchema.ps1</c>). Read only in
+    /// the marker's own query, never in <c>ContactSelect</c>. Never logged.
+    /// </summary>
+    public const string ExternalInviteCodeHashColumn = "sprk_externalinvitecodehash";
 
     private static BindingDecision? DecideOnOid(ContactLookup oidLookup)
     {

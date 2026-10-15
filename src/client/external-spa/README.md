@@ -28,15 +28,12 @@ Authentication is handled by MSAL against an Entra External ID (CIAM) tenant —
 
 ## Environment Variables
 
-| Variable | Purpose |
-|---|---|
-| `VITE_BFF_API_URL` | Spaarke BFF API base URL |
-| `VITE_MSAL_AUTHORITY` | Full CIAM authority URL (`https://{subdomain}.ciamlogin.com/{tenant-id}`) |
-| `VITE_MSAL_CLIENT_ID` | SPA public-client app registration ID (registered in the CIAM tenant) |
-| `VITE_MSAL_TENANT_ID` | CIAM external tenant ID |
-| `VITE_MSAL_BFF_SCOPE` | BFF API scope exposed in the CIAM tenant (must match BFF `Ciam:Audience`) |
-| `VITE_TEAMS_MSAL_CLIENT_ID` | Optional — workforce multitenant app client ID (Teams tab host only) |
-| `VITE_TEAMS_MSAL_BFF_SCOPE` | Optional — workforce BFF scope (Teams tab host only) |
+The variables, their meaning and which are optional are documented in [`.env.example`](./.env.example) - that file is the
+single source (backend selection: `VITE_BACKENDS` or `VITE_BFF_API_URL`; the CIAM and workforce authority / client /
+tenant values; the BFF scopes, which on both planes must be `api://{app id}/user_impersonation` - ADR-028 A8).
+
+The BFF URL and scope are chosen at run time from Spaarke-owned configuration (task 041, FR-17); a missing or invalid
+backend fails closed - no request is sent and the sign-in screen says so.
 
 Copy `.env.example` to `.env.local` and set real values.
 `.env.local` is gitignored — never commit secrets.
@@ -45,10 +42,9 @@ Copy `.env.example` to `.env.local` and set real values.
 
 ## Dev Server Proxy
 
-The Vite dev server proxies `/api/*` to the Spaarke BFF API so the SPA can call it
-from `localhost` without hitting browser CORS restrictions (`bffApiCall` uses relative
-`/api/...` paths when `VITE_BFF_API_URL` is empty). See `server.proxy` in
-`vite.config.ts`.
+The Vite dev server has an `/api/*` proxy entry (`server.proxy` in `vite.config.ts`), but `bffApiCall` does not use
+relative `/api/...` paths: it always builds its URL on the active backend's origin and fails closed when no backend is
+configured (an empty `VITE_BFF_API_URL` is not a relative-path mode).
 
 ---
 

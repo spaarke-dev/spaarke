@@ -4,7 +4,7 @@
     <title>FR-16 — Find returns documents only, can never leave its empty state in Outlook, and never becomes available for a document saved in the current session</title>
     <phase>5 Remediation — spec integrity</phase>
     <gate>blocked — requires 063 (send-to-index authorization, which Find's Run Index calls)</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Implements client and server behaviour across the Find surface. Tags include frontend + react + bff-api. Modifies `.tsx`/`.ts`.</rigor-reason>
     <model-tier>opus</model-tier>

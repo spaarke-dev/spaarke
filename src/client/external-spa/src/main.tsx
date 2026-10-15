@@ -4,11 +4,34 @@ import { MsalProvider } from '@azure/msal-react';
 import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-components';
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
-import { detectTeamsHost, createTeamsHostAdapter } from './host/TeamsHostAdapter';
+import { extractAuthDiagnostics } from './auth/auth-diagnostics';
+import {
+  detectTeamsHost,
+  createTeamsHostAdapter,
+  notifyTeamsAppLoaded,
+  notifyTeamsFailureOther,
+  notifyTeamsSuccess,
+  type ITeamsHostAdapter,
+} from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
+import { syncActiveAccountOnInteractiveSignIn } from './auth/msal-auth';
 import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
+import {
+  activateBackend,
+  chooseBackend,
+  clearActiveBackend,
+  resolveBackendSelection,
+  type Backend,
+  type BackendPlane,
+} from './auth/backend-selection';
 import { RealmChooser } from './components/auth/RealmChooser';
+import { CustomerPicker } from './components/auth/CustomerPicker';
+import { TeamsAuthError } from './components/auth/TeamsAuthError';
 import { App } from './App';
+import { isDevMockEnabled } from './dev-mock';
+import { isJoinPath } from './auth/registration-client';
+import { JoinPage } from './pages/JoinPage';
+import { captureInviteCode, clearInviteCode } from './auth/invite-code';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
 // External users authenticate via Entra B2B — they are guest accounts in the main
@@ -49,10 +72,15 @@ function getRootElement(): HTMLElement | null {
  * the acquirer/scope to values identical to the module defaults.
  */
 async function bootstrapStandalone(root: Root): Promise<void> {
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+  if (isDevMockEnabled()) {
     // Dev mock: existing behavior — CIAM instance, no chooser, no MSAL initialize (AuthGuard
     // short-circuits in mock mode). Kept as a separate branch so StandaloneBootstrap's hooks stay
-    // unconditional (rules of hooks).
+    // unconditional (rules of hooks). The configured CIAM backend is activated when it resolves to exactly one
+    // (task 041), so pages that read the active backend do not throw; with several configured backends the first is
+    // activated (mock mode has no picker); with none, mock mode runs without one.
+    const selection = await resolveBackendSelection('ciam');
+    if (selection.kind === 'selected') activateBackend('ciam', selection.backend);
+    else if (selection.kind === 'pick') activateBackend('ciam', selection.options[0]);
     root.render(
       <React.StrictMode>
         <MsalProvider instance={msalInstance}>
@@ -89,6 +117,9 @@ const bootstrapCenterStyle: React.CSSProperties = {
  *
  * State machine (all pre-auth screens are Fluent v9 semantic tokens only — ADR-021):
  *   - no stored realm            → <RealmChooser> ("My organization" | "Partner")
+ *   - realm chosen               → run-time backend selection for that plane (task 041, FR-17): one backend (or a
+ *                                  valid `?customer=` / stored key) is activated; several and none active →
+ *                                  <CustomerPicker>; none → fail closed (the error screen below; no request is made)
  *   - realm chosen, initializing → spinner
  *   - realm chosen, init failed  → fail-loud error + "choose a different sign-in" (criterion 4)
  *   - plane ready                → <MsalProvider instance={plane}><App/></MsalProvider>
@@ -100,14 +131,31 @@ const StandaloneBootstrap: React.FC = () => {
   const [realm, setRealm] = React.useState<Realm | null>(() => getStoredRealm());
   const [plane, setPlane] = React.useState<StandalonePlane | null>(null);
   const [error, setError] = React.useState<unknown>(null);
+  // Customer picker options (several backends known, none active), and the key the user picked from them.
+  const [pickOptions, setPickOptions] = React.useState<Backend[] | null>(null);
+  const [pickedKey, setPickedKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!realm) return;
     let cancelled = false;
     void (async () => {
       try {
+        if (!pickedKey) {
+          // Backend first (task 041): the plane's scope and every request URL come from the active backend.
+          const selection = await resolveBackendSelection(realm);
+          if (cancelled) return;
+          if (selection.kind === 'pick') {
+            setPickOptions(selection.options);
+            return;
+          }
+          if (selection.kind === 'none') throw new Error(selection.reason);
+          activateBackend(realm, selection.backend);
+        }
         const resolved = resolveStandalonePlane(realm);
         applyStandalonePlane(resolved);
+        // Before initialize(): the redirect response is handled there, and the account it signs in must become the
+        // active one (so "Sign in again" with a different identity switches the account the SPA acquires tokens for).
+        syncActiveAccountOnInteractiveSignIn(resolved.instance);
         // MSAL requires explicit initialize() before any token op / render; also processes the
         // auth-code redirect response when returning from the IdP.
         await resolved.instance.initialize();
@@ -119,17 +167,35 @@ const StandaloneBootstrap: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [realm]);
+  }, [realm, pickedKey]);
 
   const handleChoose = React.useCallback((chosen: Realm) => {
     setStoredRealm(chosen);
     setRealm(chosen);
   }, []);
 
+  const handlePickCustomer = React.useCallback(
+    (key: string) => {
+      if (!realm || !pickOptions) return;
+      try {
+        chooseBackend(realm, pickOptions, key);
+        setPickOptions(null);
+        setPickedKey(key);
+      } catch (err) {
+        setError(err);
+      }
+    },
+    [realm, pickOptions]
+  );
+
   const handleResetRealm = React.useCallback(() => {
     clearStoredRealm();
+    clearInviteCode(); // task 185
+    clearActiveBackend();
     setError(null);
     setPlane(null);
+    setPickOptions(null);
+    setPickedKey(null);
     setRealm(null);
   }, []);
 
@@ -162,6 +228,15 @@ const StandaloneBootstrap: React.FC = () => {
     );
   }
 
+  // Several customer backends are known and none is active → the customer picker (FR-17).
+  if (pickOptions) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <CustomerPicker options={pickOptions} onChoose={handlePickCustomer} />
+      </FluentProvider>
+    );
+  }
+
   // Plane chosen, authority resolving / MSAL initializing.
   if (!plane) {
     return (
@@ -188,16 +263,83 @@ const StandaloneBootstrap: React.FC = () => {
  * "initialize, then render the SAME App" and handles the fail-loud error path.
  */
 async function bootstrapTeams(root: Root): Promise<void> {
+  // Backend first (task 041, FR-17): the Teams token scope is the active workforce backend's.
+  const selection = await resolveBackendSelection('workforce');
+  if (selection.kind === 'none') {
+    renderBackendUnavailable(root, selection.reason);
+    return;
+  }
+  if (selection.kind === 'pick') {
+    renderTeamsCustomerPicker(root, 'workforce', selection.options);
+    return;
+  }
+  activateBackend('workforce', selection.backend);
+  await bootstrapTeamsAuth(root);
+}
+
+/** Teams: the customer picker (several workforce backends, none active); the choice continues the bootstrap. */
+function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Backend[]): void {
+  // The host's spinner stops once there is a screen to show (app.initialize() already ran in detectTeamsHost()).
+  notifyTeamsAppLoaded();
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <CustomerPicker
+          options={options}
+          onChoose={key => {
+            try {
+              chooseBackend(plane, options, key);
+            } catch (err) {
+              renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
+              return;
+            }
+            void bootstrapTeamsAuth(root);
+          }}
+        />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams: no backend could be resolved — fail closed with an explicit screen (no token is requested). */
+function renderBackendUnavailable(root: Root, reason: string): void {
+  // Same signals as a failed start: loaded (a screen is showing) and failed (Other), so Teams stops its spinner and
+  // records the failure instead of waiting on a tab that will never authenticate.
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther(reason);
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <div style={bootstrapCenterStyle}>
+          <Text size={500} weight="semibold">
+            No organization available
+          </Text>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground3, maxWidth: '32rem' }}>
+            {reason}
+          </Text>
+        </div>
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams auth bootstrap once a backend is active: adapter initialize (NAA, then popup) → the SAME App. */
+async function bootstrapTeamsAuth(root: Root): Promise<void> {
   const adapter = createTeamsHostAdapter();
 
   try {
     await adapter.initialize();
   } catch (err) {
     console.error('[SecureProjectWorkspace] Teams workforce authentication failed:', err);
-    renderTeamsAuthError(root, err);
+    renderTeamsAuthError(root, adapter, err);
     return;
   }
 
+  renderTeamsApp(root, adapter);
+}
+
+/** Render the SAME shared <App> under the Teams-signed-in MSAL instance (after bootstrap or after recovery). */
+function renderTeamsApp(root: Root, adapter: ITeamsHostAdapter): void {
   root.render(
     <React.StrictMode>
       <MsalProvider instance={adapter.getMsalInstance()}>
@@ -208,49 +350,12 @@ async function bootstrapTeams(root: Root): Promise<void> {
 }
 
 /**
- * Extracts the underlying NAA + Teams-SSO failure detail (error name / MSAL errorCode / subError /
- * any AADSTS code / message) from a TeamsWorkforceAuthError's `cause` ({ naaError, ssoError }), so the
- * on-screen error state can show the REAL diagnostic on hosts where dev tools aren't readily available
- * (e.g. the Teams desktop client). Diagnostic-only; contains no tokens or secrets.
- */
-function extractAuthDiagnostics(err: unknown): string {
-  const describe = (label: string, e: unknown): string => {
-    if (e == null) return `${label}: (none)`;
-    if (typeof e === 'string') return `${label}: ${e}`;
-    const any = e as Record<string, unknown>;
-    const parts: string[] = [];
-    if (any.name) parts.push(`name=${String(any.name)}`);
-    if (any.errorCode) parts.push(`errorCode=${String(any.errorCode)}`);
-    if (any.subError) parts.push(`subError=${String(any.subError)}`);
-    const msg = (any.errorMessage ?? any.message) as string | undefined;
-    if (msg) parts.push(`msg=${String(msg).slice(0, 600)}`);
-    const aadsts = `${String(any.message ?? '')} ${String(any.errorMessage ?? '')}`.match(/AADSTS\d+/);
-    if (aadsts) parts.push(`AADSTS=${aadsts[0]}`);
-    if (parts.length === 0) {
-      try {
-        return `${label}: ${JSON.stringify(any).slice(0, 400)}`;
-      } catch {
-        return `${label}: (unserializable)`;
-      }
-    }
-    return `${label}: ${parts.join('  ·  ')}`;
-  };
-  const cause = (err as { cause?: unknown } | null)?.cause as { naaError?: unknown; ssoError?: unknown } | undefined;
-  const lines = [describe('top', err)];
-  if (cause && typeof cause === 'object') {
-    lines.push(describe('NAA', cause.naaError));
-    lines.push(describe('SSO', cause.ssoError));
-  }
-  return lines.join('\n');
-}
-
-/**
  * Fail-loud error state for a Teams bootstrap failure (acceptance criterion 4 - never silently
- * degrade to a blank/broken tab). Minimal Fluent v9 markup styled exclusively with semantic tokens
- * (ADR-021); intentionally NOT a feature component - this is bootstrap-path infrastructure, shown
- * only when Teams workforce auth cannot be established at all.
+ * degrade to a blank/broken tab). The screen (components/auth/TeamsAuthError) has a "Sign in" button that
+ * runs the MSAL popup on click - a user gesture, which the bootstrap popup fallback does not have - and, on
+ * success, continues into the app without a reload.
  */
-function renderTeamsAuthError(root: Root, err: unknown): void {
+function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unknown): void {
   const message = err instanceof Error ? err.message : 'Sign-in to the Spaarke collaboration tab failed.';
   const diagnostics = extractAuthDiagnostics(err);
   // The adapter writes the Teams-provided theme to localStorage BEFORE the auth step that can
@@ -260,62 +365,53 @@ function renderTeamsAuthError(root: Root, err: unknown): void {
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100dvh',
-            rowGap: tokens.spacingVerticalM,
-            padding: tokens.spacingVerticalXXL,
-            textAlign: 'center',
-            backgroundColor: tokens.colorNeutralBackground1,
-            color: tokens.colorNeutralForeground1,
+        <TeamsAuthError
+          message={message}
+          diagnostics={diagnostics}
+          onSignIn={async () => {
+            await adapter.signInWithPopup();
+            renderTeamsApp(root, adapter);
           }}
-        >
-          <Text size={500} weight="semibold">
-            Sign-in failed
-          </Text>
-          <Text size={300} style={{ color: tokens.colorNeutralForeground3, maxWidth: '32rem' }}>
-            {message}
-          </Text>
-          <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-            Contact your Teams admin if this persists - your organization may not have consented to the Spaarke app yet.
-          </Text>
-          <pre
-            style={{
-              marginTop: tokens.spacingVerticalM,
-              maxWidth: '46rem',
-              maxHeight: '14rem',
-              overflow: 'auto',
-              textAlign: 'left',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: tokens.fontFamilyMonospace,
-              fontSize: tokens.fontSizeBase200,
-              lineHeight: tokens.lineHeightBase200,
-              color: tokens.colorNeutralForeground3,
-              backgroundColor: tokens.colorNeutralBackground3,
-              border: `1px solid ${tokens.colorNeutralStroke2}`,
-              borderRadius: tokens.borderRadiusMedium,
-              padding: tokens.spacingHorizontalM,
-            }}
-          >
-            {`Diagnostic detail (share this):\n${diagnostics}`}
-          </pre>
-        </div>
+        />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/**
+ * `/join?customer={key}` (task 056, FR-13): a pre-sign-in page, so it is rendered here — before the realm chooser, the
+ * backend activation and any MSAL instance — in both hosts. The page itself decides what to show: "not available"
+ * while `VITE_JOIN_ENABLED` is off, a browser-only message inside Teams (no redirect in the Teams iframe, NFR-04).
+ */
+function renderJoin(root: Root, inTeams: boolean): void {
+  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens), and the
+  // message is the whole tab (no sign-in follows), so the start is also reported as successful, as the Teams bootstrap
+  // does once it has something to show.
+  if (inTeams) {
+    notifyTeamsAppLoaded();
+    notifyTeamsSuccess();
+  }
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <JoinPage teamsHost={inTeams} />
       </FluentProvider>
     </React.StrictMode>
   );
 }
 
 async function main() {
+  // Task 185: FIRST, before any MSAL work — store the invite link's code and strip it from the URL (auth/invite-code.ts).
+  captureInviteCode();
   const rootElement = getRootElement();
   if (!rootElement) return;
   const root = createRoot(rootElement);
 
   const inTeams = await detectTeamsHost();
+  if (isJoinPath(window.location.pathname)) {
+    renderJoin(root, inTeams);
+    return;
+  }
   if (inTeams) {
     await bootstrapTeams(root);
   } else {

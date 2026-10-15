@@ -100,6 +100,18 @@ describe('fetchBriefingNarration / fetchAiBriefing', () => {
     });
   });
 
+  // A 403 (the caller may not read it) was missing here and fell through to the red generic error with
+  // "HTTP 403"; the live path, email-share and the other Daily Briefing calls all treat it as the
+  // sign-in/permission state. fetchBriefingNarration's own /narrate catch got the same branch but is
+  // unreachable while USE_LIVE_RENDER is on (a module const), so it cannot be driven from here.
+  it('summary: a thrown 403 is the authentication/permission state, not a generic error', async () => {
+    mockFetch.mockRejectedValueOnce(apiError(403));
+    await expect(fetchAiBriefing(channels)).resolves.toEqual({
+      status: 'unavailable',
+      reason: 'Authentication required for AI briefing.',
+    });
+  });
+
   it('summary: an exhausted 401 is the authentication state', async () => {
     mockFetch.mockRejectedValueOnce(authExhausted());
     await expect(fetchAiBriefing(channels)).resolves.toEqual({

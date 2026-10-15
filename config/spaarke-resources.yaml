@@ -334,6 +334,15 @@ environments:
       # Content Safety (T246): served by the multi-service AIServices account spaarke-openai-dev (eastus); the BFF
       # calls it with its managed identity (Cognitive Services User). Required at BFF startup outside Development/Testing.
       content_safety_endpoint: https://spaarke-openai-dev.cognitiveservices.azure.com/
+      # System sender (owner decision 2026-10-11; F3 fix round 2026-10-12): grant/registration email is sent from
+      # Communication__DefaultMailbox, which MUST also be Communication__ApprovedSenders__N__Email or the send is rejected
+      # InvalidSender (CommunicationOptionsValidator fails the host's start outside Development/Testing). Non-secret.
+      # Verified read-only 2026-10-12. The staging slot needs the same settings (not yet verified).
+      communication_default_mailbox: mailbox-central@spaarke.com # Communication__DefaultMailbox
+      communication_approved_senders:
+        - email: mailbox-central@spaarke.com # Communication__ApprovedSenders__0__Email
+          is_default: true # Communication__ApprovedSenders__0__IsDefault
+          display_name: Spaarke Central # Communication__ApprovedSenders__0__DisplayName (the value the deploy scripts emit; the live value was not read)
       secrets:
         # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
         # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated
@@ -582,56 +591,9 @@ environments:
       orphaned_or_unreviewed: # Not yet classified — review next sync
         []
 
-  demo:
-    # Corrected 2026-10-05 (T242b) from the live subscription: this section named spaarke-bff-prod /
-    # rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist in any Spaarke subscription
-    # (that stack was decommissioned). Owner 2026-10-05: demo is the next environment used to test the
-    # provisioning orchestration.
-    display_name: Demo
-    azure_subscription_id: 2ff9ee48-6f1d-4664-865c-f11868dd1b50 # "Spaarke Demo Environment"
-    resource_group: rg-spaarke-demo
-    location: westus2
-    region: West US 2
-    keyvault: sprk-demo-kv
-    keyvault_resource_group: rg-spaarke-demo
-
-    bff:
-      app_service_name: spaarke-bff-demo # Stopped since 2026-10-04 (needs .NET 10 + settings refresh, task 242c)
-      app_service_url: https://spaarke-bff-demo.azurewebsites.net
-      app_service_slot: null # no deployment slot exists
-      app_registration_ref: app_registrations.bff_api # TBD: confirm if demo uses separate app reg
-      # Redis: Azure Managed Redis, Microsoft Entra only (T242b) — the BFF identity mi-bff-api-demo holds the access policy.
-      redis_endpoint: spaarke-bff-redis-demo.westus2.redis.azure.net:10000
-      # Content Safety (T246): NOT set on spaarke-bff-demo (checked 2026-10-06). The BFF refuses to start without
-      # AiSafety__ContentSafety__Endpoint outside Development/Testing — task 242c must set it before demo runs again.
-      content_safety_endpoint: null
-      secrets: {} # the former kv:API-CLIENT-SECRET does not exist in sprk-demo-kv (checked 2026-10-05)
-
-    dataverse:
-      env_url: https://spaarke-demo.crm.dynamics.com
-      region: unitedstates
-
-    ai:
-      openai:
-        endpoint: https://spaarke-openai-demo.openai.azure.com/
-        resource_name: spaarke-openai-demo
-      ai_search:
-        resource_name: spaarke-search-demo # NOT present in rg-spaarke-demo (checked 2026-10-05)
-      document_intelligence:
-        resource_name: spaarke-docintel-demo
-
-    spe:
-      containers:
-        spe_root:
-          _meta:
-            status: active
-            created: 2026-03-25
-            history:
-              - 2026-03-25: Provisioned during demo environment deployment
-          drive_id: b!FzmtPrWQEEi1yPtUOXM4_h7X4udVbCVJgu1ClOi23elAbPdL3-EGQK-D8YZ9tcZp
-          friendly_name: SPE Root Container
-          purpose: Demo environment root container
-          dataverse_env_var: sprk_SharePointEmbeddedContainerId # demo value
+  # The old "demo" environment (spaarke-demo.crm.dynamics.com, App Service spaarke-bff-demo and its AI/data stack) was
+  # retired and deleted on 2026-10-14 (D35); its entry was removed. The demo is now the ACME customer stamp (customerId
+  # acme) built by the provisioning control plane (T186) — it is not described by static config.
 
 # ============================================================================
 # GitHub Actions (OIDC + repo secrets)

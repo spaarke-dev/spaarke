@@ -9,8 +9,7 @@ Configuring OAuth scopes for BFF API, Graph API, or Dataverse access.
 
 ## Read These Files
 1. `src/client/shared/Spaarke.Auth/src/config.ts` — Code Page MSAL scope configuration
-2. `src/client/pcf/UniversalQuickCreate/control/services/auth/msalConfig.ts` — PCF scope config
-3. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` — Server-side OBO scope usage
+2. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` — Server-side OBO scope usage
 
 ## Constraints
 - **ADR-004**: Scopes must follow least-privilege principle

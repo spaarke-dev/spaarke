@@ -1,5 +1,8 @@
+using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
@@ -351,5 +354,210 @@ public class DataverseContactIdentityStoreTests
         DataverseContactIdentityStore.TryParseJson("<html>gateway timeout</html>").Should().BeNull();
         using var doc = DataverseContactIdentityStore.TryParseJson("{\"value\":[]}");
         doc.Should().NotBeNull();
+    }
+
+    // ── Task 184: the bind-intent reads and the pending-invite marker ─────────────────────────────────────────
+
+    /// <summary>
+    /// Task 185 slice B2 (option (c), design §6): the bind-intent read has no grant leg. The store has no grant path
+    /// builder or grant-answer interpreter left, and its one intent query (the marker's) reads no grant entity set, so no
+    /// grant can bind and no grant fault can deny. Before B2 this was
+    /// <c>TheIntentGrantLeg_IsTheReadPathsOwnActiveUnexpiredContactGrantFilter</c>.
+    /// </summary>
+    [Fact]
+    public void TheBindIntentRead_HasNoGrantLeg()
+    {
+        typeof(DataverseContactIdentityStore)
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+            .Select(m => m.Name)
+            .Should().NotContain(new[] { "BuildActiveContactGrantPath", "InterpretGrantLeg" });
+        DataverseContactIdentityStore.BuildInviteMarkerPath(Guid.NewGuid())
+            .Should().StartWith("contacts(").And.NotContain("sprk_externalrecordaccess");
+    }
+
+    [Fact]
+    public void TheMarkerAndItsCodeHash_AreReadTogetherInTheirOwnQuery_NeverInTheBindingSelect()
+    {
+        var contact = Guid.NewGuid();
+
+        DataverseContactIdentityStore.BuildInviteMarkerPath(contact)
+            .Should().Be($"contacts({contact:D})?$select=contactid,sprk_externalinvitedon,sprk_externalinvitecodehash");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedOnColumn,
+            "a BFF deployed before the column would otherwise fail every binding read, on every plane");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInviteCodeHashColumn,
+            "the hash is read only where E11 needs it (and never by the Readers profile)");
+    }
+
+    // ── Task 184 (fix round 1, F4-1): how each intent leg's answer is read ─────────────────────────────────
+
+    private static readonly Guid IntentContact = Guid.Parse("CCCCCCCC-0000-4000-8000-000000000184");
+    private static readonly Guid OtherContact = Guid.Parse("DDDDDDDD-0000-4000-8000-000000000184");
+
+    /// <summary>
+    /// The marker leg: a 404 is "this contact was never invited" (it does not exist); a column the environment lacks is
+    /// ColumnMissing (no evidence — denied not invited); a body that is absent, not JSON, or about another contact is
+    /// a fault — never "not invited" and never "invited". MUTATION PROOF (M22): reporting an unreadable body as Read fails
+    /// the not-json, no-body, not-an-object and another-contact rows. Task 185: the stored hash comes back with the marker
+    /// (only from this contact's readable row).
+    /// </summary>
+    [Theory]
+    [InlineData("marked", LookupStatus.Read, true)]
+    [InlineData("marked-with-hash", LookupStatus.Read, true)]
+    [InlineData("unmarked", LookupStatus.Read, false)]
+    [InlineData("not-a-date", LookupStatus.Read, false)]
+    [InlineData("not-found", LookupStatus.Read, false)]
+    [InlineData("not-json", LookupStatus.Failed, false)]
+    [InlineData("no-body", LookupStatus.Failed, false)]
+    [InlineData("json-not-an-object", LookupStatus.Failed, false)]
+    [InlineData("another-contact", LookupStatus.Failed, false)]
+    [InlineData("no-contact-id", LookupStatus.Failed, false)]
+    public void TheMarkerLeg_IsEvidence_OnlyForThisContactsReadableRow(
+        string scenario, LookupStatus expectedStatus, bool expectedInvited)
+    {
+        var (code, body) = scenario switch
+        {
+            "marked" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}}"),
+            "marked-with-hash" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\",\"sprk_externalinvitecodehash\":\"{StoredHash}\"}}"),
+            "unmarked" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":null}}"),
+            "not-a-date" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"soon\"}}"),
+            "not-found" => (HttpStatusCode.NotFound, (string?)null),
+            "not-json" => (HttpStatusCode.OK, "<html>gateway timeout</html>"),
+            "no-body" => (HttpStatusCode.OK, null),
+            "json-not-an-object" => (HttpStatusCode.OK, "[]"),
+            "another-contact" => (HttpStatusCode.OK, $"{{\"contactid\":\"{OtherContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\",\"sprk_externalinvitecodehash\":\"{StoredHash}\"}}"),
+            "no-contact-id" => (HttpStatusCode.OK, "{\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        var (status, invitedOn, hash) = DataverseContactIdentityStore.InterpretMarkerLeg(LookupStatus.Read, code, body, IntentContact);
+
+        status.Should().Be(expectedStatus);
+        (invitedOn is not null).Should().Be(expectedInvited);
+        if (expectedInvited)
+        {
+            invitedOn.Should().Be(new DateTimeOffset(2026, 10, 13, 9, 30, 5, TimeSpan.Zero));
+        }
+
+        hash.Should().Be(scenario == "marked-with-hash" ? StoredHash : null);
+    }
+
+    /// <summary>A well-formed stored value (task 185's <c>v1.</c> format), as the marker read returns it.</summary>
+    private static readonly string StoredHash = InviteCode.Create(IntentContact).StoredValue;
+
+    [Theory]
+    [InlineData(LookupStatus.ColumnMissing)]
+    [InlineData(LookupStatus.Failed)]
+    public void TheMarkerLeg_KeepsAFaultedRead_AndIgnoresItsBody(LookupStatus fault)
+        => DataverseContactIdentityStore.InterpretMarkerLeg(fault, HttpStatusCode.BadRequest,
+                $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\",\"sprk_externalinvitecodehash\":\"{StoredHash}\"}}", IntentContact)
+            .Should().Be((fault, (DateTimeOffset?)null, (string?)null));
+
+    /// <summary>
+    /// Task 185: the marker write carries the marker (UTC) AND the new code's stored hash — exactly those two columns, in
+    /// the one PATCH, so a re-invite replaces both together. Before 185 this was <c>TheMarkerWrite_CarriesOnlyTheMarker_InUtc</c>.
+    /// </summary>
+    [Fact]
+    public void TheMarkerWrite_CarriesTheMarkerInUtc_AndTheCodeHash_AndNothingElse()
+    {
+        var payload = DataverseContactIdentityStore.InviteMarkerPayload(
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), StoredHash);
+
+        payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_externalinvitedon"] = "2026-10-13T09:30:05Z",
+            ["sprk_externalinvitecodehash"] = StoredHash,
+        });
+    }
+
+    /// <summary>
+    /// Task 185 (AC2): the consuming bind's PATCH body is the plain bind's three columns PLUS the hash set to null — one
+    /// request, so the code is consumed by the write that binds. The marker is not in it. The plain bind (the workforce and
+    /// systemuser planes) never names the hash column, so those binds stay byte-identical.
+    /// </summary>
+    [Fact]
+    public void TheConsumingBind_IsThePlainBindPlusTheHashCleared_InOneBody()
+    {
+        var plain = DataverseContactIdentityStore.BindPayload(Oid, IdentityPlaneMarker.External);
+        var consuming = DataverseContactIdentityStore.BindAndConsumeInvitePayload(Oid, IdentityPlaneMarker.External);
+
+        consuming.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_externalobjectid"] = "aaaaaaaa-0000-4000-8000-000000000001",
+            ["sprk_externalobjectidkey"] = "aaaaaaaa-0000-4000-8000-000000000001",
+            ["sprk_identityplane"] = (int)IdentityPlaneMarker.External,
+            ["sprk_externalinvitecodehash"] = null,
+        });
+        JsonSerializer.Serialize(consuming).Should().Contain("\"sprk_externalinvitecodehash\":null",
+            "the request body clears the hash; a missing key would leave it in place");
+        plain.Keys.Should().BeEquivalentTo("sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane");
+    }
+
+    /// <summary>
+    /// Task 185: the consuming bind is never unconditional. Without a row version (null, empty, or <c>*</c>) it is refused
+    /// before any request: no token is acquired and no HTTP client is created.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    public async Task TheConsumingBind_WithoutARowVersion_SendsNothing(string? etag)
+    {
+        var requests = 0;
+        var store = new DataverseContactIdentityStore(
+            new CountingHttpClientFactory(() => requests++),
+            _ => { requests++; throw new InvalidOperationException("no request may be made"); },
+            "https://org.test.invalid",
+            NullLogger.Instance);
+
+        var write = await store.BindOidAndConsumeInviteAsync(Guid.NewGuid(), etag, Oid, IdentityPlaneMarker.External,
+            CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Failed);
+        write.Error.Should().Be("no row version for the bind");
+        requests.Should().Be(0);
+    }
+
+    /// <summary>Fails the test's count if the store ever asks for an HTTP client (no HTTP double: nothing is answered).</summary>
+    private sealed class CountingHttpClientFactory(Action onCreate) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            onCreate();
+            throw new InvalidOperationException("no request may be made");
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80048d19\",\"message\":\"Error identified in Payload ... The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", true)]
+    [InlineData("Invalid property 'sprk_externalinvitedon' was found in entity 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", false)]
+    [InlineData("Principal user is missing prvWriteContact privilege (sprk_externalinvitedon)", false)]
+    [InlineData(null, false)]
+    public void AMissingMarkerColumn_IsToldApartFromEveryOtherWriteFault(string? body, bool missing)
+        => DataverseContactIdentityStore.IsWriteColumnMissing(body, "sprk_externalinvitedon").Should().Be(missing);
+
+    /// <summary>
+    /// Task 185: the marker write carries two columns, so a fault naming EITHER is ColumnMissing (a stamp with the marker
+    /// column but not yet the hash column), and a fault naming neither is not.
+    /// </summary>
+    [Theory]
+    [InlineData("The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("Invalid property 'sprk_externalinvitecodehash' was found in entity 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", false)]
+    [InlineData("Principal user is missing prvWriteContact privilege (sprk_externalinvitecodehash)", false)]
+    public void AMissingMarkerOrHashColumn_IsColumnMissing_ForTheMarkerWrite(string body, bool missing)
+        => DataverseContactIdentityStore.IsWriteColumnMissing(body, DataverseContactIdentityStore.InviteMarkerColumns.ToArray())
+            .Should().Be(missing);
+
+    [Theory]
+    [InlineData("{\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}", true)]
+    [InlineData("{\"sprk_externalinvitedon\":null}", false)]
+    [InlineData("{\"sprk_externalinvitedon\":\"not a date\"}", false)]
+    [InlineData("{}", false)]
+    public void TheMarker_ReadsAsEvidence_OnlyWhenItIsADateTime(string json, bool evidence)
+    {
+        using var doc = JsonDocument.Parse(json);
+        (DataverseContactIdentityStore.ParseInvitedOn(doc.RootElement) is not null).Should().Be(evidence);
     }
 }

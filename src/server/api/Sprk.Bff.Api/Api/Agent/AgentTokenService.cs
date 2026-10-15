@@ -83,7 +83,7 @@ public sealed class AgentTokenService
     /// 2026-08-21 that <c>AgentToken__ClientSecret</c>, <c>API_CLIENT_SECRET</c>,
     /// <c>AzureAd__ClientSecret</c> and <c>Dataverse__ClientSecret</c> all hold the SAME value —
     /// <c>BFF-API-ClientSecret</c> — and that <c>AgentToken__ClientId</c> is the BFF app registration.
-    /// <c>Reconcile-DemoEnvironment.ps1:76</c> maps the demo environment the same way.
+    /// (The retired old-demo reconcile script mapped its environment the same way.)
     ///
     /// <para>Because "verified today" is not "true forever", divergence is not left to be discovered as
     /// an opaque <c>AADSTS7000215</c> on the agent endpoint: <c>IdentityConfigurationValidator</c>

@@ -15,13 +15,13 @@
     Source Dataverse URL (e.g., https://spaarkedev1.crm.dynamics.com)
 
 .PARAMETER TargetUrl
-    Target Dataverse URL (e.g., https://spaarke-demo.crm.dynamics.com)
+    Target Dataverse URL (e.g., https://myenv.crm.dynamics.com)
 
 .PARAMETER DryRun
     Preview what would be migrated without making changes.
 
 .EXAMPLE
-    .\Migrate-DataverseData.ps1 -SourceUrl "https://spaarkedev1.crm.dynamics.com" -TargetUrl "https://spaarke-demo.crm.dynamics.com"
+    .\Migrate-DataverseData.ps1 -SourceUrl "https://spaarkedev1.crm.dynamics.com" -TargetUrl "https://myenv.crm.dynamics.com"
 #>
 
 [CmdletBinding()]

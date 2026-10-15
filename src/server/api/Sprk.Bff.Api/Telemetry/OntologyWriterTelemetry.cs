@@ -29,6 +29,16 @@ public static class OntologyWriterTelemetry
                      "observed failures is not evidence of health — it may mean the failures are silent.");
 
     /// <summary>
+    /// <c>customMetrics/ontology.writer.skips</c> (task 042, K1): a write that was deliberately NOT made, by design (today only
+    /// <c>gate_dr_skipped_unfiled</c>), kept off <see cref="FailuresCounter"/> so an alert on <c>ontology.writer.failures</c> counts real
+    /// failures only and stays unfiltered. Same <see cref="MeterName"/>.
+    /// </summary>
+    private static readonly Counter<long> SkipsCounter = Meter.CreateCounter<long>(
+        name: "ontology.writer.skips",
+        unit: "{skip}",
+        description: "Count of writes skipped by design (not failures), by reason.");
+
+    /// <summary>
     /// <c>customMetrics/ontology.policy.invalid</c> (task 022, same <see cref="MeterName"/> as the writer's own
     /// failure counter — this is still the ontology domain, just the policy-validation side rather than the
     /// write side; CLAUDE.md §11 reuse-first: extending this class's existing Meter rather than standing up a
@@ -67,6 +77,11 @@ public static class OntologyWriterTelemetry
     /// </summary>
     public static void RecordFailure(string reason) =>
         FailuresCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one write skipped BY DESIGN (task 042, K1): not a failure, never on <c>ontology.writer.failures</c>.
+    /// <paramref name="reason"/> is one of the bounded constants of the writer that skipped.</summary>
+    public static void RecordSkip(string reason) =>
+        SkipsCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
 
     /// <summary>
     /// Records one <c>sprk_policyversion</c> validation refusal (task 022). <paramref name="reason"/> MUST be
@@ -308,6 +323,10 @@ public static class OntologyWriterFailureReason
 
     /// <summary>Task 031: a system closure (ConditionCleared) of a Signal failed in Dataverse.</summary>
     public const string SignalCloseFailed = "signal_close_failed";
+
+    /// <summary>Ontology task 145 (D-123, review F1): clearing stored evidence detail that is no longer within the Signal's secure
+    /// family failed in Dataverse.</summary>
+    public const string SignalEvidenceRedactFailed = "signal_evidence_redact_failed";
 
     /// <summary>Task 031 (D-35), task 143: re-owning a no-core Signal to its item's current owner team failed (uac-r2's
     /// <c>ReownOrdinaryRowAsync</c> answered Failed, or faulted).</summary>

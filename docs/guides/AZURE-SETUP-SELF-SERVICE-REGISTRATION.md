@@ -73,7 +73,7 @@ These are **Application (Role) permissions**, NOT Delegated permissions. The pro
 | `GroupMember.ReadWrite.All` | `dbaae8cf-10b5-4b86-a4a1-f871c94c6695` | Add/remove users from the demo security group |
 | `Directory.ReadWrite.All` | `06b708a9-e830-4db3-a914-8e69da51d44f` | Assign licenses to demo users |
 | `Files.ReadWrite.All` | `75359482-378d-4052-8f01-80520e7db3cd` | SPE container access (may already exist) |
-| `Mail.Send` | `40dc41bc-0f7e-42ff-89bd-d9516947e474` | Send welcome and expiration notification emails (may already exist) |
+| `Mail.Send` | `b633e1c5-b582-4048-a93e-9f11b44c7e96` | Send welcome and expiration notification emails (may already exist) |
 
 3. After adding all permissions, click **Grant admin consent for {your-tenant-name}**
 4. Verify that each permission shows a green checkmark under **Status** indicating "Granted for {tenant}"

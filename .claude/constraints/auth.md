@@ -2,7 +2,7 @@
 
 > **Domain**: OAuth, OBO, Token Management, Access Control, Server Hardening
 > **Source ADRs**: **ADR-028 (canonical — Spaarke Auth v2)**, ADR-003 (server seams), ADR-004 (OBO), ADR-008 (filters), ADR-009 (Redis caching)
-> **Last Updated**: 2026-08-24 (ADR-028 **A4** applied; exception **E-3 CLOSED** — the BFF identity is secret-free)
+> **Last Updated**: 2026-10-11 (Model 1 workforce identity / home-tenant section added at the owner's request; earlier: 2026-08-24 ADR-028 **A4** applied, exception **E-3 CLOSED**)
 > **Last Reviewed**: 2026-08-24
 > **Status**: Verified · v2-aligned · A4-complete
 >
@@ -59,6 +59,24 @@ Load when:
 - ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
+### Model 1 workforce identity — the customer's home directory (owner request 2026-10-11; R3; ADR-028 A8 + A9)
+
+Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directory** = the customer's own Entra directory. Never write a bare "tenant" for the second.
+
+- ✅ **MUST** treat a Model 1 **licensed core user** as a **B2B guest in the Spaarke tenant** who authenticates in their customer's home directory: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-directory issuer (ADR-028 A8).
+- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
+- ✅ **MUST** resolve a licensed core user who opens the browser SPA with their company account to their `systemuser` only through the stored link home (`tid`, `oid`) → `systemuserid` — never by email or UPN (A9).
+- ✅ **MUST** key workforce membership on the customer's home directory id(s) in `WorkforceIdentity:CustomerTenantIds` — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
+  - **Scope (owner 2026-10-13, §6.5 path B; word-add-in-r1 task 126):** this governs what the BFF accepts or binds from a sign-in token, as ADR-028 A9 states it (validated `iss`/`tid`).
+  - It does not cover the operator's reviewed data step `scripts/Set-ExternalFlagForB2BGuests.ps1 -CustomerTenantIds`, which sets `systemuser.sprk_isexternal` on licensed B2B guests. That step:
+    - may use a guest's email domain only as the input to a Graph directory lookup;
+    - compares directory ids;
+    - is reviewed as a dry run;
+    - never writes a guest it cannot place.
+  - Workforce contacts never reach it. They are contacts, not systemusers, and their plane is `contact.sprk_identityplane`, written at sign-in.
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in (model-driven apps, Office add-ins, Teams) — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 workforce-contact browser-SPA client.
+- Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
+
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)
 
 - ✅ **MUST** read and write SPE bytes app-only, behind a Dataverse decision and the document-pointer check, whenever a `sprk_document` (or record) stands behind them (task 171, owner rounds 69/70).
@@ -85,7 +103,7 @@ Load when:
 
 - ❌ **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in Spaarke code — the root-cause snapshot pattern v2 eliminates. Exception: third-party SDK contracts (Power BI `IReportEmbedConfiguration`, MSAL result objects) — these are NOT Spaarke BFF tokens. See memory `feedback-third-party-sdk-accesstoken-is-ok`.
 - ❌ **MUST NOT** use `useState`/`useEffect` to snapshot a token in React state — the 401-after-refresh bug
-- ❌ **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals. Use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA. Each MUST carry `// Auth v2 (D-AUTH-7):` justification comment.
+- ❌ **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals. Use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA, and the classic form-script helper `Spaarke.BffAuth.authenticatedFetch` (`sprk_/scripts/bff_auth.js`, built from `@spaarke/auth`, which returns non-OK responses to framework-free callers that read their status and body — ADR-028 A7; only with its BFF-origin check). Each MUST carry `// Auth v2 (D-AUTH-7):` justification comment.
 - ❌ **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` — all deleted in v2
 - ❌ **MUST NOT** use `sessionStorage` for the MSAL cache on internal surfaces (INV-1 violation; popup every new tab)
 - ❌ **MUST NOT** set `storeAuthStateInCookie: false` (INV-2 violation)

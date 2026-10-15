@@ -433,7 +433,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 groupRejection, cancellationToken).ConfigureAwait(false);
         }
 
-        // Guests are blocked from Dataverse while restrictguestuseraccess is on (the default for a new environment).
+        // Guests are blocked from Dataverse while restrictGuestUserAccess is on (the default for a new environment).
         var guestAccess = await _guestUserWriter.ReadGuestAccessAsync(dataverseEnvUrl, tenantId, cancellationToken)
             .ConfigureAwait(false);
         if (guestAccess is not GuestAccessOutcome.Allowed)
@@ -441,7 +441,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.GuestAccessRestricted,
                 guestAccess is GuestAccessOutcome.Failure readFailure
                     ? $"The environment's guest-access setting could not be read: {readFailure.Diagnostic}. Nothing was written."
-                    : "The environment restricts guest access (organization.restrictguestuseraccess = true, the default) — " +
+                    : "The environment restricts guest access (organization.restrictGuestUserAccess = true, the default) — " +
                       "guests could not use it. Turn it off (prerequisite PRQ-C-12), then resume. Nothing was written.",
                 cancellationToken).ConfigureAwait(false);
         }

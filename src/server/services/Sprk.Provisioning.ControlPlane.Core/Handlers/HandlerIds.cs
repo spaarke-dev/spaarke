@@ -17,14 +17,14 @@
 //   DagAdvancer's dependency map is string-keyed.
 //
 // DISPATCHABLE VS SUB-STEP:
-//   21 of the 22 handler ids are independently enqueued via
+//   21 of the 23 handler ids are independently enqueued via
 //   HandlerEnvelope.HandlerId and therefore need a keyed DI registration --
-//   these are <see cref="Dispatchable"/>. The remaining one (H14a) is
-//   orchestrated IN-PROCESS by H14IntegrationWiringHandler (ONE
-//   ReplaceRunAsync call) and is
-//   NEVER independently enqueued -- it is deliberately EXCLUDED from
+//   these are <see cref="Dispatchable"/>. The remaining two (H14a, and H14m since
+//   task 263) are orchestrated IN-PROCESS by H14IntegrationWiringHandler (ONE
+//   ReplaceRunAsync call) and are
+//   NEVER independently enqueued -- they are deliberately EXCLUDED from
 //   Dispatchable and MUST NOT be keyed-registered
-//   (HandlerRegistrationCompletenessTests asserts its absence).
+//   (HandlerRegistrationCompletenessTests asserts their absence).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers;
@@ -109,7 +109,7 @@ public static class HandlerIds
     /// <summary>H13 -- E2E acceptance gate (final handler).</summary>
     public const string H13 = "H13";
 
-    /// <summary>H14 -- post-deploy integration wiring (parent of the H14a in-process sub-step).</summary>
+    /// <summary>H14 -- post-deploy integration wiring (parent of the H14a and H14m in-process sub-steps).</summary>
     public const string H14 = "H14";
 
     /// <summary>
@@ -118,6 +118,13 @@ public static class HandlerIds
     /// (see class remarks) -- NOT in <see cref="Dispatchable"/>.
     /// </summary>
     public const string H14a = "H14a";
+
+    /// <summary>
+    /// H14m -- the customer's Spaarke-tenant shared mailbox (task 263, owner decision 2026-10-10 #1562): created in
+    /// Exchange, joined to the customer's scope group, authorization-tested, and recorded as the stamp's verified
+    /// sprk_communicationaccount row. In-process only, after H14a -- NOT in <see cref="Dispatchable"/>.
+    /// </summary>
+    public const string H14m = "H14m";
 
     /// <summary>
     /// The envelope-dispatchable ids (design.md §4.1 handler catalog).

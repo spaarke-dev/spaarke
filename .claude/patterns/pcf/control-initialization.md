@@ -13,7 +13,7 @@ Creating or modifying a PCF control's lifecycle (init, updateView, destroy).
         list/dataset UX do NOT build a dataset PCF at all — use `<DataGrid configId=… />` from
         @spaarke/ui-components (docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md). Other live
         entry points if VisualHost is a poor fit: MatterHeader, RecordHeader. (EmailProcessingMonitor deleted 2026-09-25.) -->
-2. `src/client/pcf/UniversalQuickCreate/control/index.ts` — Standard control exemplar (field-bound)
+2. `src/client/pcf/RecordHeader/control/index.ts` — Standard control exemplar (field-bound; UniversalQuickCreate was retired in `5b4cca898`)
 
 ## Constraints
 - **ADR-006**: Field-bound form controls → PCF; standalone dialogs → Code Page

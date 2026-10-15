@@ -403,8 +403,6 @@ public class RagIndexingPipelineTests
             "because {0} knowledge chunks were uploaded successfully", knowledgeChunks);
         result.DiscoveryChunksIndexed.Should().Be(discoveryChunks,
             "because {0} discovery chunks were uploaded successfully", discoveryChunks);
-        result.DurationMs.Should().BeGreaterOrEqualTo(0,
-            "DurationMs should be a non-negative wall-clock measurement");
     }
 
     // -------------------------------------------------------------------------
@@ -835,6 +833,5 @@ public class RagIndexingPipelineTests
             "session-files chunks are reported via KnowledgeChunksIndexed (no new field per task scope)");
         result.DiscoveryChunksIndexed.Should().Be(0,
             "session-files path NEVER writes to the discovery index");
-        result.DurationMs.Should().BeGreaterOrEqualTo(0);
     }
 }
