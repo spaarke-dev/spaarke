@@ -212,6 +212,17 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
                 "Verifier is expected to return CountMismatch(0) on internal exceptions rather than throw.");
         }
 
+        // (3b) T186 audit: a half whose query could not be completed (Dataverse 429 / 5xx / timeout through the
+        //      verifier's bounded retries) has no verdict — InfraFault (Resumable), never Failed (QuarantineRequired).
+        if (bffResult is DataverseAppUserVerificationResult.Unverified || uamiResult is DataverseAppUserVerificationResult.Unverified)
+        {
+            var reasons = new[] { ("BFF", bffResult), ("UAMI", uamiResult) }
+                .Where(h => h.Item2 is DataverseAppUserVerificationResult.Unverified)
+                .Select(h => $"{h.Item1} half: {((DataverseAppUserVerificationResult.Unverified)h.Item2).Diagnostic}");
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                $"T2 verdict deferred: the systemusers re-query could not be completed ({string.Join("; ", reasons)}).");
+        }
+
         // (4) Verdict — BOTH halves must resolve as exactly-one App User row.
         var bffOk = bffResult is DataverseAppUserVerificationResult.Verified;
         var uamiOk = uamiResult is DataverseAppUserVerificationResult.Verified;

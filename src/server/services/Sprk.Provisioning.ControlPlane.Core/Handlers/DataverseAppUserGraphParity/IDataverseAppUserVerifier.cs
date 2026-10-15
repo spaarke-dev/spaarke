@@ -32,7 +32,7 @@ public interface IDataverseAppUserVerifier
 
 /// <summary>
 /// Result of one <see cref="IDataverseAppUserVerifier.VerifyAsync"/>
-/// invocation. Exhaustive: <see cref="Verified"/> | <see cref="CountMismatch"/>.
+/// invocation. Exhaustive: <see cref="Verified"/> | <see cref="CountMismatch"/> | <see cref="Unverified"/>.
 /// </summary>
 public abstract record DataverseAppUserVerificationResult
 {
@@ -55,4 +55,11 @@ public abstract record DataverseAppUserVerificationResult
     /// more than one — duplicate registration, also a data-integrity concern).
     /// </summary>
     public sealed record CountMismatch(int ObservedCount) : DataverseAppUserVerificationResult;
+
+    /// <summary>
+    /// T186 audit: the query could not be completed because Dataverse kept answering 429 / 5xx, timing out or dropping the
+    /// connection after the bounded retries. No verdict was reached — this is NOT evidence that the row is missing, so
+    /// callers must not quarantine on it (H10 classifies it Resumable).
+    /// </summary>
+    public sealed record Unverified(string Diagnostic) : DataverseAppUserVerificationResult;
 }

@@ -42,7 +42,7 @@ public interface IGraphAppRoleParityVerifier
 
 /// <summary>
 /// Result of one <see cref="IGraphAppRoleParityVerifier.VerifyAsync"/>
-/// invocation. Exhaustive: <see cref="Verified"/> | <see cref="Partial"/>.
+/// invocation. Exhaustive: <see cref="Verified"/> | <see cref="Partial"/> | <see cref="Unverified"/>.
 /// </summary>
 public abstract record GraphAppRoleParityResult
 {
@@ -60,6 +60,13 @@ public abstract record GraphAppRoleParityResult
         IReadOnlyList<string> MissingRoleValues,
         int GrantedCount,
         int ExpectedCount) : GraphAppRoleParityResult;
+
+    /// <summary>
+    /// T186 audit: the assignments could not be read because Microsoft Graph kept answering 429 / 5xx, timing out or
+    /// dropping the connection after the bounded retries. No verdict was reached — this is NOT evidence of a wrong GUID
+    /// or a missing grant, so callers must not quarantine on it (H10 classifies it Resumable).
+    /// </summary>
+    public sealed record Unverified(string Diagnostic, int ExpectedCount) : GraphAppRoleParityResult;
 }
 
 /// <summary>

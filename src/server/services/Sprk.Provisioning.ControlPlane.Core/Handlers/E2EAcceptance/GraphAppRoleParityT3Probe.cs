@@ -518,9 +518,15 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                 _logger.LogWarning("T3 probe FAILED (parity mismatch): {Diagnostic}", diagnostic);
                 return new TrapVerificationOutcome.Failed(Kind, diagnostic);
 
+            case GraphAppRoleParityResult.Unverified unverified:
+                // T186 audit: Graph stayed unavailable through the verifier's bounded retries — no verdict, so
+                // InfraFault (Resumable), never Failed (QuarantineRequired).
+                return new TrapVerificationOutcome.InfraFault(Kind,
+                    $"T3 verdict deferred: the appRoleAssignments read could not be completed: {unverified.Diagnostic}");
+
             default:
                 // Defensive: GraphAppRoleParityResult is a discriminated union
-                // whose subclasses are exhaustively Verified + Partial. A
+                // whose subclasses are exhaustively Verified + Partial + Unverified. A
                 // future addition surfacing here means seam evolution the
                 // probe hasn't caught up to -- InfraFault rather than crash.
                 return new TrapVerificationOutcome.InfraFault(Kind,

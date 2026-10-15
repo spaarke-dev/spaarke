@@ -69,6 +69,24 @@ public sealed class DataverseAppUserPairT2ProbeTests
         verifier.CallCount.Should().Be(2);
     }
 
+    // ---------- T186 audit: a half whose query could not be completed has no verdict ----------
+
+    [Fact]
+    public async Task ProbeAsync_UamiHalfUnverified_ReturnsInfraFault_NotFailed()
+    {
+        var verifier = new FakeVerifier(
+            bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
+            uami: new DataverseAppUserVerificationResult.Unverified("HTTP 503 after 4 attempt(s)."));
+        var probe = BuildProbe(verifier);
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        var infra = outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>(
+            "Failed is QuarantineRequired — an outage is not a T2 trap").Subject;
+        infra.Kind.Should().Be(TrapKind.T2DataverseAppUser);
+        infra.Diagnostic.Should().Contain("UAMI half").And.Contain("HTTP 503");
+    }
+
     // ---------- T2 BFF-half missing ----------
 
     [Fact]
