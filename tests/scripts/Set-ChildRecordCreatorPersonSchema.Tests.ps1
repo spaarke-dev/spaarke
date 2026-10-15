@@ -78,9 +78,20 @@ Describe 'the script''s table and solution wiring' {
         $text | Should -Match '(?m)^\$Tables = @\([^)]*''sprk_signal''[^)]*\)'
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         $homes | Should -Match '(?m)^\s+sprk_signal\s+= @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
-        # exactly the three ontology tables have solution homes; every other child's column stays in SpaarkeCore
+        # exactly the three ontology tables and the four eBilling tables (ebilling-r1 task 013) have solution homes; every
+        # other child's column stays in SpaarkeCore
         @([regex]::Matches($homes, '(?m)^\s+(sprk_\w+)\s+=') | ForEach-Object { $_.Groups[1].Value } | Sort-Object) |
-            Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
+            Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_externalidentifier', 'sprk_invoiceapproval',
+                'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_signal')
+    }
+
+    It 'ebilling-r1 013: lists the four eBilling tables in $Tables with SpaarkeMaster as their only solution home' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        foreach ($t in 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection') {
+            $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
+            $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
+        }
     }
 
     It 'D-136: the narrow profile covers exactly sprk_budgetrevision, sprk_decisionrecord and sprk_signal' {
@@ -119,6 +130,9 @@ Describe 'a simulated run' {
         }
         # The tables whose column travels in SpaarkeMaster / OntologyPlatformSolution, as the script's $SolutionHomes says.
         $global:SimCpHomeTables = @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
+        # ebilling-r1 task 013: tables whose column travels in SpaarkeMaster only (the eBilling schema scripts create it with
+        # the canonical relationship name).
+        $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection')
         function global:SimCp-Rel([string]$t) {
             # the maker-made lookups (D-135 Q27) carry the maker's relationship name
             if ($t -in $global:SimCpHomeTables) { "$($t)_CreatedByPerson_systemuser" } else { "sprk_systemuser_$($t)_createdbyperson" }
@@ -213,7 +227,7 @@ Describe 'a simulated run' {
                 $signalTable = @{ objectid = (SimCp-Guid 'table-sprk_signal'); componenttype = 1; rootcomponentbehavior = 0 }
                 if ($sid -eq (SimCp-Guid 'sol-SpaarkeCore')) {
                     # SpaarkeCore holds every other table's column and relationship, and NOT the budget revision's or the decision record's.
-                    foreach ($t in $global:SimCpTables | Where-Object { $_ -notin $global:SimCpHomeTables }) {
+                    foreach ($t in $global:SimCpTables | Where-Object { $_ -notin $global:SimCpHomeTables -and $_ -notin $global:SimCpMasterOnlyTables }) {
                         $rows += @{ objectid = (SimCp-Guid "attr-$t"); componenttype = 2; rootcomponentbehavior = 0 }
                         $rows += @{ objectid = (SimCp-Guid "rel-$t"); componenttype = 10; rootcomponentbehavior = 0 }
                     }
@@ -225,6 +239,7 @@ Describe 'a simulated run' {
                     $rows += $budgetRevisionTable
                     $rows += $decisionRecordTable
                     $rows += $signalTable
+                    foreach ($t in $global:SimCpMasterOnlyTables) { $rows += @{ objectid = (SimCp-Guid "table-$t"); componenttype = 1; rootcomponentbehavior = 0 } }
                     if ($global:SimCpScenario -ne 'narrow-not-in-master') { $rows += @{ objectid = $narrow; componenttype = 70; rootcomponentbehavior = 0 } }
                 }
                 elseif ($sid -eq (SimCp-Guid 'sol-OntologyPlatformSolution')) {
@@ -246,7 +261,7 @@ Describe 'a simulated run' {
     }
     AfterAll {
         foreach ($f in 'az', 'Invoke-RestMethod', 'SimCp-Guid', 'SimCp-Rel', 'SimCp-Reset') { Remove-Item "function:global:$f" -ErrorAction SilentlyContinue }
-        Remove-Variable SimCpTables, SimCpHomeTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable SimCpTables, SimCpHomeTables, SimCpMasterOnlyTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra -Scope Global -ErrorAction SilentlyContinue
     }
 
     It 'passes: the maker relationship name is accepted, and the column is found in SpaarkeMaster and OntologyPlatformSolution, not reported missing from SpaarkeCore' {

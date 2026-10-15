@@ -92,6 +92,9 @@ public static class RecordCreatorPerson
         // forms) and "New Billing Event" (invoice form) create through the same route, so they record the person too
         // (same script, gate G147-5).
         "sprk_kpiassessment", "sprk_billingevent",
+        // ebilling-r1 task 013: the invoice family's new secure children are created by the BFF as the application (intake,
+        // approval, correction), so they record the person who asked, like the invoice and the line (same script).
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
         // Ontology task 147 (D-135 Q27, #1777): a budget revision records the person whose decision commit caused it
         // (ReviseBudgetExecutor passes RequestedBy). The owner created the column on dev; the same script lists it, and
         // its relationship carries the maker's name form (`sprk_budgetrevision_CreatedByPerson_systemuser`).

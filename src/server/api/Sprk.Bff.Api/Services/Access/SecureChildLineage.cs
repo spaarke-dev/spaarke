@@ -71,8 +71,10 @@ internal static class SecureChildLineage
             ("sprk_analysisid", "sprk_analysis")),
         T("sprk_attachmentartifact", "sprk_attachmentartifacts",
             ("sprk_document", "sprk_document"), ("sprk_emailartifact", "sprk_emailartifact")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (ebilling-r1 task 010, live spaarkedev1 2026-10-15).
         T("sprk_billingevent", "sprk_billingevents",
-            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project)),
+            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project),
+            ("sprk_regardingworkassignment", WorkAssignment)),
         T("sprk_budget", "sprk_budgets",
             ("sprk_matter", Matter), ("sprk_project", Project)),
         // Ontology platform R1 task 044 (D-33/D-38): the revision a decision records is owned by the secure team under a Secure
@@ -127,9 +129,30 @@ internal static class SecureChildLineage
             ("sprk_event", "sprk_event")),
         T("sprk_fileversion", "sprk_fileversions",
             ("sprk_document", "sprk_document")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012) and sprk_supersedesinvoice (the invoice a
+        // resubmission replaces), live spaarkedev1 2026-10-15. Its sprk_billingexport lookup is left out: an export batch
+        // is not a codified table (it spans many core records and is filed under none; ebilling-r1 task 013 notes).
         T("sprk_invoice", "sprk_invoices",
-            new[] { ("sprk_matter", Matter), ("sprk_project", Project) }
-                .Concat(Regarding("sprk_agreement")).ToArray()),
+            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_supersedesinvoice", "sprk_invoice") }
+                .Concat(Regarding("sprk_agreement", WorkAssignment)).ToArray()),
+        // ebilling-r1 task 013 (FR-05, D-82): the invoice family's new tables, lookups read live, spaarkedev1 2026-10-15
+        // (EntityDefinitions(<table>)/ManyToOneRelationships). Each names its core record through the CoreAncestorLookups
+        // trio; the vendor organization, the submitter / decider contact and the issuing organization are identities, not
+        // parents.
+        T("sprk_invoicesubmission", "sprk_invoicesubmissions",
+            new[]
+            {
+                ("sprk_invoice", "sprk_invoice"), ("sprk_document", "sprk_document"), ("sprk_reportdocument", "sprk_document"),
+                ("sprk_resubmissionof", "sprk_invoicesubmission"),
+            }.Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+        T("sprk_invoiceapproval", "sprk_invoiceapprovals",
+            new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_decisionrecord", "sprk_decisionrecord") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+        T("sprk_externalidentifier", "sprk_externalidentifiers",
+            Regarding("sprk_invoice", Matter, Project, WorkAssignment)),
+        T("sprk_invoicecorrection", "sprk_invoicecorrections",
+            new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_invoiceline", "sprk_billingevent") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
         T("sprk_kpiassessment", "sprk_kpiassessments",
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_reportcard", "sprk_reportcard")),
         T("sprk_memo", "sprk_memos",

@@ -51,6 +51,8 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_emailreviewlog", "sprk_communicationchannelref", "sprk_fileversion", "sprk_emailartifact",
         "sprk_attachmentartifact", "sprk_eventlog", "sprk_invoicelineitem", "sprk_budgetbucket", "sprk_processingjob",
         "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
+        // ebilling-r1 task 013: the invoice family's new secure children (no server create exists yet).
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
     };
 
     private enum Disposition

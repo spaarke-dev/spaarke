@@ -154,7 +154,7 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -188,6 +188,12 @@ $SolutionHomes = @{
     sprk_budgetrevision = @('SpaarkeMaster', 'OntologyPlatformSolution')
     sprk_decisionrecord = @('SpaarkeMaster', 'OntologyPlatformSolution')   # ontology task 142 (D-135), as 147 did for the budget revision
     sprk_signal         = @('SpaarkeMaster', 'OntologyPlatformSolution')   # ontology task 143 (D-135), as 142 did for the Decision Record
+    # ebilling-r1 task 013: the invoice family's new tables live only in SpaarkeMaster (scripts/ebilling/Deploy-Ebilling*Schema.ps1
+    # create each table there, its sprk_createdbyperson lookup included); this script secures the column and checks it.
+    sprk_invoicesubmission  = @('SpaarkeMaster')
+    sprk_invoiceapproval    = @('SpaarkeMaster')
+    sprk_externalidentifier = @('SpaarkeMaster')
+    sprk_invoicecorrection  = @('SpaarkeMaster')
 }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────

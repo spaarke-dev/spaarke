@@ -75,6 +75,57 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// ebilling-r1 task 013 (FR-05): every core-record lookup of the invoice family is a lineage parent — a dropped one
+    /// could leave out the root with the fewest sharees and widen the child's share intersection. The line's invoice stays
+    /// a parent too (an extra lookup only narrows), but the line's CORE record is its own lookup (D-75).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_billingevent", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicesubmission", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_externalidentifier", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicecorrection", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    public void TheInvoiceFamily_FilesUnderEveryCoreRecordLookup(string table, string matter, string project, string workAssignment)
+    {
+        var lookups = SecureChildLineage.Children[table].Lookups;
+
+        lookups.Should().Contain(new Dictionary<string, string>
+        {
+            [matter] = "sprk_matter",
+            [project] = "sprk_project",
+            [workAssignment] = "sprk_workassignment",
+        });
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column)
+            .Should().BeSubsetOf(lookups.Keys, "the guard's core lookups and the lineage's parents are the same columns");
+    }
+
+    /// <summary>ebilling-r1 task 013: the family rows that name an invoice, a line or a document keep that parent too.</summary>
+    [Fact]
+    public void TheInvoiceFamily_KeepsItsInvoiceLineAndDocumentParents()
+    {
+        SecureChildLineage.Children["sprk_invoice"].Lookups.Should().Contain("sprk_supersedesinvoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoicesubmission"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_document"] = "sprk_document",
+            ["sprk_reportdocument"] = "sprk_document",
+            ["sprk_resubmissionof"] = "sprk_invoicesubmission",
+        });
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_decisionrecord"] = "sprk_decisionrecord",
+        });
+        SecureChildLineage.Children["sprk_externalidentifier"].Lookups.Should().Contain("sprk_regardinginvoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoicecorrection"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_invoiceline"] = "sprk_billingevent",
+        });
+    }
+
+    /// <summary>
     /// The mirror follows the ownership resolver: every table it treats as a reparentable child is mirrored, except
     /// <c>sprk_servicerequest</c>, which the resolver treats as a root of its own.
     /// </summary>

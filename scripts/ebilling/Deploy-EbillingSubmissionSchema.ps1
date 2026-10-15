@@ -179,6 +179,8 @@ try {
     Add-SubLookup 'sprk_regardingproject' 'sprk_RegardingProject' 'sprk_invoicesubmission_regproject' 'sprk_project' 'Regarding Project' "ADR-024 entity-specific lookup. $RegardingNote"
     Add-SubLookup 'sprk_regardingworkassignment' 'sprk_RegardingWorkAssignment' 'sprk_invoicesubmission_regworkassignment' 'sprk_workassignment' 'Regarding Work Assignment' "ADR-024 entity-specific lookup. $RegardingNote"
     Add-SubLookup 'sprk_regardingrecordtype' 'sprk_RegardingRecordType' 'sprk_invoicesubmission_regrecordtype_recordtype_ref' 'sprk_recordtype_ref' 'Regarding Record Type' 'ADR-024 resolver field: the record type of the core record the submission is regarding.'
+    # ebilling-r1 task 013: the creator-person lookup the BFF stamps on an app-only create (secure-record family).
+    Add-SubLookup 'sprk_createdbyperson' 'sprk_CreatedByPerson' 'sprk_systemuser_sprk_invoicesubmission_createdbyperson' 'systemuser' 'Created By (Person)' 'The PERSON who asked for this record. Stamped by the BFF only (field-secured by scripts/Set-ChildRecordCreatorPersonSchema.ps1): createdby is the BFF application user for a record the BFF creates app-only, so this column is what records the person. ebilling-r1 task 013 (secure-record family; unified-access-control-r2 task 146 shape).'
 
     # --- 4. Resolver text fields (lengths per 140-schema-delta.md section 2) ------------------------------------
     Write-Host "4. Resolver text fields" -ForegroundColor Cyan

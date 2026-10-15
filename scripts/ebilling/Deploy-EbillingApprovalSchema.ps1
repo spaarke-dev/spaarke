@@ -158,6 +158,8 @@ try {
         -Display 'Regarding Work Assignment' -Description "ADR-024 entity-specific lookup. $RegardingNote"
     Add-Lookup -Column 'sprk_regardingrecordtype' -SchemaName 'sprk_RegardingRecordType' -RelSchema 'sprk_invoiceapproval_regrecordtype_recordtype_ref' -Target 'sprk_recordtype_ref' `
         -Display 'Regarding Record Type' -Description 'ADR-024 resolver field: the record type of the core record the approval is regarding.'
+    # ebilling-r1 task 013: the creator-person lookup the BFF stamps on an app-only create (secure-record family).
+    Add-Lookup -Column 'sprk_createdbyperson' -SchemaName 'sprk_CreatedByPerson' -RelSchema 'sprk_systemuser_sprk_invoiceapproval_createdbyperson' -Target 'systemuser' -Display 'Created By (Person)' -Description 'The PERSON who asked for this record. Stamped by the BFF only (field-secured by scripts/Set-ChildRecordCreatorPersonSchema.ps1): createdby is the BFF application user for a record the BFF creates app-only, so this column is what records the person. ebilling-r1 task 013 (secure-record family; unified-access-control-r2 task 146 shape).'
     Add-Column 'sprk_regardingrecordid' (New-StringDef 'sprk_RegardingRecordId' 'Regarding Record Id' 'ADR-024 resolver field: id of the core record the approval is regarding.' 100) 'String'
     Add-Column 'sprk_regardingrecordname' (New-StringDef 'sprk_RegardingRecordName' 'Regarding Record Name' 'ADR-024 resolver field: name of that record.' 200) 'String'
     Add-Column 'sprk_regardingrecordnumber' (New-StringDef 'sprk_RegardingRecordNumber' 'Regarding Record Number' 'ADR-024 resolver field: number of that record.' 100) 'String'
