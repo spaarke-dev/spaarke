@@ -4,7 +4,7 @@
     <title>Invoice lifecycle transition service</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF service and DI registration on the write path (tags bff, write-path).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,7 +101,10 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append point: FinanceModule.cs. Enforcing "only writer of invoice status" mechanically (an ArchTest source scan) is a candidate for 015 once sprk_invoicestatus is gone — note it there, do not add it here.</notes>
+  <notes>Shared append point: FinanceModule.cs. Enforcing "only writer of invoice status" mechanically (an ArchTest source scan) is a candidate for 015 once sprk_invoicestatus is gone — note it there, do not add it here.
+
+COMPLETED 2026-10-15. Full notes: projects/ebilling-r1/notes/014-invoice-lifecycle-service.md. Summary: IInvoiceLifecycleService / InvoiceLifecycleService (Services/Finance/InvoiceLifecycleService.cs), enum InvoiceLifecycleStatus, reasons invoice.transition_not_allowed | not_found | status_unknown | concurrent_change; registered unconditionally in AddFinanceModule; 28 unit tests (all 49 pairs, conflict re-validation, fail-closed unknown status); ADR-010 1:1 ceiling 160 -> 161 (+1, seam justified in ADR010_DITests.cs); publish-size delta +3,169 B (+0.003 MB) vs fresh base build (Release linux-x64 framework-dependent, Compress-Archive Optimal, PDBs included); no package change. Found in passing and filed: #1957 (status changeable outside the service via OOB Activate/Deactivate and direct Web API). TASK-INDEX.md not edited (parallel mode, main session owns it).
+rework: fix-round-1 task 014</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
