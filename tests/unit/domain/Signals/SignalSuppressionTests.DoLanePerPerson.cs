@@ -61,11 +61,28 @@ public partial class SignalSuppressionTests
         s.Signals.Single(x => x.Id == bobOpen).GetAttributeValue<DateTime?>("sprk_suppresseduntil").Should().Be(until);
         plan.Creates.Should().BeEmpty("three of Bob's own dismissals on the matter suppress his next Do item for the policy");
         plan.Suppressed.Should().Be(1);
+        // A colleague's Do item on the matter: her holder (…a0) sorts before Bob's (…b0), so Bob's count must be read from his own
+        // holder, not the partition's first one (review pass 2, F3-2).
+        OpenDo(s, MatterId, Alice);
         var status = await StatusAsync(s, bobOpen, callerContact: Bob);
         status!.DismissalsCounted.Should().Be(3);
         status.SuppressedUntil.Should().Be(until);
         (await StatusAsync(s, bobOpen, callerContact: Alice))!.DismissalsCounted.Should().Be(0,
             "a Do item's count is reported only to its own person (D-141)");
+    }
+
+    [Fact]
+    public async Task T152_TheCommitTimePass_SplitsTheDoLaneByPerson_Too()
+    {
+        // Review pass 2, F3-1: the decision route's ApplyAsync (commit time), not only the nightly pass, counts a Do-lane grain per person.
+        var s = BobDismissedThreeOfHisOwn();
+        var aliceOpen = OpenDo(s, MatterId, Alice);
+        var bobOpen = OpenDo(s, MatterId, Bob);
+
+        await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        s.StampedIds.Should().NotContain(aliceOpen, "Bob's dismissals never mute Alice's Do item at commit time either");
+        s.StampedIds.Should().Contain(bobOpen, "Bob's own open Do item on the matter is suppressed by his three dismissals");
     }
 
     [Fact]
