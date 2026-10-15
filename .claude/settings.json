@@ -8,6 +8,7 @@
   },
   "workflowSizeGuideline": "small",
   "autoCompactWindow": 400000,
+  "promptCacheTtl": "1h",
   "hooks": {
     "PreToolUse": [
       {
@@ -16,6 +17,15 @@
           {
             "type": "command",
             "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/require-agent-model.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/guard-worktree-links.py\""
           }
         ]
       }

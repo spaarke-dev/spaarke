@@ -601,7 +601,7 @@ runtime behavior.
 Exercised on 2026-08-24 (graduation criterion 12): a deliberate ninth secret-bearing confidential client
 was seeded on a scratch branch, and `CredentialGuardTests` (**FR-F1**) and `CredentialCensusTests`
 (**FR-F2**) both failed, naming the offending `file:line`. Note the precise mechanism — **`dotnet build`
-succeeds; the ArchTests fail** — so the gate is CI (`sdap-ci.yml` `code-quality` job), not the compiler.
+succeeds; the ArchTests fail** — so the gate is CI (Tier 1 `arch-tests` in `ci-tier1-blocking.yml`, blocking), not the compiler.
 
 ### Scope and non-scope
 

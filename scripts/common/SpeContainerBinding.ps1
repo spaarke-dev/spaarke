@@ -54,7 +54,9 @@ function Invoke-SpeGraph {
 function Get-SpeContainerBinding {
     <#
     .SYNOPSIS
-        The binding of ONE container: @{ Found; TypeId; Stamp; Malformed; Marker } (Marker: the spaarkeCustomerId value, $null when absent or ambiguous). Graph drops customProperties on the
+        The binding of ONE container: @{ Found; TypeId; Stamp; Malformed; Marker; MarkerMalformed } (Marker: the spaarkeCustomerId
+        value, $null when absent or ambiguous; MarkerMalformed: $true when the marker is present but ambiguous — several
+        entries, or one blank value — so "absent" and "unreadable" are never confused). Graph drops customProperties on the
         containers COLLECTION (measured 2026-10-04), so this is always a single-container GET. 404 -> Found = $false;
         any other failure throws (never read a fault as "unbound").
     #>
@@ -79,13 +81,15 @@ function Get-SpeContainerBinding {
     }
     # Marker: the one value, trimmed (the BFF compares it ordinally with Customer__Id); $null when absent or ambiguous.
     $marker = if ($markers.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($markers[0])) { $markers[0].Trim() } else { $null }
+    # Present but ambiguous (several entries, or one blank value): NOT absent — a backfill must never write over it.
+    $markerMalformed = ($markers.Count -gt 1) -or ($markers.Count -eq 1 -and [string]::IsNullOrWhiteSpace($markers[0]))
     $typeId = ConvertTo-SpeBindingGuid $c.containerTypeId
-    if ($values.Count -eq 0) { return @{ Found = $true; TypeId = $typeId; Stamp = $null; Malformed = $false; Marker = $marker } }
+    if ($values.Count -eq 0) { return @{ Found = $true; TypeId = $typeId; Stamp = $null; Malformed = $false; Marker = $marker; MarkerMalformed = $markerMalformed } }
     $clean = @($values | ForEach-Object { ConvertTo-SpeBindingGuid $_ })
     if (($clean | Where-Object { -not $_ }).Count -gt 0 -or ($clean | Select-Object -Unique).Count -ne 1) {
-        return @{ Found = $true; TypeId = $typeId; Stamp = $null; Malformed = $true; Marker = $marker }
+        return @{ Found = $true; TypeId = $typeId; Stamp = $null; Malformed = $true; Marker = $marker; MarkerMalformed = $markerMalformed }
     }
-    return @{ Found = $true; TypeId = $typeId; Stamp = $clean[0]; Malformed = $false; Marker = $marker }
+    return @{ Found = $true; TypeId = $typeId; Stamp = $clean[0]; Malformed = $false; Marker = $marker; MarkerMalformed = $markerMalformed }
 }
 
 function Set-SpeContainerStamp {
@@ -118,6 +122,85 @@ function Set-SpeContainerCustomerMarker {
         [string]$GraphBase = 'https://graph.microsoft.com/v1.0'
     )
     Invoke-SpeGraph $Token 'Patch' "$GraphBase/storage/fileStorage/containers/$([uri]::EscapeDataString($ContainerId))/customProperties" @{ $SpeContainerCustomerMarkerProperty = @{ value = $CustomerId; isSearchable = $false } } | Out-Null
+}
+
+function Remove-SpeContainerCustomerMarker {
+    <#
+    .SYNOPSIS
+        PATCH /containers/{id}/customProperties with a $null value for the customer marker — removes ONLY the marker (merge
+        semantics; the same null-removal shape Set-SpeContainerStamp sends for the stamp). Used by the backfill's
+        -RevertManifest. Callers check the marker still holds the value they wrote before calling.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Token,
+        [Parameter(Mandatory)][string]$ContainerId,
+        [string]$GraphBase = 'https://graph.microsoft.com/v1.0'
+    )
+    Invoke-SpeGraph $Token 'Patch' "$GraphBase/storage/fileStorage/containers/$([uri]::EscapeDataString($ContainerId))/customProperties" @{ $SpeContainerCustomerMarkerProperty = $null } | Out-Null
+}
+
+function Get-SpeContainerMarkerDecision {
+    <#
+    .SYNOPSIS
+        THE pure per-container decision of Backfill-SpeContainerBusinessUnitStamp.ps1's customer-marker pass (issue #1889:
+        per-record containers created before the marker shipped carry none, and SpeContainerOwnershipGuard refuses them).
+        No I/O - everything is passed in, so it is unit-tested (tests/scripts/Backfill-SpeContainerMarker.Tests.ps1).
+
+        THE RULE. The marker is what makes the BFF SERVE a container to this customer, and every customer stamp shares one
+        container type, so a container is marked only on a basis the customer cannot forge on its own:
+          (a) at the FIRST read of the run the container ALREADY carried a stamp naming a unit in this environment's
+              hierarchy (StampState = Stamped) and the records derive its owner - the stamp is an earlier, reviewed act; or
+          (b) an explicit operator -Bind names it (-BindNamed) and does not conflict with the stamp or the records.
+        A container this run itself stamps from records alone (StampState = Unstamped, no -Bind) is NOT marked in the same
+        pass: sprk_containerid on a secure root is a field the customer can write, so the operator reviews the stamp first.
+
+        Returns $null when -CustomerId is blank (no marker pass runs), else exactly one of:
+          SkipUnderivable   no authoritative record (and no -Bind) names the container's owner: NEVER marked. In a shared
+                            container type other environments' containers land here.
+          UnmarkedNoClaim   the container IS stamped with a unit of this environment (an earlier -Bind) but no record and no
+                            -Bind in this run claim it, and its marker is not -CustomerId: listed, never marked automatically.
+          SkipDisputedStamp the stamp is MISMATCH / FOREIGN / MALFORMED (or a -Bind contradicts it): ownership is disputed,
+                            so it is only listed.
+          MarkerMalformed   the marker is present but ambiguous (several entries / blank): listed, never written.
+          AlreadyMarked     the marker equals -CustomerId (ordinal, case-sensitive, trimmed): no-op.
+          MarkerForeign     the marker is a DIFFERENT value (a case-differing one included): listed, never overwritten.
+          MarkNextRun       the container was unstamped at the first read and is derivable from records alone (no -Bind):
+                            this run stamps it; it is listed and NOT marked until a later run, after the operator has
+                            reviewed the stamp.
+          Mark              derivable, undisputed, the marker is ABSENT and basis (a) or (b) holds: the only outcome that writes.
+    .PARAMETER Derivable   $true when the records derive the container's owner, or an explicit -Bind names it.
+    .PARAMETER StampState  Unstamped | Stamped | Mismatch | Foreign | Malformed - the stamp as read at the FIRST read of
+                           this run (Unstamped stays Unstamped even after this run writes the stamp).
+    .PARAMETER Marker      The trimmed marker value Get-SpeContainerBinding read ($null when absent or ambiguous).
+    .PARAMETER MarkerMalformed  Get-SpeContainerBinding's MarkerMalformed.
+    .PARAMETER BindNamed   $true when an explicit -Bind names this container (it is only passed as such when it does not
+                           conflict with the stamp or the records).
+    #>
+    param(
+        [AllowEmptyString()][AllowNull()][string]$CustomerId,
+        [Parameter(Mandatory)][bool]$Derivable,
+        [Parameter(Mandatory)][ValidateSet('Unstamped', 'Stamped', 'Mismatch', 'Foreign', 'Malformed')][string]$StampState,
+        [AllowEmptyString()][AllowNull()][string]$Marker,
+        [bool]$MarkerMalformed = $false,
+        [bool]$BindNamed = $false
+    )
+    if ([string]::IsNullOrWhiteSpace($CustomerId)) { return $null }
+    if (-not $Derivable) {
+        # Stamped for this environment (an earlier -Bind) yet claimed by nothing: not marked, but never silent.
+        if ($StampState -eq 'Stamped' -and ($MarkerMalformed -or [string]::IsNullOrWhiteSpace($Marker) -or $Marker.Trim() -cne $CustomerId.Trim())) {
+            return 'UnmarkedNoClaim'
+        }
+        return 'SkipUnderivable'
+    }
+    if ($StampState -in 'Mismatch', 'Foreign', 'Malformed') { return 'SkipDisputedStamp' }
+    if ($MarkerMalformed) { return 'MarkerMalformed' }
+    if ([string]::IsNullOrWhiteSpace($Marker)) {
+        # Basis: (a) already stamped at the first read, or (b) an explicit -Bind. Anything else is a record claim alone.
+        if ($StampState -eq 'Unstamped' -and -not $BindNamed) { return 'MarkNextRun' }
+        return 'Mark'
+    }
+    if ($Marker.Trim() -ceq $CustomerId.Trim()) { return 'AlreadyMarked' }
+    return 'MarkerForeign'
 }
 
 function Invoke-SpeContainerBindOrRemove {

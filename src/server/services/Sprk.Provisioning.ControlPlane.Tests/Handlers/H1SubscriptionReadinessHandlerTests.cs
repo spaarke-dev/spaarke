@@ -58,6 +58,22 @@ public sealed class H1SubscriptionReadinessHandlerTests
     }
 
     [Fact]
+    public void DefaultRequiredResourceProviders_IncludeEveryNamespaceCustomerBicepDeploys()
+    {
+        // T186: the first live run found the DEMO subscription with Microsoft.EventGrid unregistered. customer.bicep's
+        // modules deploy Microsoft.OperationalInsights (monitoring), Microsoft.EventGrid + Microsoft.Communication
+        // (acs-communication, conditional) and Microsoft.SignalRService (signalr, conditional); none was in the default list,
+        // so H2a would fail MissingSubscriptionRegistration ~20 min in the first time a customer turned a module on.
+        // The existing entries stay (Microsoft.ManagedServices is the Model 2 Lighthouse registration).
+        new SubscriptionReadinessOptions().RequiredResourceProviders.Should().Contain(new[]
+        {
+            "Microsoft.OperationalInsights", "Microsoft.EventGrid", "Microsoft.SignalRService", "Microsoft.Communication",
+            "Microsoft.KeyVault", "Microsoft.Storage", "Microsoft.ServiceBus", "Microsoft.DocumentDB", "Microsoft.CognitiveServices",
+            "Microsoft.Search", "Microsoft.Web", "Microsoft.ManagedIdentity", "Microsoft.ManagedServices", "Microsoft.Insights", "Microsoft.Cache",
+        });
+    }
+
+    [Fact]
     public async Task AC1_SpaarkeOwnedHappyPath_ReturnsSuccessAndEnqueuesH2a()
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");

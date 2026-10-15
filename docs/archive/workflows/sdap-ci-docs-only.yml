@@ -1,3 +1,8 @@
+# =====================================================================================
+# ARCHIVED 2026-10-14 — NOT EXECUTED. GitHub runs workflows only from .github/workflows/.
+# Retired with sdap-ci.yml by task CICD-077: it only posted placeholder "Build & Test"
+# checks for a branch-protection rule that no longer exists (the required check is Router).
+# =====================================================================================
 name: SDAP CI - Docs-Only Fallback
 
 # Purpose: emit no-op "Build & Test (Debug)" + "Build & Test (Release)" check runs

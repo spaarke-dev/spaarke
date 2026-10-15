@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Eval.AssistantR1;
 /// <para>
 /// <b>Merge-gate wiring</b> (identical pattern to <c>ResourcefulnessEvalSuiteTests</c> /
 /// <c>OriginClassificationEvalSuiteTests</c>): the <c>Category=GoldenUtteranceEval</c> trait joins this
-/// class to the dedicated <c>eval-gate</c> job in <c>.github/workflows/sdap-ci.yml</c>
+/// class to the dedicated <c>eval-gate</c> job in <c>.github/workflows/ci-tier1-blocking.yml</c>
 /// (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>, NO <c>continue-on-error</c>) with zero
 /// CI-YAML change — the trait IS the registration. It deliberately does NOT touch the shared
 /// <c>golden-utterances.json</c> (whose closed §3-UC set + P1/P2 activation guards are owned by the

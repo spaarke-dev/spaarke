@@ -1,3 +1,10 @@
+# =====================================================================================
+# ARCHIVED 2026-10-14 — NOT EXECUTED. GitHub runs workflows only from .github/workflows/.
+# Retired by ci-cd-unit-test-remediation-r1 task CICD-077 after the CI Router cutover
+# (task 071, 2026-09-29) and the 7-day soak (task 075). Kept for history ("move, never delete").
+# Where each job went: .github/workflows/ci-standalone-checks.yml (header table) and
+# projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md.
+# =====================================================================================
 name: SDAP CI
 
 on:
