@@ -1686,6 +1686,9 @@ public partial class SignalSuppressionTests
         private int _writes;
         public bool FailReads { get; set; }
 
+        /// <summary>uac-r2 K1 on ontology #1891: every query of this one table faults (the walker's batched parent read).</summary>
+        public string? FailReadsOf { get; set; }
+
         /// <summary>The n-th <c>sprk_signal</c> query (a grain read) faults, like a Dataverse timeout (#1661 round 2 F3).</summary>
         public int FailSignalReadNumber { get; set; }
         private int _signalReads;
@@ -1932,6 +1935,7 @@ public partial class SignalSuppressionTests
         private EntityCollection Run(QueryExpression q)
         {
             if (FailReads) throw new InvalidOperationException("dataverse is down");
+            if (q.EntityName == FailReadsOf) throw new InvalidOperationException($"{q.EntityName} cannot be read");
             if (q.EntityName == "sprk_signal" && ++_signalReads == FailSignalReadNumber) throw new TimeoutException("Dataverse timed out on a grain read.");
             Queries++;
             _queriesOf[q.EntityName] = QueriesOf(q.EntityName) + 1;

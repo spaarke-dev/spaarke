@@ -330,8 +330,12 @@ public sealed class SignalSuppressionService
     /// walked in ONE run of uac-r2's walker (<see cref="SecureChildShareSynchronizer.SecureRootsAboveEachAsync"/>), so each parent row
     /// is read once per call whatever the number of items (task 038). <paramref name="knownSecureTeam"/>: the Secure team the caller
     /// already identified in this request (by <see cref="ResolveSecureTeamAsync"/>), so it is not identified again.
+    /// <paramref name="readAsSubjects"/> (uac-r2 K1 on ontology #1891; the read-time rule only): rows the caller read with
+    /// <see cref="ReadSubjectRowsAsync"/>. When given, those rows and the subjects read here are handed to the walker, which then
+    /// does not read them again; null (every other caller) hands it nothing.
     /// </summary>
-    private async Task<SuppressionPartition[]> PartitionsAsync(IReadOnlyList<PartitionItem> items, CancellationToken ct, Guid? knownSecureTeam = null)
+    private async Task<SuppressionPartition[]> PartitionsAsync(
+        IReadOnlyList<PartitionItem> items, CancellationToken ct, Guid? knownSecureTeam = null, IReadOnlyCollection<Entity>? readAsSubjects = null)
     {
         var result = new SuppressionPartition[items.Count];
         if (items.Count == 0) return result;
@@ -361,8 +365,13 @@ public sealed class SignalSuppressionService
         // lineage is walked once, and all of them share ONE run (one read cache).
         var keys = lineages.Select(LineageKey).ToList();
         var distinct = keys.Select((key, i) => (key, i)).DistinctBy(k => k.key, StringComparer.Ordinal).ToList();
+
+        // uac-r2 K1 on ontology #1891: the rows already read with the walk's columns (SubjectColumns), so it does not read them again.
+        var readRows = readAsSubjects?.Concat(subjects.Values)
+            .Select(row => (row, SubjectColumns(SecureChildLineage.Children[row.LogicalName])))
+            .ToList();
         var answers = await walker.SecureRootsAboveEachAsync(
-            distinct.Select(k => (IReadOnlyCollection<Entity>)lineages[k.i]).ToList(), secureTeamId.Value, ct).ConfigureAwait(false);
+            distinct.Select(k => (IReadOnlyCollection<Entity>)lineages[k.i]).ToList(), secureTeamId.Value, ct, readRows).ConfigureAwait(false);
         var byLineage = new Dictionary<string, SuppressionPartition>(StringComparer.Ordinal);
         for (var d = 0; d < distinct.Count; d++)
         {
@@ -408,7 +417,7 @@ public sealed class SignalSuppressionService
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    ColumnSet = SubjectColumns(table),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(table.IdColumn, ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -419,6 +428,10 @@ public sealed class SignalSuppressionService
 
         return found;
     }
+
+    /// <summary>What <see cref="ReadSubjectRowsAsync"/> reads of a subject row: its lineage lookups and its owner (what the walk reads).</summary>
+    private static ColumnSet SubjectColumns(SecureChildLineage.Table table) =>
+        new(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray());
 
     /// <summary>
     /// #1661 R1: the partition each hit's NEW episode will belong to, from the same truth as the rows (the hit's Signal as the writer
@@ -1305,8 +1318,10 @@ public sealed class SignalSuppressionService
 
             // ONE placement for the Signals and the witnesses together. A witness's family comes from its roots: a row already filed
             // under secure X but not yet re-owned by the Secure team (the re-own window) is in X's family, never ordinary.
+            // uac-r2 K1 on ontology #1891: the witness rows and the subjects are handed to the walker as read, not read again.
             var families = await PartitionsAsync(
-                placed.Select(w => ItemOf(rows[w.SignalId])).Concat(witnessItems).ToList(), ct, secureTeam).ConfigureAwait(false);
+                placed.Select(w => ItemOf(rows[w.SignalId])).Concat(witnessItems).ToList(), ct, secureTeam,
+                readAsSubjects: witnessItems.Select(i => i.Signal).ToList()).ConfigureAwait(false);
             var familyOfWitness = new Dictionary<(string, Guid), SuppressionPartition>();
             for (var i = 0; i < readable.Count; i++) familyOfWitness[readable[i]] = families[placed.Count + i];
 
