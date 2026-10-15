@@ -50,7 +50,7 @@ The event rule matches `EventOwnershipScope` (097 decision B) exactly; a test pi
   - `CoreAncestorResolver.CoreRecordEntities`
   - `SecureChildShareSynchronizer.SecureRootsAboveAsync` / `ResolveSecureOwnerTeamAsync`
 - uac-r2's PR #1861 does not overlap.
-- **For uac-r2 to review:** `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` (their file). It sets `ExpectedEndpointFileCount` 121 → 122, adds a GovernedFile `Api/Signals/SignalReadEndpoints.cs`, and adds a HandlerDecision `GET /api/v1/signals/worklist`.
+- **For uac-r2 to review:** `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` (their file). It sets `ExpectedEndpointFileCount` 124 → 125, adds a GovernedFile `Api/Signals/SignalReadEndpoints.cs`, and adds a HandlerDecision `GET /api/v1/signals/worklist`.
 - **Also for uac-r2 to review:** `Services/Access/SecureChildShareSynchronizer.cs` gains an additive `SecureRootsAboveEachAsync`. It is `SecureRootsAboveAsync`'s walk, one answer per group, all groups in one run (one read cache), and it takes a Secure team the caller already identified with `ResolveSecureOwnerTeamAsync`. `SignalSuppressionService.PartitionsAsync` now uses it.
 - The census was mutation-proven: with the original ledger 3 tests fail; with the new entry all 86 pass.
 

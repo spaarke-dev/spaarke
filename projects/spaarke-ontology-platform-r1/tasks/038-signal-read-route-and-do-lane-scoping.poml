@@ -4,7 +4,7 @@
     <title>BFF Signal read route: matter-access filter, Do-lane reader scope, deterministic order</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>050, 031, 037 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New authorized BFF route over secured rows; it is the only thing standing between a Signal's sentence and a reader who cannot open its matter.</rigor-reason>
     <model-tier>opus</model-tier>
