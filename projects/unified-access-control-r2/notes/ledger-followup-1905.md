@@ -15,3 +15,10 @@ UAC review of #1905 at `e5fb90b09`: CLEAN (PR comment 6194460481). The guard pas
 - **SignalReadService.cs** (worklist entry `:1807-1813`): :240 is now `ResolveMineCallerAsync` (WhoAmI moved to :777); :510→484, :671→645, :726→698-699.
 
 Related: #1921 (Do-lane suppression keyed (policy, core); owner decision through ontology).
+
+## Also after ontology #1946 (D-145a) merges (UAC review at 06c5dd473)
+- **Suppression handler entry (`:1799-1806`).** For a Do item, the count is the item's person's own (D-145a). `DecisionPlanEndpoints.cs:98` passes `decision.CallerContactId`, set at `SignalCoreRecordAccess.cs:356`. A "mine" caller who isn't the person gets a 200 empty status, not a 404.
+- **Line moves at 06c5dd473 vs the e5fb90b09 values above:**
+  - `DecisionPlanEndpoints.cs` +1. Suppression: 75, 78, 83, 88. Plan: 169, 172, 177, 182.
+  - `SignalCoreRecordAccess.cs` +3. Reads 146, 198, 263/268; `ConfirmDoLaneMineAsync` 296, its caller 313, the "mine" read 322-323; new line 356.
+- **Take the final numbers from merged master, not from these notes.**
