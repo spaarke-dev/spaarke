@@ -279,3 +279,11 @@ The incremental runs at 04:45Z and 04:50Z are identical apart from `fullPass:fal
 ### Not done (by instruction)
 
 Criterion 89 (blank the writer client id, expect the writer-failure alert to fire, restore the setting): **not run.** The main session schedules it around R3's redeploy. Task 035's POML status and TASK-INDEX are not changed here.
+
+## 2026-10-15 — 035 criterion 89: negative alert test + writer setting (main session)
+
+- **Finding (task 146)**: `Ontology__Writer__ManagedIdentityClientId` had never been set on spaarke-bff-dev, so the deployed writers could not write (`OntologyWriterCredentialFactory` throws on first use). UAMI `mi-ontology-writer-dev` (client id `69040982-612e-469e-a85f-26d5172367c5`) was attached.
+- **Negative test** (setting absent, 13:41:44Z): one enabled zz-146 test policy (`ZZ-146-RECIPE`, one matching zz matter), `POST /api/admin/jobs/signal-reevaluation/trigger` → outcome `failed`, policiesEvaluated 1, hits 1, written 0, refused 1. `ontology.writer.failures` reasons `credential_unresolvable` 1, `write_failed` 1. Alert `spaarke-bff-dev-ontology-writer-failures` **fired 13:44:53Z** (Sev 1, action group `ag-spaarke-oncall-dev`).
+- **Setting added** 13:46:55Z (D-138 035 deploy approval; word-add-in, R3 and uac-r2 notified before and after); healthz 200 at 13:47:38Z; code unchanged (master `f292ad119`).
+- **Positive run** 13:48:04Z → outcome `succeeded`, policiesEvaluated 1, hits 1, written 1, refused 0. First proof of the writer's managed-identity token path on dev.
+- The test policy and its rows are cleaned up by task 146 (zz-146 prefix).
