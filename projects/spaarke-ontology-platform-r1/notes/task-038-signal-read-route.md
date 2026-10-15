@@ -60,14 +60,11 @@ The event rule matches `EventOwnershipScope` (097 decision B) exactly; a test pi
 - **Otherwise:** both are removed and the line carries `"withheld": true`. `kind`, `ref`, `tier`, `asOf` and `clause` stay.
 - **A fault** in the family read withholds every detail. This is fail closed: the list itself is unchanged and the result is logged at Warning.
 - **Evidence that is not a JSON array of objects** is returned as null.
-- **Implementation:** `SignalSuppressionService.WitnessDetailShownOnReadAsync` places the returned Signals with `PartitionsAsync`, reading app-only the rows the caller's reads already admitted. Its two private helpers mirror task 145's (unmerged) helpers, and its witness placement follows 145's `WitnessFamiliesAsync` (no owner override):
-
-  | This branch | Task 145 |
-  |---|---|
-  | `WitnessDetailWithinFamily` | `KeepsDetail` |
-  | `WitnessOnRead` | `WitnessOf` |
-
-- **When 145 merges** (#1874, still OPEN at push time): replace `WitnessDetailWithinFamily` / `WitnessOnRead` with direct calls to 145's `KeepsDetail` / `WitnessOf`. Then only one rule exists. The names differ on purpose so the merge does not collide. Tracked as DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890).
+- **Implementation:** `SignalSuppressionService.WitnessDetailShownOnReadAsync` places the returned Signals and their witnesses in ONE `PartitionsAsync` call, reading app-only only the rows the caller's reads already admitted.
+- **Folded into task 145** (#1874 merged before this PR opened; DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890), fixed here):
+  - It calls 145's `KeepsDetail` / `WitnessOf`.
+  - It shares the new `WitnessItemsAsync` with 145's `WitnessFamiliesAsync`, so a witness is placed one way everywhere.
+  - No copy of the rule remains.
 - **DTO:** `WorklistItemRow.EvidenceRefs` carries the `withheld` flag per line.
 - Pass 2 (`b677b4760`):
   - The witness family comes from its ROOTS (`PartitionsAsync`), never an owner override. A row filed under secure X but not yet re-owned is X's family (task 145's re-own window).
@@ -147,7 +144,7 @@ The delta is well under +5 MB. The `8024c9b92` additions are source only, with n
 
 ## Issues filed (D-106)
 
-- **DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890):** fold the read-time witness helpers into 145's when #1874 merges.
+- **DI-87 [#1890](https://github.com/spaarke-dev/spaarke/issues/1890):** fold the read-time witness helpers into 145's. Done in this PR; close it when the PR merges.
 
 - **DI-82 [#1881](https://github.com/spaarke-dev/spaarke/issues/1881):** the evaluator's work-assignment assignee column.
 - **DI-83 [#1882](https://github.com/spaarke-dev/spaarke/issues/1882):** the outer link to `sprk_policy` empties the worklist for users without policy Read. Task 050's note #8 assumption is wrong.
