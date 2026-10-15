@@ -33,10 +33,19 @@
 //   - Microsoft.Cache          (Azure Managed Redis — every stamp has its own
 //                                cache since D-12; Microsoft.Cache/redisEnterprise
 //                                since task 242)
-//   SignalR (Microsoft.SignalRService) is
-//   conditional (ADR-032 feature flag) and NOT part of the always-required
-//   list — its Bicep module will register on-demand if a customer's
-//   signalrEnabled flag flips true.
+//   - Microsoft.OperationalInsights (modules/monitoring.bicep — Log Analytics workspace)
+//   - Microsoft.EventGrid      (modules/acs-communication.bicep — system topic + event
+//                                subscription; conditional on deployAcsMessaging)
+//   - Microsoft.Communication  (modules/acs-communication.bicep — ACS resource;
+//                                conditional on deployAcsMessaging)
+//   - Microsoft.SignalRService (modules/signalr.bicep; conditional on signalrEnabled,
+//                                ADR-032 feature flag)
+//   T186 (2026-10-14): the conditional modules' namespaces are registered up front too. A
+//   namespace left unregistered fails the whole customer.bicep deployment with
+//   MissingSubscriptionRegistration the first time a customer turns the module on, ~20 min
+//   into H2a; registering is idempotent and free. PRQ-S-03 (prereqs.yaml) checks this list
+//   minus Microsoft.ManagedServices (Model 2 Lighthouse only) —
+//   tests/scripts/Prereqs-Recipes.Tests.ps1 fails if the two drift.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -63,6 +72,10 @@ public sealed class SubscriptionReadinessOptions
         "Microsoft.ManagedServices",
         "Microsoft.Insights",
         "Microsoft.Cache",
+        "Microsoft.OperationalInsights",
+        "Microsoft.EventGrid",
+        "Microsoft.SignalRService",
+        "Microsoft.Communication",
     };
 
     /// <summary>

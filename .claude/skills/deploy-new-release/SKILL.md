@@ -94,8 +94,8 @@ PRE-FLIGHT CHECKS
   [PASS] Git working tree is clean
   [PASS] On branch: master
   [PASS] Azure CLI: ralph@spaarke.com (tenant: a221a95e-...)
-  [PASS] PAC CLI: connected to spaarke-demo.crm.dynamics.com
-  [PASS] BFF URLs validated (2 environments, all host-only)
+  [PASS] PAC CLI: connected to spaarkedev1.crm.dynamics.com
+  [PASS] BFF URLs validated (1 environment, host-only)
 
 All pre-flight checks passed. Proceeding to environment selection.
 ```
@@ -126,19 +126,17 @@ AVAILABLE ENVIRONMENTS (from config/environments.json)
       Dataverse: https://spaarkedev1.crm.dynamics.com
       BFF API:   https://spe-api-dev-67e2xz.azurewebsites.net
       App Svc:   spe-api-dev-67e2xz (spe-infrastructure-westus2)
-
-  [2] Demo
-      Dataverse: https://spaarke-demo.crm.dynamics.com
-      BFF API:   https://api.spaarke.com
-      App Svc:   spaarke-bff-prod (rg-spaarke-platform-prod)
 ```
+
+> **Customer stamps are not targets of this skill.** The old Demo entry was retired 2026-10-14 (D35); the demo is now
+> the ACME Corporation stamp. Every customer stamp (ACME included) is upgraded by re-running provisioning, which
+> re-imports the published SpaarkeMaster through H6 (`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md` §5).
 
 #### Operator Selects Environments
 
 Ask the operator to select one or more environments by number or name. Examples of valid responses:
 - `1` or `dev` — deploy to Development only
-- `2` or `demo` — deploy to Demo only
-- `1, 2` or `dev, demo` — deploy to both (sequentially, dev first)
+- `1, 2` or `dev, <other>` — deploy to several (sequentially, dev first), when `config/environments.json` lists more than one
 - `all` — deploy to all environments
 
 #### Confirm Selection
@@ -146,8 +144,8 @@ Ask the operator to select one or more environments by number or name. Examples 
 After the operator selects, confirm:
 
 ```
-You selected: Development, Demo
-Deployment order: Development -> Demo (sequential, lowest risk first)
+You selected: Development
+Deployment order: Development (sequential, lowest risk first)
 Is this correct? (yes/no)
 ```
 
@@ -211,7 +209,7 @@ Present the full deployment plan and require explicit approval. **Nothing deploy
 DEPLOYMENT PLAN
 
   Version:      v1.1.0 (auto-suggested from last tag v1.0.0)
-  Environments: Development -> Demo (sequential)
+  Environments: Development
   Phases:
     Phase 1: Build all client components
     Phase 2: Deploy BFF API (per environment)
@@ -246,7 +244,7 @@ Call `Deploy-Release.ps1` with the operator's selections.
 
 - A customer environment: the row's `sprk_customerid` (pattern `^[a-z][a-z0-9]{2,7}$`).
 - A platform row (no `sprk_customerid`): a value equal to its `sprk_name` or `sprk_envaccountdomain` (case-insensitive). **Dev:** `-CustomerId dev` matches the row named `Dev` → `spaarkedev1` (verified 2026-10-11).
-- **Demo cannot be resolved today**: its row is named `Demo 1` (the space fails the pattern) and its domain contains dots. Phase 4 for Demo fails until the registry row gets a valid id — tracked in #1670; do not work around it by editing the script.
+- The old `Demo 1` row (inactive since the old demo was retired 2026-10-14) cannot be resolved by id: its name has a space and its domain contains dots (#1670). Customer stamps resolve by `sprk_customerid` and are upgraded through provisioning, not this skill.
 
 ```powershell
 # Single environment
@@ -334,7 +332,6 @@ DEPLOYMENT COMPLETE
 
   v1.1.0 deployed successfully to all environments:
     Development .... OK (3m 42s)
-    Demo ........... OK (4m 18s)
 
   Release tag v1.1.0 has been created and pushed to origin.
 
@@ -354,15 +351,15 @@ The script creates and pushes the git tag automatically (Phase 6). Report that t
 DEPLOYMENT COMPLETED WITH FAILURES
 
   Development .... OK (3m 42s)
-  Demo ........... FAILED (Phase 3: Solution import)
+  <env> .......... FAILED (Phase 3: Solution import)
 
   Release tag was NOT created due to failures.
 
   Next steps:
     1. Review the error output above
-    2. Fix the issue in the Demo environment
-    3. Re-run deployment for Demo only:
-       .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId <demo-id> -Version v1.1.0 -SkipBuild
+    2. Fix the issue in the failed environment
+    3. Re-run deployment for that environment only:
+       .\scripts\Deploy-Release.ps1 -EnvironmentUrl <env> -CustomerId <registry-id> -Version v1.1.0 -SkipBuild
     4. Once all environments pass, manually tag:
        git tag -a v1.1.0 -m "Release v1.1.0"
        git push origin v1.1.0
@@ -441,7 +438,7 @@ Environments are defined in `config/environments.json` (read it at runtime; this
 | Pre-flight: BFF URL ends with `/api` | Misconfigured registry | Edit `config/environments.json` to remove `/api` suffix |
 | Build fails | Missing dependencies or compilation error | Check build output; run `npm install --legacy-peer-deps --no-audit --no-fund` in the affected directory (not `npm ci` — most lock files are stale) |
 | `Cannot validate argument on parameter 'CustomerId'` (pattern) / prompt or error for missing mandatory parameter `CustomerId` | `-CustomerId` omitted or fails `^[a-z][a-z0-9]{2,7}$` | Pass the registry id (dev = `dev`); see Step 5 |
-| `Registry lookup found NO sprk_dataverseenvironment row` | No registry row matches the id (Demo today) | Fix the registry row (give it a valid `sprk_customerid`); never hard-code a target in the script |
+| `Registry lookup found NO sprk_dataverseenvironment row` | No registry row matches the id (e.g. the inactive `Demo 1` row) | Fix the registry row (give it a valid `sprk_customerid`); never hard-code a target in the script |
 | BFF deploy fails | App Service not found or auth issue | Verify `appServiceName` in environments.json matches Azure |
 | SpaarkeMaster import refused or fails | Type switch / downgrade refused; no published package; no access | The message names the refusal. "no solutions.SpaarkeMaster entry" = nothing published yet (run `publish-dataverse-solutions-manifest.yml`); a refusal = fix `solutionPackageType` or publish a higher version; access = Storage Blob Data Reader on `sprkcpartifacts{env}` and pac signed in to the target (your own identity — no service principal) |
 | Web resource deploy fails | Auth token expired or wrong URL | Re-run `az login`; verify `dataverseUrl` |
@@ -485,7 +482,7 @@ Environments are defined in `config/environments.json` (read it at runtime; this
 - **Sequential deployment** — environments are always deployed one at a time. Never attempt parallel deployment.
 - **The script handles rollback** for BFF API (slot swap). For solutions and web resources, provide manual rollback guidance referencing the procedure document.
 - **Version suggestion** — auto-suggest patch increment from the last tag. Let the operator override if they want minor or major.
-- **If the operator says "just deploy to demo"** — still run pre-flight checks. The checks protect against silent failures.
+- **If the operator says "just deploy to demo"** — the demo is the ACME stamp: upgrade it by re-running provisioning (H6), not this skill. For any environment this skill does deploy, still run pre-flight checks.
 
 ---
 

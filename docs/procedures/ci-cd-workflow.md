@@ -2,9 +2,9 @@
 
 > **Purpose**: Developer guide for the complete CI/CD pipeline — from local commits through automated testing, pull request workflow, and deployment to staging/production.
 >
-> **Last Updated**: 2026-09-30
-> **Last Reviewed**: 2026-09-30
-> **Reviewed By**: customer-provisioning-orchestration-r1 (plan gap G24) — workflow sections rewritten against `.github/workflows`
+> **Last Updated**: 2026-10-14
+> **Last Reviewed**: 2026-10-14
+> **Reviewed By**: ci-cd-unit-test-remediation-r1 task 077 — `sdap-ci.yml` retired; "How CI problems are surfaced" added (earlier: customer-provisioning-orchestration-r1, plan gap G24)
 > **Status**: Current
 
 ---
@@ -15,10 +15,47 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 
 **Key Concepts**:
 - **Local quality gates** run before commits (code-review, adr-check, lint)
-- **`CI / Router`** (`ci-router.yml`) is the single required status check on every PR to `master` — it dispatches a blocking Tier 1 and an advisory Tier 2
+- **`CI / Router`** (`ci-router.yml`) is the required status check on every PR to `master` — it dispatches a blocking Tier 1 and an advisory Tier 2. The ruleset also requires `Client lint (type-aware ratchet)` (`client-lint.yml`)
 - Several other workflows report on PRs (actionlint, `css-reset-gate.yml`, `office-addins-tests.yml`, path-scoped gates) but are **not** in the required-check list, so a red there does not by itself block merge
 - **Deployment is operator-driven**: every deploy workflow in this repo is either `workflow_dispatch`-only, or auto-deploys only to a non-production target (dev slot). Production always requires a manual trigger or a GitHub Environment reviewer approval
-- A legacy monolithic pipeline (`sdap-ci.yml` + its `sdap-ci-docs-only.yml` fallback) still runs but is **no longer the required branch-protection check** — it has been superseded by `CI / Router` and is pending deletion by another project
+- The legacy monolithic pipeline (`sdap-ci.yml` + its `sdap-ci-docs-only.yml` fallback) was **retired on 2026-10-14** (ci-cd-unit-test-remediation-r1 task 077) and archived at `docs/archive/workflows/`. Its checks with no Router equivalent moved to `ci-standalone-checks.yml` (advisory); where each job went: `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`
+- **CI failures are never silent**: see [How CI problems are surfaced](#how-ci-problems-are-surfaced)
+
+---
+
+## How CI problems are surfaced
+
+A CI problem is either **fixed** or **raised for review**. Nothing that fails is allowed to disappear into a job log.
+
+**On a pull request**
+
+| Check | Required? | Where a failure shows |
+|---|---|---|
+| `Router` (`ci-router.yml`: Tier 1 blocking + Tier 2 advisory) | **Yes** | Red required check; the PR cannot merge. Tier 2 never fails the Router; its results are in the "Tier 2 Advisory Report" PR comment |
+| `Client lint (type-aware ratchet)` (`client-lint.yml`) | **Yes** | Red required check |
+| `CI Standalone Checks` (`ci-standalone-checks.yml`): dependency audit, Release build + BFF publish, Compose client gate, client typecheck, PCF ESLint | No (advisory) | Red check on the PR, plus a results table in the run's `Summary` job summary |
+| Other path-scoped workflows (actionlint, `office-addins-tests.yml`, `css-reset-gate.yml`, ...) | No | Red check on the PR |
+
+Verify the required list with `gh api repos/spaarke-dev/spaarke/rules/branches/master` before relying on it.
+
+**On master** a failure raises a **quality alert**: one GitHub issue per check, labelled `quality-alert`, **assigned to the owner (so GitHub emails them)**, edited in place while the check keeps failing, and closed automatically by the next green run. The mechanism (`.github/actions/quality-alert`) is described under [Quality alerts](#quality-alerts). Per-push checks on master:
+
+| Alert | Raised by | `failing` when |
+|---|---|---|
+| `router-master` | `master-ci-alert.yml` (`workflow_run` when `CI` completes on a push to master) | the Router or any Tier 1 job is red, cancelled or timed out on its most recent master run. Master is red for every branch cut from it |
+| `tier2-master/full-unit-tests` | `master-ci-alert.yml` | a Tier 2 unit-test shard reports a verdict other than `pass`, or none, on its most recent master run in which master compiled (read from the verdict artifacts; nothing is re-run) |
+| `ci-standalone/dependency-audit`, `/release-build`, `/compose-client-gate`, `/client-typecheck`, `/pcf-eslint`, `/unit-tests-outside-router`, `/bff-seam-contract-tests`, `/verdict-script-tests`, `/trivy-fs` | `ci-standalone-checks.yml` job `alerts` (push to master only; skipped when a newer master run already posted) | that job is not `success` |
+| `master-ci-alert/evaluation` | `master-ci-alert.yml` | the verdict script itself failed (GitHub API errors after retries), so the two alerts above were not updated |
+
+The scheduled workflows (`nightly-health.yml`, `client-tests.yml`, `mutation-nightly.yml`) raise their own alerts the same way. The decision logic for `router-master` and `tier2-master/full-unit-tests` is `scripts/ci/master-ci-verdict.ps1`. It judges master's current state, not one run: the newest 100 completed master push runs, each job and Tier 2 shard from the most recent run that executed it. A docs-only push (Tier 1 skipped, Router green) therefore cannot close a compile-break alert, and a path-gated job keeps its last real result. It also reads the open alert issue: a job or shard the issue lists as failing that no run in the window executed is reported as still failing ("has not executed since …"), so a failing path-gated job that is not re-run cannot be dropped and "Recovered". If a newer master run is still queued or running, `ok` is held back (the alert is not closed until that run's own evaluation). Known limit: a job that failed and was then renamed or removed never runs again, so its alert stays open until closed by hand. The Pester controls are `tests/scripts/Master-Ci-Verdict.Tests.ps1`. Replay any past state: `pwsh scripts/ci/master-ci-verdict.ps1 -RunId <id> -Repo spaarke-dev/spaarke -AsOf`.
+
+**Where to look**
+
+- The pinned issue **`📊 Issues & Quality Dashboard`** (`issues-dashboard.yml`) lists every open quality alert with its "failing since" date, and the last result of each scheduled workflow.
+- The open list `label:quality-alert is:open` ([issues](https://github.com/spaarke-dev/spaarke/issues?q=is%3Aissue+is%3Aopen+label%3Aquality-alert)) is the same information.
+- **Claude Code** shows the open alerts in its session-start banner, so every session starts knowing what is red.
+
+Closing an alert by hand does not silence the check: the next failing run reopens it.
 
 ---
 
@@ -60,7 +97,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │     PULL REQUEST — CI / Router (ci-router.yml)                       │
-│     THE single required status check on master                      │
+│     required status check on master (+ Client lint, client-lint.yml)│
 │                                                                      │
 │   classify (path-aware) ──▶ Tier 1 (blocking, ci-tier1-blocking.yml) │
 │                         └─▶ Tier 2 (advisory, ci-tier2-advisory.yml) │
@@ -74,7 +111,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
    office-addins-tests.yml (office-addins + related server paths) ·
    build-provisioning-sidecar.yml (sidecar paths — build+Trivy+size only
    on PR, no push) · deploy-infrastructure.yml lint + compile only (bicep
-   paths) · legacy sdap-ci.yml (paths-ignore: docs/**, **.md, .claude/**)
+   paths) · ci-standalone-checks.yml (advisory; paths-ignore: docs/**, **.md, .claude/**)
                               │
                               │ (merge to master)
                               ▼
@@ -85,7 +122,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │  deploy-office-addins.yml → builds + deploys the Static Web App      │
 │  publish-provisioning-arm-artifacts.yml → Bicep → ARM JSON artifact  │
 │  build-provisioning-sidecar.yml → builds, scans, pushes sidecar image│
-│  legacy sdap-ci.yml / sdap-ci-docs-only.yml still run (not required) │
+│  ci-standalone-checks.yml → advisory checks + quality alerts         │
+│  master-ci-alert.yml      → quality alert when CI is red on master   │
 └────────────────────────────────────────────────────────────────────┘
                               │
                               │ (operator runs `gh workflow run ...`)
@@ -108,6 +146,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          SCHEDULED                                    │
+│  mutation-nightly.yml (dispatch only; schedule pending #1870)         │
+│  issues-dashboard.yml (every 6h + issue events)                       │
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
 │  pcf-build-prod-nightly.yml (daily, 08:00 UTC)                        │
@@ -121,7 +161,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 |-------|---------|-----------------|----------|
 | Pre-commit Hooks | Auto (`git commit`, Husky) | ~5-10s | Yes (local) |
 | Local Quality | Manual | ~30s | Yes (recommended) |
-| `CI / Router` (`ci-router.yml`) | PR → master, push → master, merge_group | Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (spec budgets) | **Yes — the only required status check** |
+| `CI / Router` (`ci-router.yml`) | PR → master, push → master, merge_group | Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (spec budgets) | **Yes** (required together with `Client lint (type-aware ratchet)`) |
 | actionlint (`workflows-validate.yml`) | Every PR, no path filter | ~17s | Reports only — not in the required-check list (see note below) |
 | `css-reset-gate.yml` | PR/push touching Code Page `index.html` | sub-second | Reports only — not in the required-check list |
 | `office-addins-tests.yml` | PR/push touching office-addins + related server/test paths | gated-jest ~16s; other jobs vary | Reports only — not in the required-check list |
@@ -137,13 +177,13 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `publish-dataverse-solutions-manifest.yml` | Manual dispatch (release-time); PR dry run on the SpaarkeMaster source | n/a | N/A (publish) |
 | `publish-copilot-agent-template.yml` | Manual dispatch (release-time); PR dry run on the Copilot agent source | n/a | N/A (publish) |
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
-| `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
+| `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 5-45 min | No (advisory; one quality alert per check) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
 | `report-workflow-health.yml` | Weekly (Mon 09:00 UTC), dispatch | n/a | No (advisory; tracking issue) |
-| `sdap-ci.yml` (legacy) | Push to `master` / PR (`paths-ignore`: docs/**, **.md, `.claude/**`, …) | n/a | No — superseded by `CI / Router`; pending deletion |
-| `sdap-ci-docs-only.yml` (legacy) | PR touching only `sdap-ci.yml`'s ignored paths | n/a | No — paired no-op fallback for `sdap-ci.yml` |
+| `ci-standalone-checks.yml` | Push to `master` / PR (`paths-ignore`: docs/**, **.md, `.claude/**`, …), dispatch | per-job timeouts 15-30 min | No (advisory; quality alerts on master) |
+| `master-ci-alert.yml` | `workflow_run` when `CI` completes on master, dispatch | 10 min | No (raises/clears quality alerts) |
 
-> **Note on actionlint**: it was once a required check (which is why it runs on every PR with no path filter — a path-filtered required check deadlocks PRs that don't touch the filtered paths). It is not required today: the `master` ruleset requires only `Router` (verified 2026-09-30 with `gh api repos/spaarke-dev/spaarke/rules/branches/master`; classic branch protection is disabled). Re-run that command before relying on this list.
+> **Note on actionlint**: it was once a required check (which is why it runs on every PR with no path filter — a path-filtered required check deadlocks PRs that don't touch the filtered paths). It is not required today: the `master` ruleset requires `Router` and `Client lint (type-aware ratchet)` (verified 2026-10-14 with `gh api repos/spaarke-dev/spaarke/rules/branches/master`; classic branch protection is disabled). Re-run that command before relying on this list.
 
 ### Complete Workflow Inventory
 
@@ -152,6 +192,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | ADR Architecture Audit | Scheduled / advisory | Full NetArchTest ADR compliance scan; creates/updates a tracking issue |
 | `build-provisioning-sidecar.yml` | Build Provisioning Sidecar | PR/push (scoped) / dispatch | Build, Trivy-scan, and push the Exchange-policy provisioning sidecar image to the platform ACR |
 | `ci-router.yml` | CI (job: `Router`) | **Blocking — required check** | Single-gate router: classifies the diff, dispatches Tier 1 + Tier 2, aggregates into `CI / Router` |
+| `ci-standalone-checks.yml` | CI Standalone Checks | PR/push / advisory | Checks retired from `sdap-ci.yml` with no Router equivalent: dependency audit, Release build + BFF publish (`deployment-packages` artifact for `deploy-promote.yml`), Compose client gate, client typecheck, PCF ESLint; quality alerts on master |
 | `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate, Xrm capability guard; the DataGrid external-host gate is advisory until its flip |
 | `ci-tier2-advisory.yml` | CI Tier 2 (Advisory) | Advisory (reusable, called by the router) | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size; posts one deduplicated PR comment |
 | `client-tests.yml` | Client Tests | Scheduled / advisory | Nightly test baseline (jest, vitest, node:test) across every client package with a real `test` script (count discovered at runtime; 43 on 2026-10-12) |
@@ -163,14 +204,15 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-promote.yml` | Environment Promotion | Manual deploy | Direct-target deploy to dev/staging/production with smoke tests; production requires reviewer approval |
 | `deploy-spaarke-ai.yml` | Deploy SpaarkeAi | Auto deploy (push) to dev; manual+approval to prod | Build the single-file HTML bundle, deploy it as the `sprk_spaarkeai` Dataverse web resource |
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
-| `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; rolling tracking issue |
+| `issues-dashboard.yml` | issues-dashboard | Scheduled + issue events / advisory | Regenerates the pinned Issues & Quality Dashboard issue (see Quality alerts) |
+| `master-ci-alert.yml` | Master CI Alert | `workflow_run` / advisory | Raises or clears the `router-master` and `tier2-master/full-unit-tests` quality alerts when `CI` completes on a master push |
+| `mutation-nightly.yml` | mutation-nightly | Dispatch only (schedule pending #1870) / advisory | Stryker.NET mutation run over the allowlisted security/contract BFF files changed in the last 24h; raises the `mutation-nightly` quality alert |
+| `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; one quality alert per check + rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time); PR dry run | Packs SpaarkeMaster managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, checks both, and publishes them with the `dataverse-solutions-latest.json` manifest H6 reads (T218d) |
 | `publish-copilot-agent-template.yml` | Publish Copilot Agent Template | Manual publish (release-time); PR dry run | Builds the per-customer Copilot agent template from `src/solutions/CopilotAgent`, renders a sample, validates it against Microsoft's schemas, and publishes it with `copilot-agent-template-latest.json` (T257) |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
-| `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
-| `sdap-ci.yml` | SDAP CI | Legacy, no longer required | Original monolithic pipeline (security scan, build/test, eval gate, client/code quality, tenant isolation, integration readiness, Compose fidelity + client gates); superseded by `CI / Router`, pending deletion |
 | `workflows-validate.yml` | actionlint | PR; reports | Lints every workflow YAML file with `actionlint` |
 
 ---
@@ -450,7 +492,7 @@ Before merging any PR to master, verify all of the following:
 
 ### Automated Checks (Must Pass)
 
-- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff, i.e. one in which every changed file is documentation.
+- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. It is one of two required status checks (with `Client lint (type-aware ratchet)`); it is skipped entirely (and still reports pass) on a docs-only diff, i.e. one in which every changed file is documentation.
 - [ ] **Tier 1 (blocking) jobs pass** — compile (whole solution, Debug), the full NetArchTest ArchTests suite, changed-surface integration smoke (conditional on changed BFF paths), auth smoke (conditional on auth-path changes), the golden-utterance eval gate, the I1–I5 tenant-isolation invariants, the Compose fidelity corpus round-trip, and the Xrm capability guard (conditional on client/solution/workflow changes)
 - [ ] **Tier 2 (advisory) results reviewed** — format, lint, the full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, and plugin size are posted as one deduplicated "Tier 2 Advisory Report" PR comment; they never block, but address real failures
 - [ ] **Path-scoped gates reviewed if touched** — `office-addins-tests.yml` (office-addins + related server/test paths), `css-reset-gate.yml` (Code Page `index.html`), `build-provisioning-sidecar.yml` (sidecar paths, hard-fails on a fixable HIGH/CRITICAL Trivy finding), `deploy-infrastructure.yml`'s `validate` job (bicep paths; lint + compile) — none of these are in the required-check list, but each reports a real pass/fail
@@ -497,7 +539,7 @@ The subsections below are grouped by what each workflow does: the PR gate, stand
 
 **Triggers**: `pull_request` → `master`, `push` → `master`, `merge_group`
 
-The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` / `provisioning_prereqs` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+The required status check `CI / Router` (the ruleset also requires `Client lint (type-aware ratchet)`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` / `provisioning_prereqs` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
 
 **`prereqs` job (blocking, since 2026-10-09 — customer-provisioning-orchestration-r1 task 208).** Runs when `scripts/provisioning-prereqs/**`, `.claude/skills/provision-environment/**` or `ci-router.yml` changes — **including docs-only diffs**, because `.claude/**` counts as documentation and would otherwise skip the check for a skill-only change. It validates `scripts/provisioning-prereqs/prereqs.yaml` (top-level shape, per-prereq required fields, scope enum, unique ids, the SPE `never_delete` guard on `PRQ-T-01`) with `validate.ps1`, using the **same** `powershell-yaml` parser the `/provision-environment` skill uses (never substitute another parser), and compiles `intake.schema.json` as a Draft 2020-12 JSON Schema via `ajv-cli` + `ajv-formats` (needed for the `format: uuid` checks on `tenantId`/`subscriptionId`). It is adjudicated by `router-result` (`allowed-skips: tier1,prereqs`), so a red `prereqs` fails `CI / Router`. It replaced the standalone advisory `provisioning-prereqs-validate.yml`, which is deleted.
 
@@ -602,7 +644,7 @@ One job (`build_and_deploy`) builds `@spaarke/auth` from source first (its `dist
 
 #### `deploy-promote.yml` — Environment Promotion
 
-**Triggers**: `workflow_dispatch` only (`target_environment`, optional `artifact_run_id`, `skip_smoke_tests`). The automatic `workflow_run` trigger (dev auto-promote after "SDAP CI" on master) was **removed** — some `if:` conditions inside the `plan` job still reference `workflow_run` defensively, but no such trigger exists in `on:` today.
+**Triggers**: `workflow_dispatch` only (`target_environment`, optional `artifact_run_id`, `skip_smoke_tests`). The automatic `workflow_run` trigger (dev auto-promote after "SDAP CI" on master) was **removed** — some `if:` conditions inside the `plan` job still reference `workflow_run` defensively, but no such trigger exists in `on:` today. Its `deployment-packages` artifact comes from a master run of `ci-standalone-checks.yml` (job `release-build`; `sdap-ci.yml` until 2026-10-14). A blank `artifact_run_id` makes the download steps take the latest completed master push run of that workflow that carries the `deployment-packages` artifact (`branch: master`, `event: push`, `workflow_conclusion: completed`, `search_artifacts: true`; a run whose `release-build` passed but an unrelated standalone job was red is still accepted). No such run fails the job (`if_no_artifact_found: fail`; the previous value `error` is not valid and degraded to `ignore`).
 
 **Pipeline**: direct-target deploy (NOT a dev→staging→prod chain — each target environment deploys independently, per the 2026-06-02 D-12 refactor) to `dev` / `staging` / `production`, each with `/ping` + `/healthz` smoke tests; `production` additionally requires `environment: production` reviewer approval. **Secrets**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC) + `DEV_APP_NAME`/`STAGING_APP_NAME`/`PROD_APP_NAME`.
 
@@ -650,19 +692,35 @@ Packs SpaarkeMaster managed + unmanaged from the committed source `src/dataverse
 
 Runs the package's Pester tests, then builds the per-customer Copilot agent template from `src/solutions/CopilotAgent` (`New-CopilotAgentTemplate` — refuses permissions, `webApplicationInfo`, a bot, a knowledge capability, hard-coded tenant/app/reference ids, or schema versions other than manifest v1.30 / DA v1.8 / plugin v2.4). It writes `copilot-agent-template-latest.json` with `New-CopilotAgentTemplateManifest`, renders a sample package and validates it against Microsoft's published JSON schemas (`scripts/copilot-agent/test_rendered_package.py`). Only a manual run on `master` with `publish: true` uploads the versioned template, a versioned manifest, the rollback pointer and the new latest manifest. A version publishes once (bump `version` in `appPackage/manifest.json`). The operator renders each customer's package from it (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`; [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12). **Secrets/vars**: as above.
 
-### Legacy Pipeline (superseded, pending deletion)
+### Standalone checks and master alerts
 
-#### `sdap-ci.yml` — SDAP CI
+#### `ci-standalone-checks.yml` — CI Standalone Checks
 
-**Triggers**: `pull_request` / `push` → `master`, both with `paths-ignore` (`docs/**`, `projects/_backlog/**`, `projects/x-*/**`, `**.md`, `.claude/**`, `memory/**`, `knowledge/**`, `CHANGELOG*`, `CODEOWNERS`, `LICENSE*`)
+**Triggers**: `pull_request` / `push` → `master` (same `paths-ignore` list the legacy pipeline used: `docs/**`, `projects/_backlog/**`, `projects/x-*/**`, `**.md`, `.claude/**`, `memory/**`, `knowledge/**`, `CHANGELOG*`, `CODEOWNERS`, `LICENSE*`), `workflow_dispatch`. **Not required.**
 
-The original monolithic pipeline: `security-scan` (Trivy fs, advisory), `build-test` (two-pass Debug build+test with coverage, no longer `continue-on-error` at the job level), `eval-gate` (golden-utterance, blocking), `client-quality` (Prettier/ESLint/tsc across the shared-lib chain, advisory), `code-quality` (needs `build-test`; `dotnet format`, the full NetArchTest suite, naming-conformance, plugin size, dependency audit — all advisory via `continue-on-error`), `tenant-isolation` (I1–I5, blocking), `integration-readiness` (publish + package artifact, advisory), `adr-pr-comment` (PR comment), `summary`, `compose-fidelity-gate` (blocking), and `compose-client-gate` (jest save-contract suite, advisory pending 3 green runs on `ubuntu-latest`). **It is no longer the branch's required status check** — `ci-router.yml` is — and multiple comments across the newer tier workflows note it is slated for deletion by another project's task 077, not yet executed as of 2026-09-28.
+The checks from `sdap-ci.yml` that have no Router or nightly equivalent, run in parallel on `ubuntu-latest`:
 
-#### `sdap-ci-docs-only.yml` — SDAP CI - Docs-Only Fallback
+- `dependency-audit` — `dotnet list Spaarke.sln package --vulnerable --include-transitive`, failing on any package outside the accepted-risk list (empty since 2026-08-13; an entry is an ADR-029 accepted-risk decision). Also fails when the scan itself cannot run.
+- `release-build` — Release build of the whole solution (spec FR-B07) and the BFF Release publish. On master pushes it uploads the `deployment-packages` artifact (`api/` layout, 30-day retention) that `deploy-promote.yml` downloads.
+- `compose-client-gate` — the `@spaarke/compose-components` jest save-contract suite (builds its shared-lib `dist/` first).
+- `client-typecheck` — `tsc` builds of six shared client libraries in dependency order, then `Spaarke.AI.Widgets` `tsc --noEmit`.
+- `pcf-eslint` — `eslint .` in `src/client/pcf` (Tier 2 `lint` runs it only on SpaarkeAi/BFF changes and `client-lint.yml` does not cover PCF).
+- `unit-tests-outside-router` — `dotnet test` on `Sprk.Provisioning.ControlPlane.Tests`, `Spaarke.Core.Tests`, `Spaarke.Scheduling.Tests`, `Sprk.Bff.Api.IntegrationTests` and `Spe.Integration.Tests`. The legacy `build-test` ran the whole solution; Tier 2 runs only when the Router's `bff` path filter matches, and that filter lists none of these. (The cleaner fix is widening the Router `bff` filter with `src/server/services/**`, `tests/unit/**` and `tests/integration/**`; it needs the no-edit rule on `ci-router.yml` released.) Live seam tests skip themselves when their environment is absent, so no category filter is needed.
+- `bff-seam-contract-tests` — tests in `tests/integration/{seam,contract,tenant,Shared}` and `tests/unit/domain` compile into `Sprk.Bff.Api.Tests` but are outside the `bff` filter. When such a `.cs` file changes, the job runs the test classes it declares (namespace + class name filter; the whole assembly is ~14,000 tests). A shared helper that declares no test class is compiled but runs nothing; production-code changes remain Tier 2's.
+- `verdict-script-tests` — Pester must-fire controls for `scripts/ci/master-ci-verdict.ps1` (fake `gh`, no network).
+- `trivy-fs` — the legacy per-change repository scan: Trivy `fs`, SARIF to the Security tab under the legacy category (`.github/workflows/sdap-ci.yml:security-scan`, so existing code-scanning alerts continue as one series). Reports only; it never fails on findings (the backlog is known), and raises `ci-standalone/trivy-fs` only if the scan itself errors. The upload step warns instead of failing on fork and Dependabot PRs, which cannot write `security-events`.
 
-**Triggers**: `pull_request` matching exactly `sdap-ci.yml`'s `paths-ignore` list
+`Summary` writes one results table to the run's summary. On a push to master, `alerts` raises or clears one quality alert per job (`ci-standalone/<job>`). No job uses `continue-on-error`: a failure must show as a failure, and a `continue-on-error` job reads as `success` to the alerts job.
 
-Emits no-op "Build & Test (Debug)"/"Build & Test (Release)" success checks for PRs that touch nothing `sdap-ci.yml` would build, so a docs-only PR is not blocked waiting for a check name that `sdap-ci.yml` never reports. Paired 1:1 with `sdap-ci.yml`'s own trigger paths — if that workflow is deleted, this one's purpose goes with it.
+#### `master-ci-alert.yml` — Master CI Alert
+
+**Triggers**: `workflow_run` (workflow `CI`, completed, branch `master`; push events only), `workflow_dispatch` (inputs `run_id`, `dry_run` default true).
+
+Runs `scripts/ci/master-ci-verdict.ps1` over the newest 100 completed master runs of `CI` (each job judged from its most recent execution; a failing job absent from the window stays failing) and raises or clears `router-master` and `tier2-master/full-unit-tests`, plus `master-ci-alert/evaluation` when the script itself fails (see [How CI problems are surfaced](#how-ci-problems-are-surfaced)). It reads the run, its jobs and the Tier 2 shard verdict artifacts; it re-runs nothing and does not touch the tier workflows. `workflow_run` workflows run from the default branch's copy only.
+
+#### Retired: `sdap-ci.yml` and `sdap-ci-docs-only.yml`
+
+Retired 2026-10-14 (task 077) after the Router cutover (2026-09-29) and the 7-day soak. Both files are kept, not executed, at `docs/archive/workflows/`. The job-by-job mapping (what moved to Tier 1, Tier 2, a nightly, or `ci-standalone-checks.yml`, and what was dropped with the reason) is in `projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-retirement.md`. `scripts/ci/shadow-window-status.ps1` now reports the shadow window as closed (`-Historical` re-runs the old comparison).
 
 ### Weekly ADR Audit
 
@@ -676,12 +734,14 @@ Runs the full NetArchTest suite (`continue-on-error: true` on the test step itse
 
 ## Scheduled Workflows
 
-Five workflows run on a `schedule:` trigger. There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
+Six workflows run on a `schedule:` trigger (`mutation-nightly.yml` is dispatch-only until #1870 proves a complete run). Two of them (`nightly-health.yml`, `client-tests.yml`), plus `mutation-nightly.yml`, also raise [quality alerts](#quality-alerts). There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
 
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
-| `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — rolling tracking issue |
-| `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — job summary + `client-test-baseline` artifact |
+| `issues-dashboard.yml` | Every 6 hours (also on issue open/close/label events) | Regenerates the pinned `📊 Issues & Quality Dashboard` issue: open quality alerts, last result of each nightly, new / stale issues, totals | No — edits one issue body in place, never comments |
+| `mutation-nightly.yml` | **Dispatch only** (daily 05:00 UTC once #1870 is closed) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
+| `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — one quality alert per check + rolling tracking issue |
+| `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — quality alert `client-tests` + job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
 | `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
@@ -692,17 +752,20 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 
 | Job | Purpose | Timeout |
 |-----|---------|---------|
-| `flake-hunt` | Runs `tests/unit/Sprk.Bff.Api.Tests/` 3× (excluding `Category=Flaky`); flags any test that passed in some runs and failed in others | 60 min |
+| `flake-hunt-run` + `flake-hunt` | Runs `tests/unit/Sprk.Bff.Api.Tests/` 3× (excluding `Category=Flaky`) as a matrix of 3 runs × 4 namespace shards (the shards `ci-tier2-advisory.yml` uses; measured 7-13 min per leg); `flake-hunt` merges the TRX per run, flags any test that passed in some runs and failed in others, and reports an incomplete hunt (missing legs) as such | 30 min per leg, 10 min analysis |
 | `bundle-size` | Builds `SemanticSearch`, `CreateMatterWizard`, and `LegalWorkspace` client artifacts; flags >10% drift vs `.github/baseline-bundle-sizes.json` | 30 min |
 | `vuln-scan` | `dotnet list package --vulnerable --include-transitive` + `npm audit` on 3 key client packages | 20 min |
 | `full-integration` | Full, unfiltered `Spe.Integration.Tests` run (Tier 3 — never blocks a PR) | 45 min |
-| `coverage-observation` | Aggregates Cobertura coverage across the whole suite — **observation only, never a gate** (ADR-038) | 30 min |
+| `coverage-shard` + `coverage-observation` | Coverage over the whole suite in 5 shards (the 4 namespace shards plus the other test projects of `Spaarke.sln`; measured 4-20 min), merged per source line — **observation only, never a gate** (ADR-038) | 45 min per shard, 10 min merge |
 | `trivy-fs` | Full filesystem Trivy scan, `exit-code: 0` (never fails the job; counts are reported) | 20 min |
 | `dep-audit` | Full transitive `dotnet`/`npm` vulnerability audit across every `package-lock.json` root | 20 min |
-| `graph-app-role-parity` | Compares a customer UAMI service principal's Graph app roles against `GraphAppRoles.cs`; `continue-on-error: true`; **self-skips today** because the four `NIGHTLY_*` secrets it needs (`NIGHTLY_GRAPH_READER_CLIENT_ID`, `NIGHTLY_AZURE_TENANT_ID`, `NIGHTLY_SUBSCRIPTION_ID`, `NIGHTLY_UAMI_SP_OBJECT_ID`) have never been populated | n/a |
-| `report` | Creates/updates a single rolling issue titled "Nightly Health — {date}" (closes it automatically on a clean night) | 10 min |
+| `graph-app-role-parity` | Compares a customer UAMI service principal's Graph app roles against `GraphAppRoles.cs`; its steps (not the job) are `continue-on-error`, and a `verdict` step exposes the job output `failed` that the alerts leg reads; **self-skips today** because the four `NIGHTLY_*` secrets it needs (`NIGHTLY_GRAPH_READER_CLIENT_ID`, `NIGHTLY_AZURE_TENANT_ID`, `NIGHTLY_SUBSCRIPTION_ID`, `NIGHTLY_UAMI_SP_OBJECT_ID`) have never been populated | n/a |
+| `report` | Legacy log: appends a comment to the rolling issue "Nightly Health — {date}". **Off by default** (the alerts and the [dashboard](#quality-alerts) replaced it; rolling issue #408 is to be closed with a pointer to the dashboard right after this change merges; closing it earlier would let the next master run open a fresh one). Restore with `-f post_tracking_comment=true` | 10 min |
+| `alerts` | One [quality alert](#quality-alerts) per check above (matrix); a job that is cancelled, timed out or skipped is a failing check | 5 min |
 
-**Manual dispatch**: `gh workflow run nightly-health.yml -f update_baseline=true` (commits the current bundle sizes as the new baseline — only input it accepts).
+**Manual dispatch**: `gh workflow run nightly-health.yml -f update_baseline=true` (commits the current bundle sizes as the new baseline). Other inputs: `dry_run_alerts=true` (print the alert decisions instead of posting them) and `post_tracking_comment=true` (restore the legacy per-night comment).
+
+Both unit-test jobs check out with `lfs: true`: `tests/fixtures/compose-corpus/*.docx` are Git-LFS pointers, and without the smudge ~1,084 Compose seam tests failed every night on 129-byte fixtures (the PR run has had `lfs: true` since 2026-08-13).
 
 ### `client-tests.yml`
 
@@ -713,6 +776,48 @@ Discovers every `package.json` with a real `test` script (filters out the npm-in
 ### `report-workflow-health.yml`
 
 Iterates every file in `.github/workflows/*.yml`, queries `gh run list --workflow=<file> --created=">7 days ago"`, computes a per-workflow success rate, and appends a weekly snapshot to a single rolling "CI Health Report" issue.
+
+### `mutation-nightly.yml`
+
+Stryker.NET 5.0.0 (installed with `dotnet tool install --tool-path`, pinned) over the security/contract-critical files that changed on the branch in the last 24 hours. Line coverage says a filter was executed; a mutation run says whether any test would notice if it were broken. A **surviving** mutant (the tests still pass with the line deliberately broken) or a **no-coverage** mutant on a changed line is the signal.
+
+| Item | Value |
+|---|---|
+| Allowlist | `src/server/api/Sprk.Bff.Api/{Api/Filters, Infrastructure/Errors, Infrastructure/Authentication, Services/Access}/**` and `src/server/shared/Spaarke.Dataverse/**AccessRights*` (the latter is a second Stryker run, `project=Spaarke.Dataverse.csproj`). Edit the pathspecs in the `Resolve scope` step to widen it. |
+| Window | Commits from the last 24h, or `-f since=<git ref>` on dispatch. Stryker `since` mode then mutates only the changed lines. No allowlisted file changed: the job succeeds in about a minute and the alert is `ok`. |
+| Tests that may kill a mutant | Derived per run by `scripts/ci/run-stryker.sh` from the files being mutated: the dedicated suites `Filters.`, `Services.Access.`, `Infrastructure.Authentication.`, `Infrastructure.Errors.` plus every test class in `tests/**` that names a type declared in a mutated file (worst case, all 52 files: 4,661 tests; 14 files: 2,746). Compose tests are excluded (Git-LFS fixtures). The broad ADR-038 KEEP set (9,667 tests, with Api.Office / Api.Insights / Api.Documents already excluded) took 71 min for the initial run alone and was dropped. A test that reaches a mutated type without naming it is not selected. |
+| Output | `mutation-report` artifact (HTML + JSON), a per-file table (killed / survived / no-coverage / score) and every surviving mutant with `file:line` in the job summary (`scripts/ci/summarize-mutation-report.py`). |
+| Alert | `mutation-nightly`: `failing` when a changed file has surviving or no-coverage mutants, or the run errors or hits its cap; `ok` otherwise. |
+| Timeout / duration | 190 min (~1.5x the one complete run). **One run has completed end to end** (run 38601727169, 2 changed files, 1,390 mutants, 1,259 tests: 124 min = ~21 min build and instrumentation of the 165,676-mutant assembly + ~79 min at ~3.4 s per mutant). A 14-file window (3,448 mutants) did not finish in 240 min, so a heavy night cannot finish. That is why the schedule is off until #1870 decides how to bound a night. |
+
+**Manual dispatch**: `gh workflow run mutation-nightly.yml -f since=<ref>` (optionally `-f dry_run_alert=true` to print the alert decision instead of posting it). Use a `since` ref that predates the file you want mutated, otherwise the window is empty.
+
+### Quality alerts
+
+A quality alert is a GitHub issue that says "this scheduled check is failing", built so it cannot be buried. Nightly results used to land only in job summaries and in a rolling tracking issue that collected one comment per night (`nightly-health`'s #408 had ~100 that nobody read), and a job cancelled at its timeout read as nothing at all.
+
+**The mechanism** is the composite action `.github/actions/quality-alert` (inputs `check`, `status` = `ok`\|`failing`, `summary`, `run-url`). Per check there is exactly one issue titled `🔴 Quality alert: <check>`, labelled `quality-alert` (created on first use) and **assigned to `spaarke-dev`**, which is what makes GitHub email the owner.
+
+| Check says | An open alert exists | Closed alert exists | None exists |
+|---|---|---|---|
+| `failing` | Body **edited in place** (current summary, run link, "failing since" date kept from the original). No new comment. | Reopened, body rewritten, one comment "Failing again" | Created, with one comment |
+| `ok` | Comment "Recovered in <run>" and **closed** | nothing | nothing |
+
+The action never fails the calling job: if it cannot post it prints a `::warning::` and exits 0. Callers need `issues: write` and a checkout of `.github/actions`. `dry-run: true` prints the decision instead of writing. The nightly workflows expose it as a dispatch input and force it on whenever the run is not on the default branch, so a branch or proof run can never open or close a real alert.
+
+**What raises one today**
+
+| Check | Raised by | `failing` when |
+|---|---|---|
+| `nightly-health/flake-hunt`, `/bundle-size`, `/vuln-scan`, `/full-integration`, `/coverage-observation`, `/trivy-fs`, `/dep-audit`, `/graph-app-role-parity` | `nightly-health.yml` job `alerts` | the job is **not `success`** (failure, cancelled, which is how a job that hits its `timeout-minutes` reports, or skipped). Additionally: `flake-hunt` when a flake is found or a run/shard result is missing; `full-integration` when any test failed or when 0 tests passed (it did not run; its job stays green by design); `coverage-observation` when no shard produced a coverage file; `graph-app-role-parity` when a configured step failed (steps are `continue-on-error`, so the job reports success; the alert reads the job's `failed` output). Vulnerability and Trivy *counts* are not alerted: they are a standing backlog, and an alert that can never close gets ignored. So `vuln-scan`, `trivy-fs` and `dep-audit` raise their alert only if the job itself fails (crash, timeout, skipped), which they are built not to do on findings. |
+| `client-tests` | `client-tests.yml` job `alert` | any package is `fail`, `install-failed` or `deps-build-failed`, or the baseline is incomplete. The alert lists the packages and links the known issues (#1788-#1793). |
+| `mutation-nightly` | `mutation-nightly.yml` job `alert` | surviving or no-coverage mutants on changed lines, or the run errors, is cancelled or times out. |
+
+**Where to look.** The open list `label:quality-alert is:open` ([issues](https://github.com/spaarke-dev/spaarke/issues?q=is%3Aissue+is%3Aopen+label%3Aquality-alert)) is the dashboard: if it is empty, every alerting nightly passed its last run. Every alert is assigned to the owner. Closing an alert by hand does not silence the check; the next failing run reopens it.
+
+**Adding a check.** Compute `ok`/`failing` in the workflow (treat a non-`success` job result as `failing`), then call `./.github/actions/quality-alert` with a stable `check` name (`<workflow>/<check>`, never a date or run number) from a job with `if: always()` and `permissions: issues: write`. Alerts are opened and closed with the default `GITHUB_TOKEN`, which does not start other workflows; the dashboard below picks changes up on its schedule.
+
+**Dashboard.** `issues-dashboard.yml` maintains ONE pinned issue, `📊 Issues & Quality Dashboard` (label `dashboard`), whose body is regenerated every 6 hours, on demand and on issue open/close/label events: open quality alerts with "failing since", the last result of each nightly workflow (a cancelled or missing run shows ⚠️, never ✅), issues opened in the last 7 days, open issues idle for 30+ days (count and the 10 oldest) and totals (open issues, open PRs, unassigned). It edits the body in place and never comments, so refreshing it notifies nobody. Dry run: `gh workflow run issues-dashboard.yml -f dry_run=true`. If the token cannot pin the issue the run prints a `::warning::`; pin it by hand once (Issue page, Pin issue). The Claude Code session-start banner shows the open alerts in every session.
 
 ---
 
@@ -842,7 +947,8 @@ gh run rerun {previous-run-id}
 | `xrm-capability-guard` | Tier 1 | A `getXrm(...)` value is used for a member its requested capability does not cover, or the analyzer hit a shape it cannot follow (blind spot) | The log names file:line and the site; request the capability the code calls, or rewrite the shape. Run `npx jest src/utils/__tests__/xrmCapabilityUsage.guard.test.ts` in `Spaarke.UI.Components` |
 | `format` / `lint` (Tier 2) | `ci-tier2-advisory.yml` | Formatting/lint violation | `dotnet format whitespace`; `npx prettier --write "src/client/**/*.{ts,tsx}"`; `cd src/client/pcf && npx eslint . --fix` |
 | `full-unit-tests` (Tier 2) | `ci-tier2-advisory.yml` | A unit test failed on both pass 1 and the pass-2 retry | Download the `tier2-unit-test-results-Debug-<shard>` artifact of the shard that failed |
-| legacy `security-scan`/`build-test`/`client-quality`/`code-quality` | `sdap-ci.yml` | Same classes as above, legacy job names | These no longer gate the merge (superseded by `CI / Router`), but a real red is still worth fixing |
+| `dependency-audit` | `ci-standalone-checks.yml` | A package has a known vulnerability (or the scan could not run) | The job summary lists the packages; upgrade, or record an ADR-029 accepted-risk entry |
+| `release-build` / `compose-client-gate` / `client-typecheck` / `pcf-eslint` / `unit-tests-outside-router` / `bff-seam-contract-tests` | `ci-standalone-checks.yml` | Release-only compile error; a Compose save-contract test failed; a shared-lib type error; a PCF ESLint error; a ControlPlane/Core/Scheduling/integration test failed; a changed seam/contract test class failed | The failing step's log; on master the matching `ci-standalone/<job>` quality alert links the run |
 
 ### Viewing CI Logs
 
@@ -878,11 +984,10 @@ gh run rerun {run-id}
 
 ### ADR Violations in CI
 
-ADR violations appear in three places:
+ADR violations appear in two places (Tier 1 `arch-tests` also blocks the merge on any ArchTest failure):
 
 1. **Tier 2 PR Comment**: `ci-tier2-advisory.yml`'s `tier2-pr-comment` job posts one deduplicated "🛈 Tier 2 Advisory Report" comment per PR (advisory — never blocks)
-2. **Legacy PR Comment**: `sdap-ci.yml`'s `adr-pr-comment` job still posts a separate "🏛️ ADR Architecture Validation Report" comment (legacy, same non-blocking status)
-3. **Weekly Issue**: `adr-audit.yml` creates/updates a tracking issue
+2. **Weekly Issue**: `adr-audit.yml` creates/updates a tracking issue
 
 **To fix:**
 ```powershell
@@ -895,8 +1000,6 @@ gh run view {run-id} --log --job="Arch Tests (full suite, blocking)"
 # Download the Tier 2 (advisory) ADR results artifact
 gh run download {run-id} --name tier2-adr-results
 
-# Download the legacy sdap-ci.yml ADR results artifact
-gh run download {run-id} --name adr-test-results
 ```
 
 ### Health Check Endpoints
@@ -1025,9 +1128,9 @@ This CI/CD workflow integrates with the [Testing and Code Quality Procedures](te
 
 ## Required Secrets
 
-### CI Gate (`ci-router.yml` / Tier 1 / Tier 2 / legacy `sdap-ci.yml`)
+### CI Gate (`ci-router.yml` / Tier 1 / Tier 2 / `ci-standalone-checks.yml` / `master-ci-alert.yml`)
 
-No secrets required — these run read-only against the repo's own code.
+No secrets required — these run against the repo's own code with the default `GITHUB_TOKEN` (the alert jobs use it with `issues: write`).
 
 ### BFF API Deploy (`deploy-bff-api.yml`)
 

@@ -1,7 +1,7 @@
 # Dependency Management
 
 > **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-09-30
+> **Last Reviewed**: 2026-10-14
 > **Reviewed By**: ai-procedure-refactoring-r2; `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — `nightly-quality.yml` references corrected to `nightly-health.yml` after its 2026-06-01 deletion)
 > **Status**: New
 > **Applies To**: All developers modifying NuGet or npm dependencies
@@ -196,9 +196,9 @@ Solutions (src/solutions/*)
 
 | Step | Automated By | Manual? |
 |------|-------------|---------|
-| Vulnerability detection (.NET) | `sdap-ci.yml` code-quality job (legacy, advisory), `nightly-health.yml` `dep-audit` + `vuln-scan` jobs | No |
+| Vulnerability detection (.NET) | `ci-standalone-checks.yml` `dependency-audit` job (per push/PR; fails on any package outside the accepted-risk list; raises a quality alert on master), `nightly-health.yml` `dep-audit` + `vuln-scan` jobs | No |
 | Vulnerability detection (npm) | `nightly-health.yml` `dep-audit` + `vuln-scan` jobs | No |
-| Build verification | `sdap-ci.yml` build-test matrix | No |
+| Build verification | Tier 1 `compile` (`ci-tier1-blocking.yml`, Debug), Tier 2 `Full Unit Tests (Debug)`, `ci-standalone-checks.yml` `release-build` (Release) | No |
 | Kiota version alignment check | Manual (see procedure above) | Yes |
 | Shared library consumer testing | Manual (build representative consumers) | Yes |
 | Peer dependency compatibility | npm install warnings | Partially |

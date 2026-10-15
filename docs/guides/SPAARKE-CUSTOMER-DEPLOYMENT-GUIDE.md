@@ -1,7 +1,7 @@
 # Spaarke Customer Deployment Guide
 
 > **Version**: 1.0 (consolidation baseline)
-> **Last Updated**: 2026-08-17
+> **Last Updated**: 2026-10-14
 > **Status**: **Authoritative**. Supersedes the customer-provisioning content in `CUSTOMER-DEPLOYMENT-GUIDE.md`, `CUSTOMER-ONBOARDING-RUNBOOK.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md`, `auth-deployment-setup.md`, `SPAARKE-DEPLOYMENT-GUIDE.md`, and `PRODUCTION-DEPLOYMENT-GUIDE.md`. Those files are retained as one-paragraph stubs pointing here.
 > **Audience**: Platform Operator (primary). Claude Code AI executes automated phases; a human operator holds accountability for gates, secrets, and customer communication.
 > **Applies To**: Every new Spaarke customer environment. **Model 1** = dedicated stamp in Spaarke's Azure tenant; **Model 2** = dedicated stamp in the customer's own Azure tenant (D-12, 2026-09-28).
@@ -1025,12 +1025,13 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
   deploy to an environment that carries the setting without declaring it. The declaration must be a JSON boolean (`true` /
   `false`, unquoted): the deploy FAILS on any other type, because PowerShell reads the string `"false"` as true (round 57
   item 3; the parse is `scripts/common/SpeAdminOperatorMarker.ps1`, which `SpeAdminOperatorEnvironmentMarkerGuardTests` runs).
-- **Standing up Spaarke's production operator environment** (`demo` — `spaarke-bff-demo`, Stopped, which declares `false`
-  today) is the change that adds the marker: its registry key set to `true`, its name in
-  `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and the App Service setting (the next
-  `Deploy-BffApi.ps1 -Environment demo` run sets it). Until then it refuses those routes (fail closed). The entry is
-  reachable through `-Environment` (main-session round 62 item 2): task T242b added `demo` to `Deploy-BffApi.ps1`'s
-  `-Environment` `ValidateSet`, so the declaration and its `requiredCorsOrigins` gate are read by a demo deploy.
+- **Standing up Spaarke's production operator environment** is the change that adds the marker: a registry entry in
+  `config/environments.json` with the key set to `true`, its name in
+  `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, the entry added to `Deploy-BffApi.ps1`'s
+  `-Environment` `ValidateSet` (so the declaration and its `requiredCorsOrigins` gate are read by a deploy), and the App
+  Service setting (the next `Deploy-BffApi.ps1` run for it sets it). Until then it refuses those routes (fail closed). The old
+  `demo` entry (`spaarke-bff-demo`) was the candidate until it was retired on 2026-10-14 and removed from the registry; the
+  demo is now the ACME stamp built by provisioning (T186), a customer environment that never carries the marker.
 - **A declared marker is bound to its App Service** (round 62 item 1): when the entry declares `true`, the deploy FAILS
   unless `-AppServiceName` and `-ResourceGroupName` equal that entry's `appServiceName` / `resourceGroup`
   (`Assert-SpeAdminOperatorMarkerTarget`, `scripts/common/SpeAdminOperatorMarker.ps1`). The declaration is read by the
@@ -1249,6 +1250,26 @@ involved (the type is shared), so renaming the container does not matter.
 marker the customer's BFF recognises its containers by (T227d) — GET first, so a re-run writes nothing. A refusal is
 Resumable (`spe-container-marker-failed`); the container stays on the run's record and a resume marks it.
 
+**Pre-marker containers (issue #1889).** Only the BFF's and H8's *creation* paths write the marker, so per-record (secure)
+containers created before T227d carry none and the guard refuses them (404 `spe_container_not_owned`). An environment that
+holds such containers runs `Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId <the BFF's Customer__Id>` — dry run,
+then `-Apply -MaxWritesPerRun 1`, then `-Apply`, then `-Apply` once more — and then `-Verify` (it must exit 0) **before the
+guard-carrying BFF is deployed there**. `-CustomerId` is the BFF's `Customer__Id` app setting and must match the BFF's
+format `^[a-z][a-z0-9]{2,7}$` (3–8 characters, lowercase letters and digits, a letter first; anything else exits 2 before
+any call). When that setting is absent, the BFF derives the id from its `WEBSITE_RESOURCE_GROUP` name
+`rg-spaarke-{customerId}-{env}` (`CustomerIdResolver`: exactly two segments after the prefix, lower-cased; `platform`,
+`shared` and `byok` are never a customer) — pass that id. An explicit setting that breaks the format is *not* replaced by the
+derived one: the BFF treats it as unresolved. The marker is what makes the BFF serve a container to this customer, and every
+customer stamp shares one container type, so the script marks only a container that **already carried a stamp naming one of
+this environment's business units** and whose owner its records derive (or one an explicit `-Bind` names). A container the
+run stamps from records alone is **not** marked in that pass: it is listed `MARK-NEXT-RUN`, the operator reviews the stamp,
+and the next run marks it. **The operator reviews the dry-run list before `-Apply`, because the record claim
+(`sprk_containerid` on a secure root) is customer-writable.** A container stamped by an earlier `-Bind` that no record
+claims is listed `UNMARKED-NO-CLAIM` (re-run with `-Bind '<id>=<unit>'` to mark it). A marker is written only where it is
+absent (a different or ambiguous marker is listed, never overwritten) after a reversal-manifest row is on disk, and
+`-Verify` exits 1 while any derivable container is unmarked. Known limit: the guard caches a missing marker for up to 10
+minutes, so access can lag a passing `-Verify` by that long.
+
 Container ID persisted to the Dataverse env-var (`sprk_SharePointEmbeddedContainerId`, H7) and to the BFF as plain settings (`EmailProcessing__DefaultContainerId`, `Communication__ArchiveContainerId`, H4b — T227c) — enables I4 invariant enforcement.
 
 **Lead-time**: none per customer. The container type and its owning app are a one-time setup; H0's `SpeOwnerCredential`
@@ -1299,7 +1320,7 @@ r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
 - ~~God-class ratchet~~ — retired 2026-08-20 (root CLAUDE.md §11.5: complexity is judged at review, with a non-blocking `scripts/report-large-server-files.ps1` observation report)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
-- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0 — blocking in `sdap-ci.yml` since T230a)
+- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0 — blocking as the Tier 1 `naming-conformance` job in `ci-tier1-blocking.yml` since T230a)
 - Graph app-role parity (`GraphAppRoles.cs` constant)
 
 **BFF publish-size ceiling**: **≤ 60 MB compressed (HARD)**. Current net10 baseline: 44.96 MB incl. PDBs. Per-PR measurement + delta report required (NFR-01).
@@ -1352,7 +1373,7 @@ Model 1 run takes only `B2BGuest`):
 1. **Before inviting anyone** it refuses (Resumable, nothing written) a run whose environment security group
    (`environmentSecurityGroupId`, `PRQ-C-10`) is not named `sprk-{customerId}-users` or not security-enabled
    (`userprov-security-group-rejected`), or whose environment restricts guests
-   (`organization.restrictguestuseraccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
+   (`organization.restrictGuestUserAccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
    isolation boundary between Model 1 environments: all live in Spaarke's tenant, so an environment without it admits
    every user of that tenant, including other customers' guests. H11 checks the group's **name**; that it is the group
    **set on the environment** is checked by the skill (Step 1e-bis, Power Platform admin API) — only a Power Platform
@@ -1476,7 +1497,7 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
   input) → Resumable `h13-customer-mailbox-inconclusive`
 - **The §4D I2–I5 tenant-isolation invariants sample-verified on the deployed stamp** (see §8; I1 is a build gate —
   T230a), with I3 checking the Cosmos account holds exactly `cosmos-db.bicep`'s containers and partition keys
-- (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run
+- (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1`, the Tier 1 `naming-conformance` job in `ci-tier1-blocking.yml` — not a per-run
   H13 check: it lints the repository's own files, T230a.)
 - Cost envelope: the subscription's month-to-date cost, extrapolated, within 20 % of $400/month (one envelope for both models — §3.2, T229)
 - **Secure-record isolation (T260, ISS-014)**: H13 calls the stamp BFF's `POST /api/platform/secure-record-isolation-census`
@@ -2108,7 +2129,7 @@ Per §11.1. If `sprk_currentrunid` is set + status = `Quarantined`:
 
 ### 13.6 Naming-conformance failure in CI
 
-`scripts/naming-conformance-check.ps1` exits non-0 in `sdap-ci.yml` (a build gate since T230a — H13 no longer runs it per
+`scripts/naming-conformance-check.ps1` exits non-0 in the Tier 1 `naming-conformance` job (`ci-tier1-blocking.yml`; a build gate since T230a — H13 no longer runs it per
 customer). Read the output — typically a secret or vault name in a changed file that matches neither `sprk-{env}-kv` /
 `sprk-{customerId}-{env}-kv` nor the secret-name rules. Rename it, or codify an exception in the script with a rationale
 (reviewed at code-review).

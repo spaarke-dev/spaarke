@@ -43,7 +43,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 public interface IDataverseGuestUserWriter
 {
     /// <summary>
-    /// Reads the environment's <c>restrictguestuseraccess</c> setting (organization table). New environments default to
+    /// Reads the environment's <c>restrictGuestUserAccess</c> setting (organization table). New environments default to
     /// restricted, which blocks guests from Dataverse entirely — the operator turns it off (PRQ-C-12); H11 checks it
     /// before inviting anyone.
     /// </summary>
@@ -74,10 +74,10 @@ public abstract record GuestAccessOutcome
 {
     private GuestAccessOutcome() { }
 
-    /// <summary>Guests may use the environment (<c>restrictguestuseraccess</c> = false).</summary>
+    /// <summary>Guests may use the environment (<c>restrictGuestUserAccess</c> = false).</summary>
     public sealed record Allowed : GuestAccessOutcome;
 
-    /// <summary>Guests are blocked (<c>restrictguestuseraccess</c> = true).</summary>
+    /// <summary>Guests are blocked (<c>restrictGuestUserAccess</c> = true).</summary>
     public sealed record Restricted : GuestAccessOutcome;
 
     /// <summary>The setting could not be read.</summary>

@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Eval.Resourcefulness;
 /// <para>
 /// <b>Merge-gate wiring</b> (same pattern as <see cref="GoldenUtteranceEvalSuiteTests"/> and
 /// <c>P2LoopInjectionEvalSuiteTests</c>): this class carries the <c>Category=GoldenUtteranceEval</c>
-/// trait, so the dedicated <c>eval-gate</c> job in <c>.github/workflows/sdap-ci.yml</c>
+/// trait, so the dedicated <c>eval-gate</c> job in <c>.github/workflows/ci-tier1-blocking.yml</c>
 /// (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>, NO <c>continue-on-error</c>) runs it
 /// as a merge-blocking gate with zero CI-YAML change — the trait IS the registration.
 /// </para>
