@@ -36,8 +36,9 @@
 //     the SA-MI principal it granted access to no longer exists, and the
 //     UAMI-based replacement is task 030's responsibility (grant is added at
 //     the caller level using `uami.outputs.principalId`).
-//   - `keyVaultReferenceIdentity` PATCH is the H4 handler's post-deploy job
-//     (spec.md § MUST rules); this module does NOT PATCH the site config.
+//   - `keyVaultReferenceIdentity` = the UAMI is set HERE, at creation (T186 L21, 2026-10-15). It used to be left to
+//     H4's post-deploy PATCH (ArmAppServiceIdentityPatcher), but H2a verifies T1 right after the deploy and H4 runs
+//     after H2a, so every fresh stamp quarantined at H2a. H4's PATCH remains as an idempotent re-assertion.
 //
 // COORDINATION NOTE (task 033 predecessor)
 //   Task 033 created a dedicated `modules/controlplane-app-service.bicep`
@@ -110,6 +111,10 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
   properties: {
     serverFarmId: appServicePlanId
     httpsOnly: true
+    // T1 (spec FR-33): @Microsoft.KeyVault(...) app settings resolve with THIS identity. Without it App Service uses
+    // 'SystemAssigned', which a UAMI-only site does not have, so every KV reference fails. Set here, declaratively —
+    // H2a verifies it right after the deploy (T186 L21: no handler ever PATCHed it).
+    keyVaultReferenceIdentity: userAssignedIdentityResourceId
     virtualNetworkSubnetId: !empty(vnetIntegrationSubnetId) ? vnetIntegrationSubnetId : null
     vnetRouteAllEnabled: !empty(vnetIntegrationSubnetId)
     siteConfig: {
