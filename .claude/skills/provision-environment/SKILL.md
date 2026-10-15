@@ -1124,20 +1124,34 @@ if ($identityPreset -ceq 'B2BGuest') {
     exit 1
   }
 
-  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription. The command is preview and its output shape is not yet
-  # verified live (T186), so the text must name the stamp subscription AND `Enabled` (case-sensitive): batch stops when
-  # either is absent; interactive always asks. Anchor to the status field once T186 shows the shape (K3).
-  $billing = pac licensing get-environment-billing-policy --environment $dataverseEnvUrl 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-11): pac licensing failed:`n$billing"; exit 1 }
-  Write-Host "PRQ-C-11 — billing policy of the environment:`n$billing" -ForegroundColor Cyan
-  $stampSub = ([guid]$subscriptionId).ToString('D')   # pac prints the hyphenated form
-  $billingOk = $billing -match [regex]::Escape($stampSub) -and $billing -cmatch '\bEnabled\b'
-  if ($script:SkipInteractiveIntake) {
-    if (-not $billingOk) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy is not shown as Enabled on the stamp subscription $stampSub — link it to an enabled pay-as-you-go policy on that subscription first."; exit 1 }
-  } else {
-    $payg = Read-Host "Is the policy above Enabled and on the stamp subscription $stampSub? (yes/no)"
-    if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to an enabled pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
+  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription — an Enabled billing policy whose billingInstrument is the
+  # stamp subscription has this environment linked. Power Platform API licensing/billingPolicies, api-version 2024-10-01
+  # (GA; verified live at T186 2026-10-14). Not `pac licensing`: preview, and absent from pac 1.46.1 (T186 L12).
+  $stampSub = ([guid]$subscriptionId).ToString('D')
+  $plToken = az account get-access-token --resource 'https://api.powerplatform.com' --query accessToken -o tsv
+  if ($LASTEXITCODE -ne 0 -or -not $plToken) { Write-Error '[skill] HARD STOP (PRQ-C-11): az could not get a Power Platform API token (az output above).'; exit 1 }
+  $plHeaders = @{ Authorization = "Bearer $plToken" }
+  try {
+    $policies = @((Invoke-RestMethod -Headers $plHeaders -Uri 'https://api.powerplatform.com/licensing/billingPolicies?api-version=2024-10-01').value |
+      Where-Object { $_.status -ceq 'Enabled' -and "$($_.billingInstrument.subscriptionId)" -eq $stampSub })
+  } catch {
+    Write-Error "[skill] HARD STOP (PRQ-C-11): listing billing policies failed — $($_.Exception.Message). The operator must be a Power Platform admin."
+    exit 1
   }
+  $linkedPolicy = $null
+  foreach ($p in $policies) {
+    try {
+      Invoke-RestMethod -Headers $plHeaders -Uri "https://api.powerplatform.com/licensing/billingPolicies/$($p.id)/environments/$ppEnvId`?api-version=2024-10-01" | Out-Null
+      $linkedPolicy = $p; break
+    } catch {
+      if ($_.Exception.Response.StatusCode.value__ -ne 404) { Write-Error "[skill] HARD STOP (PRQ-C-11): reading policy $($p.name) failed — $($_.Exception.Message)"; exit 1 }
+    }
+  }
+  if (-not $linkedPolicy) {
+    Write-Error "[skill] HARD STOP (PRQ-C-11): environment $ppEnvId ($dvRes) is linked to no Enabled pay-as-you-go billing policy on the stamp subscription $stampSub ($($policies.Count) Enabled on it). Link it per prereqs.yaml PRQ-C-11, then rerun."
+    exit 1
+  }
+  Write-Host "PRQ-C-11 OK — billing policy '$($linkedPolicy.name)' (Enabled, subscription $stampSub) has the environment linked." -ForegroundColor Green
 }
 
 while ([string]::IsNullOrWhiteSpace($exchangePolicyScopeGroupId)) {
@@ -1192,7 +1206,7 @@ if (-not $SkipStep0_5) {
 }
 ```
 
-Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
+Recipes that need the customer's subscription (PRQ-S-*, PRQ-C-03, PRQ-C-11) run with the operator's az
 sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
 `spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
 "group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
@@ -1254,7 +1268,7 @@ $environmentId = pac data create --entity sprk_dataverseenvironment `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
-Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — belt-and-suspenders since PRQ-E-13 was deleted from prereqs.yaml; the placeholder-record-exists check now lives here exclusively):
+Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — PRQ-E-13 is retired in prereqs.yaml because this step creates the row after the customer pass (T186 L13), so the placeholder-record-exists check lives here exclusively):
 
 ```powershell
 if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {

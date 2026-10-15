@@ -98,7 +98,7 @@ Suppose BFF is SIGABRTing on boot after H9 deploy. Operator invokes H4b. Under t
 5. **If `/healthz` red after 480s**, H4b fetches Kudu docker-logs:
    ```
    GET https://{app}.scm.azurewebsites.net/api/logs/docker
-   # Auth: Bearer {L2 UAMI token with Website Contributor role — PRQ-E-05}
+   # Auth: Bearer {L2 UAMI token with Website Contributor role — granted by H2a, customer-l2-bff-rbac.bicep}
    ```
    Parser regex: `Unhandled exception. System.InvalidOperationException: (\w+Options): (.+)$` → extracts `{moduleName}`.
 
