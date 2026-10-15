@@ -159,6 +159,12 @@ public static class SpeContainerRejectionCodes
     /// </summary>
     public const string ContainerGetVerificationFailed = "spe-container-get-verification-failed";
 
+    /// <summary>
+    /// The app-only verification GET kept failing transiently (429, 5xx, timeout, dropped connection) after bounded
+    /// retries. Resumable — the container is on the run's record and the resume verifies it again.
+    /// </summary>
+    public const string ContainerVerificationTransient = "spe-container-verification-transient";
+
     /// <summary>Verifier infrastructure fault after successful creation + activation — QuarantineRequired (created resource, unverified post-condition).</summary>
     public const string VerificationInfraFault = "spe-verification-infra-fault";
 

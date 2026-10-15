@@ -74,4 +74,11 @@ public abstract record SpeContainerVerificationResult
     /// (a session-free run-level pause), never Resumable/QuarantineRequired.
     /// </summary>
     public sealed record ReplicationPending(string Diagnostic) : SpeContainerVerificationResult;
+
+    /// <summary>
+    /// The GET kept failing with a TRANSIENT service fault (429, 5xx, a client-side timeout, a dropped connection) after
+    /// the verifier's bounded retries. Says nothing about the container — the handler maps it to Resumable (the container
+    /// stays on the run's record and the resume verifies it again), never QuarantineRequired.
+    /// </summary>
+    public sealed record TransientFailure(string Diagnostic) : SpeContainerVerificationResult;
 }

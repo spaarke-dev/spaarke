@@ -230,9 +230,18 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
     {
         try
         {
-            using var activateTimeout = LinkedTimeout(cancellationToken);
-            await graph.Storage.FileStorage.Containers[containerId].Activate.PostAsync(
-                cancellationToken: activateTimeout.Token).ConfigureAwait(false);
+            // T186 audit: /activate seconds after the create can get 404 until the new container replicates — wait that
+            // out (bounded). Any other answer, and the last 404, falls to the failure paths below unchanged.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var activateTimeout = LinkedTimeout(attemptCt);
+                    await graph.Storage.FileStorage.Containers[containerId].Activate.PostAsync(
+                        cancellationToken: activateTimeout.Token).ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "container activate", cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "H8-B container activated: containerId={ContainerId} customerId={CustomerId}",
@@ -308,12 +317,28 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
                 throw new InvalidOperationException("No owning business unit was resolved (Guid.Empty) — the container cannot be bound.");
             }
 
-            await WriteStampAsync(graph, containerId, businessUnitId, cancellationToken).ConfigureAwait(false);
+            // T186 audit: a container created seconds ago can answer 404 on the PATCH or the read-back until it
+            // replicates. Each is retried (bounded) while Graph says not-found; any other error, and the last 404,
+            // reach the failure path below exactly as before.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    await WriteStampAsync(graph, containerId, businessUnitId, attemptCt).ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "business-unit stamp write", cancellationToken).ConfigureAwait(false);
 
-            using var readTimeout = LinkedTimeout(cancellationToken);
-            var container = await graph.Storage.FileStorage.Containers[containerId]
-                .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
-                .ConfigureAwait(false);
+            var container = await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var readTimeout = LinkedTimeout(attemptCt);
+                    return await graph.Storage.FileStorage.Containers[containerId]
+                        .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
+                        .ConfigureAwait(false);
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "business-unit stamp read-back", cancellationToken).ConfigureAwait(false);
 
             var stamped = ReadStamp(container);
             if (stamped == businessUnitId)

@@ -50,6 +50,24 @@ public sealed class SpeContainerOptions
     public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Attempts for a call on a container created moments ago that Graph answers 404 (not yet replicated) — the
+    /// <c>/activate</c> call and the business-unit stamp write + read-back (T186 audit of H8). Bounded; the last error propagates.
+    /// </summary>
+    public int ReplicationRetryCount { get; set; } = 6;
+
+    /// <summary>Delay between <see cref="ReplicationRetryCount"/> attempts.</summary>
+    public TimeSpan ReplicationRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Attempts for the verifier's GET when Graph answers a transient fault (429, 5xx, timeout, dropped connection).
+    /// If it persists, the verification is reported as a transient failure (Resumable), never as a quarantine.
+    /// </summary>
+    public int VerifyTransientRetryCount { get; set; } = 3;
+
+    /// <summary>Delay between <see cref="VerifyTransientRetryCount"/> attempts.</summary>
+    public TimeSpan VerifyTransientRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// The SPE container types this L2 deployment provisions into, each with its owning app (task 245b;
     /// task 248 — the owning app trusts the Worker UAMI, so no credential is stored). A run's <c>containerTypeId</c>
     /// (intake) selects the entry. Empty is valid at startup — no container type is set up yet — and

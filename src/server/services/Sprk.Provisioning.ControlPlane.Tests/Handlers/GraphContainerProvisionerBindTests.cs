@@ -306,7 +306,8 @@ public sealed class GraphContainerProvisionerBindTests
     private static GraphContainerProvisioner Sut(
         FakeGraph transport, TimeSpan? graphRequestTimeout = null, TokenCredential? credential = null)
     {
-        var options = new SpeContainerOptions();
+        // A 404 is retried (T186 audit) — keep the wait out of these tests.
+        var options = new SpeContainerOptions { ReplicationRetryDelay = TimeSpan.FromMilliseconds(1) };
         if (graphRequestTimeout is { } timeout)
         {
             options.GraphRequestTimeout = timeout;
