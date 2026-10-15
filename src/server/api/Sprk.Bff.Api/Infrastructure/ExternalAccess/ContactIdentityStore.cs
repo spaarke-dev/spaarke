@@ -134,6 +134,19 @@ public interface IContactIdentityStore
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
     /// <summary>
+    /// ADR-028 A9 (r3 task 046): systemusers whose stored home link — the FIELD-SECURED pair <c>sprk_hometenantid</c> /
+    /// <c>sprk_homeobjectid</c> — is (<paramref name="homeTenantId"/>, <paramref name="homeObjectId"/>). Any state, two rows.
+    /// Read-only. Never filters on the unsecured key mirrors and never on <c>azureactivedirectoryobjectid</c>.
+    /// </summary>
+    Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): contacts on plane WorkforceHome whose <c>sprk_externaltenantid</c> is
+    /// <paramref name="homeTenantId"/> and whose binding is <paramref name="homeObjectId"/>. Any state, two rows. Read-only.
+    /// </summary>
+    Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
     /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for the CIAM plane's E11: its
     /// pending-invite marker (<c>sprk_externalinvitedon</c>) and the stored invite-code hash
     /// (<c>sprk_externalinvitecodehash</c>), read together in ONE query of their own (never in <c>ContactSelect</c>), so a
@@ -389,6 +402,46 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
                || error.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
                || error.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): the stored-link read. Filters on the FIELD-SECURED pair only (design §5: a mirror edit must
+    /// never redirect a sign-in), any state (a disabled link must be seen so it can deny), two rows (an ambiguous link must
+    /// be visible). Selects <c>isdisabled</c> and the secured pair, which the decision re-checks.
+    /// </summary>
+    public static string BuildHomeLinkLookupPath(Guid homeTenantId, Guid homeObjectId)
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + ContactBindingDecision.HomeObjectIdColumn
+           + $"&$filter={ContactBindingDecision.HomeTenantIdColumn} eq '{homeTenantId:D}'"
+           + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2";
+
+    /// <summary>The home contact read's columns: every binding column, plus the home directory.</summary>
+    public static readonly string HomeContactSelect = $"{ContactSelect},{ContactBindingDecision.ExternalTenantIdColumn}";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): the home contact read — plane WorkforceHome AND the home directory AND the binding, any
+    /// state, two rows. Its own select (<see cref="HomeContactSelect"/>), so no other read depends on the A9 column.
+    /// </summary>
+    public static string BuildHomeContactLookupPath(Guid homeTenantId, Guid homeObjectId)
+        => $"contacts?$select={HomeContactSelect}"
+           + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}"
+           + $" and {ContactBindingDecision.ExternalTenantIdColumn} eq '{homeTenantId:D}'"
+           + $" and {ContactBindingDecision.ExternalObjectIdColumn} eq '{homeObjectId:D}'&$top=2";
+
+    /// <summary>Parses one stored-link row from Web API JSON. <c>isdisabled</c> that is not a boolean reads as null.</summary>
+    public static HomeLinkRow? ParseHomeLinkRow(JsonElement row)
+    {
+        if (row.ValueKind != JsonValueKind.Object) return null;
+        var id = GuidOf(row, "systemuserid");
+        if (id is null) return null;
+
+        bool? disabled = row.TryGetProperty("isdisabled", out var d) && d.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? d.GetBoolean()
+            : null;
+        return new HomeLinkRow(
+            id.Value, disabled,
+            StringOf(row, ContactBindingDecision.HomeTenantIdColumn),
+            StringOf(row, ContactBindingDecision.HomeObjectIdColumn));
+    }
+
     /// <summary>The masking probe: rows that carry a plane marker.</summary>
     public static string BuildProbePath()
         => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn}"
@@ -583,7 +636,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             StringOf(row, "@odata.etag"),
             StringOf(row, "emailaddress1"),
             flag,
-            StringOf(row, ContactBindingDecision.KeyMirrorColumn));
+            StringOf(row, ContactBindingDecision.KeyMirrorColumn),
+            StringOf(row, ContactBindingDecision.ExternalTenantIdColumn));
     }
 
     /// <summary>Parses one systemuser row (with an optional expanded linked contact) from Web API JSON.</summary>
@@ -726,6 +780,50 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var lookup = await ReadContactsAsync(BuildProbePath(), "masking probe", ct).ConfigureAwait(false);
         return ClassifyProbe(lookup);
     }
+
+    /// <inheritdoc />
+    public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
+        {
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("home link lookup");
+                return HomeLinkLookup.ColumnMissing;
+            }
+
+            return HomeLinkLookup.Failed;
+        }
+
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return HomeLinkLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList();
+        return new HomeLinkLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public async Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        var lookup = await ReadContactsAsync(BuildHomeContactLookupPath(homeTenantId, homeObjectId), "home contact lookup", ct)
+            .ConfigureAwait(false);
+        if (lookup.Status == LookupStatus.ColumnMissing)
+        {
+            LogHomeSchemaMissing("home contact lookup");
+        }
+
+        return lookup;
+    }
+
+    private void LogHomeSchemaMissing(string what)
+        => _logger.LogError(
+            "[ID-BIND] {What} failed: an A9 home-identity column is not provisioned in this environment. Every home sign-in is "
+            + "denied until scripts/Set-WorkforceHomeIdentitySchema.ps1 is applied.",
+            what);
 
     /// <inheritdoc />
     /// <remarks>

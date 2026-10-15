@@ -150,6 +150,53 @@ public class DataverseContactIdentityStoreTests
         sdk.Criteria.Conditions.Should().ContainSingle().Which.AttributeName.Should().Be("sprk_externalobjectid");
     }
 
+    // ── ADR-028 A9 (r3 task 046): the two home reads. The in-memory double returns a superset, so these pin the filter ──
+
+    private static readonly Guid HomeTenant = Guid.Parse("BBBBBBBB-0000-4000-8000-000000000002");
+
+    [Fact]
+    public void TheHomeLinkLookup_FiltersOnTheSecuredPairOnly_NeverOnTheMirrorsOrTheAadObjectId()
+    {
+        var path = DataverseContactIdentityStore.BuildHomeLinkLookupPath(HomeTenant, Oid);
+
+        path.Should().StartWith("systemusers?");
+        path.Should().Contain("$filter=sprk_hometenantid eq 'bbbbbbbb-0000-4000-8000-000000000002'"
+                              + " and sprk_homeobjectid eq 'aaaaaaaa-0000-4000-8000-000000000001'");
+        path.Should().NotContain("sprk_hometenantidkey").And.NotContain("sprk_homeobjectidkey",
+            "a mirror edit can block a link but must never redirect a sign-in (design §5)");
+        path.Should().NotContain("azureactivedirectoryobjectid", "a home oid is never compared with the Spaarke-tenant oid (finding (d))");
+        path.Should().NotContain("isdisabled eq", "a disabled link must be seen so it can deny");
+        path.Should().Contain("$top=2").And.Contain("isdisabled");
+    }
+
+    [Fact]
+    public void TheHomeContactLookup_FiltersOnPlaneTenantAndOid_AnyState()
+    {
+        var path = DataverseContactIdentityStore.BuildHomeContactLookupPath(HomeTenant, Oid);
+
+        path.Should().Contain("$filter=sprk_identityplane eq 100000002"
+                              + " and sprk_externaltenantid eq 'bbbbbbbb-0000-4000-8000-000000000002'"
+                              + " and sprk_externalobjectid eq 'aaaaaaaa-0000-4000-8000-000000000001'");
+        path.Should().NotContain("sprk_externalobjectidkey eq");
+        path.Should().NotContain("statecode eq", "an inactive match must be seen so it can deny");
+        path.Should().Contain("$top=2").And.Contain("sprk_externaltenantid").And.Contain("sprk_identityplane");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain("sprk_externaltenantid",
+            "no other contact read may depend on the A9 column");
+    }
+
+    [Fact]
+    public void ParseHomeLinkRow_ReadsTheSecuredPairAndIsDisabled()
+    {
+        using var doc = JsonDocument.Parse(
+            "{\"systemuserid\":\"cccccccc-0000-4000-8000-000000000003\",\"isdisabled\":false,"
+            + "\"sprk_hometenantid\":\"bbbbbbbb-0000-4000-8000-000000000002\","
+            + "\"sprk_homeobjectid\":\"aaaaaaaa-0000-4000-8000-000000000001\"}");
+
+        DataverseContactIdentityStore.ParseHomeLinkRow(doc.RootElement).Should().Be(new HomeLinkRow(
+            Guid.Parse("cccccccc-0000-4000-8000-000000000003"), false,
+            "bbbbbbbb-0000-4000-8000-000000000002", "aaaaaaaa-0000-4000-8000-000000000001"));
+    }
+
     [Fact]
     public void EveryContactRead_SelectsTheBindingAndTheMirror_SoASquatCanBeToldApart()
         => DataverseContactIdentityStore.ContactSelect.Split(',')

@@ -57,6 +57,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// </summary>
         public string? InviteCodeHash { get; set; }
 
+        /// <summary>A9 (r3 task 046): <c>sprk_externaltenantid</c> — the home directory of a WorkforceHome contact.</summary>
+        public string? ExternalTenantId { get; set; }
+
         public int Version { get; set; }
     }
 
@@ -78,6 +81,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         public bool IsDisabled { get; set; }
         public int AccessMode { get; set; }
         public Guid? ApplicationId { get; set; }
+
+        /// <summary>A9 (r3 task 046): the stored home link — <c>sprk_hometenantid</c> / <c>sprk_homeobjectid</c> (FIELD-SECURED).</summary>
+        public string? HomeTenantId { get; set; }
+        public string? HomeObjectId { get; set; }
+
+        /// <summary>A9: the UNSECURED key mirrors <c>sprk_hometenantidkey</c> / <c>sprk_homeobjectidkey</c>. Nothing resolves by them.</summary>
+        public string? HomeTenantIdKey { get; set; }
+        public string? HomeObjectIdKey { get; set; }
+
         public int Version { get; set; }
     }
 
@@ -120,6 +132,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public bool MaskBindingColumn { get; set; }
     public LookupStatus OidLookupStatus { get; set; } = LookupStatus.Read;
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>A9 (r3 task 046): the stored-link read ends this way.</summary>
+    public LookupStatus HomeLinkLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>A9 (r3 task 046): the home contact read ends this way.</summary>
+    public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
     /// <summary>Task 181: <see cref="LookupStatus.ColumnMissing"/> makes <c>GetContactAsync</c> answer that a binding column is not provisioned.</summary>
@@ -174,6 +192,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             MaskBindingColumn = false;
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
+            HomeLinkLookupStatus = LookupStatus.Read;
+            HomeContactLookupStatus = LookupStatus.Read;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
             Grants.Clear();
@@ -334,6 +354,54 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (FailProbe) return Task.FromResult(BindingReadability.Failed);
             var marked = Contacts.Values.Where(c => c.Plane is not null).Take(50).Select(Row).ToArray();
             return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked)));
+        }
+    }
+
+    /// <summary>
+    /// A9 (r3 task 046). Deliberately a SUPERSET of what the Dataverse filter returns: every systemuser whose secured home
+    /// object id OR whose mirror carries <paramref name="homeObjectId"/>, in any directory. The tenant and the secured-only
+    /// conditions are then the production decision's (<see cref="ContactBindingDecision.DecideHomeLink"/>), so a resolver
+    /// test exercises them; the Dataverse filter itself is pinned by <c>DataverseContactIdentityStoreTests</c>.
+    /// </summary>
+    public Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("home-link");
+            AfterRead?.Invoke("home-link");
+            if (HomeLinkLookupStatus != LookupStatus.Read)
+            {
+                return Task.FromResult(HomeLinkLookupStatus == LookupStatus.ColumnMissing
+                    ? HomeLinkLookup.ColumnMissing
+                    : HomeLinkLookup.Failed);
+            }
+
+            var rows = SystemUsers.Values
+                .Where(u => OidEquals(u.HomeObjectId, homeObjectId) || OidEquals(u.HomeObjectIdKey, homeObjectId))
+                .Take(2)
+                .Select(u => new HomeLinkRow(u.Id, u.IsDisabled, u.HomeTenantId, u.HomeObjectId))
+                .ToArray();
+            return Task.FromResult(HomeLinkLookup.Of(rows));
+        }
+    }
+
+    /// <summary>
+    /// A9 (r3 task 046). Deliberately a SUPERSET of what the Dataverse filter returns: every contact BOUND to
+    /// <paramref name="homeObjectId"/>, on any plane, in any directory, any state. The plane and tenant conditions are then
+    /// the production decision's (<see cref="ContactBindingDecision.DecideHomeContact"/>), so a resolver test exercises them;
+    /// the Dataverse filter itself is pinned by <c>DataverseContactIdentityStoreTests</c>.
+    /// </summary>
+    public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("home-contact");
+            AfterRead?.Invoke("home-contact");
+            if (HomeContactLookupStatus != LookupStatus.Read) return Task.FromResult(Failed(HomeContactLookupStatus));
+            var rows = Contacts.Values
+                .Where(c => !MaskBindingColumn && OidEquals(c.Oid, homeObjectId))
+                .Take(2).Select(Row).ToArray();
+            return Task.FromResult(ContactLookup.Of(rows));
         }
     }
 
@@ -590,7 +658,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     private ContactBindingRow Row(Contact c)
         => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag,
-            c.KeyMirror);
+            c.KeyMirror, c.ExternalTenantId);
 
     private SystemUserIdentityRow UserRow(SystemUser u)
         => new(u.Id, u.Oid, u.Email, u.DomainName, u.PrimaryContactId, $"W/\"{u.Version}\"",
