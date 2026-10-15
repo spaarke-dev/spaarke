@@ -427,28 +427,277 @@ public class WorkforcePrincipalResolverTests
         _store.Contacts.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup()
+    // ─────────────────────────────────────────────────────────────────────
+    // R3 task 046 — ADR-028 A9 home principals (authenticated by the WorkforceHome scheme). Design §3/§4/§5:
+    // missing oid/tid → 401; stored link (secured pair) → systemuser; WorkforceHome contact by (tid, oid);
+    // else 403 registration_required. Nothing is created, updated or bound; the oid → systemuser lookup and the
+    // binder's workforce path never run (finding (d)).
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid HomeTenant = Guid.Parse("99999999-eeee-4eee-8eee-999999999999");
+    private static readonly Guid OtherHomeTenant = Guid.Parse("12121212-ffff-4fff-8fff-121212121212");
+    private static readonly Guid HomeOid = Guid.Parse("13131313-1313-4313-8313-131313131313");
+
+    /// <summary>The A9 home-token shape: customer tid, acct = 0, a user token, authenticated by WorkforceHome.</summary>
+    private static ClaimsPrincipal HomeUser(Guid? oid = null, Guid? tid = null, bool omitOid = false, bool omitTid = false)
+        => HomePrincipal(BuildUser(omitOid ? null : oid ?? HomeOid, omitTid ? null : tid ?? HomeTenant, email: TestEmail));
+
+    private InMemoryContactIdentityStore.Contact AddHomeContact(
+        Guid id, Guid? tid, Guid oid, int? plane = ContactBindingDecision.WorkforceHomePlaneValue, int stateCode = 0)
     {
-        // Review F2 (task 045): until task 046 adds the home branch, a WorkforceHome-authenticated principal must not
-        // reach the systemuser lookup or the binder - its oid is the CUSTOMER directory's. Task 046 removes this guard
-        // and this test.
+        var c = _store.AddContact(id, oid: oid.ToString("D"), stateCode: stateCode);
+        c.Plane = plane;
+        c.ExternalTenantId = tid?.ToString("D");
+        return c;
+    }
+
+    private InMemoryContactIdentityStore.SystemUser AddLinkedSystemUser(
+        Guid id, Guid? tid, Guid? oid, bool disabled = false, Guid? aadOid = null)
+    {
+        var u = _store.AddSystemUser(id, aadOid ?? Guid.NewGuid(), "licensed@customer.example", disabled: disabled);
+        u.HomeTenantId = tid?.ToString("D");
+        u.HomeObjectId = oid?.ToString("D");
+        u.HomeTenantIdKey = u.HomeTenantId;
+        u.HomeObjectIdKey = u.HomeObjectId;
+        return u;
+    }
+
+    private (WorkforcePrincipalResolver Sut, Mock<IDataverseService> Dataverse, Mock<IIdentityNormalizationService> Identity)
+        HomeSut(Guid? derivedContact = null)
+    {
         var dataverse = new Mock<IDataverseService>();
         var identity = new Mock<IIdentityNormalizationService>();
-        var user = HomePrincipal(BuildUser(TestOid, CustomerTenant, email: TestEmail));
+        identity
+            .Setup(x => x.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid suid, CancellationToken _) => new PersonIdentity(suid, ContactId: derivedContact));
+        return (CreateSut(dataverse.Object, identity.Object), dataverse, identity);
+    }
 
-        var result = await CreateSut(dataverse.Object, identity.Object).ResolveAsync(user, CancellationToken.None);
+    /// <summary>AC "no Dataverse write occurs during resolution": nothing written, created, bound, linked or invalidated.</summary>
+    private void AssertNothingWritten(Mock<IDataverseService> dataverse, Mock<IIdentityNormalizationService> identity)
+    {
+        _store.Writes.Should().BeEmpty("nothing is created, updated or bound at sign-in (047/048 do that)");
+        dataverse.Invocations.Should().BeEmpty(
+            "finding (d): the oid → systemuser lookup (ResolveSystemUserAsync) never runs for a home principal");
+        identity.Verify(x => x.InvalidateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _store.Reads.Should().NotContain(new[] { "oid", "email", "references", "intent", "probe", "systemuser" },
+            "the binder's workforce path (bind, create, inline link) is never reached");
+    }
+
+    [Theory]
+    [InlineData("no-oid")]
+    [InlineData("no-tid")]
+    [InlineData("tid-not-a-guid")]
+    public async Task Home_MissingOidOrTid_Is401MissingIdentityClaims_BeforeAnyLookup(string shape)
+    {
+        var (sut, dataverse, identity) = HomeSut();
+        var user = shape switch
+        {
+            "no-oid" => HomeUser(omitOid: true),
+            "no-tid" => HomeUser(omitTid: true),
+            _ => HomePrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+                BuildUser(HomeOid, null, email: TestEmail).Claims.Append(new Claim("tid", "not-a-tenant")), "x"))),
+        };
+
+        var result = await sut.ResolveAsync(user, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyReason.Should().Be(WorkforceDenyReason.MissingIdentityClaims);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyMissingIdentityClaims);
+        _store.Reads.Should().BeEmpty();
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_StoredLinkToAnEnabledSystemUser_ResolvesThatSystemUser_WithItsDerivedContact()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.SystemUser);
+        result.Principal.SystemUserId.Should().Be(TestSystemUserId);
+        result.Principal.ContactId.Should().Be(TestContactId);
+        result.Principal.Oid.Should().Be(HomeOid.ToString("D"));
+        result.Principal.TenantId.Should().Be(HomeTenant.ToString("D"));
+        _store.Reads.Should().Equal(new[] { "home-link" }, "a linked caller never reaches the contact lookup");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_StoredLinkToADisabledSystemUser_IsDeniedSystemUserDisabled_AndNeverReachesTheContactLookup()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid, disabled: true);
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenySystemUserDisabled);
+        _store.Reads.Should().NotContain("home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_WorkforceHomeContactWithTheSameTidAndOid_ResolvesThatContact()
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.ContactOnly);
+        result.Principal.ContactId.Should().Be(TestContactId);
+        result.Principal.SystemUserId.Should().BeNull();
+        result.Principal.Oid.Should().Be(HomeOid.ToString("D"));
+        result.Principal.TenantId.Should().Be(HomeTenant.ToString("D"));
+        _store.Reads.Should().Equal("home-link", "home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Theory]
+    [InlineData("other-tenant")]      // same oid, a WorkforceHome contact of ANOTHER customer directory
+    [InlineData("no-tenant")]         // same oid, WorkforceHome plane, no sprk_externaltenantid
+    [InlineData("plane-external")]    // same oid and tid, but a CIAM partner contact
+    [InlineData("plane-workforce")]   // same oid and tid, but the Spaarke-tenant workforce plane (A8)
+    [InlineData("no-plane")]          // same oid and tid, a pre-141 binding with no plane marker
+    [InlineData("nothing")]           // no contact and no link at all
+    public async Task Home_NoMatchingContact_IsRegistrationRequired_AndNothingIsCreated(string seed)
+    {
+        switch (seed)
+        {
+            case "other-tenant": AddHomeContact(TestContactId, OtherHomeTenant, HomeOid); break;
+            case "no-tenant": AddHomeContact(TestContactId, null, HomeOid); break;
+            case "plane-external": AddHomeContact(TestContactId, HomeTenant, HomeOid, (int)IdentityPlaneMarker.External); break;
+            case "plane-workforce": AddHomeContact(TestContactId, HomeTenant, HomeOid, (int)IdentityPlaneMarker.Workforce); break;
+            case "no-plane": AddHomeContact(TestContactId, HomeTenant, HomeOid, plane: null); break;
+        }
+
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
 
         result.IsResolved.Should().BeFalse();
         result.Principal.Should().BeNull();
         result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
-        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyWorkforceHomeResolutionPending)
-            .And.Be("sdap.access.deny.workforce_home_resolution_pending");
-        dataverse.Invocations.Should().BeEmpty("no Dataverse call may precede the deny");
-        identity.Invocations.Should().BeEmpty();
-        _store.Reads.Should().BeEmpty("the binder is never called");
-        _store.Writes.Should().BeEmpty();
-        _store.Contacts.Should().BeEmpty();
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired)
+            .And.Be("sdap.access.registration_required");
+        AssertNothingWritten(dataverse, identity);
+        _store.Contacts.Should().HaveCount(seed == "nothing" ? 0 : 1, "no contact is created at sign-in");
+    }
+
+    [Fact]
+    public async Task Home_LinkedInAnotherDirectory_IsNotThisCallersLink_IsRegistrationRequired()
+    {
+        // The same home oid stored with ANOTHER directory's tid: the pair is (tid, oid), never the oid alone.
+        AddLinkedSystemUser(TestSystemUserId, OtherHomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_OidEqualToASystemUsersAadObjectId_WithNoStoredLink_IsRegistrationRequired_NeverThatSystemUser()
+    {
+        // Finding (d): a systemuser whose azureactivedirectoryobjectid IS the home oid, with no stored link. The Spaarke-tenant
+        // lookup would resolve it; a home principal must never reach that lookup.
+        _store.AddSystemUser(TestSystemUserId, HomeOid, "someone@spaarke.example");
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+        SetupSystemUserLookup(dataverse, HomeOid, TestSystemUserId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse("a home oid is never compared with systemuser.azureactivedirectoryobjectid");
+        result.Principal.Should().BeNull();
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_AKeyMirrorEdit_NeverRedirectsASignIn()
+    {
+        // Design §5: someone with systemuser Write sets ANOTHER user's unsecured mirrors to this caller's (tid, oid). The
+        // secured pair is untouched (null), so that user is not this caller's link.
+        var u = AddLinkedSystemUser(TestSystemUserId, tid: null, oid: null);
+        u.HomeTenantIdKey = HomeTenant.ToString("D");
+        u.HomeObjectIdKey = HomeOid.ToString("D");
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    // Beyond the named cases (one-line justifications in notes/task-046-notes.md): the fail-closed arms of the new code.
+
+    [Theory]
+    [InlineData("link", "Failed")]
+    [InlineData("link", "ColumnMissing")]
+    [InlineData("contact", "Failed")]
+    [InlineData("contact", "ColumnMissing")]
+    public async Task Home_AReadThatFails_Denies_NeverRegistrationRequired(string read, string status)
+    {
+        var lookupStatus = Enum.Parse<LookupStatus>(status);
+        if (read == "link") _store.HomeLinkLookupStatus = lookupStatus;
+        else _store.HomeContactLookupStatus = lookupStatus;
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(lookupStatus == LookupStatus.ColumnMissing
+            ? ContactBindingDecision.DenyBindingColumnMissing
+            : ContactBindingDecision.DenyContactLookupFailed,
+            "an unreadable answer is never 'not registered' — that would send a registered user to the form");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_TwoEnabledSystemUsersWithTheSameStoredLink_AreDeniedAmbiguous()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        AddLinkedSystemUser(Guid.Parse("44444444-4444-4444-4444-444444444444"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyHomeLinkAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_TheMatchingContactIsInactive_IsDeniedContactInactive_NotRegistrationRequired()
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid, stateCode: 1);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_AnAppOnlyToken_IsDeniedNotUserToken_BeforeAnyLookup()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomePrincipal(AppOnlyToken(HomeOid, HomeTenant)), CancellationToken.None);
+
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyNotUserToken);
+        _store.Reads.Should().BeEmpty();
+        AssertNothingWritten(dataverse, identity);
     }
 
     [Fact]
