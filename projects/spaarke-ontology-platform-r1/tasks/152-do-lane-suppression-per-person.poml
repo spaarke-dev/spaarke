@@ -4,7 +4,7 @@
     <title>Do-lane suppression counts per person: a colleague's dismissals never mute your Do items (D-145a)</title>
     <phase>3 Worklist</phase>
     <gate>blocked: #1903 (task 151) and #1905 (task 150) merged into docs/ontology-platform-design</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the suppression grain used by the nightly job and the suppression route; privacy rule (D-141/D-145).</rigor-reason>
     <model-tier>opus</model-tier>
