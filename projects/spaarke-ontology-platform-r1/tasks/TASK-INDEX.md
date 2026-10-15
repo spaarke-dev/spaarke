@@ -229,6 +229,8 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 [open] 149 | [Gate Decision Records: one per decision, written by an ADR-004 queue job](149-gate-decision-record-queue-idempotent.poml) | FULL | sonnet/xhigh | 042 (#1878) | CC6 | **D-139** (owner 2026-10-14, from uac-r2 review of 042 K2/K4). Idempotent on (communication, outcome); the gate never waits on the write. **Also D-144** (unfiled → BU default team) and uac-r2 K3 (log level) · **[uac]** |
 | 🔲 [open] 150 | [Do items private to their assignee on per-Signal routes](150-do-items-private-to-assignee.poml) | FULL | **opus**/high | 038 (#1891) | — | **D-141** (owner 2026-10-15; DI-86 #1883). One "mine" rule shared with the worklist · **[uac]** |
 | 🔲 [open] 151 | [Hide evidence detail when the caller cannot read the witness](151-evidence-hidden-unless-witness-readable.poml) | FULL | **opus**/high | 038, #1892 | — | **D-142** (owner 2026-10-15; DI-80 #1873, uac-r2 K2 on #1891). Batched OBO read per witness table · **[uac]** |
+| 🔲 [open] 152 | [Do-lane suppression counts per person](152-do-lane-suppression-per-person.poml) | FULL | **opus**/high | 150, 151 merged | — | **D-145a** (owner 2026-10-15; #1921). A colleague's dismissals never mute your Do items · **[uac]** |
+| 🔲 [open] 153 | [Satisfied Do item closure writes a Routine Decision Record](153-do-item-satisfied-closure-records-decision.poml) | FULL | **opus**/high | 149 merged | — | **D-145b** (owner 2026-10-15). ConditionCleared on a Do Signal records who did the work, best effort · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
