@@ -18,7 +18,7 @@ namespace Sprk.Provisioning.ControlPlane.Rollback;
 
 /// <summary>
 /// DI composition for the §4C rollback surface (IFailureClassifier +
-/// IQuarantineClearService).
+/// IQuarantineClearService + IRunControlService).
 /// </summary>
 public static class RollbackModule
 {
@@ -42,6 +42,10 @@ public static class RollbackModule
         // Clear-quarantine service — Scoped because it consumes the Scoped
         // IProvisioningRunRepository (CosmosProvisioningRunRepository).
         services.AddScoped<IQuarantineClearService, QuarantineClearService>();
+
+        // Operator run-control (resume / cancel / gate-advance) — Scoped for the same reason; also consumes the
+        // Singleton IHandlerEnqueuer + ICustomerRunGuard registered by the Api / Worker hosts.
+        services.AddScoped<IRunControlService, RunControlService>();
 
         return services;
     }

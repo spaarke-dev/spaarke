@@ -465,12 +465,12 @@ same rules for batch mode.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/runs` | Initialize a new ProvisioningRun |
-| `POST /api/runs/{id}/preflight` | Run H0 quota + naming checks |
+| `POST /api/runs/{id}/preflight` | Run H0 quota + naming checks on an open run (409 `run-not-preflightable` on a terminal run — use `/resume` for a Failed one) |
 | `GET /api/runs/{id}` | Poll run state |
-| `POST /api/runs/{id}/gates/{gateId}/advance` | Advance a manual gate |
-| `POST /api/runs/{id}/resume` | Resume a `Failed` run from `currentPhase` |
+| `POST /api/runs/{id}/gates/{gateId}/advance` | Re-check a Pending gate now: re-dispatches the gate's verifier handler with a fresh attempt (the reconciler's own re-dispatch reuses the first MessageId, which Service Bus drops for 1 h). It does not force the gate open. 409 unless the run is `WaitingOnGate` and the gate is Pending |
+| `POST /api/runs/{id}/resume` | Resume a `Failed` run: re-takes the customer guard, sets it `Running` and dispatches `currentPhase` with a fresh attempt (H0 included). 409 on any other status (a Quarantined run is cleared first) |
 | `GET /api/runs/{id}/phases/{phaseId}/logs` | Retrieve phase logs |
-| `POST /api/runs/{id}/cancel` | Cancel a run |
+| `POST /api/runs/{id}/cancel` | Set the run `Cancelled` and release the customer guard. 409 on Completed/Cancelled/Quarantined. A handler already running finishes, but its write loses the ETag race and nothing further dispatches |
 | `POST /api/onboarding/consent-callback` | (BFF endpoint) H0.5 consent capture |
 | `POST /api/runs/{id}/clear-quarantine` | Clear `Quarantined` state (reason required, audit-logged) |
 
