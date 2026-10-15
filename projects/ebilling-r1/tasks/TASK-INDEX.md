@@ -51,8 +51,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 |---|---|---|---|---|---|---|
 | 040 | ✅ [done] | eBilling feature flag, options and null-object fallbacks | STANDARD | sonnet / high | P2-A | none |
 | 041 | ✅ [done] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
-| 042 | 🔲 [open] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
-| 043 | 🟡 [wip] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
+| 042 | 🟡 [wip] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
+| 043 | ✅ [done] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
 | 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |
 | 045 | 🔲 [open] | Concurrency-safe tracking numbers `{invoice}.{n}` | FULL | sonnet / xhigh | P2-B | 029 |
 | 046 | 🔲 [open] | Resolution and combined confidence | STANDARD | sonnet / xhigh | P2-B | 025, 029 |

@@ -42,6 +42,7 @@
   </context>
 
   <constraints>
+    <constraint source="ISS-009 (task 043)">Merge gate: every BFF environment token set defines CONTENT_UNDERSTANDING_ENDPOINT (empty where eBilling is not deployed) before this branch reaches master.</constraint>
     <constraint source="root CLAUDE.md section 7, ADR-038">/test-diet runs before close; its required actions (scaffolding deletions with same-PR replacement rule, KEEP-path moves) are applied, not just reported.</constraint>
     <constraint source="root CLAUDE.md section 8.5">Every F-class finding from code-review and adr-check is fixed and re-checked on the fix diff; a known-limit class never holds a confirmed defect. Findings in other projects' code are filed and reported.</constraint>
     <constraint source="root CLAUDE.md section 3">Edits under .claude/ (FAILURE-MODES.md, patterns, constraints) are proposed in notes and applied by the main session, never by a sub-agent.</constraint>

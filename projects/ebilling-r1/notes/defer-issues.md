@@ -10,6 +10,18 @@
 
 ## Open (in priority order)
 
+### ISS-009 — Before merging to master: every BFF environment must define CONTENT_UNDERSTANDING_ENDPOINT (task 043)
+
+| Field | Value |
+|---|---|
+| **Status** | Open - merge gate |
+| **Urgency** | before the first ebilling-r1 BFF merge to master (and before any dev BFF deploy of this branch) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 043 |
+| **GitHub Issue** | none - project merge checklist item (task 190) |
+
+**Description**: `appsettings.template.json` now carries `#{CONTENT_UNDERSTANDING_ENDPOINT}#`. An unreplaced token fails options validation at startup (intended: fail loud). Every environment's token set must define it (the endpoint where eBilling runs, an empty string elsewhere, which leaves `ReadInvoiceAsync` refused as `ai.invoice.read.not_configured` and the health check Healthy). `spaarke-bff-dev` additionally needs `ContentUnderstanding__Endpoint` set to `spaarke-docintel-invoices-dev` and the BFF identity granted access before eBilling reads work there. See `src/server/api/Sprk.Bff.Api/appsettings.tokens.md`.
+
 ### ISS-007 — Invoice status can be changed outside IInvoiceLifecycleService (OOB Activate / Deactivate, direct writes)
 
 | Field | Value |

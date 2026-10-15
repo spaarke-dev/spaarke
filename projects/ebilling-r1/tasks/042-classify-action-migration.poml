@@ -4,7 +4,7 @@
     <title>Migrate attachment classification to INVOICE-CLASSIFY@v1</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Swaps one AI call path to an existing pattern (Action + Binding via the 041 facade) and removes its legacy members; behaviour parity is measured, not redesigned.</rigor-reason>
     <model-tier>sonnet</model-tier>
