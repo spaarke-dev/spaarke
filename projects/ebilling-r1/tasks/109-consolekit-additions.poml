@@ -130,8 +130,10 @@
   </acceptance-criteria>
 
   <notes>Parallel group P4-A: this task alone edits ConsoleKit/ (108 edits FilePreview/). Never import from the prototype repository.
-Completed: statusOverride on StatusBar and RecordRow; OutcomeCards, CountFilters and Disclosure added and exported. Disclosure added because Fluent Accordion sets aria-expanded but no aria-controls and cannot give the inline button look. 63 ConsoleKit tests pass (28 new, 35 unchanged); tsc, eslint (ConsoleKit) and the ui-components client-lint ratchet are clean. Browser ui-tests not run (no Chrome in the session); jest covers the behaviour and the dark theme render. ontology-r1 notice is carried in the orchestrator report. TASK-INDEX.md left to the orchestrator (parallel mode). Detail: projects/ebilling-r1/notes/109-consolekit-additions.md
-rework: none task 109</notes>
+Completed: statusOverride on StatusBar and RecordRow, covered by ConsoleKit/__tests__/ConsoleKitStatusOverride.test.tsx. TASK-INDEX.md left to the orchestrator (parallel mode).
+Review outcome (ontology-r1, 2026-10-15, CLAUDE.md section 11): ConsoleKit is the ontology state-vocabulary kit, so OutcomeCards, CountFilters and Disclosure (first delivered here) were REMOVED with their exports and tests; ONLY statusOverride remains. The steps, relevant-files, justification and acceptance criteria above that name those three components are superseded by this note. Task 110 reuses existing components instead: WorkspaceShell MetricCard + MetricCardRow (count filters), Fluent v9 Accordion (disclosure), SprkChat/OutcomeCard or a Fluent RadioGroup (outcome choice); exact imports are in task 110's constraints. Browser ui-tests now cover statusOverride only (run on 110's page); Jest covers the override and the dark-theme render.
+Detail: projects/ebilling-r1/notes/109-consolekit-additions.md
+rework: ontology-r1 review - removed OutcomeCards / CountFilters / Disclosure, kept statusOverride (task 109)</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
