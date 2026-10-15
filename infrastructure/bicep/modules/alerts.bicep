@@ -4,8 +4,7 @@
 @description('Name prefix for alert rules')
 param alertNamePrefix string
 
-@description('Location for alert action group (global only)')
-#disable-next-line no-unused-params
+@description('Location for the scheduled-query rules (alerts 7 and 8). Metric alerts and the action group are global.')
 param location string = resourceGroup().location
 
 @description('Application Insights resource ID')
@@ -276,6 +275,112 @@ resource tokenUsageAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 }
 
 // =====================================================
+// Alert 7: Ontology Signal writer failures (silent-failure guard)
+// =====================================================
+// spaarke-ontology-platform-r1 task 035, owner directive 2026-10-04 (deploy approved D-138): the writer fails closed by design, so a broken
+// credential, a refused privilege or a sentence-template refusal would otherwise look exactly like "no conditions found".
+// UNFILTERED on purpose: any ontology.writer.failures{reason} increment pages; by-design skips are counted on
+// ontology.writer.skips, never here (OntologyWriterTelemetry).
+// A scheduled-query rule, not a metric alert: the counter only exists in customMetrics after its first increment, and a
+// metric alert cannot be created against a series that has never been emitted.
+var ontologyWriterFailuresKql = '''
+customMetrics
+| where name == "ontology.writer.failures"
+| summarize failures = sum(valueSum)
+| where failures > 0
+'''
+
+resource ontologyWriterFailuresAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
+  name: '${alertNamePrefix}-ontology-writer-failures'
+  location: location
+  tags: tags
+  properties: {
+    description: 'Ontology Signal/Decision Record writer recorded at least one failure in 15 minutes (ontology.writer.failures > 0, unfiltered). The writer fails closed, so this is the only signal of a broken credential or refused write. Break down by customDimensions.reason.'
+    severity: criticalSeverity
+    enabled: true
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      appInsightsId
+    ]
+    criteria: {
+      allOf: [
+        {
+          query: ontologyWriterFailuresKql
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroupId
+      ]
+    }
+    autoMitigate: true
+  }
+}
+
+// =====================================================
+// Alert 8: Ontology evaluator has not succeeded recently (dead-job guard)
+// =====================================================
+// The signal-reevaluation job runs nightly (SignalReevaluationJob.DefaultCronSchedule "30 2 * * *" = 02:30 UTC), so a
+// healthy day has exactly one ontology.evaluator.runs{outcome=succeeded}. Window = 24 h: task 035 asked for 26 h (nightly
+// cadence plus margin) but a scheduled-query rule only accepts 5-720 min, 1440 min or 2880 min windows, and 48 h would let one
+// whole missed night go unreported. Hourly evaluation; a run more than a few minutes late can fire it for an hour, and
+// autoMitigate clears it. Absence cannot be expressed as a metric alert (no data never fires one), hence a scheduled-query rule:
+// summarize without a by-clause returns one row (0) on an empty set, which is what makes the "no runs" case fire.
+// Expected on first deploy: fires until the first nightly run succeeds after the BFF carrying the evaluator is live.
+var ontologyEvaluatorStalledKql = '''
+customMetrics
+| where name == "ontology.evaluator.runs"
+| where tostring(customDimensions.outcome) == "succeeded"
+| summarize succeededRuns = countif(valueSum > 0)
+| where succeededRuns == 0
+'''
+
+resource ontologyEvaluatorStalledAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
+  name: '${alertNamePrefix}-ontology-evaluator-stalled'
+  location: location
+  tags: tags
+  properties: {
+    description: 'No successful ontology.evaluator.runs (outcome=succeeded) in 24 hours. The nightly signal-reevaluation job is dead, failing every attempt, or the BFF is not exporting metrics. Check GET /api/admin/jobs/signal-reevaluation/status.'
+    severity: criticalSeverity
+    enabled: true
+    evaluationFrequency: 'PT1H'
+    windowSize: 'P1D'
+    scopes: [
+      appInsightsId
+    ]
+    criteria: {
+      allOf: [
+        {
+          query: ontologyEvaluatorStalledKql
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroupId
+      ]
+    }
+    autoMitigate: true
+  }
+}
+
+// =====================================================
 // Action Group (if not provided externally)
 // =====================================================
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = if (empty(actionGroupId)) {
@@ -302,4 +407,6 @@ output ragLatencyAlertId string = ragLatencyAlert.id
 output toolFailureAlertId string = toolFailureAlert.id
 output cacheMissAlertId string = cacheMissAlert.id
 output tokenUsageAlertId string = tokenUsageAlert.id
+output ontologyWriterFailuresAlertId string = ontologyWriterFailuresAlert.id
+output ontologyEvaluatorStalledAlertId string = ontologyEvaluatorStalledAlert.id
 output defaultActionGroupId string = empty(actionGroupId) ? actionGroup.id : actionGroupId
