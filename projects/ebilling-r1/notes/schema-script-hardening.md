@@ -29,7 +29,7 @@ Also in the module, from the task 021 / 020 versions: re-reads until metadata ap
 Two defects found in the new code while testing, both fixed:
 
 1. **A stale read made a re-run report a change.** `Set-ColumnRequiredLevel` read `sprk_vendororg` as `None` minutes after it had been raised to SystemRequired (the next read showed SystemRequired; nothing else touches that table). It now re-reads three times before concluding that a level must change.
-2. **DEF-012 (#1942), filed by the task 023 session against this module.** A read-modify-PUT of the required level could restore the old primary-name length when the read was stale. `Set-PrimaryNameLength` now records the length it set and `Set-ColumnRequiredLevel` waits for a read that shows it before sending the PUT, and checks it again afterwards. Task 023's own script has its own copy and is not touched here.
+2. **DEF-012 (#1942), filed by the task 023 session against this module.** A read-modify-PUT of the required level could restore the old primary-name length when the read was stale. `Set-PrimaryNameLength` now records the length it set and `Set-ColumnRequiredLevel` waits for a read that shows it before sending the PUT, and checks it again afterwards. Tasks 022 and 023 carried their own helper copies when this was written; both now import the module (2026-10-15) and DEF-012 is closed.
 
 ## Required-level decisions (DEF-009)
 

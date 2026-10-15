@@ -480,7 +480,7 @@ Port both changes to the other scripts, or move the helpers into one shared file
 
 | Field | Value |
 |---|---|
-| **Status** | Open - evidence gathered, replacement script prepared, awaiting owner OK |
+| **Status** | Resolved 2026-10-15 - owner OK; Matter column recreated as multi-select in dev (task 024) |
 | **Urgency** | before task 024 and task 103 start |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 021 |
@@ -514,7 +514,7 @@ In task 024 decide with the owner: replace the Matter column with a multi-select
 - The "Assigned To" option: Matter and Project have no `sprk_assignedto`; task 024 does not depend on it. Task 103 must treat option 100000006 as "no approver" on Matter and Project.
 - Side effect to check on first use: whether the platform recreates the `FormFillFieldOptOut` skill config for the new column (it is deleted with the old one). Harmless either way.
 
-**Next action**: owner OK for the destructive replacement (0 rows affected, 1 auto-generated dependency); then run the script with `-ReplaceMatterApproverRole`, close #1941 and set this item to Resolved. Task 024 stays in-progress until then.
+**Resolution (2026-10-15)**: owner OK given. The column delete was first refused (0x8004f01f) by the generated `aiskillconfig`; the script now deletes that config first. `-ReplaceMatterApproverRole` then recreated `sprk_matter.sprk_billingapproverrole` as a multi-select on the global choice (0 rows before and after); re-run reports no change. #1941 closed.
 
 ---
 
@@ -522,7 +522,8 @@ In task 024 decide with the owner: replace the Matter column with a multi-select
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Closed |
+| **Resolution** | Fixed 2026-10-15: the shared module (`EbillingSchema.psm1`) waits for a settled read of the length `Set-PrimaryNameLength` set before the required-level PUT and checks it again afterwards (commit `0cfeec7c1`); the last two scripts that carried their own helper copies, `Deploy-EbillingExternalIdentifierSchema.ps1` (022) and `Deploy-EbillingExportSchema.ps1` (023), now import the module (the module gained `Set-PicklistRequiredLevel` for 022's choice key column). Evidence, dev spaarkedev1: both scripts re-run with `created : 0  changed : 0  skipped : 20` (022, key Active) and `skipped : 12` (023), "nothing changed - no publish", exit 0; 020 and 018 (module users) re-run unchanged after the module edit. |
 | **Urgency** | before the next new-table schema script run (tasks 022 and 024-028 copy these helpers) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 023 |

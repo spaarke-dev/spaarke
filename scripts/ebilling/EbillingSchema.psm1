@@ -611,11 +611,11 @@ $script:RequiredRank = @{ None = 0; Recommended = 1; ApplicationRequired = 2; Sy
 # Sets a column's required level with a read-back. Never LOWERS a level (a column already SystemRequired stays so when an
 # older call asks for ApplicationRequired). Raising to SystemRequired needs every existing row to hold a value: the null
 # rows are counted first and, when there are any, nothing is changed (a WARNING says so and the column is added to the
-# Deferred list for the script to report). -Kind is the attribute cast: String or Lookup.
+# Deferred list for the script to report). -Kind is the attribute cast: String, Lookup or Picklist.
 function Set-ColumnRequiredLevel {
     param(
         [string]$Table, [string]$Column, [string]$Level,
-        [ValidateSet('String', 'Lookup')][string]$Kind,
+        [ValidateSet('String', 'Lookup', 'Picklist')][string]$Kind,
         [string]$Tag = 'required', [string]$SkipText
     )
     $path = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.${Kind}AttributeMetadata"
@@ -693,6 +693,11 @@ function Set-LookupRequiredLevel([string]$Table, [string]$Column, [string]$Level
 # SystemRequired for a text column that is a key / parental column (same rules as Set-LookupRequiredLevel).
 function Set-StringRequiredLevel([string]$Table, [string]$Column, [string]$Level) {
     Set-ColumnRequiredLevel -Table $Table -Column $Column -Level $Level -Kind String -Tag "required $Level" -SkipText "already $Level"
+}
+
+# SystemRequired for a choice column that is a key column (same rules as Set-LookupRequiredLevel).
+function Set-PicklistRequiredLevel([string]$Table, [string]$Column, [string]$Level) {
+    Set-ColumnRequiredLevel -Table $Table -Column $Column -Level $Level -Kind Picklist -Tag "required $Level" -SkipText "already $Level"
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -811,6 +816,6 @@ Export-ModuleMember -Function @(
     'Add-Column', 'Add-Lookup', 'Add-LocalChoice', 'Get-PicklistLabels', 'Add-Table',
     'New-StringDef', 'New-MemoDef', 'New-MoneyDef', 'New-DateOnlyDef', 'New-DateTimeDef',
     'Get-RowCountExact', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
-    'Set-LookupRequiredLevel', 'Set-StringRequiredLevel',
+    'Set-LookupRequiredLevel', 'Set-StringRequiredLevel', 'Set-PicklistRequiredLevel',
     'Get-Keys', 'Add-AlternateKey', 'Get-ManyToMany', 'Add-ManyToMany'
 )

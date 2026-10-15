@@ -20,10 +20,14 @@
          SystemRequired: enforced by the platform on every write),
          sprk_timekeeper (-> sprk_timekeeper, optional), sprk_approvedrate and sprk_rackrate (money),
          sprk_effectivefrom / sprk_effectiveto (date only).
-      4  Classification (OPT-IN, held by default): sprk_classification on sprk_timekeeper and sprk_ratecardrate, using the
-         EXISTING global choice sprk_timekeeperrole. Task 017 escalation: more than two LEDES classifications have no
-         sprk_timekeeperrole equivalent, so the owner chooses reuse vs a new choice first. Until then the script skips
-         item 4 and says so. After the owner chooses "reuse", re-run with -ApplyClassification.
+      4  Classification (owner decision 2026-10-15, "no interpretation"): the shared global choice sprk_timekeeperrole is
+         revised and extended so it holds the 20 LEDES timekeeper classifications (label = LEDES name, ExternalValue =
+         LEDES code); existing integer VALUES never change; an option is relabelled to its LEDES equivalent only where the
+         mapping is exact (Partner, Associate, Paralegal, Other - already the LEDES names); options with no exact LEDES
+         equivalent are KEPT and reported with their row usage (deleting needs the owner's OK). Then sprk_classification
+         (Picklist bound to the global choice) is created on sprk_timekeeper and sprk_ratecardrate.
+      5  Obsolete stub lookup sprk_timekeeper.sprk_invoice (owner-approved delete 2026-10-15): removed only with
+         -RemoveStubInvoiceLookup, and only while the table holds no row that uses it and nothing else depends on it.
 
     NEVER deletes or renames anything by logical name (display labels change). If an existing item conflicts (a column of
     another type, a lookup to another table, status values with unexpected labels or states), the script STOPS with exit
@@ -47,14 +51,15 @@
 .PARAMETER SolutionUniqueName
     Unmanaged solution the created components are added to (header MSCRM.SolutionUniqueName).
 
-.PARAMETER ApplyClassification
-    Create sprk_classification (global choice sprk_timekeeperrole) on sprk_timekeeper and sprk_ratecardrate. Use only
-    after the owner confirmed "reuse sprk_timekeeperrole" (see notes/017-timekeeper-ratecard-schema.md).
+.PARAMETER RemoveStubInvoiceLookup
+    Delete the obsolete stub lookup sprk_timekeeper.sprk_invoice (relationship sprk_Invoice_Timekeeper_1n; its column and
+    name companion go with it). Owner-approved 2026-10-15. Refuses (exit 2) if any timekeeper row holds a value in it or a
+    form / view / other component depends on it. Idempotent: a second run finds it gone and reports skipped.
 
 .EXAMPLE
     pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1
-    pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -ApplyClassification
+    pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -RemoveStubInvoiceLookup
 
 .NOTES
     Project: ebilling-r1, task 017. Dev only in R1. The Dataverse helpers live in EbillingSchema.psm1 (shared by the
@@ -69,7 +74,7 @@ using module .\EbillingSchema.psm1
 param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [string]$SolutionUniqueName = 'SpaarkeMaster',
-    [switch]$ApplyClassification
+    [switch]$RemoveStubInvoiceLookup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -212,6 +217,162 @@ $TkInsert = @{ Value = 659490000; State = 0; Label = 'Pending' }
 $CardRelabel = @{ Value = 1; State = 0; From = 'Active'; To = 'Draft' }
 $CardInsert = @{ Value = 659490000; State = 0; Label = 'Published' }
 
+# ---------------------------------------------------------------------------------------------------------------
+# LEDES classification choice (owner decision 2026-10-15: reuse the shared list, make it match LEDES, no interpretation)
+# ---------------------------------------------------------------------------------------------------------------
+
+# LOC Revised Timekeeper Classification Codes (August 2014, revised 6/2023; notes/research/ledes-utbms-ocg-reference.md
+# section 2, law-firm classifications; source https://ledes.org/loc-revised-timekeeper-classification-codes-august-2014/).
+# Label = LEDES name, ExternalValue = LEDES code. Value is the integer stored in data:
+#   - an existing sprk_timekeeperrole option keeps its value and is matched ONLY where the meaning is exactly the same
+#     (Partner, Associate, Paralegal, Other: the existing labels already ARE the LEDES names);
+#   - every other LEDES classification is a new option, numbered after the last existing one (100000014 ...).
+$LedesClassifications = @(
+    @{ Code = 'PARTNR'; Label = 'Partner'; Value = 100000001 }
+    @{ Code = 'OFCOUN'; Label = 'Of Counsel'; Value = 100000014 }
+    @{ Code = 'ASSOC'; Label = 'Associate'; Value = 100000003 }
+    @{ Code = 'TRANEE'; Label = 'Associate Trainee'; Value = 100000015 }
+    @{ Code = 'STFATT'; Label = 'Staff Attorney'; Value = 100000016 }
+    @{ Code = 'SECNDE'; Label = 'Secondee'; Value = 100000017 }
+    @{ Code = 'LGLINT'; Label = 'Legal Intern'; Value = 100000018 }
+    @{ Code = 'PARALG'; Label = 'Paralegal'; Value = 100000004 }
+    @{ Code = 'LGLAST'; Label = 'Legal Assistant'; Value = 100000019 }
+    @{ Code = 'CLKSEC'; Label = 'Clerk or Secretary'; Value = 100000020 }
+    @{ Code = 'NBOTHR'; Label = 'Other'; Value = 100000006 }
+    @{ Code = 'LIBRRN'; Label = 'Librarian'; Value = 100000021 }
+    @{ Code = 'RSRCHR'; Label = 'Research Specialist/Researcher'; Value = 100000022 }
+    @{ Code = 'ANALST'; Label = 'Analyst'; Value = 100000023 }
+    @{ Code = 'HLNLPF'; Label = 'High-Level Non-Lawyer Professional'; Value = 100000024 }
+    @{ Code = 'LGPRMG'; Label = 'Legal Project Manager'; Value = 100000025 }
+    @{ Code = 'IPAGNT'; Label = 'IP Agent'; Value = 100000026 }
+    @{ Code = 'CSTCNS'; Label = 'Costs Counsel'; Value = 100000027 }
+    @{ Code = 'TEMPAT'; Label = 'Contract Attorney'; Value = 100000028 }
+    @{ Code = 'TEMPOS'; Label = 'Contract Other Staff'; Value = 100000029 }
+)
+
+function Get-ChoiceOptions([string]$Name) {
+    $o = Get-DvOrNull "GlobalOptionSetDefinitions(Name='$Name')" -Retries 4
+    if (-not $o) { throw "Global choice '$Name' does not exist in $EnvironmentUrl." }
+    return @($o.Options | ForEach-Object {
+            [pscustomobject]@{ Value = [int]$_.Value; Label = $_.Label.UserLocalizedLabel.Label; External = [string]$_.ExternalValue }
+        })
+}
+
+# The ExternalValue of an option is set by UpdateOptionValue (the same call carries the label). Read back on a settled read.
+function Set-ChoiceOptionExternal([string]$Name, [int]$Value, [string]$Label, [string]$External) {
+    Invoke-WhilePropagating {
+        Invoke-Dv -Path 'UpdateOptionValue' -Method POST -ExtraHeaders $SolutionHeader -Body @{
+            OptionSetName = $Name; Value = $Value; Label = (New-Label $Label); MergeLabels = $true
+            ExternalValue = $External; SolutionUniqueName = $SolutionUniqueName
+        } | Out-Null
+    } | Out-Null
+    $got = $null
+    for ($i = 0; $i -lt 18; $i++) {
+        $got = Get-ChoiceOptions $Name | Where-Object { $_.Value -eq $Value }
+        if ($got -and $got.External -eq $External -and $got.Label -eq $Label) { return }
+        Start-Sleep -Seconds 5
+    }
+    throw "$Name option $Value reads '$($got.Label)' / '$($got.External)' after the update, expected '$Label' / '$External'."
+}
+
+# Brings the global choice to the LEDES classification set. Never deletes, never changes an integer value, never relabels a
+# non-LEDES option. Returns the options that are NOT LEDES (kept, reported).
+function Sync-LedesChoice([string]$Name) {
+    $have = Get-ChoiceOptions $Name
+    $ledesValues = @($LedesClassifications | ForEach-Object { $_.Value })
+    foreach ($l in $LedesClassifications) {
+        $tag = "$Name.$($l.Code)"
+        $cur = $have | Where-Object { $_.Value -eq $l.Value }
+        $byLabel = $have | Where-Object { $_.Label -eq $l.Label -and $_.Value -ne $l.Value }
+        if ($byLabel) { throw [EscalationException]::new("$Name already has '$($l.Label)' as value $($byLabel.Value) but the LEDES mapping uses $($l.Value). Owner decision needed.") }
+        $byCode = $have | Where-Object { $_.External -eq $l.Code -and $_.Value -ne $l.Value }
+        if ($byCode) { throw [EscalationException]::new("$Name option $($byCode.Value) '$($byCode.Label)' already carries ExternalValue '$($l.Code)' but the LEDES mapping uses value $($l.Value). Owner decision needed.") }
+        if ($cur) {
+            if ($cur.Label -ne $l.Label) { throw [EscalationException]::new("$Name value $($l.Value) is labelled '$($cur.Label)' but the exact LEDES match is '$($l.Label)' ($($l.Code)). Owner decision needed.") }
+            if ($cur.External -eq $l.Code) { $script:Skipped.Add($tag); Write-Host "  skipped  $($l.Value) $($l.Label) = $($l.Code)" -ForegroundColor Yellow; continue }
+            if ($cur.External) { throw [EscalationException]::new("$Name option $($l.Value) '$($cur.Label)' has ExternalValue '$($cur.External)', expected empty or '$($l.Code)'. Owner decision needed.") }
+            if ($DryRun) { $script:Changed.Add("$tag external"); Write-Host "  WOULD SET $($l.Value) $($l.Label): ExternalValue '' -> $($l.Code)" -ForegroundColor Cyan; continue }
+            Set-ChoiceOptionExternal $Name $l.Value $l.Label $l.Code
+            $script:Changed.Add("$tag external"); Write-Host "  CHANGED  $($l.Value) $($l.Label): ExternalValue -> $($l.Code)" -ForegroundColor Green
+            continue
+        }
+        if ($DryRun) { $script:Created.Add($tag); Write-Host "  WOULD INSERT $($l.Value) $($l.Label) = $($l.Code)" -ForegroundColor Cyan; continue }
+        try {
+            Invoke-WhilePropagating {
+                Invoke-Dv -Path 'InsertOptionValue' -Method POST -ExtraHeaders $SolutionHeader -Body @{
+                    OptionSetName = $Name; Value = $l.Value; Label = (New-Label $l.Label); SolutionUniqueName = $SolutionUniqueName
+                } | Out-Null
+            } | Out-Null
+        } catch {
+            # A stale read hid an option that is already there: the refusal is authoritative, verify on a settled read.
+            if (-not (Test-DuplicateRefusal $_.Exception.Message -Loose)) { throw }
+            $found = $null
+            for ($i = 0; $i -lt 12 -and -not $found; $i++) {
+                $found = Get-ChoiceOptions $Name | Where-Object { $_.Value -eq $l.Value -and $_.Label -eq $l.Label }
+                if (-not $found) { Start-Sleep -Seconds 5 }
+            }
+            if (-not $found) { throw }
+        }
+        Set-ChoiceOptionExternal $Name $l.Value $l.Label $l.Code
+        $script:Created.Add($tag); Write-Host "  INSERTED $($l.Value) $($l.Label) = $($l.Code)" -ForegroundColor Green
+    }
+    return @($have | Where-Object { $_.Value -notin $ledesValues })
+}
+
+# Row usage of every column bound to the global choice (read-only; counts include inactive rows).
+$ChoiceUsers = @(
+    @{ Set = 'sprk_billingevents'; Table = 'sprk_billingevent'; Column = 'sprk_timekeeperrole' }
+    @{ Set = 'sprk_contactorganizations'; Table = 'sprk_contactorganization'; Column = 'sprk_role' }
+    @{ Set = 'sprk_userprofiles'; Table = 'sprk_userprofile'; Column = 'sprk_primaryrole' }
+    @{ Set = 'sprk_timekeepers'; Table = 'sprk_timekeeper'; Column = 'sprk_classification' }
+    @{ Set = 'sprk_ratecardrates'; Table = 'sprk_ratecardrate'; Column = 'sprk_classification' }
+)
+
+function Get-ChoiceUsage([int]$Value) {
+    $out = [ordered]@{}
+    foreach ($u in $ChoiceUsers) {
+        $key = "$($u.Table).$($u.Column)"
+        if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$($u.Table)')/Attributes(LogicalName='$($u.Column)')?`$select=LogicalName")) { $out[$key] = 'n/a'; continue }
+        $out[$key] = Get-RowCountExact $u.Set "$($u.Table)id" "$($u.Column) eq $Value"
+    }
+    return $out
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Obsolete stub lookup sprk_timekeeper.sprk_invoice (owner-approved delete 2026-10-15)
+# ---------------------------------------------------------------------------------------------------------------
+
+function Remove-StubInvoiceLookup {
+    $col = 'sprk_invoice'
+    $attr = Get-Attr $TkTable $col 'LogicalName,AttributeType,MetadataId'
+    if (-not $attr) { $script:Skipped.Add("$TkTable.$col removed"); Write-Host "  skipped  $col (already removed)" -ForegroundColor Yellow; return }
+    if (-not $RemoveStubInvoiceLookup) { Write-Host "  kept     $col (obsolete stub lookup; pass -RemoveStubInvoiceLookup to delete it - owner-approved 2026-10-15)" -ForegroundColor Yellow; return }
+    # 1. no data lost: no row holds a value in it (exact count, includes inactive rows)
+    $used = Get-RowCountExact 'sprk_timekeepers' 'sprk_timekeeperid' '_sprk_invoice_value ne null'
+    if ($null -eq $used) { throw "Could not count $TkTable rows that use $col; not deleting." }
+    $all = Get-RowCountExact 'sprk_timekeepers' 'sprk_timekeeperid'
+    Write-Host "  $TkTable rows: $all   rows holding $col`: $used"
+    if ($used -gt 0) { throw [EscalationException]::new("$used $TkTable row(s) hold a value in $col; deleting it would lose data. Nothing was deleted.") }
+    # 2. nothing depends on the column or its relationship (forms, views, workflows ... )
+    $rel = Get-DvOrNull "EntityDefinitions(LogicalName='$TkTable')/ManyToOneRelationships?`$select=SchemaName,MetadataId&`$filter=ReferencingAttribute eq '$col'"
+    $relRow = if ($rel -and $rel.value) { @($rel.value)[0] } else { $null }
+    if (-not $relRow) { throw "The relationship that owns $TkTable.$col was not found; not deleting." }
+    $depA = Invoke-Dv "RetrieveDependenciesForDelete(ObjectId=$($attr.MetadataId),ComponentType=2)"
+    $depR = Invoke-Dv "RetrieveDependenciesForDelete(ObjectId=$($relRow.MetadataId),ComponentType=10)"
+    $nDep = @($depA.value).Count + @($depR.value).Count
+    Write-Host "  dependencies: column $(@($depA.value).Count), relationship $($relRow.SchemaName) $(@($depR.value).Count)"
+    if ($nDep -gt 0) { throw [EscalationException]::new("$nDep component(s) depend on $TkTable.$col / $($relRow.SchemaName); remove them first. Nothing was deleted.") }
+    if ($DryRun) { $script:Changed.Add("$TkTable.$col removed"); Write-Host "  WOULD DELETE relationship $($relRow.SchemaName) (column $col and its name companions go with it)" -ForegroundColor Cyan; return }
+    Invoke-WhilePropagating { Invoke-Dv -Path "RelationshipDefinitions($($relRow.MetadataId))" -Method DELETE | Out-Null } | Out-Null
+    $gone = $false
+    for ($i = 0; $i -lt 18 -and -not $gone; $i++) {
+        $gone = -not (Get-Attr $TkTable $col)
+        if (-not $gone) { Start-Sleep -Seconds 5 }
+    }
+    if (-not $gone) { throw "$TkTable.$col is still readable after the relationship delete." }
+    $script:Changed.Add("$TkTable.$col removed"); Write-Host "  DELETED  relationship $($relRow.SchemaName) (column $col removed)" -ForegroundColor Green
+}
+
 function Get-RowCount([string]$Table, [string]$Filter) {
     # Counts rows only (no row data); @odata.count is exact for the filter. Includes inactive rows.
     $set = (Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=EntitySetName" -Retries 2).EntitySetName
@@ -225,7 +386,7 @@ function Get-RowCount([string]$Table, [string]$Filter) {
 
 Write-Host ""
 Write-Host "eBilling task 017 - timekeeper roster and rate card schema" -ForegroundColor Cyan
-Write-Host "Environment: $EnvironmentUrl   Solution: $SolutionUniqueName   Mode: $(if ($DryRun) { 'WHATIF (no writes)' } else { 'APPLY' })   Classification: $(if ($ApplyClassification) { 'APPLY (reuse sprk_timekeeperrole)' } else { 'HELD (owner decision pending)' })"
+Write-Host "Environment: $EnvironmentUrl   Solution: $SolutionUniqueName   Mode: $(if ($DryRun) { 'WHATIF (no writes)' } else { 'APPLY' })   Stub invoice lookup: $(if ($RemoveStubInvoiceLookup) { 'REMOVE (owner-approved)' } else { 'kept' })"
 Write-Host ""
 
 try {
@@ -300,18 +461,19 @@ try {
     Add-Column 'sprk_effectivefrom' (New-DateOnlyDef 'sprk_EffectiveFrom' 'Effective From' 'First day the rate applies.') 'DateTime'
     Add-Column 'sprk_effectiveto' (New-DateOnlyDef 'sprk_EffectiveTo' 'Effective To' 'Last day the rate applies. Empty = open ended.') 'DateTime'
 
-    # --- 4. Classification (held until the owner decides reuse vs new choice) ----------------------------------------
-    Write-Host "4. Classification (global choice $GlobalChoice)" -ForegroundColor Cyan
-    if (-not $ApplyClassification) {
-        Write-Host "  HELD - not created: more than two LEDES classifications have no $GlobalChoice equivalent, so the owner chooses reuse vs a new choice first (task 017 escalation; notes/017-timekeeper-ratecard-schema.md). Re-run with -ApplyClassification after the owner confirms 'reuse'." -ForegroundColor Magenta
-    } else {
-        Set-EbEntity $TkTable
-        Add-GlobalChoiceColumn -Column 'sprk_classification' -Schema 'sprk_Classification' -Display 'Classification' `
-            -Description 'Timekeeper classification (Partner, Associate, Paralegal, ...). Shares the global choice sprk_timekeeperrole with sprk_billingevent.' -ChoiceName $GlobalChoice
-        Set-EbEntity $RateTable
-        Add-GlobalChoiceColumn -Column 'sprk_classification' -Schema 'sprk_Classification' -Display 'Classification' `
-            -Description 'Optional: the rate applies to every timekeeper of this classification. Empty = the rate is for the named timekeeper.' -ChoiceName $GlobalChoice
-    }
+    # --- 4. Classification: the shared global choice becomes the LEDES list; then the two columns -----------------
+    Write-Host "4. Classification (global choice $GlobalChoice = LEDES timekeeper classifications)" -ForegroundColor Cyan
+    $leftover = @(Sync-LedesChoice $GlobalChoice)
+    Set-EbEntity $TkTable
+    Add-GlobalChoiceColumn -Column 'sprk_classification' -Schema 'sprk_Classification' -Display 'Classification' `
+        -Description 'Timekeeper classification, the LEDES list (Partner, Associate, Paralegal, ...). Shares the global choice sprk_timekeeperrole with sprk_billingevent.' -ChoiceName $GlobalChoice
+    Set-EbEntity $RateTable
+    Add-GlobalChoiceColumn -Column 'sprk_classification' -Schema 'sprk_Classification' -Display 'Classification' `
+        -Description 'Optional: the rate applies to every timekeeper of this classification (LEDES list). Empty = the rate is for the named timekeeper.' -ChoiceName $GlobalChoice
+
+    # --- 5. Obsolete stub lookup (owner-approved delete) -----------------------------------------------------------------
+    Write-Host "5. Obsolete stub lookup $TkTable.sprk_invoice" -ForegroundColor Cyan
+    Remove-StubInvoiceLookup
 
     # --- Publish (only when something changed) ------------------------------------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
@@ -322,7 +484,7 @@ try {
         Write-Host "  nothing changed - no publish" -ForegroundColor Yellow
     } else {
         Invoke-Dv -Path 'PublishXml' -Method POST -Body @{
-            ParameterXml = "<importexportxml><entities><entity>$TkTable</entity><entity>$CardTable</entity><entity>$RateTable</entity><entity>sprk_organization</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity><entity>sprk_document</entity></entities></importexportxml>"
+            ParameterXml = "<importexportxml><entities><entity>$TkTable</entity><entity>$CardTable</entity><entity>$RateTable</entity><entity>sprk_organization</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity><entity>sprk_document</entity></entities><optionsets><optionset>$GlobalChoice</optionset></optionsets></importexportxml>"
         } | Out-Null
         Write-Host "  customizations published" -ForegroundColor Green
     }
@@ -368,6 +530,16 @@ try {
             Write-Host ("  sprk_ratecard_ratecardrate_ratecard cascade: delete {0}, assign {1}, reparent {2}" -f $rel.CascadeConfiguration.Delete, $rel.CascadeConfiguration.Assign, $rel.CascadeConfiguration.Reparent)
             if ($rel.CascadeConfiguration.Delete -ne 'Cascade') { $bad.Add("sprk_ratecard_ratecardrate_ratecard delete behaviour is $($rel.CascadeConfiguration.Delete), expected Cascade") }
         }
+        # The global choice holds every LEDES classification with its code (settled read: option changes lag a few seconds).
+        $opts = @()
+        for ($i = 0; $i -lt 12; $i++) {
+            $opts = Get-ChoiceOptions $GlobalChoice
+            $miss = @($LedesClassifications | Where-Object { $l = $_; -not ($opts | Where-Object { $_.Value -eq $l.Value -and $_.Label -eq $l.Label -and $_.External -eq $l.Code }) })
+            if ($miss.Count -eq 0) { break }
+            Start-Sleep -Seconds 5
+        }
+        if ($miss.Count -gt 0) { $bad.Add("$GlobalChoice is missing LEDES option(s): $(($miss | ForEach-Object { $_.Code }) -join ', ')") }
+        else { Write-Host "  $GlobalChoice holds all $($LedesClassifications.Count) LEDES classifications ($($opts.Count) options in total, $($opts.Count - $LedesClassifications.Count) non-LEDES kept)" -ForegroundColor Green }
         if ($bad.Count -gt 0) { throw "Verification failed: $($bad -join '; ')" }
         Write-Host "  all $($script:Expect.Count) expected columns present with the right type and target" -ForegroundColor Green
     }
@@ -390,6 +562,17 @@ Write-Host ("created : {0}  {1}" -f $script:Created.Count, ($script:Created -joi
 Write-Host ("changed : {0}  {1}" -f $script:Changed.Count, ($script:Changed -join ', '))
 Write-Host ("skipped : {0}" -f $script:Skipped.Count)
 if ($State.Deferred.Count -gt 0) { Write-Host ("deferred: {0}  {1}" -f $State.Deferred.Count, ($State.Deferred -join ', ')) -ForegroundColor DarkYellow }
-if (-not $ApplyClassification) { Write-Host "held    : sprk_classification on sprk_timekeeper and sprk_ratecardrate (owner decision pending)" -ForegroundColor Magenta }
+if ($leftover.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Options of $GlobalChoice with NO exact LEDES equivalent (kept, not deleted - deleting needs the owner's OK); row usage by column:" -ForegroundColor Magenta
+    foreach ($o in ($leftover | Sort-Object Value)) {
+        $use = ''
+        if (-not $DryRun) {
+            $pairs = @((Get-ChoiceUsage $o.Value).GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+            $use = '  ->  ' + ($pairs -join ', ')
+        }
+        Write-Host ("  {0}  {1}{2}" -f $o.Value, $o.Label, $use) -ForegroundColor Magenta
+    }
+}
 if ($DryRun) { Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan }
 exit 0

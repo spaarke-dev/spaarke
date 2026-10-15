@@ -4,7 +4,7 @@
     <title>Timekeeper (extend stub) and rate card schema</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script; extends one table and adds two; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,7 @@
     <criterion testable="true">docs list every new column with logical name, type and option values.</criterion>
   </acceptance-criteria>
 
-  <notes>2026-10-15 (partial): schema applied to dev and verified; second run no-change; docs written. OPEN: (1) classification columns held - escalation fired (7 LEDES classifications have no sprk_timekeeperrole equivalent), owner chooses reuse vs new choice, then run the script with -ApplyClassification; (2) owner OK needed before deleting sprk_timekeeper.sprk_invoice (0 rows, 0 readers). Details: notes/017-timekeeper-ratecard-schema.md. Shared append points: docs/data-model/sprk_financial-related-entities.md (Timekeeper rows only), docs/data-model/INDEX.md (one row). FR-08's overlap refusal is implemented by 078 at import / publish, not by schema. Task 011 depends on this task's lookup review.</notes>
+  <notes>2026-10-15 COMPLETE. Schema applied to dev and verified; second run no-change. Owner decisions 2026-10-15 applied: (1) the shared global choice sprk_timekeeperrole was revised and extended to the 20 LEDES classifications (label = LEDES name, ExternalValue = LEDES code, existing integer values unchanged; Partner, Associate, Paralegal, Other matched, 16 options added; 10 non-LEDES options kept, not deleted) and sprk_classification created on sprk_timekeeper and sprk_ratecardrate bound to it; (2) the stub lookup sprk_timekeeper.sprk_invoice was deleted (0 rows, 0 dependencies). Details and evidence: notes/017-timekeeper-ratecard-schema.md section 8; LEDES list and kept options: docs/data-model/sprk_ratecard.md. FR-08's overlap refusal is implemented by 078 at import / publish, not by schema. Task 011 depends on this task's lookup review (sprk_invoicelineitem remains for 011).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
