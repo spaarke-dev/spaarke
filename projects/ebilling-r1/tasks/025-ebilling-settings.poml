@@ -4,7 +4,7 @@
     <title>eBilling settings table and BFF settings reader</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New table plus a small new BFF reader (new .cs files, DI registration) with an explicit reference implementation; brief sets STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,6 +125,17 @@
     AP mapping, firm-notice toggle and default code set are not in FR-48's list; they come from FR-41 / D-56, FR-50 and FR-22 and are added now because later tasks have no solution-sync step.
     "Caps" in D-47 are undefined; interpreted as a ceiling on combined confidence when the arithmetic check fails or no reference-data match exists. Task 046 confirms or changes the interpretation.
     FinanceModule.cs is a shared append point.
+
+    COMPLETED 2026-10-15 (parallel mode: TASK-INDEX.md and current-task.md left to the main session). Full notes: projects/ebilling-r1/notes/025-ebilling-settings.md.
+    - Dev (spaarkedev1): sprk_ebillingsetting created and seeded by scripts/ebilling/Deploy-EbillingSettingsSchema.ps1; re-run: created 0, changed 0, skipped 23, no publish. Second row refused (0x80060892); threshold 1.5 / -0.1, chunk size 0 and window 91 refused; 0.85 saved and restored to 0.90; both changes in the audit history; an admin-edited value survives a re-run.
+    - Column deviation: the whole-number window column is sprk_relatedwindowdays (typo in the first dev run; a rename would delete a column, which needs owner OK). Consumers read EbillingSettings.RelatedWorkWindowDays.
+    - Provisional values (D-69): weights analyzer 0.50, arithmetic 0.25, reference match 0.15, self-report 0.10; caps arithmetic-fail 0.50, reference-missing 0.80. Calibrated in 161 / 162 / 163; task 046 confirms "cap" = ceiling on combined confidence.
+    - BFF: IEbillingSettingsReader / EbillingSettingsReader / EbillingSettings registered once in AddFinanceModule (singleton, 30 s IMemoryCache, ADR-009 exception on the class). 8 new tests; Finance / DI suites 263 passed; ArchTests 1045 passed. ADR-010 1:1 ceiling raised 159 -> 160 with a documented seam justification (merge with other branches that raise it: sum the additions).
+    - Publish size vs fresh origin/master: 37.10 -> 37.12 MB (+0.023 MB incl. earlier eBilling tasks; this task alone +0.006 MB); framework-dependent linux-x64, Release, PDBs included, Compress-Archive Optimal, 192 files each. No new package, no vulnerable package.
+    - §11 answers (existing / extension / cost of doing nothing) for every new surface: notes/025-ebilling-settings.md section 5.
+    - Docs: docs/data-model/sprk_ebillingsetting.md (+ INDEX row), scripts/README.md eBilling Scripts entry.
+
+    rework: fix-round-2 task 025
   </notes>
 
   <execution>
