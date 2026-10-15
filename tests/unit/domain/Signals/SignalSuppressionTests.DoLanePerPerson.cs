@@ -173,6 +173,34 @@ public partial class SignalSuppressionTests
         status.Should().Be(new SuppressionStatus(0, 0, null, false));
     }
 
+    [Fact]
+    public async Task T152_BobsThreeSecureDoDismissals_NeverMuteHisOrdinaryDoItem_OnTheSameMatter_D123()
+    {
+        // uac-r2 review F3: the secure wall (D-123) holds inside the Do lane too. Bob's three dismissals are of To Dos under secure
+        // project A (Secure-owned Signals); his open Do item on the same matter is ordinary. Same person, same matter, other partition.
+        var s = LaneStore(SignalWriter.LaneDo);
+        foreach (var days in new[] { 6, 3, 1 }) DismissDo(s, MatterId, Bob, days, secure: true);
+        var ordinaryOpen = OpenDo(s, MatterId, Bob, secure: false);
+        var ordinaryNext = DoHit(MatterId, AssignedTodo(s, Bob));
+
+        await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+        s.StampedIds.Should().HaveCount(3, "the three secure dismissals are stamped in their own family")
+            .And.NotContain(ordinaryOpen, "commit time: a secure family's count never reaches an ordinary row");
+
+        // Service level: the nightly suppression pass and the planner, as NightlyPlanAsync drives them (the job's World cannot reach a
+        // worked grain, see the job tests).
+        s.StampedIds.Clear();
+        var plan = await NightlyPlanAsync(s, ordinaryNext);
+        s.StampedIds.Should().NotContain(ordinaryOpen, "the nightly pass leaves the ordinary row alone too");
+        s.Signals.Single(x => x.Id == ordinaryOpen).GetAttributeValue<DateTime?>("sprk_suppresseduntil").Should().BeNull();
+        plan.Creates.Should().ContainSingle("Bob's next ordinary Do item on the matter is raised")
+            .Which.Hit.SubjectId.Should().Be(ordinaryNext.SubjectId);
+
+        var status = await StatusAsync(s, ordinaryOpen, callerContact: Bob);
+        status!.DismissalsCounted.Should().Be(0, "none of Bob's ordinary-partition Do items was dismissed");
+        status.SuppressedUntil.Should().BeNull();
+    }
+
     // ---- Fixtures --------------------------------------------------------------------------------------------------------------
 
     private static Store LaneStore(int lane) => new() { PolicyLane = lane };
@@ -187,20 +215,21 @@ public partial class SignalSuppressionTests
 
     /// <summary>A dismissed Do-lane Signal of a To Do for <paramref name="person"/>, whose Decision Record names <paramref name="decider"/>
     /// (default: the person) as the one who decided.</summary>
-    private static Guid DismissDo(Store s, Guid core, Guid? person, int daysAgo, Guid? decider = null, Guid? todo = null, int episode = 1)
+    private static Guid DismissDo(
+        Store s, Guid core, Guid? person, int daysAgo, Guid? decider = null, Guid? todo = null, int episode = 1, bool? secure = null)
     {
         var subject = todo ?? Guid.NewGuid();
-        var id = s.Dismiss(core, subject, daysAgo, episode: episode, subjectEntity: "sprk_todo");
+        var id = s.Dismiss(core, subject, daysAgo, episode: episode, subjectEntity: "sprk_todo", secure: secure);
         AssignTo(s, subject, person);
         var record = s.Signals.Single(x => x.Id == id).GetAttributeValue<EntityReference>("sprk_decisionrecord").Id;
         if ((decider ?? person) is { } who) s.Records.Single(r => r.Id == record)["sprk_assignedtointernal"] = new EntityReference("contact", who);
         return id;
     }
 
-    private static Guid OpenDo(Store s, Guid core, Guid? person)
+    private static Guid OpenDo(Store s, Guid core, Guid? person, bool? secure = null)
     {
         var subject = Guid.NewGuid();
-        var id = s.Open(core, subject, subjectEntity: "sprk_todo");
+        var id = s.Open(core, subject, subjectEntity: "sprk_todo", secure: secure);
         AssignTo(s, subject, person);
         return id;
     }
