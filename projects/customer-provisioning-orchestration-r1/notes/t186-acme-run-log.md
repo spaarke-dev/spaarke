@@ -130,4 +130,8 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | 21:03:53 UTC | Run b6941254: **H2a ✓** (incremental redeploy ≈ 2 min; T1 trap check passed: L21 + L23 proven live) | First live H2a completion |
 | 21:04:00 UTC | **H2b ✓**: the 7 AI Search indexes were provisioned and verified | First live H2b pass |
 | 21:04:07 UTC | H4 → **Quarantined** (`kvsecrets-kv-write-partial-failure`, 10 of 13 entries 403 ForbiddenByRbac) | **L24**. 3 secrets were written. Recovery: redeploy with the fix, `clear-quarantine`, then `resume` (H4 re-runs idempotently) |
+| ≈21:27 UTC | Owner: no per-step OK needed for the rest of T186; stop only for a real issue or significant cost | This standing authorization covers control-plane redeploys, clear-quarantine, resume and gate advances for this run |
+| ≈21:28 UTC | Dev control plane redeployed from `dbb0c2c82` (L24 fix) | All post-deploy checks OK |
+| 21:29:47 UTC | `clear-quarantine` b6941254 | 202 |
+| 21:29:48 UTC | `resume` b6941254 | 202; polling |
 | ≈19:30 UTC | External-access R3 deployed spaarke-bff-dev `1.0.0+e276357a7` (source `c20bff283`, which contains #1901 `98c5962d7`), with owner OK. | The identity-link reconciliation job now skips the ACME in-progress registry row, so its per-run failure logs should stop. Not a provisioning action. |
