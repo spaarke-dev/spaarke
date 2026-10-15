@@ -515,10 +515,18 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         // configurations (api://{appId} requires the appId to already exist);
         // PATCH it in as a second call — matches the retired script's own
         // two-phase approach (create THEN append identifierUri).
-        await graph.Applications[created.Id].PatchAsync(new Application
-        {
-            IdentifierUris = new List<string> { $"api://{created.AppId}" },
-        }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+        // T186 L26: the app object is not addressable by id for a few seconds after the POST (Graph 404
+        // Request_ResourceNotFound) — the first live H3 failed here.
+        await RetryWhileReplicatingAsync(
+            async attemptCt =>
+            {
+                await graph.Applications[created.Id].PatchAsync(new Application
+                {
+                    IdentifierUris = new List<string> { $"api://{created.AppId}" },
+                }, cancellationToken: attemptCt).ConfigureAwait(false);
+                return true;
+            },
+            IsNotYetReplicated, "identifierUris PATCH on the new application", ct).ConfigureAwait(false);
 
         return created;
     }
@@ -794,9 +802,10 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_options.GraphRequestTimeout);
 
-            var current = await graph.Applications[appObjectId]
-                .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "optionalClaims"], timeoutCts.Token)
-                .ConfigureAwait(false);
+            var current = await RetryWhileReplicatingAsync(
+                attemptCt => graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "optionalClaims"], attemptCt),
+                IsNotYetReplicated, "optionalClaims read", ct).ConfigureAwait(false);
             if (current is null)
             {
                 return new EntraAppRegOutcome.Failure(
@@ -1039,25 +1048,76 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // ---------------------------------------------------------------------
 
     /// <summary>Ensures the app's service principal exists and returns its object id.</summary>
-    private async Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+    private Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+        // T186 L26: a service principal for an app created moments ago is refused until the app replicates
+        // (400 "...does not reference a valid application object"). Each attempt re-reads first, so a POST that
+        // landed but timed out is found rather than created twice.
+        => RetryWhileReplicatingAsync(
+            async attemptCt =>
+            {
+                var existing = await graph.ServicePrincipals.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
+                }, attemptCt).ConfigureAwait(false);
+
+                var found = existing?.Value?.FirstOrDefault()?.Id;
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+
+                var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
+                    cancellationToken: attemptCt).ConfigureAwait(false);
+                return created?.Id
+                    ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
+            },
+            IsNotYetReplicated, "service principal ensure", ct);
+
+    /// <summary>
+    /// T186 L26: Graph's answer for an object created moments ago that has not replicated to the replica serving the
+    /// request — 404 Request_ResourceNotFound by id, or 400 when a service principal names the new appId.
+    /// </summary>
+    internal static bool IsNotYetReplicated(ODataError ex) =>
+        ex.ResponseStatusCode == 404
+        || (ex.ResponseStatusCode == 400
+            && (ex.Error?.Message ?? ex.Message).Contains("does not reference a valid application object", StringComparison.OrdinalIgnoreCase));
+
+    private Task<T> RetryWhileReplicatingAsync<T>(
+        Func<CancellationToken, Task<T>> call, Func<ODataError, bool> isTransient, string operation, CancellationToken ct)
+        => RetryWhileReplicatingAsync(call, isTransient, _options.RoleAssignmentRetryCount, _options.RoleAssignmentRetryDelay,
+            _options.GraphRequestTimeout, _logger, operation, ct);
+
+    /// <summary>
+    /// Runs <paramref name="call"/> (each attempt under its own <paramref name="attemptTimeout"/>), retrying up to
+    /// <paramref name="attempts"/> times while <paramref name="isTransient"/> says Graph has not caught up. The last
+    /// error, and any other error, propagates. Internal static for tests.
+    /// </summary>
+    internal static async Task<T> RetryWhileReplicatingAsync<T>(
+        Func<CancellationToken, Task<T>> call,
+        Func<ODataError, bool> isTransient,
+        int attempts,
+        TimeSpan delay,
+        TimeSpan attemptTimeout,
+        ILogger logger,
+        string operation,
+        CancellationToken ct)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(_options.GraphRequestTimeout);
-        var existing = await graph.ServicePrincipals.GetAsync(rc =>
+        for (var attempt = 1; ; attempt++)
         {
-            rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
-        }, timeoutCts.Token).ConfigureAwait(false);
-
-        var found = existing?.Value?.FirstOrDefault()?.Id;
-        if (!string.IsNullOrWhiteSpace(found))
-        {
-            return found;
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(attemptTimeout);
+            try
+            {
+                return await call(attemptCts.Token).ConfigureAwait(false);
+            }
+            catch (ODataError ex) when (attempt < attempts && isTransient(ex))
+            {
+                logger.LogInformation(
+                    "H3 {Operation} attempt {Attempt}/{Max} got Graph {Status} — the new object has not replicated yet; " +
+                    "retrying in {Delay}.", operation, attempt, attempts, ex.ResponseStatusCode, delay);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
+            }
         }
-
-        var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
-            cancellationToken: timeoutCts.Token).ConfigureAwait(false);
-        return created?.Id
-            ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
     }
 
     private async Task<string> EnsureClientSecretAsync(GraphServiceClient graph, Application app, CancellationToken ct)
