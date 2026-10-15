@@ -833,23 +833,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // pinned, so the pin is not re-armed for it.
     if (isStreamingRef.current || otherWriterActiveRef.current) {
       appendMessage(injectLocalMessage);
-      if (onLocalMessageInjected) {
-        try {
-          onLocalMessageInjected();
-        } catch {
-          // Host callback errors must not break the injection lifecycle.
-        }
-      }
-      return;
+    } else {
+      addMessage(injectLocalMessage);
+      // UAT round 1 #7 — give an injected turn the SAME pin-to-top treatment a typed turn gets, anchored
+      // to the injected message itself. Releasing the bottom-pin matters as much as arming the top-pin:
+      // without it the streaming auto-scroll below yanks the viewport back down (the same pairing
+      // handleSend does).
+      isPinnedToBottomRef.current = false;
+      pinTargetIsLastMessageRef.current = true;
+      pendingPinToTopRef.current = true;
     }
-    addMessage(injectLocalMessage);
-    // UAT round 1 #7 — give an injected turn the SAME pin-to-top treatment a typed turn gets, anchored
-    // to the injected message itself. Releasing the bottom-pin matters as much as arming the top-pin:
-    // without it the streaming auto-scroll below yanks the viewport back down (the same pairing
-    // handleSend does).
-    isPinnedToBottomRef.current = false;
-    pinTargetIsLastMessageRef.current = true;
-    pendingPinToTopRef.current = true;
     if (onLocalMessageInjected) {
       try {
         onLocalMessageInjected();
