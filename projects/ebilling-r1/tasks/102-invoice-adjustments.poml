@@ -70,7 +70,7 @@
   </steps>
 
   <escalation>
-    <trigger>Open owner question F-8 (where the adjustment rule list comes from). Default assumption: published rules of the invoice's applicable rule sets in force on the invoice date. If the spec or the owner says otherwise (e.g. only clauses tagged as discounts, as the prototype proposes), STOP and confirm before building the list route; record the answer in notes.</trigger>
+    <trigger>Owner decided D-74 (F-8): the citable rule list is the published rules of the invoice's applicable rule sets in force on the invoice date.</trigger>
     <trigger>If 016 counts inactive Adjustment lines or cannot recompute on removal, STOP and report rather than computing totals here.</trigger>
   </escalation>
 

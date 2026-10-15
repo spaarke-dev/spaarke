@@ -82,9 +82,9 @@
   </steps>
 
   <escalation>
-    <trigger>If 074's notes do not settle F-9 (Decision Record per line vs per invoice), STOP before the decision routes; do not choose a granularity here.</trigger>
+    <trigger>Per D-75 each line decision writes its own Decision Record (subject the line) through 074's recorder; if 074 has not landed that shape, STOP before the decision routes.</trigger>
     <trigger>If invoice access does not inherit from the core record in dev (013 stamping absent), STOP: the authorization would be wrong.</trigger>
-    <trigger>If the owner requires the prototype rule (only eligible approvers decide lines) instead of Write access on the invoice, STOP and confirm; 103's resolver would supply the check.</trigger>
+    <trigger>Owner decided D-77: any internal user with Write access to the invoice may decide lines (not restricted to eligible approvers).</trigger>
   </escalation>
 
   <justification>

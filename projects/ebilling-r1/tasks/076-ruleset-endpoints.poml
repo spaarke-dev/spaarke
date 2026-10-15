@@ -40,7 +40,7 @@
 
   <constraints>
     <constraint source="ADR-001, ADR-008, ADR-019">Minimal API; every route carries its own endpoint-filter authorization; ProblemDetails with stable error codes; eBilling disabled code (040) when the flag is off.</constraint>
-    <constraint source="spec FR-28, root CLAUDE.md section 6">Admin-only for every write and for proposal reads. Choose ONE mechanism (caller privilege on sprk_ruleset / sprk_policyversion, or the SystemAdmin app role) and state why; auth is security-sensitive — see escalation.</constraint>
+    <constraint source="spec FR-28, root CLAUDE.md section 6">Admin-only for every write and for proposal reads. Mechanism decided by the owner (D-76): caller Dataverse privilege on sprk_ruleset / sprk_policyversion via CallerHoldsPrivilegeAsync, failing closed; not the SystemAdmin app role.</constraint>
     <constraint source="spec MUST">A published version is never updated: an edit creates a new Draft version; publishing it stamps the predecessor's in-force-to and moves the current-version pointer. Publish is all or nothing: one invalid rule refuses the whole publish with per-rule errors and writes nothing.</constraint>
     <constraint source="D-66, D-63">The clause-visibility helper returns clause text for a firm only when the rule's rule set has the flag on; the Procedure Library document link is never returned by any firm-facing projection.</constraint>
     <constraint source="ADR-007, ADR-002">Source documents uploaded only through SpeFileStore to the Procedure Library container; no client creates policy rows directly; server-side owner for publish.</constraint>
@@ -67,7 +67,7 @@
 
   <steps mode="directional">
     <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Read 019's columns in dev metadata and 070's billing ValidateForSave signature.</step>
-    <step order="1">Decide the admin mechanism (escalation if unclear) and implement it once as a reusable route helper (075 reuses it).</step>
+    <step order="1">Implement the D-76 admin check (caller privilege on sprk_ruleset / sprk_policyversion) once as a reusable route helper (075 reuses it).</step>
     <step order="2">Routes under /api/finance/rulesets (names directional): POST create (multipart: source document, name, scope, firm, source kind Guideline / RateCard / InternalProcedure sets the initial flag per D-66); GET list; GET one with proposals (rule type, parameters, consequence, describer text from RuleBodyDescriber, clause quote and location, status); PATCH proposal (Draft only; on a Published version create a new Draft version); POST proposal reject / accept; POST publish (effective date; validate every accepted rule; all or nothing; response states whether clause quotes will be visible to firms); PUT assignment (client default or firm); PUT visibility.</step>
     <step order="3">Service: Dataverse writes as the app after the caller check; in-force stamping and current-version move on publish; Procedure Library upload through SpeFileStore.</step>
     <step order="4">Clause-visibility helper (one method) for 130 / 134 / 135 to call; unit-tested.</step>

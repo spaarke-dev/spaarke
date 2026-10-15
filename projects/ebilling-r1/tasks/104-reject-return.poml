@@ -72,7 +72,7 @@
   </steps>
 
   <escalation>
-    <trigger>Open owner question F-7 (can a non-privileged user Return a blocked internal submission). This task handles invoices only; the blocked-submission Return is 105's, which carries the default. If the owner's answer changes who may Return an invoice, STOP and align with 105.</trigger>
+    <trigger>Owner decided D-73 (F-7): Return of a blocked internal submission needs no privilege (105 implements it). Invoice Return here keeps its existing access rule; if that conflicts with D-73, STOP and align with 105.</trigger>
     <trigger>If 015 has not landed (rollups still read sprk_invoicestatus), STOP before the rollup test and report; do not add a statuscode filter here.</trigger>
     <trigger>If two prior invoices for the same firm and number are both Returned (ambiguous predecessor), STOP and confirm the rule (default: most recent by created on).</trigger>
   </escalation>

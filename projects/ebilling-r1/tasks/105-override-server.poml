@@ -44,6 +44,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-76">eBilling Override is a Dataverse table privilege on a small dedicated table (owner decision D-76), checked once through CallerRecordAccessProbe.CallerHoldsPrivilegeAsync and failing closed; no security-role-name check and no app role. The table is created by an idempotent additive script under scripts/ebilling/ and captured into the solution source by the next deploy task; answer the root CLAUDE.md section 11 three questions for it in notes.</constraint>
     <constraint source="FR-19, FR-37, root CLAUDE.md section 6">Override requires the privilege, checked server-side on every call, fail closed (no token, probe failure, unknown user = 403 ebilling.override.not_permitted). Reason required (400). One person: no second approval step.</constraint>
     <constraint source="D-24">Only an internal-channel submission whose processing status is Rejected because of a blocking finding can be overridden; SPA submissions, Failed submissions and already-accepted ones are refused (409 with stable codes). A repeat override is a no-op with no new Decision Record.</constraint>
     <constraint source="FR-37, I-5">The override never deletes or rewrites the blocking finding: it is persisted as a Signal on the new invoice / line marked Overridden (with who, when, reason) and the line is Flagged for review.</constraint>
@@ -79,7 +80,7 @@
 
   <escalation>
     <trigger>🔔 Privilege mechanism (auth, security-sensitive — STOP and ask before coding). Options: (A) a Dataverse security role "eBilling Override" granting a privilege on a dedicated marker table, checked with CallerHoldsPrivilegeAsync (existing caller-scoped probe; administered with other Dataverse roles; needs one small schema addition, synced by 112); (B) an Entra app role on the BFF registration, checked like the SystemAdmin policy (no schema; administered in Entra, not Dataverse); (C) role-membership query by role name (no existing helper; name-based, fragile). Recommendation: A, matching the spec's "security role privilege" assumption and the existing probe; keep consistent with 076's choice where possible.</trigger>
-    <trigger>Open owner question F-7 (can a non-privileged user Return a blocked internal submission). Default assumption: yes — any internal user with access to the submission's core record may Return it, no privilege. Confirm with the owner; align 104 if the answer changes invoice Return.</trigger>
+    <trigger>Owner decided D-73 (F-7): any internal user with access to the submission's core record may Return a blocked internal submission, no privilege; only Override needs the eBilling Override privilege.</trigger>
     <trigger>If 049's accept path cannot take an override marker without restructuring, STOP and coordinate rather than duplicating invoice creation.</trigger>
   </escalation>
 

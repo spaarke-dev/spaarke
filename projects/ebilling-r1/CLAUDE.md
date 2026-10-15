@@ -131,14 +131,18 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
 - 2026-10-15 — D-71: legacy Finance extraction deleted; confirm route redirected into 044; ontology-r1 confirmed no dependency 2026-10-15; keep `sprk_totalamount` + matter/project lookup for `FinanceBaseValues`; send the 050 PR to ontology-r1 for review.
 
+- 2026-10-15 — D-72 (F-2): approve with undecided Clean lines allowed (Accepted in bulk, not labels).
+- 2026-10-15 — D-73 (F-7): Return of a blocked internal submission needs no privilege.
+- 2026-10-15 — D-74 (F-8): adjustment rule list = published rules of applicable rule sets in force on the invoice date.
+- 2026-10-15 — D-75 (F-9): one Decision Record per line decision (subject = the line itself, no 1:N invoice assumption) plus one per invoice decision.
+- 2026-10-15 — D-76: Override and billing-admin are Dataverse table privileges checked via `CallerHoldsPrivilegeAsync`; no role-name or app-role checks.
+- 2026-10-15 — D-77: any user with Write on the invoice decides lines.
+- 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
+- 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
+
 ### Open owner questions
 
-Carried into the tasks:
-
-- **Prototype F-2:** can an invoice be approved while Clean lines are undecided? Task 103. The current assumption is yes: Approve implicitly accepts them as *Accepted in bulk*, which is not a label.
-- **Prototype F-7:** can a non-privileged user Return a blocked internal submission? Tasks 104 and 105.
-- **Prototype F-8:** where does the invoice-level adjustment rule list come from? Task 102.
-- **Prototype F-9:** Decision Record granularity per line vs per invoice. Task 074; check with ontology-r1.
+None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remaining owner gates sit in the tasks themselves (005 go / no-go).
 
 ## 4. Coordination
 

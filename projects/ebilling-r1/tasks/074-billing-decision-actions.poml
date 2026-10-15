@@ -17,7 +17,7 @@
     <estimated-effort>2-3 days</estimated-effort>
   </metadata>
 
-  <prompt>Add the billing decisions (line accept / reduce / disallow; invoice approve / reject / return; override) to DecisionActionCatalog, each with a PlanLane, record class and gate factors, and provide one Finance-side recorder that writes exactly one Decision Record per decision — human decisions through the commit-route writer, decisions without a human through the gate-style path — after the owner question F-9 and the writer-shape gaps below are settled with ontology-r1.</prompt>
+  <prompt>Add the billing decisions (line accept / reduce / disallow; invoice approve / reject / return; override) to DecisionActionCatalog, each with a PlanLane, record class and gate factors, and provide one Finance-side recorder that writes exactly one Decision Record per decision — human decisions through the commit-route writer, decisions without a human through the gate-style path — per owner decision D-75 (one record per line decision, subject the line), after the writer-shape gaps below are settled with ontology-r1.</prompt>
 
   <role>SPAARKE platform developer. Expert in the ontology Decision Record writer, the closed action catalog and idempotent write design.</role>
 
@@ -78,7 +78,7 @@ Gaps against the spec: an invoice approve with no findings has no policy version
   </steps>
 
   <escalation>
-    <trigger>Open owner question F-9 (Decision Record per line versus per invoice): STOP before coding and confirm with ontology-r1 and the owner. Present: (a) one record per line decision plus one per invoice decision, (b) line decisions as steps of the invoice's one record, (c) line decisions audited on the line only. Recommendation: (b), unless ontology-r1 needs per-line records for its worklist.</trigger>
+    <trigger>Owner decided D-75 (F-9): one Decision Record per line decision with the line record itself as subject, plus one per invoice decision (subject the invoice). Do not reach the line through the invoice or assume a line belongs to exactly one invoice (a future model may not be 1:N). Inform ontology-r1 of the shape before coding the recorder.</trigger>
     <trigger>WriteAsync cannot record an invoice decision without a policy version, and WriteGateDecisionAsync accepts only a communication subject: STOP and present the additive writer entry (or generalisation) to ontology-r1 with the root CLAUDE.md section 6.5 path; do not edit the writer's validation in place.</trigger>
     <trigger>If 026 has not landed (no invoice-line subject on sprk_decisionrecord), STOP before the recorder step and report.</trigger>
   </escalation>

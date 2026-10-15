@@ -84,8 +84,8 @@
   </steps>
 
   <escalation>
-    <trigger>Open owner question F-2 (approve while Clean lines are undecided). Default assumption: allowed; approve sets them Accepted and writes Accepted in bulk correction rows (islabel false), and any AI-sourced field of an individually decided line with no correction row gets Unreviewed. Confirm with the owner before step 4; record the answer in notes.</trigger>
-    <trigger>Re-resolution on assignment change: no change event exists. Default: live check at approve, recheck on GET, and EligibleApproverRefreshJob over In Review portions (cadence proposed in notes, e.g. 15 minutes). If the owner requires event-driven re-resolution, STOP — it needs a Dataverse-side trigger that ADR-002 forbids as a plugin.</trigger>
+    <trigger>Owner decided D-72 (F-2): approve is allowed with undecided Clean lines; it sets them Accepted and writes Accepted in bulk correction rows (islabel false), and any AI-sourced field of an individually decided line with no correction row gets Unreviewed.</trigger>
+    <trigger>Owner decided D-78: live check at approve (mandatory) and recheck on GET, plus either EligibleApproverRefreshJob over In Review portions (cadence in notes, e.g. 15 minutes) or the lower-overhead alternative (a stale flag plus a manual refresh action); choose one and record which and why. Event-driven re-resolution is out (it would need a Dataverse-side trigger, ADR-002).</trigger>
     <trigger>If 049's file must be edited and 105 has an uncommitted change in it, re-read and add only this task's call; if the change cannot be a single call, STOP and coordinate.</trigger>
   </escalation>
 
