@@ -11,19 +11,19 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 152 (#1946) uac-r2 F3 fix round; 153 (#1953) adversarial pass 1; 146 blocked on the dev BFF connection's privilege cache. |
-| **Blocker** | 146 items 1, 2, 3, 9, 11 need a dev BFF restart (my restart or R3's #1949 redeploy). R3 is redeploying `c20bff283` (owner-approved); waiting for R3 to report it. |
-| **Next Action** | (1) 152 agent `af490c65f025a85b5` returns the F3 test SHA, then send it to uac-r2 for a re-check, then merge on green, then close #1921. (2) 153 pass-1 reviewer `a97a4b7bbe382f169` returns, then a fix round that keeps uac-r2's anti-spoof property, then pass 2, then uac-r2, then merge. (3) After the BFF restarts, wait about 15 minutes, then resume the 146 agent to re-run its blocked items. |
+| **Task** | 059 worklist widget (lane running); 153 (#1953) adversarial pass 1; 146 waits for R3's c20bff283 redeploy. |
+| **Blocker** | None. |
+| **Next Action** | (1) 059 agent returns a PR, then one adversarial review, a fix round and a re-check, then merge. (2) 153 pass 1 returns, then a fix round that keeps uac-r2's anti-spoof property, then pass 2, then uac-r2, then merge. (3) R3 reports the c20bff283 deploy (SHA, healthz, writer setting); about 15 minutes later, resume the 146 agent for items 1, 2, 3, 9, 11. |
 
 ## Lanes in flight (all PRs into `docs/ontology-platform-design`)
 
 | Task | PR | Head | Worktree | State |
 |---|---|---|---|---|
-| 152 Do-lane suppression per person (D-145a) | #1946 | `06c5dd473` → fix | `C:\wts-152` | uac-r2 F3 is the Do-lane secure wall. Test: Bob's 3 dismissals in secure family S must not stamp or mute his open Do item in M's ordinary partition, with a seeding proof. Agent running. |
+| 059 worklist widget | — | — | `C:\wts-059` | Sonnet/high implementer running through task-execute. Branch `task/ontology-059-worklist-widget` from `7fc51a796`. On the path to 055 (Console deploy). |
 | 153 satisfied close writes a Routine DR (D-145b) | #1953 | `09e2d6432` | `C:\wts-153` | Adversarial pass 1 is running and was given uac-r2's anti-spoof check: `FindGateRecordAsync` matched only `sprk_confirmedby IS NULL`, and the switch to `Plan.IsGate` must not let a human, condition-cleared or crafted-`sprk_steps` DR satisfy or block the gate lookup. Also watch: "a failed record write fails the run" vs the fail-closed rule and the evaluator-stalled alert; the 7-day backfill. |
 | 146 child-contract live gate | #1933 | `ef64dbfb6` | `C:\wts-146` | Docs only. Items 5, 6, 7, 10 pass; 4 and 9 are partial; 8 is the UAC known limit. Items 1, 2, 3, 9, 11 are refused because the BFF connection still caches the writer's privileges after the AppendTo-contact grant (`RetrievePrincipalAccess` flipped at 17:51Z). All test data is deleted. |
 
-Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`).
+Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`), #1905 (150, `223cc7d47`), #1907 (149, `5a30d11dc`), #1946 (152, `7fc51a796`; #1921 closed).
 
 ## Dev state (spaarke-bff-dev)
 
@@ -32,10 +32,10 @@ Merged into the docs branch today: #1926 (master sync), #1903 (151, `fe05faa4f`)
 
 ## Next, in order
 
-1. Merge 152 and 153 (each needs uac-r2 sign-off).
+1. Merge 153 (needs uac-r2 sign-off) and 059.
 2. 146 re-run → merge #1933 → 144/148 report-only pass → uac-r2 → enable writes.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
-4. **059** worklist widget, then the **055** Console deploy, then 049, 064, 105.
+4. Docs branch → master merge (tell uac-r2), then the **055** Console deploy, then 049, 064, 105.
 5. ebilling: their 070, 013, 015, 026, 050 and 074 come to us for review.
 
 ## Promises to peers
