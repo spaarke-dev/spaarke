@@ -4,7 +4,7 @@
     <title>Invoice totals calculator (I-1)</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New BFF service with unit tests; a pure calculation plus one persistence method (brief-assigned STANDARD; code-review still runs at Step 9.5).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,18 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append point: FinanceModule.cs. FR-07's "client attempt to write approved total directly is refused" is met for every BFF path here; refusing a direct Dataverse / model-driven edit needs the totals columns read-only on forms (029) and, if required, a field security profile — not built here; raise it with the main session (recorded as a brief gap). Callers: 049, 100, 101, 102.</notes>
+  <notes>Shared append point: FinanceModule.cs. FR-07's "client attempt to write approved total directly is refused" is met for every BFF path here; refusing a direct Dataverse / model-driven edit needs the totals columns read-only on forms (029) and, if required, a field security profile — not built here; raise it with the main session (recorded as a brief gap). Callers: 049, 100, 101, 102.
+
+    COMPLETED 2026-10-15 (parallel mode: TASK-INDEX.md and current-task.md left to the main session). Full notes: projects/ebilling-r1/notes/016-invoice-totals-calculator.md.
+    - BFF: InvoiceTotalsCalculator (pure) + IInvoiceTotalsService/InvoiceTotalsService.RecalculateAsync(invoiceId) in Services/Finance, one unconditional registration in AddFinanceModule. Writes changed Adjustment-line sprk_amount, then the five totals with If-Match on the invoice version (3 attempts); a refusal writes nothing. Refusal codes (stable): approved-total-negative, billed-total-missing, line-cost-type-unknown, line-amount-negative, line-approved-amount-invalid, adjustment-invalid.
+    - Rounding: decimal, 2 dp, MidpointRounding.AwayFromZero (recorded in docs/data-model/sprk_invoice.md).
+    - Tests: 38 new (calculator + service), mutation-checked (expenses in base, base before line adjustments, banker's rounding, write on refusal, wrong version, culture-sensitive money read all fail them). ArchTests 1045 passed; ADR-010 1:1 ceiling raised 160 -> 161 (+1, seam justification in the test file; merge with other branches that raise it: sum the additions).
+    - Publish size (fresh short-path worktrees, parent commit 290ffd704 vs this): 37.128 -> 37.135 MB, +0.008 MB; framework-dependent linux-x64, Release, PDBs included, Compress-Archive Optimal, 192 files each. No new package; no vulnerable package.
+    - Review: one adversarial pass; F2 (culture-sensitive money read), F3, K2 x2, K3 fixed; K4 items documented. Open for the main session: a billed total that differs from fees + expenses is logged, not blocked (owner question: expected?); the caller of a refusal (100-102) must undo the adjustment line that caused it; direct Dataverse edits of the totals are not blocked (029 / field-security profile).
+    - Section 11 answers: notes/016-invoice-totals-calculator.md section 5.
+
+    rework: fix-round-1 task 016
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -195,6 +195,62 @@ public sealed class InvoiceTotalsServiceTests
     }
 
     [Fact]
+    public async Task Recalculate_ReadsAFractionalBilledTotal_ThatArrivesAsADouble_WhateverTheHostCulture()
+    {
+        // RetrieveRecordFieldsAsync returns a double for any non-integral JSON number; under de-DE a double.ToString() is "1500,5".
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        try
+        {
+            GivenInvoice(1500.5d);
+            GivenLines(Line(InvoiceLineCostType.Fee, 1500.5m));
+            Dictionary<string, object?>? write = null;
+            _records
+                .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+                .Callback<string, Guid, Dictionary<string, object?>, long, CancellationToken>((_, _, f, _, _) => write = f)
+                .Returns(Task.CompletedTask);
+
+            await CreateService().RecalculateAsync(InvoiceId);
+
+            write!["sprk_approvedtotal"].Should().Be(1500.5m);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
+
+    [Fact]
+    public async Task Recalculate_WithoutABilledTotal_ReturnsTheRefusal_AndWritesNothing()
+    {
+        GivenInvoice(null);
+        GivenLines(Line(InvoiceLineCostType.Fee, 100m));
+
+        var result = await CreateService().RecalculateAsync(InvoiceId);
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.BilledTotalMissing);
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task Recalculate_WhenAnAdjustmentLineIsDeletedMidWay_ReReads_InsteadOfReportingInvoiceNotFound()
+    {
+        GivenInvoice(1000L);
+        var gone = Line(InvoiceLineCostType.Adjustment, 0m, method: InvoiceAdjustmentMethod.Percent, value: 10m);
+        GivenLines(Line(InvoiceLineCostType.Fee, 1000m), gone);
+        _records
+            .SetupSequence(r => r.UpdateExistingRecordFieldsAsync("sprk_billingevent", gone.Id, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("line gone"))
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateService().RecalculateAsync(InvoiceId);
+
+        result.IsRefused.Should().BeFalse();
+        _records.Verify(r => r.UpdateRecordFieldsIfUnchangedAsync(
+            "sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Recalculate_ReadsEveryPageOfLines()
     {
         GivenInvoice(300L);

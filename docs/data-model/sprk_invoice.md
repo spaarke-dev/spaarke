@@ -36,7 +36,7 @@ The five totals and every Adjustment line's `sprk_amount` are written only by `I
 
 **Rounding.** `decimal` arithmetic; each computed adjustment and each total is rounded to 2 decimals with `MidpointRounding.AwayFromZero` (half a cent rounds up, not to even). USD only in R1; no currency conversion.
 
-**Refusals (FR-32), stable codes, nothing written.** `invoice-totals.approved-total-negative`; and, fail-closed, `invoice-totals.line-cost-type-unknown` (a line with no Fee / Expense / Adjustment cost type), `invoice-totals.line-approved-amount-invalid` (Reduced line with no approved amount, or one outside 0 .. billed amount), `invoice-totals.adjustment-invalid` (Adjustment line with no method / value, a negative value, or a percent above 100).
+**Refusals (FR-32), stable codes, nothing written.** `invoice-totals.approved-total-negative`; and, fail-closed, `invoice-totals.line-cost-type-unknown` (a line with no Fee / Expense / Adjustment cost type), `invoice-totals.line-approved-amount-invalid` (Reduced line with no approved amount, or one outside 0 .. billed amount), `invoice-totals.adjustment-invalid` (Adjustment line with no method / value, a negative value, or a percent above 100), `invoice-totals.billed-total-missing` (`sprk_totalamount` empty), `invoice-totals.line-amount-negative` (a Fee or Expense line below 0). An Adjustment line's own `sprk_linestatus` is never read; only Fee and Expense lines are decided.
 
 ### Status (`statecode` / `statuscode`, FR-06, D-41)
 

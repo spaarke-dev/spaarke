@@ -89,7 +89,7 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
             }
 
             var version = ReadVersion(invoice);
-            var billedTotal = ReadMoney(invoice, InvoiceBilledTotal) ?? 0m;
+            var billedTotal = ReadMoney(invoice, InvoiceBilledTotal);
             var lines = await ReadLinesAsync(invoiceId, ct);
 
             var calculation = InvoiceTotalsCalculator.Calculate(billedTotal, lines);
@@ -109,18 +109,36 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
                 _logger.LogWarning(
                     "Invoice {InvoiceId} billed total {Billed} differs from fees + expenses {LinesTotal}; the approved total is based on the billed total",
                     invoiceId,
-                    billedTotal.ToString("0.00", CultureInfo.InvariantCulture),
+                    billedTotal!.Value.ToString("0.00", CultureInfo.InvariantCulture),
                     (calculation.FeesTotal + calculation.ExpensesTotal).ToString("0.00", CultureInfo.InvariantCulture));
             }
 
-            foreach (var line in lines.Where(l => l.CostType == InvoiceLineCostType.Adjustment))
+            try
             {
-                var computed = calculation.AdjustmentLineAmounts[line.Id];
-                if (computed != line.Amount)
+                foreach (var line in lines.Where(l => l.CostType == InvoiceLineCostType.Adjustment))
                 {
-                    await _records.UpdateExistingRecordFieldsAsync(
-                        LineEntity, line.Id, new Dictionary<string, object?> { [LineAmount] = computed }, ct);
+                    var computed = calculation.AdjustmentLineAmounts[line.Id];
+                    if (computed != line.Amount)
+                    {
+                        await _records.UpdateExistingRecordFieldsAsync(
+                            LineEntity, line.Id, new Dictionary<string, object?> { [LineAmount] = computed }, ct);
+                    }
                 }
+            }
+            catch (KeyNotFoundException gone)
+            {
+                // An Adjustment line was deleted after the read: the same as the invoice changing in between. Re-read; this must not
+                // surface as "invoice not found" (the interface documents KeyNotFoundException for the invoice only).
+                _logger.LogWarning(gone,
+                    "An adjustment line of invoice {InvoiceId} disappeared during recalculation (attempt {Attempt} of {MaxAttempts})",
+                    invoiceId, attempt, MaxWriteAttempts);
+
+                if (attempt >= MaxWriteAttempts)
+                {
+                    throw new DBConcurrencyException("The invoice's lines kept changing during recalculation.", gone);
+                }
+
+                continue;
             }
 
             try
@@ -210,10 +228,16 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         return version;
     }
 
+    /// <summary>A Money value as <c>RetrieveRecordFieldsAsync</c> returns it: a <see cref="long"/> for a whole number, a <see cref="double"/>
+    /// otherwise. Never converted through a culture-sensitive string (a double rendered as "1500,5" would parse as 15005).</summary>
     private static decimal? ReadMoney(Dictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var raw)
-        && raw is not null
-        && decimal.TryParse(raw.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var value)
-            ? value
-            : null;
+        !row.TryGetValue(column, out var raw) ? null : raw switch
+        {
+            decimal d => d,
+            double d => (decimal)d,
+            long l => l,
+            int i => i,
+            string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null,
+        };
 }

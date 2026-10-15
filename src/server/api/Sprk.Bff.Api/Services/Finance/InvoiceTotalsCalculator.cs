@@ -48,6 +48,12 @@ public static class InvoiceTotalsRefusalCodes
     /// <summary>A line has no usable cost type, so it cannot be placed in the fees, expenses or adjustments.</summary>
     public const string LineCostTypeUnknown = "invoice-totals.line-cost-type-unknown";
 
+    /// <summary>The invoice has no billed total (<c>sprk_totalamount</c>), so no approved total can be derived.</summary>
+    public const string BilledTotalMissing = "invoice-totals.billed-total-missing";
+
+    /// <summary>A Fee or Expense line has a negative amount; the platform minimum for the totals is 0, so the result could not be stored.</summary>
+    public const string LineAmountNegative = "invoice-totals.line-amount-negative";
+
     /// <summary>A Reduced line has no approved amount, or one that is negative or above the billed amount.</summary>
     public const string LineApprovedAmountInvalid = "invoice-totals.line-approved-amount-invalid";
 
@@ -59,8 +65,9 @@ public static class InvoiceTotalsRefusalCodes
 public sealed record InvoiceTotalsRefusal(string Code, string Message, Guid? LineId = null);
 
 /// <summary>
-/// The five totals of an invoice plus the computed amount of each Adjustment line. When <see cref="Refusal"/> is set the
-/// figures are what the inputs WOULD give (so a caller can say how far below zero an adjustment goes), and they must not be stored.
+/// The five totals of an invoice plus the computed amount of each Adjustment line. When <see cref="Refusal"/> is set the figures must
+/// not be stored: for <see cref="InvoiceTotalsRefusalCodes.ApprovedTotalNegative"/> they are what the inputs would give (so a caller can say
+/// how far below zero the adjustments go); for every other code they are zero.
 /// </summary>
 public sealed record InvoiceTotalsCalculation(
     decimal FeesTotal,
@@ -89,16 +96,22 @@ public sealed record InvoiceTotalsCalculation(
 /// <see cref="MidpointRounding.AwayFromZero"/> (the owner-facing choice recorded in <c>docs/data-model/sprk_invoice.md</c>).
 /// The billed total is taken as given (it is the stored <c>sprk_totalamount</c>).</para>
 /// <para><b>Fail closed.</b> Input that the formula cannot place (a line with no cost type, a Reduced line with no usable approved amount,
-/// an Adjustment line with no method/value) refuses the whole calculation rather than being skipped, because a skipped line silently
-/// changes what the firm is paid.</para>
+/// an Adjustment line with no method/value, a missing billed total) refuses the whole calculation rather than being skipped, because a
+/// skipped line silently changes what the firm is paid. An Adjustment line's own status is never read: only Fee and Expense lines are decided.</para>
 /// </remarks>
 public static class InvoiceTotalsCalculator
 {
     private const int Decimals = 2;
 
-    public static InvoiceTotalsCalculation Calculate(decimal billedTotal, IReadOnlyList<InvoiceLineInput> lines)
+    public static InvoiceTotalsCalculation Calculate(decimal? billedTotal, IReadOnlyList<InvoiceLineInput> lines)
     {
         ArgumentNullException.ThrowIfNull(lines);
+
+        if (billedTotal is not { } billed)
+        {
+            return Refused(new InvoiceTotalsRefusal(
+                InvoiceTotalsRefusalCodes.BilledTotalMissing, "The invoice has no billed total, so the approved total cannot be derived."));
+        }
 
         decimal fees = 0m, expenses = 0m, feeLineAdjustments = 0m, expenseLineAdjustments = 0m;
         var adjustmentLines = new List<InvoiceLineInput>();
@@ -109,6 +122,12 @@ public static class InvoiceTotalsCalculator
             {
                 case InvoiceLineCostType.Fee:
                 case InvoiceLineCostType.Expense:
+                    if (line.Amount < 0m)
+                    {
+                        return Refused(new InvoiceTotalsRefusal(
+                            InvoiceTotalsRefusalCodes.LineAmountNegative, "A Fee or Expense line has a negative amount.", line.Id));
+                    }
+
                     if (!TryLineAdjustment(line, out var lineAdjustment, out var refusal))
                     {
                         return Refused(refusal!);
@@ -162,7 +181,7 @@ public static class InvoiceTotalsCalculator
         }
 
         invoiceAdjustments = Round(invoiceAdjustments);
-        var approved = Round(billedTotal - lineAdjustmentsTotal - invoiceAdjustments);
+        var approved = Round(billed - lineAdjustmentsTotal - invoiceAdjustments);
 
         InvoiceTotalsRefusal? negative = approved < 0m
             ? new InvoiceTotalsRefusal(

@@ -207,6 +207,38 @@ public sealed class InvoiceTotalsCalculatorTests
         result.Refusal.LineId.Should().Be(line.Id);
     }
 
+    [Fact]
+    public void MissingBilledTotal_IsRefused_NotTreatedAsZero()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(null, new[] { Fee(100m) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.BilledTotalMissing);
+    }
+
+    [Fact]
+    public void NegativeFeeOrExpenseAmount_IsRefused()
+    {
+        var credit = Expense(-50m);
+
+        var result = InvoiceTotalsCalculator.Calculate(100m, new[] { Fee(150m), credit });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineAmountNegative);
+        result.Refusal.LineId.Should().Be(credit.Id);
+    }
+
+    [Fact]
+    public void AdjustmentLinesOwnStatus_IsNotRead()
+    {
+        // Only Fee and Expense lines are decided; a Disallowed status on an Adjustment line changes nothing.
+        var adjustment = new InvoiceLineInput(
+            Guid.NewGuid(), InvoiceLineCostType.Adjustment, 0m, null, InvoiceLineStatus.Disallowed, InvoiceAdjustmentMethod.Fixed, 20m);
+
+        var result = InvoiceTotalsCalculator.Calculate(100m, new[] { Fee(100m), adjustment });
+
+        result.AdjustmentLineAmounts[adjustment.Id].Should().Be(20m);
+        result.ApprovedTotal.Should().Be(80m);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData(-1.0)]
