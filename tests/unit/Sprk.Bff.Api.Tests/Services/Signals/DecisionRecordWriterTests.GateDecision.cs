@@ -90,7 +90,8 @@ public sealed partial class DecisionRecordWriterTests
 
         // sprk_steps: the one offered step, taken, outcome Authorized; no Signal ids; no follow-ons.
         using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps"));
-        steps.RootElement.GetProperty("reviewId").GetString().Should().Be(GateEvaluation.ToString("D"));
+        steps.RootElement.GetProperty("reviewId").GetString().Should().Be(GateDecisionKey.IdOf(CommunicationId, authorize: true).ToString("D"),
+            "task 149: the record's key is the decision's (communication + outcome), never the per-run evaluation id");
         steps.RootElement.GetProperty("resolvedSignalIds").GetArrayLength().Should().Be(0);
         var step = steps.RootElement.GetProperty("steps").EnumerateArray().Single();
         step.GetProperty("code").GetString().Should().Be("communication-ri-action");
@@ -196,33 +197,130 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     [Fact]
-    public async Task Gate_AnUnfiledCommunication_IsRefused_NotHandedToTheBusinessUnitsDefaultTeam_FailClosed()
+    public async Task Gate_AnUnfiledCommunication_IsOwnedByItsBusinessUnitsDefaultTeam_D144()
     {
-        // Owner round 10 item 8 (E1): an unfiled communication keeps its creator and its privacy rests on per-participant shares. A decision
-        // about it owned by the business unit's default team (Basic User = Read on sprk_decisionrecord) would widen who can read it, so the
-        // gate asks as the content of the communication; the resolver answers Unchanged and this writer refuses (nothing is written).
+        // Task 149, D-144 (owner decision; uac-r2 reviews the choice). Task 042 refused an unfiled communication (owner round 10 item 8,
+        // E1: it keeps its creator). The owner has decided its gate decision is owned by the communication's owning business unit's
+        // DEFAULT team, accepting that this reveals the communication's existence to that unit. REAL RecordOwnershipResolver over an
+        // in-memory directory: the first ask (as content of the communication) answers Unchanged, the second (as a plain parent) answers
+        // the owning business unit's default Owner team.
         var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var h = new Harness(realResolver: directory.Resolver());
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        result.AlreadyRecorded.Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", ChildTeam),
+            "the owning business unit's DEFAULT Owner team (not the Secure default decoy, not a person)");
+        h.Row.Contains("owninguser").Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
+        result.SecureOwnerTeamId.Should().BeNull();
+        h.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0, "a record that is written is not an alert");
+    }
+
+    [Fact]
+    public async Task Gate_AnUnchangedAnswer_IsAskedAgainOnce_AsAPlainParent_OverTheSameParents_D144()
+    {
+        var h = new Harness();
+        var team = Guid.NewGuid();
+        h.Ownership.Setup(r => r.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => c.KeepCreatorUnlessTargetIsTeamOwned), It.IsAny<CancellationToken>()))
+            .Callback<RecordOwnershipContext, CancellationToken>((c, _) => h.OwnerAsks.Add(c))
+            .ReturnsAsync(RecordOwnerResolution.Unchanged("not team-owned and filed under nothing"));
+        h.Ownership.Setup(r => r.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => !c.KeepCreatorUnlessTargetIsTeamOwned), It.IsAny<CancellationToken>()))
+            .Callback<RecordOwnershipContext, CancellationToken>((c, _) => h.OwnerAsks.Add(c))
+            .ReturnsAsync(RecordOwnerResolution.Owned(team));
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.OwnerAsks.Should().HaveCount(2, "one ask as content of the communication, one more as a plain parent, never a third");
+        h.OwnerAsks[0].KeepCreatorUnlessTargetIsTeamOwned.Should().BeTrue();
+        h.OwnerAsks[1].KeepCreatorUnlessTargetIsTeamOwned.Should().BeFalse();
+        h.OwnerAsks[1].Parents.Should().Equal(h.OwnerAsks[0].Parents, "the same parents, so the business unit is the communication's");
+        h.OwnerAsks[1].RequestedBy.Should().BeNull();
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(team);
+    }
+
+    [Fact]
+    public async Task Gate_ATeamOwnedOrFiledCommunication_IsAskedOnce_TheSecondAskIsOnlyForUnchanged()
+    {
+        var h = new Harness();
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.OwnerAsks.Should().ContainSingle("an Owned answer is used as returned");
+    }
+
+    [Theory]
+    [InlineData("noBusinessUnit")]
+    [InlineData("noDefaultTeam")]
+    public async Task Gate_AnUnfiledCommunicationWithNoUnitOrNoDefaultTeam_WritesNothing_IsASkipNotAFailure_D144(string shape)
+    {
+        // Negative case of D-144: nothing written, counted on ontology.writer.skips and never on ontology.writer.failures. REAL resolver.
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (failureListener, failures) = ListenReasons(scope);
+        var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
+        using var _ = failureListener;
+        using var __ = skipListener;
+        var directory = shape == "noDefaultTeam"
+            ? Standard(withDefaultTeams: false).WithRecord("sprk_communication", CommunicationId, ChildBu)
+            : Standard().WithRecord("sprk_communication", CommunicationId, owningBusinessUnit: null);
         var h = new Harness(realResolver: directory.Resolver());
 
         var act = () => h.Writer.WriteGateDecisionAsync(Gate());
 
-        // K3: this is the REAL RecordOwnershipResolver (over an in-memory directory), not a mock. K1a: a by-design skip with its own reason.
-        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.GateSkippedUnfiled);
+        var thrown = (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        thrown.Reason.Should().Be(DecisionRecordRefusalReason.GateSkippedNoUnitTeam);
+        thrown.OwnerRefusalCode.Should().Be(shape == "noDefaultTeam" ? RecordOwnerRefusal.NoDefaultOwnerTeam : RecordOwnerRefusal.ParentUnresolved);
         h.Created.Should().BeEmpty();
-        h.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0, "an unfiled communication is by design, not an alert (the harness catalog stub's own untyped-pair warning has no event id)");
-        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled).Which.Level.Should().Be(LogLevel.Information);
+        failures.Should().BeEmpty("a by-design skip is not a failure: an alert on ontology.writer.failures stays unfiltered and quiet");
+        skips.Should().Equal(DecisionRecordRefusalReason.GateSkippedNoUnitTeam);
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedNoUnitTeam).Which.Level.Should().Be(LogLevel.Warning);
+        h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.WriteRefused, "the skip is not logged as a refusal at Error");
+        h.Log.Entries.Single(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedNoUnitTeam).Message
+            .Should().Contain(GateEvaluation.ToString("D")).And.Contain(thrown.OwnerRefusalCode!, "the run id and the resolver's refusal code, nothing else");
     }
 
     [Fact]
-    public async Task Gate_AnOwnerRefusal_IsStillARealRefusal_LoggedAtError_NotTheUnfiledSkip()
+    public async Task Gate_AnOwnerRefusalForACoreRecord_IsStillARealRefusal_LoggedAtError_NotTheSkip()
     {
+        // D-144's skip is scoped to what it names: a communication that stands alone. A communication filed under a matter whose business
+        // unit cannot be read is a fail-closed refusal that needs attention (security fails closed), counted as a failure.
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (failureListener, failures) = ListenReasons(scope);
+        var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
+        using var _ = failureListener;
+        using var __ = skipListener;
         var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "no business unit"));
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        h.Created.Should().BeEmpty();
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.WriteRefused).Which.Level.Should().Be(LogLevel.Error);
+        h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedNoUnitTeam);
+        failures.Should().Equal(DecisionRecordRefusalReason.OwnerRefused);
+        skips.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Gate_ARefusalOtherThanNoUnitOrNoTeam_ForAStandAloneCommunication_IsStillARealRefusal()
+    {
+        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.SecureParentNotIsolated, "not isolated"));
 
         var act = () => h.Writer.WriteGateDecisionAsync(Gate());
 
         (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
         h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.WriteRefused).Which.Level.Should().Be(LogLevel.Error);
-        h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled);
     }
 
     [Fact]
@@ -259,7 +357,7 @@ public sealed partial class DecisionRecordWriterTests
         var asked = h.OwnerAsks.Should().ContainSingle().Subject;
         asked.Parents.Should().Equal(Parent("sprk_matter", MatterId), Parent("sprk_communication", CommunicationId));
         asked.RequestedBy.Should().BeNull("no person asked: a system decision");
-        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeTrue("a gate record is content of the communication: an unfiled one keeps its creator and is refused, never given to a business-unit team");
+        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeTrue("a gate record is asked as content of the communication first: a filed one resolves from what it is filed under, and only an unfiled one (Unchanged) is asked again as a plain parent (D-144)");
     }
 
     [Fact]
@@ -277,7 +375,8 @@ public sealed partial class DecisionRecordWriterTests
 
         await h.Writer.WriteGateDecisionAsync(Gate());
         var afterFirst = (RootReads: rootReads, Probes: h.ProbeCalls, Types: h.RecordTypes.Queried.Count);
-        await h.Writer.WriteGateDecisionAsync(Gate() with { EvaluationId = Guid.NewGuid() });
+        // A second, DIFFERENT decision (a deny): the same communication and outcome would be found as already recorded (task 149).
+        await h.Writer.WriteGateDecisionAsync(Gate(authorize: false) with { EvaluationId = Guid.NewGuid() });
 
         afterFirst.RootReads.Should().Be(1, "the stamps are derived once and reused by the filing step");
         rootReads.Should().Be(2, "one derivation per decision");
@@ -312,7 +411,7 @@ public sealed partial class DecisionRecordWriterTests
     [Fact]
     public async Task Gate_AnOwnerRefusal_WritesNothing_AndThrowsTheWritersOneException()
     {
-        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "no business unit"));
+        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "nothing to own the record from"));
 
         var act = () => h.Writer.WriteGateDecisionAsync(Gate());
 

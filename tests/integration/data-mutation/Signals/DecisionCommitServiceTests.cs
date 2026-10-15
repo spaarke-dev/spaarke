@@ -418,7 +418,7 @@ public sealed class DecisionCommitServiceTests
                 resolver = recording.Object;
             }
 
-            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance);
+            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
                 Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
