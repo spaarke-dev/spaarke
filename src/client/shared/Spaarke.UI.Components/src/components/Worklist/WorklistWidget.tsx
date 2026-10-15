@@ -151,14 +151,15 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   const openWizard = React.useCallback(
     async (event: OpenItemEvent, sourceSet: WorklistSetName) => {
       setNotice(null);
-      let recorded = false;
+      // An object, not a `let`: the flag is set inside a callback, which control-flow narrowing cannot see.
+      const outcome = { recorded: false };
       try {
         const result = await launchWizard({
           ...event,
           loadItem: loaderFor(sourceSet),
           lookup,
           onRecorded: () => {
-            recorded = true;
+            outcome.recorded = true;
           },
         });
         if (!result.opened && result.reason === 'no-host') {
@@ -168,15 +169,15 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
         setNotice('The decision wizard could not be opened.');
       }
       // What was recorded has left the lanes: read them again once the wizard is closed.
-      if (recorded) reload();
+      if (outcome.recorded) reload();
     },
     [launchWizard, loaderFor, lookup, reload]
   );
 
   const startLane = (lane: WorklistLane) => {
     const view = views[lane];
+    if (view.groups.length === 0) return;
     const first = view.groups[0];
-    if (!first) return;
     void openWizard(
       {
         itemId: view.visibleIds[0],

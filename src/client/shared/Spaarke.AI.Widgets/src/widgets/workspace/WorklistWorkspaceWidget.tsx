@@ -51,7 +51,7 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   const dispatch = useOptionalDispatchPaneEvent();
 
   const service = React.useMemo(
-    () => createWorklistService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl ?? '' }),
+    () => createWorklistService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
     [authenticatedFetch, bffBaseUrl]
   );
 
