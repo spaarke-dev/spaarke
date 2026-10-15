@@ -20,9 +20,9 @@
 | `sprk_reviewedby` | Lookup -> `systemuser` | Reviewed By | |
 | `sprk_reviewedon` | Date and time (user local) | Reviewed On | |
 | `sprk_linestatus` | Choice (local) | Line Status | Options below. "Pending" is shown as Processing in the review UI (D-58). |
-| `sprk_taskcode` | Lookup -> `sprk_billingcode` | Task Code | **Deferred**: created when `sprk_billingcode` exists (task 018); re-run the script then. |
-| `sprk_activitycode` | Lookup -> `sprk_billingcode` | Activity Code | Deferred, as above. |
-| `sprk_expensecode` | Lookup -> `sprk_billingcode` | Expense Code | Deferred, as above. |
+| `sprk_taskcode` | Lookup -> `sprk_billingcode` | Task Code | Created 2026-10-15 by re-running the script after task 018 created `sprk_billingcode` (was deferred until then). See [sprk_billingcode.md](sprk_billingcode.md). |
+| `sprk_activitycode` | Lookup -> `sprk_billingcode` | Activity Code | Created with `sprk_taskcode`, as above. |
+| `sprk_expensecode` | Lookup -> `sprk_billingcode` | Expense Code | Created with `sprk_taskcode`, as above. |
 | `sprk_taskcodeasbilled` | Text (100) | Task Code (as billed) | |
 | `sprk_activitycodeasbilled` | Text (100) | Activity Code (as billed) | |
 | `sprk_expensecodeasbilled` | Text (100) | Expense Code (as billed) | |

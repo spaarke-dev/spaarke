@@ -281,3 +281,34 @@ Settle the spend definition with the line writers (exclude or sign Adjustment li
 **Related**: ebilling-r1 tasks 010, 014, 016, 100; evidence `notes/010-invoice-line-columns.md`
 
 ---
+
+### DEF-005 — UTBMS LOC 2013 revised activity/expense lists and IP expense codes E125-E131 are not seeded
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before IP (patent / trademark) or eDiscovery customers' invoices are coded |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 018 (UTBMS code sets) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1929 |
+
+**Description**
+
+Task 018 seeded the original ABA Activity (A101-A111) and Expense (E101-E124) lists, which utbms.com publishes as clean spreadsheets. Not seeded: the LOC 2013 revised Activity list (A112-A128, incl. discovery / eDiscovery codes) and Expense list (X-series), and the seven IP expense codes E125-E131. utbms.com publishes them only as PDFs whose tables do not extract reliably (code and name columns misalign), so rows could not be produced with confidence. A patent / trademark / eDiscovery line carrying one of these codes is outside the seeded set: FR-22 cannot propose it and a firm-supplied one is flagged as a mismatch.
+
+**Entry-points**
+
+- `scripts/seed-data/ebilling/utbms-activity.csv`, `utbms-expense.csv`
+- `scripts/ebilling/Seed-EbillingBillingCodes.ps1` (create-only: re-running after adding rows adds them without touching existing rows)
+
+**Suggested fix**
+
+Owner decides the product standard (original ABA, LOC 2013 revised, or ABA plus E125-E131). Then add hand-verified rows to the CSVs and re-run the seed.
+
+**Estimated effort**: 2-3 hours plus the owner decision
+
+**Blockers**: owner decision on which revision is the standard
+
+**Related**: ebilling-r1 tasks 018, 047; evidence `notes/018-utbms-code-sets.md`
+
+---

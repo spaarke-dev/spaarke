@@ -91,4 +91,10 @@ Read: `CoreAncestorResolver.cs` `ApplyStamps` (both overloads, ~718-790), `Stamp
 - Finding class check (Step 9.5 item 6): the eventually-consistent-metadata-read hazard is a repeatable pattern in schema scripts that check-then-create from a read. A grep for `Test-AttributeExists` or `Test-EntityExists` over `scripts/*.ps1` and `scripts/*/*.ps1` matches 27 scripts; they were not opened or changed (out of scope). No guard can be mechanised for a live-API timing behaviour; this script's create-refusal handling is the model.
 - Quality gates: STANDARD rigor, configuration-only (script + doc + live metadata), no `tests/**`: code-review / adr-check skipped per Step 9.5 skip rule (configuration-only). ADR-002 / ADR-024 / ADR-022 checked by hand: no plugin / calculated column / flow; resolver fields complete; unmanaged solution.
 
+## 7. Deferred lookups created (task 018, 2026-10-15)
+
+Task 018 created `sprk_billingcode` in dev (`scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1`), then `Deploy-EbillingInvoiceLineSchema.ps1` was re-run unchanged against dev. Result: `created : 3  sprk_taskcode, sprk_activitycode, sprk_expensecode`, `skipped : 24`, `deferred: 0`, customizations published, exit 0. So the deferred path works: the script detected the table on the first read (no false deferral from a lagging metadata read) and `Add-Lookup` created all three.
+
+Confirmed by an independent metadata read (`LookupAttributeMetadata`): `sprk_billingevent.sprk_taskcode`, `sprk_activitycode` and `sprk_expensecode` are `Lookup` -> `sprk_billingcode`. A further run: `created : 0`, `skipped : 27`, `deferred: 0`, "nothing changed - no publish". `docs/data-model/sprk_billingevent.md` no longer marks them deferred.
+
 rework: fix-round-1 task 010

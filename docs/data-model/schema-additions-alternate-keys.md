@@ -42,6 +42,7 @@ These alternate keys are composite keys used for idempotent upsert operations. R
 | Entity | Alternate Key Fields | Purpose |
 |---|---|---|
 | `sprk_billingevent` | `sprk_invoice` + `sprk_linesequence` | Idempotent invoice line re-extraction |
+| `sprk_billingcode` | `sprk_codeset` + `sprk_code` (key `sprk_billingcode_codeset_code_key`) | Idempotent UTBMS code seeding; a code is unique within its set. Address by key as `sprk_billingcodes(_sprk_codeset_value=<id>,sprk_code='L110')`. See [sprk_billingcode.md](sprk_billingcode.md) |
 | `sprk_spendsnapshot` | `sprk_matter` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (matter-scoped) | Idempotent snapshot regeneration |
 | `sprk_spendsnapshot` | `sprk_project` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (project-scoped) | Idempotent snapshot regeneration |
 | Processing Job entity | `sprk_idempotencykey` | Idempotency key for background jobs |

@@ -4,7 +4,7 @@
     <title>UTBMS code sets: schema, mapping lookups, seed files, seed script</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New schema script, seed data files and an idempotent seed script applied to dev; no BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,7 +98,7 @@
     <criterion testable="true">manifest.yaml is unchanged; no file under src/dataverse/solutions/SpaarkeMaster/ changed; the Litigation code-set id is in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared append points: docs/data-model/INDEX.md and schema-additions-alternate-keys.md (one row each). 029 re-runs this schema script before 010's (010 creates the line code lookups only when sprk_billingcode exists). AI proposals for unmapped matter types are 048's.</notes>
+  <notes>COMPLETED 2026-10-15 (task-execute, STANDARD). Dev: sprk_billingcodeset + sprk_billingcode (alternate key sprk_billingcode_codeset_code_key Active), sprk_defaultbillingcodeset on sprk_mattertype_ref and sprk_practicearea_ref, 8 sets / 161 codes seeded; re-seed = 0 writes; guidance edit survives. 010 deferred lookups (task/activity/expense code) created by re-running Deploy-EbillingInvoiceLineSchema.ps1. Litigation set: UTBMS Litigation, dev id 827ec4c0-abc8-f111-a05c-0022482913fc (for task 025). Gap: LOC 2013 revised activity/expense and IP expense E125-E131 not seeded (DEF-005, issue 1929). Evidence: notes/018-utbms-code-sets.md. TASK-INDEX.md status cell left for the main session. rework: fix-round-3 task 018. Original note: Shared append points: docs/data-model/INDEX.md and schema-additions-alternate-keys.md (one row each). 029 re-runs this schema script before 010's (010 creates the line code lookups only when sprk_billingcode exists). AI proposals for unmapped matter types are 048's.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

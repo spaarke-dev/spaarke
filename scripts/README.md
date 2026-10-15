@@ -1764,7 +1764,7 @@ Owned by `ebilling-r1` (`projects/ebilling-r1/`). All are idempotent: a second r
 
 ### `ebilling/Deploy-EbillingInvoiceLineSchema.ps1`
 
-Additive Dataverse metadata script that turns `sprk_billingevent` into the Invoice Line (FR-04 / FR-05): review, coding, adjustment and extraction columns, `sprk_linestatus`, the work-assignment lookup and the ADR-024 resolver fields. The UTBMS code lookups are deferred until `sprk_billingcode` exists (task 018), and are created on the next run after that. Supports `-WhatIf`; never deletes or renames. Columns: `docs/data-model/sprk_billingevent.md`.
+Additive Dataverse metadata script that turns `sprk_billingevent` into the Invoice Line (FR-04 / FR-05): review, coding, adjustment and extraction columns, `sprk_linestatus`, the work-assignment lookup and the ADR-024 resolver fields. The UTBMS code lookups are deferred until `sprk_billingcode` exists (task 018) and are created on the next run after that (done in dev 2026-10-15). Supports `-WhatIf`; never deletes or renames. Columns: `docs/data-model/sprk_billingevent.md`.
 
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
@@ -1778,6 +1778,24 @@ Additive Dataverse metadata script that extends `sprk_invoice` for eBilling (FR-
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingBillingCodeSchema.ps1`
+
+Additive Dataverse metadata script for the UTBMS reference tables (FR-08 / FR-22): creates `sprk_billingcodeset` and `sprk_billingcode`, the alternate key `sprk_billingcode_codeset_code_key` on (`sprk_codeset`, `sprk_code`) (waits for the index to be Active), and `sprk_defaultbillingcodeset` on `sprk_mattertype_ref` and `sprk_practicearea_ref`. Supports `-WhatIf`; never deletes or renames; retries on customization / publish locks and on a new table still propagating; ends with a metadata read-back of everything it owns. Run it before `Seed-EbillingBillingCodes.ps1`, then re-run `Deploy-EbillingInvoiceLineSchema.ps1` so the three code lookups on the Invoice Line are created. Columns and key: `docs/data-model/sprk_billingcode.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Seed-EbillingBillingCodes.ps1`
+
+Seeds the eight UTBMS code sets (litigation, counseling, project, bankruptcy, IP patent prosecution, trademark, activity, expense; 161 codes) from `scripts/seed-data/ebilling/utbms-*.csv`, one CSV per set carrying set name, body, version, source URL and download date. Create-only: a set is matched on its name and a code on its alternate key; a missing row is created and an existing row is **never** updated (an admin's `sprk_guidancetext` edit always survives). A re-run with unchanged CSVs makes zero writes. Validates every CSV before any write (duplicate codes in a set stop it with exit 2). Supports `-WhatIf`. Not part of `scripts/seed-data/manifest.yaml`.
+
+```powershell
+pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
 ### `content-understanding/Deploy-Analyzers.ps1`
@@ -1956,3 +1974,4 @@ Most scripts require:
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).
 - **2026-10-15:** Added the eBilling Scripts section: Deploy-EbillingInvoiceLineSchema.ps1 (task 010) and content-understanding/Deploy-Analyzers.ps1 (task 004), `ebilling-r1`.
 - **2026-10-15:** Added ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (sprk_invoice header columns and lifecycle statuscode values, `ebilling-r1` task 012).
+- **2026-10-15:** Added ebilling/Deploy-EbillingBillingCodeSchema.ps1 and ebilling/Seed-EbillingBillingCodes.ps1 (UTBMS code set tables, alternate key, default-code-set lookups, eight seeded sets; `ebilling-r1` task 018).
