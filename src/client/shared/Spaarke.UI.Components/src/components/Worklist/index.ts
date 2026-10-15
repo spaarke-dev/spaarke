@@ -9,3 +9,20 @@ export type { OpenItemEvent, PastDueWording, WorkType, WorklistCore, WorklistIte
 // The lane count filters are DATA for the existing WorkspaceShell/MetricCardRow (D-24); no new card component.
 export { bucketLaneItems, buildLaneCountCards, filterLaneItems, resolveLaneFilterKey } from './laneCountFilters';
 export type { BuildLaneCountCardsOptions, LaneCountBucket, LaneFilterKey } from './laneCountFilters';
+// The worklist widget (task 059): the two lanes, count filters, narrative slot, aggregate row and disclosures over the Signal read
+// route (task 038). WorklistLanePanel and WorklistDisclosures are its parts and are not exported.
+export { WorklistWidget } from './WorklistWidget';
+export type { WorklistWidgetProps } from './WorklistWidget';
+export { createWorklistService, parseWorklistResponse } from './worklistService';
+export type {
+  WorklistData,
+  WorklistGroupData,
+  WorklistRequestError,
+  WorklistRouteItem,
+  WorklistService,
+  WorklistServiceOptions,
+  WorklistSetName,
+} from './worklistService';
+export { buildLaneView, hiddenItemsNote } from './worklistView';
+export type { LaneGroupView, LaneView } from './worklistView';
+export { buildWizardItem, closedLineText, parseEvidenceRefs } from './worklistWizardItem';

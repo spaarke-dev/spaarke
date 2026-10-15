@@ -45,6 +45,11 @@ export interface WorklistItem {
    * a lane by it so the counts add up; the row itself does not render it.
    */
   workType?: WorkType | null;
+  /**
+   * Replaces the age / due state with this text. Set by the host (task 059) for the items of the Closed today, Suppressed
+   * and Closed earlier sets, whose age or due state would be misleading ("5d overdue" on a finished item).
+   */
+  timingText?: string | null;
 }
 
 /**

@@ -437,9 +437,9 @@ describe('ADR-021 and structure', () => {
     ).toBe(true);
   });
 
-  it('only MatterCard is exported as a component (IssueLine is its part, not a second row component)', async () => {
+  it('only MatterCard is exported as a row component (IssueLine is its part, not a second row component); WorklistWidget is the host that arranges cards (task 059)', async () => {
     const barrel = await import('..');
-    expect(Object.keys(barrel).filter(k => /^[A-Z]/.test(k))).toEqual(['MatterCard']);
+    expect(Object.keys(barrel).filter(k => /^[A-Z]/.test(k))).toEqual(['MatterCard', 'WorklistWidget']);
   });
 });
 
