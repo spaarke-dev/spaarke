@@ -101,3 +101,5 @@ Running the pipeline in dev needs at least: (a) a `Finance__InvoiceExtractionPla
 | D6 | Matter rollups stale / inconsistent; counted status unreachable; snapshot job never enqueued | Already filed: #1663; evidence comment added; basis change in task 015 |
 
 No `src/**` file was changed by this task; no dev record was created, so there is nothing to clean up (step 7: none).
+
+> **Owner decision 2026-10-15 (D-80):** baseline accepted without a live run (option A). No dev repair.

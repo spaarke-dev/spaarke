@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave W0-1 + W2-1 in parallel: 001, 002, 003, 041 (agents running); 040 queued |
+| **Task** | Parallel mode. Done: 003 (5ebd41523). Done: 001 (owner option A, D-80). Running: 002, 041 (shared tree), 040 (isolated worktree, commits on its own branch), 004 |
 | **Step** | — |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | Collect agent results; main session commits per task; launch 040 when a slot frees (it shares appsettings.template.json with 003 and the BFF build with 041); then W0-2 (004) and W1-1 schema batches |
+| **Next Action** | Collect results; commit per task; cherry-pick 040 from its worktree branch; then 005 (needs 002 + 004) and W1-1 schema batches of 4 (010, 012, 017, 018, ...) |
 
 ### Files Modified This Session
 - Pipeline output only (README, plan, CLAUDE.md, tasks/). See the pipeline commit.

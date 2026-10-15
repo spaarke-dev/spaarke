@@ -139,6 +139,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-77: any user with Write on the invoice decides lines.
 - 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
+- 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
 
 ### Open owner questions
 
