@@ -104,6 +104,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC1_HappyPath_WritesKeyVaultReferencesAndPerEnvValues_AndAdvancesCosmos()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-1");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();
@@ -388,9 +389,30 @@ public sealed class H4bBulkAppSettingsHandlerTests
     // ---------- AC-4 healthz timeout with parseable module ----------
 
     [Fact]
+    public async Task L28_FreshStamp_WritesSettingsAndCompletes_WithoutPollingHealthz()
+    {
+        // T186 L28: before H9 deploys the BFF, the stamp's site serves only the platform default page (/healthz → 404),
+        // so a fresh run's poll could only time out and quarantine. H9 verifies boot with these settings.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-l28");
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Timeout("HTTP 404 (elapsed 480s across 5 attempts)");
+        var fetcher = new FakeContainerLogFetcher();
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), writer, probe, fetcher);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.CallCount.Should().Be(1);
+        probe.CallCount.Should().Be(0, "a fresh stamp has no BFF code to answer /healthz");
+        repo.LastWrittenRun!.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be(HandlerIds.H4b);
+    }
+
+    [Fact]
     public async Task AC4_HealthzTimeoutWithParseableModule_QuarantineRequired_WithModuleDiagnostic()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-4");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();
@@ -419,6 +441,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC5_HealthzTimeoutWithUnparseableLog_QuarantineRequired_WithGenericDiagnostic()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-5");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();

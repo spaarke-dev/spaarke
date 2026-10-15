@@ -142,6 +142,7 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
+                RunInput.Intake("provisionedOn", required: false),   // T186 L28: upgrade runs poll /healthz; a fresh stamp has no code yet
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
