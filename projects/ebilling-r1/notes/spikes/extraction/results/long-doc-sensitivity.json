@@ -1,0 +1,109 @@
+{
+  "items_le_20_pages": 39,
+  "excluded": ["A-07", "B-0150"],
+  "a": {
+    "header": 51.3,
+    "repaired": {
+      "expense.amount": 97.0,
+      "expense.date": 100.0,
+      "fee.amount": 98.9,
+      "fee.date": 93.6,
+      "fee.hours": 99.1,
+      "fee.rate": 99.1,
+      "fee.timekeeper": 0.0
+    },
+    "recall": 99.6,
+    "latency_p90_s": 33.5,
+    "cost_mean_usd": 0.0079,
+    "conf_ge_090": {
+      "n": 2924,
+      "wrong": 90,
+      "wrong_rate": 3.1,
+      "share_of_scored_values": 100.0
+    }
+  },
+  "a2": {
+    "header": 99.1,
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.7,
+      "fee.date": 99.9,
+      "fee.hours": 99.9,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.5
+    },
+    "recall": 100.0,
+    "latency_p90_s": 32.9,
+    "cost_mean_usd": 0.0667,
+    "conf_ge_090": {
+      "n": 3491,
+      "wrong": 27,
+      "wrong_rate": 0.8,
+      "share_of_scored_values": 88.8
+    }
+  },
+  "b": {
+    "header": 58.8,
+    "repaired": {
+      "expense.amount": 98.8,
+      "expense.date": 97.9,
+      "fee.amount": 99.9,
+      "fee.date": 96.9,
+      "fee.hours": 96.1,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 0.0
+    },
+    "recall": 98.2,
+    "latency_p90_s": 55.6,
+    "cost_mean_usd": 0.0943,
+    "conf_ge_090": {
+      "n": 0,
+      "wrong": 0,
+      "wrong_rate": null,
+      "share_of_scored_values": 0.0
+    }
+  },
+  "c": {
+    "header": 97.6,
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 97.2,
+      "fee.amount": 100.0,
+      "fee.date": 98.0,
+      "fee.hours": 99.9,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.3
+    },
+    "recall": 100.0,
+    "latency_p90_s": 37.8,
+    "cost_mean_usd": 0.0877,
+    "conf_ge_090": {
+      "n": 608,
+      "wrong": 6,
+      "wrong_rate": 1.0,
+      "share_of_scored_values": 15.4
+    }
+  },
+  "cp": {
+    "header": 98.7,
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.9,
+      "fee.date": 100.0,
+      "fee.hours": 99.9,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.3
+    },
+    "recall": 100.0,
+    "latency_p90_s": 51.5,
+    "cost_mean_usd": 0.0912,
+    "conf_ge_090": {
+      "n": 670,
+      "wrong": 3,
+      "wrong_rate": 0.4,
+      "share_of_scored_values": 17.0
+    }
+  }
+}

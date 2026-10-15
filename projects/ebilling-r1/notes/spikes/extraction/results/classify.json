@@ -1,0 +1,31 @@
+{
+  "items": 21,
+  "lines": 259,
+  "cls_matched_lines": 259,
+  "cls_activity_top1": 75.7,
+  "cls_activity_top1_on_matched": 75.7,
+  "cls_conf_ge_090": {
+    "n": 0,
+    "wrong": 0
+  },
+  "cls_rows_with_billed_activity_value": 0,
+  "coding_step_activity_top1": {
+    "gpt-5.4-mini": 77.2,
+    "gpt-5.6-luna": 76.4
+  },
+  "cls_latency_p90_s": 37.7,
+  "cls_succeeded": 21,
+  "cls_confidence_p50_max": [0.61, 0.888],
+  "same_items_c": {
+    "fee_line_accuracy_repaired": 99.1,
+    "header_accuracy": 98.8,
+    "latency_p90_s": 31.8,
+    "cost_mean_usd": 0.0653
+  },
+  "same_items_cls": {
+    "fee_line_accuracy_repaired": 99.1,
+    "header_accuracy": 98.8,
+    "latency_p90_s": 37.7,
+    "cost_mean_usd": 0.0705
+  }
+}

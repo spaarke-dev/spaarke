@@ -4,7 +4,7 @@
     <title>Extraction spike — four arms, coding model comparison, package size; go / no-go</title>
     <phase>0 Baseline and AI foundations (WP0)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Spike code and an evaluation note outside src/; produces the evidence for an owner gate decision.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -100,7 +100,29 @@
     <criterion testable="true">No committed file under notes/spikes/ contains document text from items the manifest marks local-only.</criterion>
   </acceptance-criteria>
 
-  <notes>This task's recommendation feeds 043 (client vs fallback), 047 (coding model and tier), 161 / 162 (baseline numbers). Keep the harness reusable for 162. The note is an input to NFR-04 / NFR-05, not their final measurement.</notes>
+  <notes>This task's recommendation feeds 043 (client vs fallback), 047 (coding model and tier), 161 / 162 (baseline numbers). Keep the harness reusable for 162. The note is an input to NFR-04 / NFR-05, not their final measurement.
+
+Execution 2026-10-15 (task-execute, STANDARD, opus): steps 1-7 done; step 8 = owner gate OPEN.
+- Result: notes/extraction-spike.md. Harness, runs and scores: notes/spikes/extraction/ (results/*.json).
+- 41 items, the same for every arm: 37 synthetic (14 bundled, B-0150 at 26 pages), A-07 (108 pages), C-03, C-10, C-11. A-02 was excluded (PII disposition REVIEW).
+- Arm a ran on the gpt-4o-mini deployment (gpt-4.1-mini) with a stand-in system prompt (#1918).
+- GA analyzer meets NFR-04 after deterministic repair:
+  - header 97.6;
+  - date / timekeeper / hours / rate / amount 91.5 / 92.1 / 92.0 / 100 / 100;
+  - hours 89.3 as returned.
+- Preview c' scores about 4 points higher.
+- Wrong at confidence >= 0.90: c 1.0 %, c' 0.6 %, a 2.8 %.
+- p90 49 s; $0.07 per typical invoice.
+- Coding: gpt-5.4-mini 66.1 / 63.9 vs gpt-5.6-luna 65.7 / 61.7 task top-1 (NFR-05 at risk).
+- Classify field 75.7 vs coding step 77.2 activity top-1.
+- Probe: a preview-built analyzer is 404 under GA (and GA-built is 404 under preview).
+- Package delta +0.16 MB, +1 file (not flagged).
+- Recommendation: GO, GA only, no path-A exception; conditions for 043 in note section 12.
+- PROPOSED as D-81 in notes/decisions-log.md, awaiting the owner (A / B / C).
+- Do NOT mark done until the owner decides; then record the decision here and in D-81.
+- Azure: created spike analyzers sprk_invoice_v1p (preview), sprk_invoice_v1_cls, sprk_invoice_router, sprk_invoice_router_p (preview). No model deployment; sprk_invoice_v1 unchanged.
+- No new defects filed. The research note section 9.6 statement on GA -> preview portability is corrected in place.
+</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -1,0 +1,48 @@
+{
+  "_source": "Azure Retail Prices API (https://prices.azure.com/api/retail/prices), read 2026-10-15; retail list prices, USD, Global Standard deployments, eastus/westus. Spike estimate only.",
+  "per_million_tokens": {
+    "gpt-5.2": {
+      "input": 1.75,
+      "cached_input": 0.175,
+      "output": 14.0,
+      "meters": "GPT 5.2 inp Gl / cd inp Gl / opt Gl"
+    },
+    "gpt-5.4-mini": {
+      "input": 0.75,
+      "cached_input": 0.075,
+      "output": 4.5,
+      "meters": "5.4 mini Inp Gl / cd Inp Gl / Opt Gl"
+    },
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "cached_input": 0.02,
+      "output": 1.2,
+      "meters": "5.6 luna ShortCo Inp Std Gl / Cd Inp / Opt Std Gl (short context)"
+    },
+    "gpt-4.1-mini": {
+      "input": 0.4,
+      "cached_input": 0.1,
+      "output": 1.6,
+      "meters": "gpt 4.1 mini Inp glbl / cached Inp glbl / Outp glbl"
+    },
+    "text-embedding-3-large": {
+      "input": 0.13,
+      "cached_input": 0.13,
+      "output": 0.0,
+      "meters": "assumed list price; CU reports no embedding tokens without labeled data"
+    }
+  },
+  "content_understanding": {
+    "document_pages_standard_per_1k": 5.0,
+    "document_pages_basic_per_1k": 1.0,
+    "document_pages_minimal_per_1k": 0.01,
+    "contextualization_tokens_standard_per_1k": 0.001,
+    "contextualization_tokens_advanced_per_1k": 0.003,
+    "meters": "Doc Content Extraction Standard Pages; Std Contextualization Tokens; Adv Contextual Tokens"
+  },
+  "document_intelligence": {
+    "read_pages_per_1k": 1.5,
+    "prebuilt_pages_per_1k": 10.0,
+    "meters": "S0 Read Pages; S0 Pre-built Pages (prebuilt-layout)"
+  }
+}

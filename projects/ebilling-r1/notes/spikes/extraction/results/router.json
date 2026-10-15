@@ -1,0 +1,352 @@
+{
+  "items": [
+    "B-0007",
+    "B-0010",
+    "B-0019",
+    "B-0022",
+    "B-0031",
+    "B-0043",
+    "B-0055",
+    "B-0067",
+    "B-0079",
+    "B-0091",
+    "B-0103",
+    "B-0115",
+    "B-0127",
+    "B-0139"
+  ],
+  "rga": {
+    "split_correct": 10,
+    "of": 14,
+    "source_pages_original_file": 7,
+    "source_pages_segment_relative": 0,
+    "source_pages_checked": 10,
+    "segment_confidence_present": 0,
+    "segment_confidence_min": null,
+    "rows": [
+      {
+        "id": "B-0007",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0010",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0019",
+        "segments": 1,
+        "invoice_contents": 1,
+        "invoice_range_ok": false,
+        "segment_confidences": [null],
+        "firmname_source_page": 1,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0022",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0031",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0043",
+        "segments": 2,
+        "invoice_contents": 2,
+        "invoice_range_ok": false,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0055",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0067",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null, null],
+        "firmname_source_page": 3,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0079",
+        "segments": 1,
+        "invoice_contents": 1,
+        "invoice_range_ok": false,
+        "segment_confidences": [null],
+        "firmname_source_page": 1,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0091",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 3,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0103",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0115",
+        "segments": 2,
+        "invoice_contents": 2,
+        "invoice_range_ok": false,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0127",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0139",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [null, null, null],
+        "firmname_source_page": 3,
+        "gt_invoice_first_page": 2
+      }
+    ]
+  },
+  "rpv": {
+    "split_correct": 10,
+    "of": 14,
+    "source_pages_original_file": 8,
+    "source_pages_segment_relative": 0,
+    "source_pages_checked": 10,
+    "segment_confidence_present": 32,
+    "segment_confidence_min": 0.78,
+    "rows": [
+      {
+        "id": "B-0007",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.98, 0.97],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0010",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.95, 0.78],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0019",
+        "segments": 2,
+        "invoice_contents": 2,
+        "invoice_range_ok": false,
+        "segment_confidences": [0.99, 0.78],
+        "firmname_source_page": 1,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0022",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.98, 0.97],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0031",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.98, 0.96],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0043",
+        "segments": 2,
+        "invoice_contents": 2,
+        "invoice_range_ok": false,
+        "segment_confidences": [0.98, 0.9],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0055",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.98, 0.97],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0067",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.97, 0.9],
+        "firmname_source_page": 3,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0079",
+        "segments": 1,
+        "invoice_contents": 1,
+        "invoice_range_ok": false,
+        "segment_confidences": [0.94],
+        "firmname_source_page": 1,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0091",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.97],
+        "firmname_source_page": 3,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0103",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.95, 0.95, 0.9],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0115",
+        "segments": 2,
+        "invoice_contents": 2,
+        "invoice_range_ok": false,
+        "segment_confidences": [0.97, 0.78],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 1
+      },
+      {
+        "id": "B-0127",
+        "segments": 2,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.98],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      },
+      {
+        "id": "B-0139",
+        "segments": 3,
+        "invoice_contents": 1,
+        "invoice_range_ok": true,
+        "segment_confidences": [0.93, 0.96, 0.9],
+        "firmname_source_page": 2,
+        "gt_invoice_first_page": 2
+      }
+    ]
+  },
+  "accuracy_c": {
+    "header_accuracy": 100.0,
+    "fee_line_accuracy": 99.7,
+    "line_accuracy_all": 99.7,
+    "line_recall": 100.0,
+    "conf_ge_090": {
+      "n": 293,
+      "wrong": 1,
+      "wrong_rate": 0.3,
+      "share_of_scored_values": 31.6
+    },
+    "latency_p90_s": 27.7,
+    "cost_mean_usd": 0.0676,
+    "succeeded": 14
+  },
+  "accuracy_cp": {
+    "header_accuracy": 99.4,
+    "fee_line_accuracy": 99.5,
+    "line_accuracy_all": 99.6,
+    "line_recall": 100.0,
+    "conf_ge_090": {
+      "n": 272,
+      "wrong": 1,
+      "wrong_rate": 0.4,
+      "share_of_scored_values": 29.2
+    },
+    "latency_p90_s": 29.7,
+    "cost_mean_usd": 0.0711,
+    "succeeded": 14
+  },
+  "accuracy_rga": {
+    "header_accuracy": 100.0,
+    "fee_line_accuracy": 99.7,
+    "line_accuracy_all": 99.7,
+    "line_recall": 100.0,
+    "conf_ge_090": {
+      "n": 304,
+      "wrong": 1,
+      "wrong_rate": 0.3,
+      "share_of_scored_values": 32.7
+    },
+    "latency_p90_s": 31.6,
+    "cost_mean_usd": 0.0695,
+    "succeeded": 14
+  },
+  "accuracy_rpv": {
+    "header_accuracy": 100.0,
+    "fee_line_accuracy": 99.7,
+    "line_accuracy_all": 99.7,
+    "line_recall": 100.0,
+    "conf_ge_090": {
+      "n": 269,
+      "wrong": 1,
+      "wrong_rate": 0.4,
+      "share_of_scored_values": 28.9
+    },
+    "latency_p90_s": 34.0,
+    "cost_mean_usd": 0.0753,
+    "succeeded": 14
+  }
+}

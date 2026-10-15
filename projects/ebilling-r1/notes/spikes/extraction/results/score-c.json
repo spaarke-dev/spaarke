@@ -1,0 +1,1950 @@
+{
+  "arm": "c",
+  "items": 41,
+  "extracted": 41,
+  "header_by_field": {
+    "firm": 97.6,
+    "firm_invoice_number": 100.0,
+    "invoice_date": 95.1,
+    "billing_period_start": 90.2,
+    "billing_period_end": 97.6,
+    "firm_matter_reference": 95.1,
+    "po_number": 100.0,
+    "fees_total": 100.0,
+    "expenses_total": 100.0,
+    "adjustments_total": 97.6,
+    "total_due": 97.6,
+    "currency": 100.0
+  },
+  "header_accuracy": 97.6,
+  "header_accuracy_in_schema": 97.6,
+  "header_schema_fields": 12,
+  "header_sign_only": 1,
+  "line_by_field": {
+    "expense.amount": {
+      "acc": 100.0,
+      "n": 199
+    },
+    "expense.date": {
+      "acc": 97.7,
+      "n": 172
+    },
+    "fee.amount": {
+      "acc": 100.0,
+      "n": 1357
+    },
+    "fee.date": {
+      "acc": 91.5,
+      "n": 1626
+    },
+    "fee.hours": {
+      "acc": 89.3,
+      "n": 1563
+    },
+    "fee.rate": {
+      "acc": 100.0,
+      "n": 839
+    },
+    "fee.timekeeper": {
+      "acc": 92.1,
+      "n": 1626
+    }
+  },
+  "complete_line_by_field": {
+    "expense.amount": {
+      "acc": 100.0,
+      "n": 199
+    },
+    "expense.date": {
+      "acc": 84.4,
+      "n": 199
+    },
+    "fee.amount": {
+      "acc": 84.2,
+      "n": 1611
+    },
+    "fee.date": {
+      "acc": 91.5,
+      "n": 1626
+    },
+    "fee.hours": {
+      "acc": 92.3,
+      "n": 1626
+    },
+    "fee.rate": {
+      "acc": 83.7,
+      "n": 1611
+    },
+    "fee.timekeeper": {
+      "acc": 92.1,
+      "n": 1626
+    }
+  },
+  "repaired_line_by_field": {
+    "expense.amount": {
+      "acc": 100.0,
+      "n": 199
+    },
+    "expense.date": {
+      "acc": 97.7,
+      "n": 172
+    },
+    "fee.amount": {
+      "acc": 100.0,
+      "n": 1357
+    },
+    "fee.date": {
+      "acc": 91.5,
+      "n": 1626
+    },
+    "fee.hours": {
+      "acc": 92.0,
+      "n": 1563
+    },
+    "fee.rate": {
+      "acc": 100.0,
+      "n": 839
+    },
+    "fee.timekeeper": {
+      "acc": 92.1,
+      "n": 1626
+    }
+  },
+  "repaired_fee_line_accuracy": 94.4,
+  "repaired_line_by_field_excl_over_50_pages": {
+    "excluded": ["A-07"],
+    "expense.amount": 100.0,
+    "expense.date": 97.7,
+    "fee.amount": 100.0,
+    "fee.date": 98.9,
+    "fee.hours": 99.9,
+    "fee.rate": 100.0,
+    "fee.timekeeper": 99.6
+  },
+  "complete_fee_line_accuracy": 88.8,
+  "fee_line_accuracy": 93.8,
+  "line_accuracy_all": 94.1,
+  "line_recall": 93.2,
+  "gt_lines": 1825,
+  "spurious_lines": 18,
+  "calibration_bins": [
+    {
+      "bin": "0.00-0.50",
+      "n": 28,
+      "wrong": 2,
+      "wrong_rate": 7.1
+    },
+    {
+      "bin": "0.50-0.70",
+      "n": 973,
+      "wrong": 7,
+      "wrong_rate": 0.7
+    },
+    {
+      "bin": "0.70-0.80",
+      "n": 3042,
+      "wrong": 54,
+      "wrong_rate": 1.8
+    },
+    {
+      "bin": "0.80-0.90",
+      "n": 2850,
+      "wrong": 39,
+      "wrong_rate": 1.4
+    },
+    {
+      "bin": "0.90-0.95",
+      "n": 342,
+      "wrong": 1,
+      "wrong_rate": 0.3
+    },
+    {
+      "bin": "0.95-1.00",
+      "n": 277,
+      "wrong": 5,
+      "wrong_rate": 1.8
+    }
+  ],
+  "conf_ge_090": {
+    "n": 619,
+    "wrong": 6,
+    "wrong_rate": 1.0,
+    "share_of_scored_values": 8.2
+  },
+  "conf_ge_090_lines": {
+    "n": 249,
+    "wrong": 1,
+    "wrong_rate": 0.4
+  },
+  "conf_ge_090_header": {
+    "n": 370,
+    "wrong": 5,
+    "wrong_rate": 1.4
+  },
+  "correct_values_at_ge_090": 8.3,
+  "succeeded": 41,
+  "failed": [],
+  "latency_p50_s": 25.1,
+  "latency_p90_s": 49.2,
+  "latency_max_s": 340.8,
+  "cost_mean_usd": 0.1711,
+  "cost_median_usd": 0.0654,
+  "cost_total_usd": 7.02,
+  "cost_mean_usd_typical_1to4_pages": 0.0684,
+  "per_item": [
+    {
+      "id": "A-07",
+      "extracted": true,
+      "header_correct": 11,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 254,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 130,
+        "expense": 0
+      },
+      "spurious": null,
+      "extracted_lines": 578,
+      "line_fields": {
+        "fee.date": [130, 254],
+        "fee.timekeeper": [130, 254],
+        "fee.hours": [130, 254]
+      },
+      "line_fields_complete": {
+        "fee.date": [130, 254],
+        "fee.timekeeper": [130, 254],
+        "fee.hours": [130, 254],
+        "fee.rate": [0, 254],
+        "fee.amount": [0, 254]
+      },
+      "line_fields_repaired": {
+        "fee.date": [130, 254],
+        "fee.timekeeper": [130, 254],
+        "fee.hours": [130, 254]
+      },
+      "latency_s": 340.83,
+      "status": "Succeeded",
+      "cost_usd": 1.6976
+    },
+    {
+      "id": "B-0001",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 16,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 16,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 22,
+      "line_fields": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.rate": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.rate": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.rate": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 31.76,
+      "status": "Succeeded",
+      "cost_usd": 0.0817
+    },
+    {
+      "id": "B-0002",
+      "extracted": true,
+      "header_correct": 10,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 10,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 10,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 15,
+      "line_fields": {
+        "fee.date": [3, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [3, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [3, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 25.09,
+      "status": "Succeeded",
+      "cost_usd": 0.0607
+    },
+    {
+      "id": "B-0003",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 9,
+        "expense": 3
+      },
+      "matched": {
+        "fee": 9,
+        "expense": 3
+      },
+      "spurious": 0,
+      "extracted_lines": 12,
+      "line_fields": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.amount": [9, 9],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "line_fields_complete": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.rate": [9, 9],
+        "fee.amount": [9, 9],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "line_fields_repaired": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.amount": [9, 9],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "latency_s": 22.89,
+      "status": "Succeeded",
+      "cost_usd": 0.0612
+    },
+    {
+      "id": "B-0004",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 9,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 9,
+        "expense": 0
+      },
+      "spurious": 0,
+      "extracted_lines": 9,
+      "line_fields": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.rate": [9, 9],
+        "fee.amount": [9, 9]
+      },
+      "line_fields_complete": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.rate": [9, 9],
+        "fee.amount": [9, 9]
+      },
+      "line_fields_repaired": {
+        "fee.date": [9, 9],
+        "fee.timekeeper": [9, 9],
+        "fee.hours": [9, 9],
+        "fee.rate": [9, 9],
+        "fee.amount": [9, 9]
+      },
+      "latency_s": 18.99,
+      "status": "Succeeded",
+      "cost_usd": 0.0449
+    },
+    {
+      "id": "B-0005",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 17,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 17,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 23,
+      "line_fields": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.hours": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.hours": [17, 17],
+        "fee.rate": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.date": [0, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.hours": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 28.0,
+      "status": "Succeeded",
+      "cost_usd": 0.0721
+    },
+    {
+      "id": "B-0006",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 7,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 7,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 12,
+      "line_fields": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 20.87,
+      "status": "Succeeded",
+      "cost_usd": 0.0601
+    },
+    {
+      "id": "B-0007",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 10,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 10,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 15,
+      "line_fields": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 25.81,
+      "status": "Succeeded",
+      "cost_usd": 0.0611
+    },
+    {
+      "id": "B-0008",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 21,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 21,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 26,
+      "line_fields": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [21, 21],
+        "fee.hours": [3, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [21, 21],
+        "fee.hours": [21, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [21, 21],
+        "fee.hours": [21, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 35.14,
+      "status": "Succeeded",
+      "cost_usd": 0.0873
+    },
+    {
+      "id": "B-0009",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 10,
+        "expense": 1
+      },
+      "matched": {
+        "fee": 10,
+        "expense": 1
+      },
+      "spurious": 0,
+      "extracted_lines": 11,
+      "line_fields": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_complete": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_repaired": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "latency_s": 20.6,
+      "status": "Succeeded",
+      "cost_usd": 0.0577
+    },
+    {
+      "id": "B-0010",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 11,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 11,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 16,
+      "line_fields": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 24.54,
+      "status": "Succeeded",
+      "cost_usd": 0.0715
+    },
+    {
+      "id": "B-0011",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 11,
+        "expense": 7
+      },
+      "matched": {
+        "fee": 11,
+        "expense": 7
+      },
+      "spurious": 1,
+      "extracted_lines": 19,
+      "line_fields": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [9, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "line_fields_complete": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [9, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "line_fields_repaired": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [9, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "latency_s": 23.68,
+      "status": "Succeeded",
+      "cost_usd": 0.0649
+    },
+    {
+      "id": "B-0012",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 13,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 13,
+        "expense": 5
+      },
+      "spurious": 1,
+      "extracted_lines": 19,
+      "line_fields": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [13, 13],
+        "fee.hours": [13, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [13, 13],
+        "fee.hours": [13, 13],
+        "fee.rate": [13, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [13, 13],
+        "fee.hours": [13, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 25.79,
+      "status": "Succeeded",
+      "cost_usd": 0.0609
+    },
+    {
+      "id": "B-0013",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 7,
+        "expense": 4
+      },
+      "matched": {
+        "fee": 7,
+        "expense": 4
+      },
+      "spurious": 0,
+      "extracted_lines": 11,
+      "line_fields": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [4, 4],
+        "expense.amount": [4, 4]
+      },
+      "line_fields_complete": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [4, 4],
+        "expense.amount": [4, 4]
+      },
+      "line_fields_repaired": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [4, 4],
+        "expense.amount": [4, 4]
+      },
+      "latency_s": 18.27,
+      "status": "Succeeded",
+      "cost_usd": 0.0473
+    },
+    {
+      "id": "B-0014",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 16,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 16,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 22,
+      "line_fields": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.rate": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [16, 16],
+        "fee.timekeeper": [16, 16],
+        "fee.hours": [16, 16],
+        "fee.amount": [16, 16],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 27.73,
+      "status": "Succeeded",
+      "cost_usd": 0.0706
+    },
+    {
+      "id": "B-0015",
+      "extracted": true,
+      "header_correct": 11,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 15,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 15,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 20,
+      "line_fields": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [4, 15],
+        "fee.amount": [15, 15],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15],
+        "expense.date": [0, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.amount": [15, 15],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 27.78,
+      "status": "Succeeded",
+      "cost_usd": 0.0656
+    },
+    {
+      "id": "B-0016",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 8,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 8,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 14,
+      "line_fields": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.hours": [8, 8],
+        "fee.rate": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.hours": [8, 8],
+        "fee.rate": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.hours": [8, 8],
+        "fee.rate": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 22.31,
+      "status": "Succeeded",
+      "cost_usd": 0.0562
+    },
+    {
+      "id": "B-0017",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 24,
+        "expense": 8
+      },
+      "matched": {
+        "fee": 24,
+        "expense": 8
+      },
+      "spurious": 0,
+      "extracted_lines": 32,
+      "line_fields": {
+        "fee.date": [24, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_complete": {
+        "fee.date": [24, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_repaired": {
+        "fee.date": [24, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "latency_s": 37.16,
+      "status": "Succeeded",
+      "cost_usd": 0.1125
+    },
+    {
+      "id": "B-0018",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 11,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 11,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 17,
+      "line_fields": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 23.73,
+      "status": "Succeeded",
+      "cost_usd": 0.0708
+    },
+    {
+      "id": "B-0019",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 7,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 7,
+        "expense": 0
+      },
+      "spurious": 0,
+      "extracted_lines": 7,
+      "line_fields": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.amount": [7, 7]
+      },
+      "line_fields_complete": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7]
+      },
+      "line_fields_repaired": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.amount": [7, 7]
+      },
+      "latency_s": 15.48,
+      "status": "Succeeded",
+      "cost_usd": 0.0478
+    },
+    {
+      "id": "B-0020",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 15,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 15,
+        "expense": 0
+      },
+      "spurious": 0,
+      "extracted_lines": 15,
+      "line_fields": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15]
+      },
+      "line_fields_complete": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15]
+      },
+      "line_fields_repaired": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15]
+      },
+      "latency_s": 30.16,
+      "status": "Succeeded",
+      "cost_usd": 0.0665
+    },
+    {
+      "id": "B-0021",
+      "extracted": true,
+      "header_correct": 10,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 24,
+        "expense": 8
+      },
+      "matched": {
+        "fee": 24,
+        "expense": 8
+      },
+      "spurious": 0,
+      "extracted_lines": 32,
+      "line_fields": {
+        "fee.date": [16, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [6, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_complete": {
+        "fee.date": [16, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [6, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_repaired": {
+        "fee.date": [16, 24],
+        "fee.timekeeper": [24, 24],
+        "fee.hours": [24, 24],
+        "fee.rate": [24, 24],
+        "fee.amount": [24, 24],
+        "expense.date": [6, 8],
+        "expense.amount": [8, 8]
+      },
+      "latency_s": 35.48,
+      "status": "Succeeded",
+      "cost_usd": 0.1022
+    },
+    {
+      "id": "B-0022",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 15,
+        "expense": 2
+      },
+      "matched": {
+        "fee": 15,
+        "expense": 2
+      },
+      "spurious": 0,
+      "extracted_lines": 17,
+      "line_fields": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_complete": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15],
+        "expense.date": [0, 2],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_repaired": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15],
+        "fee.rate": [15, 15],
+        "fee.amount": [15, 15],
+        "expense.amount": [2, 2]
+      },
+      "latency_s": 26.05,
+      "status": "Succeeded",
+      "cost_usd": 0.0843
+    },
+    {
+      "id": "B-0023",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 21,
+        "expense": 6
+      },
+      "matched": {
+        "fee": 21,
+        "expense": 6
+      },
+      "spurious": 0,
+      "extracted_lines": 27,
+      "line_fields": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [20, 21],
+        "fee.hours": [7, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_complete": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [20, 21],
+        "fee.hours": [21, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "line_fields_repaired": {
+        "fee.date": [21, 21],
+        "fee.timekeeper": [20, 21],
+        "fee.hours": [21, 21],
+        "fee.rate": [21, 21],
+        "fee.amount": [21, 21],
+        "expense.date": [6, 6],
+        "expense.amount": [6, 6]
+      },
+      "latency_s": 34.04,
+      "status": "Succeeded",
+      "cost_usd": 0.087
+    },
+    {
+      "id": "B-0024",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 10,
+        "expense": 3
+      },
+      "matched": {
+        "fee": 10,
+        "expense": 3
+      },
+      "spurious": 0,
+      "extracted_lines": 13,
+      "line_fields": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "line_fields_complete": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "line_fields_repaired": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [3, 3],
+        "expense.amount": [3, 3]
+      },
+      "latency_s": 16.29,
+      "status": "Succeeded",
+      "cost_usd": 0.0539
+    },
+    {
+      "id": "B-0026",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 10,
+        "expense": 7
+      },
+      "matched": {
+        "fee": 10,
+        "expense": 7
+      },
+      "spurious": 0,
+      "extracted_lines": 17,
+      "line_fields": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "line_fields_complete": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "line_fields_repaired": {
+        "fee.date": [10, 10],
+        "fee.timekeeper": [10, 10],
+        "fee.hours": [10, 10],
+        "fee.rate": [10, 10],
+        "fee.amount": [10, 10],
+        "expense.date": [7, 7],
+        "expense.amount": [7, 7]
+      },
+      "latency_s": 27.66,
+      "status": "Succeeded",
+      "cost_usd": 0.062
+    },
+    {
+      "id": "B-0031",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 6,
+        "expense": 1
+      },
+      "matched": {
+        "fee": 6,
+        "expense": 1
+      },
+      "spurious": 1,
+      "extracted_lines": 8,
+      "line_fields": {
+        "fee.date": [6, 6],
+        "fee.timekeeper": [6, 6],
+        "fee.hours": [6, 6],
+        "fee.amount": [6, 6],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_complete": {
+        "fee.date": [6, 6],
+        "fee.timekeeper": [6, 6],
+        "fee.hours": [6, 6],
+        "fee.rate": [5, 6],
+        "fee.amount": [6, 6],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_repaired": {
+        "fee.date": [6, 6],
+        "fee.timekeeper": [6, 6],
+        "fee.hours": [6, 6],
+        "fee.amount": [6, 6],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "latency_s": 15.23,
+      "status": "Succeeded",
+      "cost_usd": 0.0471
+    },
+    {
+      "id": "B-0043",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 12,
+        "expense": 2
+      },
+      "matched": {
+        "fee": 12,
+        "expense": 2
+      },
+      "spurious": 0,
+      "extracted_lines": 14,
+      "line_fields": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_complete": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.hours": [12, 12],
+        "fee.rate": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_repaired": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "latency_s": 20.85,
+      "status": "Succeeded",
+      "cost_usd": 0.0605
+    },
+    {
+      "id": "B-0055",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 40,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 40,
+        "expense": 5
+      },
+      "spurious": 0,
+      "extracted_lines": 45,
+      "line_fields": {
+        "fee.date": [40, 40],
+        "fee.timekeeper": [39, 40],
+        "fee.hours": [40, 40],
+        "fee.amount": [40, 40],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [40, 40],
+        "fee.timekeeper": [39, 40],
+        "fee.hours": [40, 40],
+        "fee.rate": [34, 40],
+        "fee.amount": [40, 40],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [40, 40],
+        "fee.timekeeper": [39, 40],
+        "fee.hours": [40, 40],
+        "fee.amount": [40, 40],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 49.23,
+      "status": "Succeeded",
+      "cost_usd": 0.1361
+    },
+    {
+      "id": "B-0067",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 12,
+        "expense": 2
+      },
+      "matched": {
+        "fee": 12,
+        "expense": 2
+      },
+      "spurious": 0,
+      "extracted_lines": 14,
+      "line_fields": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_complete": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.hours": [12, 12],
+        "fee.rate": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "line_fields_repaired": {
+        "fee.date": [12, 12],
+        "fee.timekeeper": [12, 12],
+        "fee.amount": [12, 12],
+        "expense.date": [2, 2],
+        "expense.amount": [2, 2]
+      },
+      "latency_s": 18.9,
+      "status": "Succeeded",
+      "cost_usd": 0.0652
+    },
+    {
+      "id": "B-0079",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 13,
+        "expense": 1
+      },
+      "matched": {
+        "fee": 13,
+        "expense": 1
+      },
+      "spurious": 1,
+      "extracted_lines": 15,
+      "line_fields": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [12, 13],
+        "fee.hours": [13, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_complete": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [12, 13],
+        "fee.hours": [12, 13],
+        "fee.rate": [11, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_repaired": {
+        "fee.date": [13, 13],
+        "fee.timekeeper": [12, 13],
+        "fee.hours": [12, 13],
+        "fee.amount": [13, 13],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "latency_s": 20.62,
+      "status": "Succeeded",
+      "cost_usd": 0.0627
+    },
+    {
+      "id": "B-0091",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 7,
+        "expense": 8
+      },
+      "matched": {
+        "fee": 7,
+        "expense": 8
+      },
+      "spurious": 1,
+      "extracted_lines": 16,
+      "line_fields": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_complete": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_repaired": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "latency_s": 17.83,
+      "status": "Succeeded",
+      "cost_usd": 0.0537
+    },
+    {
+      "id": "B-0103",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 11,
+        "expense": 8
+      },
+      "matched": {
+        "fee": 11,
+        "expense": 8
+      },
+      "spurious": 0,
+      "extracted_lines": 19,
+      "line_fields": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_complete": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.rate": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_repaired": {
+        "fee.date": [11, 11],
+        "fee.timekeeper": [11, 11],
+        "fee.hours": [11, 11],
+        "fee.amount": [11, 11],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "latency_s": 24.67,
+      "status": "Succeeded",
+      "cost_usd": 0.0756
+    },
+    {
+      "id": "B-0115",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 17,
+        "expense": 5
+      },
+      "matched": {
+        "fee": 17,
+        "expense": 5
+      },
+      "spurious": 1,
+      "extracted_lines": 23,
+      "line_fields": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_complete": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.hours": [17, 17],
+        "fee.rate": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "line_fields_repaired": {
+        "fee.date": [17, 17],
+        "fee.timekeeper": [17, 17],
+        "fee.amount": [17, 17],
+        "expense.date": [5, 5],
+        "expense.amount": [5, 5]
+      },
+      "latency_s": 28.4,
+      "status": "Succeeded",
+      "cost_usd": 0.0743
+    },
+    {
+      "id": "B-0127",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 7,
+        "expense": 1
+      },
+      "matched": {
+        "fee": 7,
+        "expense": 1
+      },
+      "spurious": 0,
+      "extracted_lines": 8,
+      "line_fields": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_complete": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.rate": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "line_fields_repaired": {
+        "fee.date": [7, 7],
+        "fee.timekeeper": [7, 7],
+        "fee.hours": [7, 7],
+        "fee.amount": [7, 7],
+        "expense.date": [1, 1],
+        "expense.amount": [1, 1]
+      },
+      "latency_s": 15.94,
+      "status": "Succeeded",
+      "cost_usd": 0.0411
+    },
+    {
+      "id": "B-0139",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 8,
+        "expense": 8
+      },
+      "matched": {
+        "fee": 8,
+        "expense": 8
+      },
+      "spurious": 0,
+      "extracted_lines": 16,
+      "line_fields": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_complete": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.hours": [8, 8],
+        "fee.rate": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "line_fields_repaired": {
+        "fee.date": [8, 8],
+        "fee.timekeeper": [8, 8],
+        "fee.amount": [8, 8],
+        "expense.date": [8, 8],
+        "expense.amount": [8, 8]
+      },
+      "latency_s": 23.14,
+      "status": "Succeeded",
+      "cost_usd": 0.0654
+    },
+    {
+      "id": "B-0149",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 230,
+        "expense": 14
+      },
+      "matched": {
+        "fee": 230,
+        "expense": 14
+      },
+      "spurious": 0,
+      "extracted_lines": 244,
+      "line_fields": {
+        "fee.date": [230, 230],
+        "fee.timekeeper": [230, 230],
+        "fee.hours": [230, 230],
+        "fee.amount": [230, 230],
+        "expense.amount": [14, 14]
+      },
+      "line_fields_complete": {
+        "fee.date": [230, 230],
+        "fee.timekeeper": [230, 230],
+        "fee.hours": [230, 230],
+        "fee.rate": [230, 230],
+        "fee.amount": [230, 230],
+        "expense.date": [0, 14],
+        "expense.amount": [14, 14]
+      },
+      "line_fields_repaired": {
+        "fee.date": [230, 230],
+        "fee.timekeeper": [230, 230],
+        "fee.hours": [230, 230],
+        "fee.amount": [230, 230],
+        "expense.amount": [14, 14]
+      },
+      "latency_s": 142.38,
+      "status": "Succeeded",
+      "cost_usd": 0.6228
+    },
+    {
+      "id": "B-0150",
+      "extracted": true,
+      "header_correct": 12,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 620,
+        "expense": 30
+      },
+      "matched": {
+        "fee": 620,
+        "expense": 30
+      },
+      "spurious": 0,
+      "extracted_lines": 650,
+      "line_fields": {
+        "fee.date": [620, 620],
+        "fee.timekeeper": [620, 620],
+        "fee.hours": [620, 620],
+        "fee.rate": [620, 620],
+        "fee.amount": [620, 620],
+        "expense.date": [30, 30],
+        "expense.amount": [30, 30]
+      },
+      "line_fields_complete": {
+        "fee.date": [620, 620],
+        "fee.timekeeper": [620, 620],
+        "fee.hours": [620, 620],
+        "fee.rate": [620, 620],
+        "fee.amount": [620, 620],
+        "expense.date": [30, 30],
+        "expense.amount": [30, 30]
+      },
+      "line_fields_repaired": {
+        "fee.date": [620, 620],
+        "fee.timekeeper": [620, 620],
+        "fee.hours": [620, 620],
+        "fee.rate": [620, 620],
+        "fee.amount": [620, 620],
+        "expense.date": [30, 30],
+        "expense.amount": [30, 30]
+      },
+      "latency_s": 298.15,
+      "status": "Succeeded",
+      "cost_usd": 1.8997
+    },
+    {
+      "id": "C-03",
+      "extracted": true,
+      "header_correct": 11,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 47,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 47,
+        "expense": 0
+      },
+      "spurious": 12,
+      "extracted_lines": 59,
+      "line_fields": {
+        "fee.date": [47, 47],
+        "fee.timekeeper": [47, 47],
+        "fee.hours": [47, 47],
+        "fee.amount": [47, 47]
+      },
+      "line_fields_complete": {
+        "fee.date": [47, 47],
+        "fee.timekeeper": [47, 47],
+        "fee.hours": [47, 47],
+        "fee.rate": [47, 47],
+        "fee.amount": [47, 47]
+      },
+      "line_fields_repaired": {
+        "fee.date": [47, 47],
+        "fee.timekeeper": [47, 47],
+        "fee.hours": [47, 47],
+        "fee.amount": [47, 47]
+      },
+      "latency_s": 60.74,
+      "status": "Succeeded",
+      "cost_usd": 0.1925
+    },
+    {
+      "id": "C-10",
+      "extracted": true,
+      "header_correct": 10,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 0,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 0,
+        "expense": 0
+      },
+      "spurious": null,
+      "extracted_lines": null,
+      "line_fields": {},
+      "line_fields_complete": {},
+      "line_fields_repaired": {},
+      "latency_s": 40.11,
+      "status": "Succeeded",
+      "cost_usd": 0.1492
+    },
+    {
+      "id": "C-11",
+      "extracted": true,
+      "header_correct": 9,
+      "header_n": 12,
+      "gt_lines": {
+        "fee": 15,
+        "expense": 0
+      },
+      "matched": {
+        "fee": 15,
+        "expense": 0
+      },
+      "spurious": 0,
+      "extracted_lines": 15,
+      "line_fields": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15]
+      },
+      "line_fields_complete": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15]
+      },
+      "line_fields_repaired": {
+        "fee.date": [15, 15],
+        "fee.timekeeper": [15, 15],
+        "fee.hours": [15, 15]
+      },
+      "latency_s": 20.51,
+      "status": "Succeeded",
+      "cost_usd": 0.0616
+    }
+  ]
+}

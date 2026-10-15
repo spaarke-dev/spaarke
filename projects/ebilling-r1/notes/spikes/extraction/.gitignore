@@ -1,0 +1,3 @@
+# Raw service outputs (~11 MB, synthetic items only) stay local; re-run run_cu.py / run_text_llm.py to regenerate.
+raw/
+__pycache__/

@@ -396,7 +396,7 @@ There's **no difference from GA.** Service limits (2026-09-16) has one table for
 
 ### 9.6 Analyzer portability and migration cost
 
-- **GA → preview:** documented. A GA analyzer is readable from the preview API (`workflow = standard.2025-11-01`) and keeps the standard rate. Analyzing a GA-created analyzer with the preview api-version is implied but not explicitly stated.
+- **GA → preview:** documented. A GA analyzer is readable from the preview API (`workflow = standard.2025-11-01`) and keeps the standard rate. Analyzing a GA-created analyzer with the preview api-version is implied but not explicitly stated. **Task 005 (2026-10-15): not true on our resource — a GA-built analyzer is 404 under the preview api-version; see §9.8.**
 - **Preview → GA:** **not documented.** A preview analyzer that uses only GA properties is *probably* callable on GA, but that's UNVERIFIED. One using distilled training, `workflow: agentic` or `allowInPageSegments` should be assumed GA-incompatible.
 - **The field schema is byte-identical across versions.** The analyzer JSON (fields, descriptions, enums, `knowledgeSources`, `contentCategories`) ports by re-PUT under a new analyzer id. Labeled blobs are reusable.
 
@@ -437,3 +437,9 @@ The opposite error, building on preview and then having it changed or retired, w
 3. What is confidence and grounding behaviour under agentic mode? Academic for us; we won't use it.
 4. Is the July 15, 2026 retirement date for `2024-12-01-preview`/`2025-05-01-preview` correct? Confirm on an en-us page.
 5. Does the current Azure Preview Supplemental Terms text for generative-AI previews permit client invoice data under our customer contracts?
+
+> **2026-10-15 — resolved by task 005** (`notes/extraction-spike.md` §7–§8):
+> - Item 1: **No.** A preview-built analyzer returns 404 `ModelNotFound` under `2025-11-01` (GET and analyze).
+>   - The reverse also fails: a GA-built analyzer is 404 under `2026-06-01-preview`. This corrects the GA → preview statement in §9.6.
+>   - Analyzers are scoped to the api-version that created them, so moving versions means re-PUT under the new version plus re-evaluation.
+> - Item 2: routed (`contentCategories` + `enableSegment`) results use **original-file** page numbers in field `source`, on both GA and preview. Ranged input was not tested.

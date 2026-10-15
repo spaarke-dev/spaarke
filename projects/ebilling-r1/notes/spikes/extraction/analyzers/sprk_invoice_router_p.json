@@ -1,0 +1,33 @@
+{
+  "analyzerId": "sprk_invoice_router_p",
+  "description": "SPIKE 005 bundled-PDF router (preview): splits a file into cover letter / invoice / other segments and routes invoice segments to sprk_invoice_v1p.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": true,
+    "enableOcr": true,
+    "enableLayout": true,
+    "enableSegment": true,
+    "omitContent": false,
+    "contentCategories": {
+      "invoice": {
+        "description": "A law-firm invoice or statement for legal services: invoice number, fee time entries, expenses and totals due.",
+        "analyzerId": "sprk_invoice_v1p"
+      },
+      "cover_letter": {
+        "description": "A cover or transmittal letter, remittance advice or email that accompanies an invoice but is not itself the invoice."
+      },
+      "other": {
+        "description": "Any other page that is neither an invoice nor its cover letter."
+      }
+    }
+  },
+  "models": {
+    "completion": "gpt-5.2",
+    "embedding": "text-embedding-3-large"
+  },
+  "processingLocation": "geography",
+  "tags": {
+    "project": "ebilling-r1",
+    "spike": "005"
+  }
+}
