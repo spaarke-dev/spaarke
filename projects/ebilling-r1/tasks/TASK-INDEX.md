@@ -14,7 +14,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 001 | 🟡 [in-progress] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
+| 001 | ⏸ [blocked: owner A/B] | Baseline the existing Finance pipeline and dev rollups | STANDARD | sonnet / high | P0-A | none |
 | 002 | 🟡 [in-progress] | Assemble the evaluation set and manifest | MINIMAL | sonnet / high | P0-A | none |
 | 003 | ✅ [completed] | Deploy dev model deployments and Content Understanding defaults | STANDARD | sonnet / high | P0-A | none |
 | 004 | 🔲 [open] | Content Understanding analyzer definition v1 and deploy script | STANDARD | sonnet / high | P0-B | 003 |

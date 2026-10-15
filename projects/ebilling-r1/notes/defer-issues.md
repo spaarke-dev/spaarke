@@ -98,3 +98,93 @@ The dev App Service has `Ai__OpenAiKey`, `AzureOpenAI__ApiKey`, `DocumentIntelli
 The deployment name misdescribes its model and the model retires 2027-04-14. eBilling does not use it (coding uses `gpt-5.4-mini`, D-46).
 
 ---
+
+### ISS-002 — Dev cannot run the legacy Finance extraction pipeline (no playbook-id setting, no FinanceExtraction / FinanceClassification playbooks, no gpt-4o deployment)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 001 (baseline; escalation trigger 1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1918 |
+
+**Description**
+
+`spaarke-bff-dev` has no `Finance__InvoiceExtractionPlaybookId` setting, so `InvoiceExtractionJobHandler` marks every invoice Failed at `:329-336`. The `FinanceExtraction` and `FinanceClassification` playbook rows that `InvoiceAnalysisService` loads by name do not exist in dev (and have no seed in the repo), and the dev OpenAI account has no `gpt-4o` deployment (the `FinanceOptions` extraction default). Any Confirm in dev enqueues a job that cannot succeed.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs:328-336`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs:35,41`
+- `src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs:37,42`
+
+**Suggested fix**
+
+None before 044: the path is replaced by Content Understanding + Actions (D-52) and deleted in 050. Owner decides whether to repair dev for an interim run.
+
+**Estimated effort**: 1-2 hours (config + seed), only if the owner wants an interim run
+**Blockers**: owner decision (task 001 escalation)
+**Related**: ebilling-r1 tasks 001, 044, 050; evidence `notes/baseline-finance-pipeline.md`
+
+---
+
+### ISS-003 — Legacy InvoiceExtraction persists nothing on success (output mapping unreachable, placeholder loads, no Extracted status, no billing events)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (superseded by 050 deletion) |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 001 (baseline) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1919 |
+
+**Description**
+
+The handler's only success-path write is `OutputOrchestrator.ApplyOutputMappingAsync`, which is a no-op because `PlaybookService.GetPlaybookAsync` never selects `sprk_configjson`; `LoadInvoiceRecordAsync` (and the indexing handler's loads) are placeholders; success never sets the extraction status; no `sprk_billingevent` rows are ever written by this path. Related existing issues: #229, #233, #1087 (wrong-entity failure-status write).
+
+**Entry-points**
+
+- `InvoiceExtractionJobHandler.cs:339, 499-527, 559-583`
+- `Services/Ai/PlaybookService.cs:223-274`; `Services/Ai/OutputOrchestratorService.cs:317-346`
+- `InvoiceIndexingJobHandler.cs:259-328`
+
+**Suggested fix**
+
+No fix: task 050 deletes the legacy extraction path (D-71); 044/152 build the replacement and the real indexing inputs.
+
+**Estimated effort**: n/a (deleted by 050)
+**Blockers**: none
+**Related**: #229, #233, #1087; ebilling-r1 tasks 044, 050, 152
+
+---
+
+### ISS-004 — AttachmentClassification job is never enqueued; finance architecture doc describes triggers and writes that do not exist
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-15 |
+| **Source** | ebilling-r1 task 001 (baseline) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1920 |
+
+**Description**
+
+No code in `src/` submits an `AttachmentClassification` job, and `EmailToDocumentJobHandler` (named as the trigger in `docs/architecture/finance-intelligence-architecture.md`) does not exist. Dev has 0 classified documents. The same doc also claims extraction writes billing events and that the snapshot job runs after extraction; neither is true.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs:38`
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs:156-159, 168-174`
+- `docs/architecture/finance-intelligence-architecture.md` (data flow steps 1-4, 7)
+
+**Suggested fix**
+
+Task 042 migrates classification to an Action + Binding with its own trigger; correct the architecture doc in the eBilling docs work.
+
+**Estimated effort**: 30 min (doc), trigger design is task 042
+**Blockers**: none
+**Related**: ebilling-r1 tasks 001, 042; rollup evidence is on existing issue #1663 (comment 2026-10-15)
+
+---

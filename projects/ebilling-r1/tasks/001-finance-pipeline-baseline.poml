@@ -4,7 +4,7 @@
     <title>Baseline the existing Finance pipeline and dev rollups</title>
     <phase>0 Baseline and AI foundations (WP0)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Investigation with a live dev run and a written evidence note; no production code change (defects are fixed in scope only when trivial, else filed).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,6 +99,8 @@
   </acceptance-criteria>
 
   <notes>Inputs for later tasks: 042 (classification baseline numbers for the FR-46 before/after comparison — record the classification outcome on the sample), 050 (what the legacy extraction path writes), 152 (indexing job state). If the dev pipeline cannot run at all, the note still records each step's static configuration and why it could not run.</notes>
+
+  <progress-notes>2026-10-15: static + read-only dev baseline complete (notes/baseline-finance-pipeline.md). Live pipeline run (step 3) NOT performed: escalation trigger 1 fired (dev lacks the playbook-id setting, FinanceExtraction/FinanceClassification playbooks and a gpt-4o deployment; classification has no trigger). Awaiting owner decision. Defects: #1918, #1919, #1920 filed (notes/defer-issues.md ISS-002..004); #1087, #229, #233, #1663 already open (evidence added to #1663). No src/** change, no dev record created (nothing to clean up). If the owner decides the baseline stands without a live run, mark completed; if an interim dev repair is approved, resume at step 3.</progress-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
