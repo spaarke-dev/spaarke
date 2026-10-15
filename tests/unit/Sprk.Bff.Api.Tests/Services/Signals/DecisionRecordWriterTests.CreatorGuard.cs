@@ -131,16 +131,32 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     [Theory]
-    [InlineData("""{"steps":[{"code":"send-reminder","taken":true},{"code":"mark-complete","taken":false}]}""", true)]
-    [InlineData("""{"steps":[{"code":"send-budget-inquiry","taken":true}]}""", true)]
-    [InlineData("""{"steps":[{"code":"send-reminder","taken":true},{"code":"mark-complete","taken":true}]}""", false)]
-    [InlineData("""{"steps":[{"code":"mark-complete","taken":true}]}""", false)]
-    [InlineData("""{"steps":[{"code":"send-reminder","taken":false}]}""", false)]
-    [InlineData("""{"steps":[{"code":"send-reminder"}]}""", false)]
-    [InlineData("""{"steps":[{"code":"condition-cleared","taken":true}]}""", false)]
-    [InlineData("""{"steps":[]}""", false)]
-    [InlineData("not json", false)]
-    [InlineData(null, false)]
-    public void IsNonResolvingReviewRecord_IsTrueOnlyForARecordThatTookNothingButActionsLeavingTheItemOpen(string? steps, bool expected) =>
-        DecisionRecordWriter.IsNonResolvingReviewRecord(steps).Should().Be(expected);
+    [InlineData("""{"steps":[{"code":"send-reminder","taken":true},{"code":"mark-complete","taken":false}]}""", null, true)]
+    [InlineData("""{"steps":[{"code":"send-budget-inquiry","taken":true}]}""", null, true)]
+    [InlineData("""{"steps":[{"code":"send-reminder","taken":true},{"code":"mark-complete","taken":true}]}""", null, false)]
+    [InlineData("""{"steps":[{"code":"mark-complete","taken":true}]}""", null, false)]
+    [InlineData("""{"steps":[{"code":"send-reminder","taken":false}]}""", null, false)]
+    [InlineData("""{"steps":[{"code":"send-reminder"}]}""", null, false)]
+    [InlineData("""{"steps":[{"code":"condition-cleared","taken":true}]}""", null, false)]
+    [InlineData("""{"steps":[]}""", null, false)]
+    [InlineData("""{"steps":[]}""", "[]", false)]
+    [InlineData("not json", null, false)]
+    [InlineData(null, null, false)]
+    // uac-r2 re-check K2: a review that took no action but created a Next step (DecisionCommitService's InquirySent) leaves the item open.
+    [InlineData("""{"steps":[{"code":"mark-complete","taken":false}]}""", """[{"actionCode":"add-todo","entity":"sprk_todo","id":"c0430000-0000-4000-8000-000000000001"}]""", true)]
+    [InlineData("""{"steps":[{"code":"mark-complete","taken":false}]}""", """[{"actionCode":"add-todo","entity":null,"id":null}]""", true)]
+    [InlineData("""{"steps":[{"code":"mark-complete","taken":true}]}""", """[{"actionCode":"add-todo","entity":null,"id":null}]""", false)]
+    [InlineData("""{"steps":[{"code":"mark-complete","taken":false}]}""", "not json", false)]
+    public void IsNonResolvingReviewRecord_IsTrueOnlyForARecordThatTookNothingButActionsAndNextStepsLeavingTheItemOpen(string? steps, string? followOns, bool expected) =>
+        DecisionRecordWriter.IsNonResolvingReviewRecord(steps, followOns).Should().Be(expected);
+
+    [Theory]
+    [InlineData(new string[0], 0, false)]
+    [InlineData(new string[0], 1, true)]
+    [InlineData(new[] { "send-reminder" }, 0, true)]
+    [InlineData(new[] { "send-reminder" }, 2, true)]
+    [InlineData(new[] { "mark-complete" }, 0, false)]
+    [InlineData(new[] { "send-reminder", "mark-complete" }, 1, false)]
+    public void LeavesSignalOpen_IsTheOneRuleBehindTheCommitsInquirySent_AndTheRetrysNonResolvingLink(string[] taken, int followOns, bool expected) =>
+        DecisionRecordWriter.LeavesSignalOpen(taken, followOns).Should().Be(expected);
 }

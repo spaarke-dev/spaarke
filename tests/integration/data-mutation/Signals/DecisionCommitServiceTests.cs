@@ -89,6 +89,12 @@ public sealed class DecisionCommitServiceTests
 
     // ── The rig ──────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Uac-r2 re-check F1: the ontology writer's own application user (WhoAmI on its connection), the <c>createdby</c> of its records.</summary>
+    private static readonly Guid WriterUser = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+
+    /// <summary>Uac-r2 re-check F1: a Console user, who has Deep Create on <c>sprk_decisionrecord</c>.</summary>
+    private static readonly Guid ConsoleCreator = Guid.Parse("c0430000-0000-4000-8000-0000000000cc");
+
     private sealed class Rig
     {
         public Dictionary<Guid, Entity> Signals { get; } = new();
@@ -103,6 +109,14 @@ public sealed class DecisionCommitServiceTests
         public Exception? FailRecordWith { get; set; }
         public Action<Guid>? BeforeSignalUpdate { get; set; }
         public List<Entity> ExistingRecords { get; } = new();
+
+        /// <summary>Uac-r2 re-check F1: every query the commit service's reads asked (the stored-record lookup included).</summary>
+        public List<QueryExpression> QueriesAsked { get; } = new();
+
+        /// <summary>Uac-r2 re-check F1: when set, WhoAmI on the writer's connection throws it; and how often it was asked.</summary>
+        public Exception? WhoAmIFault { get; set; }
+
+        public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
         public Mock<IGenericEntityService> Entities { get; } = new();
         public Mock<IDataverseUserClient> User { get; } = new();
@@ -186,8 +200,17 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                     new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : id == ReassignVersion ? ReassignPlan : PathBPlan });
+            // The stored-record lookup is narrowed by createdby (uac-r2 re-check F1): like Dataverse, answer only the rows whose createdby
+            // equals the query's createdby condition, when it has one.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
+                .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+                {
+                    QueriesAsked.Add(query);
+                    var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                    return new EntityCollection(ExistingRecords
+                        .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .ToList());
+                });
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid id, string[] columns, CancellationToken _) =>
                     (columns.Contains("sprk_assignedto") ? TodoReadFault : TodoFilingReadFault) is { } fault
@@ -213,7 +236,16 @@ public sealed class DecisionCommitServiceTests
                     Records.Add(e);
                     return Task.FromResult(RecordId);
                 });
-            Org.Setup(o => o.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            // Uac-r2 re-check F1: WhoAmI on the writer's own connection (the createdby of every row it creates).
+            Org.Setup(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+                .Returns((OrganizationRequest _, CancellationToken _) =>
+                {
+                    WhoAmICalls++;
+                    return WhoAmIFault is { } fault
+                        ? Task.FromException<OrganizationResponse>(fault)
+                        : Task.FromResult<OrganizationResponse>(new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = WriterUser } });
+                });
+            Org.Setup(o => o.ExecuteAsync(It.IsAny<UpdateRequest>(), It.IsAny<CancellationToken>()))
                 .Returns((OrganizationRequest request, CancellationToken _) =>
                 {
                     var target = ((UpdateRequest)request).Target;
@@ -2783,6 +2815,7 @@ public sealed class DecisionCommitServiceTests
     {
         var written = rig.Records.Single();
         written.Id = RecordId;
+        written["createdby"] = new EntityReference("systemuser", WriterUser); // Dataverse stamps the creator: the writer, with no impersonation
         rig.ExistingRecords.Add(written);
         await ForgetLedger(rig, review);
     }
@@ -2836,6 +2869,73 @@ public sealed class DecisionCommitServiceTests
         var unproven = await rig.CommitAsync(review);
         unproven.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged, "a record that cannot prove it is this review answers nothing");
 
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    // ── uac-r2 re-check F1 (PR #1953): the stored-record lookup matches only records the ontology writer created ───────────────────────
+
+    [Fact]
+    public async Task F1_AUserCreatedRowWithTheReviewsIdAndHash_IsIgnored_TheFullPathRuns_AndTheGenuineRecordIsWrittenAndLinked()
+    {
+        // A Console user (Deep create on sprk_decisionrecord; sprk_steps and sprk_confirmedby are not field-secured) pre-creates a row with
+        // their own confirmedby, the review id, the predictable review hash and the Signals.
+        var rig = new Rig();
+        var review = PathBReview(inquiry: false, todo: false);
+        var forged = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_confirmedby"] = new EntityReference("systemuser", Caller),
+            ["createdby"] = new EntityReference("systemuser", ConsoleCreator),
+            ["sprk_steps"] = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["reviewId"] = review.ReviewId.ToString("D"),
+                ["reviewHash"] = DecisionCommitService.ContentHash(Primary, review),
+                ["resolvedSignalIds"] = new[] { Primary.ToString("D") },
+                ["steps"] = new[] { new { code = "approve-variance", taken = true } },
+            }),
+            ["sprk_followons"] = "[]",
+        };
+        rig.ExistingRecords.Add(forged);
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeFalse("the forged row is not an earlier run of this review");
+        result.DecisionRecordId.Should().Be(RecordId).And.NotBe(forged.Id);
+        rig.Log.Should().Contain(l => l.StartsWith("execute:", StringComparison.Ordinal), "the executors ran");
+        rig.Records.Should().ContainSingle("the genuine record is written");
+        rig.LinkedRecord(Primary).Should().Be(RecordId, "the Signal links the genuine record, not the forged row");
+    }
+
+    [Fact]
+    public async Task F1_AWriterCreatedRecordWithTheSameKey_StillTakesTheFinishingPath_NoRegression()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.Records.Should().ContainSingle("nothing is recorded again");
+        rig.QueriesAsked.Last(q => q.EntityName == "sprk_decisionrecord").Criteria.Conditions.Should().Contain(
+            c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal && c.Values.Single().Equals(WriterUser));
+    }
+
+    [Fact]
+    public async Task F1_WhenTheWritersIdentityCannotBeRead_TheCommitIsUnavailable_AndNothingIsDoneOrClosed()
+    {
+        var rig = new Rig { WhoAmIFault = new TimeoutException("whoami") };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, "the lookup cannot be narrowed, so it fails closed, never 'no record found'");
+        rig.WhoAmICalls.Should().BeGreaterThan(0);
+        rig.Writes.Should().BeEmpty("nothing is executed, recorded or closed");
         rig.Status(Primary).Should().Be(Open);
     }
 

@@ -144,4 +144,64 @@ public partial class SignalReevaluationJobTests
                                           && e.Message.Contains("hit again"))
             .Which.Level.Should().Be(LogLevel.Warning);
     }
+
+    [Fact]
+    public async Task Run_ANextStepsOnlyReviewRecordLinked_IsReplacedByTheClosuresRecord_LikeAReminder()
+    {
+        // uac-r2 re-check K2: a review that took no action but created a Next step is InquirySent in the commit (the Signal stays Acknowledged
+        // and linked to it). The retry must recognise that record by the same rule, or the closure's record is dropped on every pass.
+        var (h, signalId, nextStepsId) = ToDoWithAReminderCompletedByAColleague();
+        h.Sysadmin.DecisionRecords[nextStepsId]["sprk_steps"] = "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"steps\":[{\"code\":\"mark-complete\",\"taken\":false}]}";
+        h.Sysadmin.DecisionRecords[nextStepsId]["sprk_followons"] = "[{\"actionCode\":\"add-todo\",\"entity\":\"sprk_todo\",\"id\":\"" + Guid.NewGuid().ToString("D") + "\"}]";
+
+        // The closing pass writes the record but its link is refused (D-61), so the Signal stays linked to the Next-steps-only record; only
+        // the next pass's RETRY can replace that link.
+        h.Org.TouchBeforeConditionalUpdateFor = target => target.Contains("sprk_decisionrecord");
+        (await h.RunAsync()).ResultJson.Should().Contain("\"closureRecordsLinked\":0");
+        h.Org.Rows[signalId].GetAttributeValue<EntityReference>("sprk_decisionrecord")!.Id.Should().Be(nextStepsId, "precondition: still the old link");
+
+        h.Org.TouchBeforeConditionalUpdateFor = null;
+        h.Clock.Advance(TimeSpan.FromDays(1));
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var record = h.Org.DecisionRecordRows.Values.Should().ContainSingle().Subject;
+        h.Org.Rows[signalId].GetAttributeValue<EntityReference>("sprk_decisionrecord")!.Id.Should().Be(record.Id, "the retry replaces the Next-steps-only link");
+        h.Org.Rows[signalId].GetAttributeValue<EntityReference>("sprk_resolvedby")!.Id.Should().Be(OtherUserId);
+        result.ResultJson.Should().Contain("\"closureRecordsLinked\":1");
+    }
+
+    [Theory]
+    [InlineData("userCreatedReminder")]
+    [InlineData("writerCreatedResolvingRecord")]
+    public async Task Run_AClosuresRetryWhosePriorLinkIsNotAWriterD128Link_IsLoggedAndMetered_NeverSilent(string priorKind)
+    {
+        // uac-r2 re-check K2: the retry is dropped (the link is foreign), and the drop says so: a Warning naming the Signal and the record,
+        // and a skip on ontology.writer.skips.
+        var (h, signalId) = ToDoCompletedByAColleague();
+        var prior = Guid.NewGuid();
+        h.Sysadmin.DecisionRecords[prior] = priorKind == "userCreatedReminder"
+            ? ForeignReminderRecord(prior, createdBy: ConsoleUserId)
+            : ForeignReminderRecord(prior, createdBy: WriterOrg.WriterUserId, resolving: true);
+        h.Org.CreateFaultFor = entity =>
+        {
+            if (entity.LogicalName == "sprk_decisionrecord") h.Org.Rows[signalId]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", prior);
+            return null;
+        };
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.CreateFaultFor = null;
+        await h.Cache.RemoveAsync(SignalReevaluationJob.ClosureRecordSkippedCacheKey(signalId, 1));
+        h.Org.ResetCounts();
+        h.Clock.Advance(TimeSpan.FromDays(1));
+
+        using var metrics = new MetricCapture();
+        var retry = await h.RunAsync();
+
+        retry.Success.Should().BeTrue();
+        h.Org.WriteCalls.Should().Be(0, "the foreign link is not replaced");
+        h.Log.Should().ContainSingle(e => e.Message.Contains(OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink)
+                                          && e.Message.Contains(signalId.ToString()) && e.Message.Contains(prior.ToString()))
+            .Which.Level.Should().Be(LogLevel.Warning);
+        metrics.Counter("ontology.writer.skips", "reason", OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink).Should().BeGreaterThanOrEqualTo(1);
+    }
 }

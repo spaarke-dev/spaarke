@@ -807,12 +807,24 @@ public sealed class DecisionRecordWriter
         && steps.Contains($"\"code\":\"{ConditionClearedStepCode}\"", StringComparison.Ordinal);
 
     /// <summary>
-    /// Task 153 (adversarial pass 2): true when a Decision Record's <c>sprk_steps</c> took only actions that leave the item open (the catalog's
-    /// <see cref="DecisionActionDefinition.ResolvesSignal"/> false: D-119's budget inquiry, D-128 Q18's Do-lane reminder), and at least one:
-    /// the record a review leaves the Signal Acknowledged and linked to (<c>DecisionCommitService</c>'s InquirySent, decided by the same
-    /// catalog flag). Only such a record's link is the one a condition-cleared closure's record replaces on a retry. Unreadable steps are not.
+    /// Task 153 (uac-r2 re-check K2): THE rule for whether a review's record leaves its Signals open: something was done (an action taken or a
+    /// Next step created) and none of the taken actions resolves the Signal (the catalog's <see cref="DecisionActionDefinition.ResolvesSignal"/>;
+    /// D-119's budget inquiry, D-128 Q18's Do-lane reminder, or a review that only created Next steps). <c>DecisionCommitService</c>'s
+    /// <c>RecordedResolution</c> (InquirySent) and <see cref="IsNonResolvingReviewRecord"/> (the job's retry) both derive from it, so a record
+    /// the commit leaves a Signal Acknowledged and linked to is the same record the closure retry may replace.
     /// </summary>
-    internal static bool IsNonResolvingReviewRecord(string? steps)
+    internal static bool LeavesSignalOpen(IReadOnlyCollection<string> takenCodes, int followOnCount) =>
+        (takenCodes.Count > 0 || followOnCount > 0)
+        && !takenCodes.Any(code => DecisionActionCatalog.TryGet(code, out var definition) && definition.ResolvesSignal);
+
+    /// <summary>
+    /// Task 153 (adversarial pass 2; uac-r2 re-check K2): true when a Decision Record (its <c>sprk_steps</c> and <c>sprk_followons</c>) is one
+    /// that <see cref="LeavesSignalOpen"/> says leaves the item open: the record a review leaves the Signal Acknowledged and linked to
+    /// (<c>DecisionCommitService</c>'s InquirySent). Only such a record's link is the one a condition-cleared closure's record replaces on a
+    /// retry. Narrower than the commit's rule in one respect: a taken code the catalog does not know makes it false (such a record is no D-128
+    /// link; the job logs and meters the drop). Unreadable steps or follow-ons are false.
+    /// </summary>
+    internal static bool IsNonResolvingReviewRecord(string? steps, string? followOns)
     {
         if (string.IsNullOrWhiteSpace(steps)) return false;
         try
@@ -825,7 +837,7 @@ public sealed class DecisionRecordWriter
                 return false;
             }
 
-            var taken = 0;
+            var taken = new List<string>();
             foreach (var step in list.EnumerateArray())
             {
                 if (step.ValueKind != JsonValueKind.Object
@@ -835,11 +847,19 @@ public sealed class DecisionRecordWriter
                 }
 
                 var code = step.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
-                if (!DecisionActionCatalog.TryGet(code, out var definition) || definition.ResolvesSignal) return false;
-                taken++;
+                if (!DecisionActionCatalog.TryGet(code, out _)) return false;
+                taken.Add(code!);
             }
 
-            return taken > 0;
+            var followOnCount = 0;
+            if (!string.IsNullOrWhiteSpace(followOns))
+            {
+                using var next = JsonDocument.Parse(followOns);
+                if (next.RootElement.ValueKind != JsonValueKind.Array) return false;
+                followOnCount = next.RootElement.GetArrayLength();
+            }
+
+            return LeavesSignalOpen(taken, followOnCount);
         }
         catch (JsonException)
         {

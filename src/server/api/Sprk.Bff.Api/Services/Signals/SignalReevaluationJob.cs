@@ -721,8 +721,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// and that record existed before the close (a D-128 reminder or inquiry the item carried while it was open): their closure still needs
     /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. Adversarial pass
     /// 2: the read returns only records the writer created (<c>createdby</c>), and a record is replaced only when it took nothing but actions
-    /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own, was created
-    /// after the close, was created by a person, is any other decision, or cannot be found is left alone. A read fault (the writer's identity
+    /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own is left alone; one that was created
+    /// after the close, was created by a person, is any other decision, or cannot be found is left alone, logged at Warning and metered
+    /// (<see cref="OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink"/>). A read fault (the writer's identity
     /// included) propagates (the caller does not guess).
     /// </summary>
     private async Task<List<(ExistingSignal Signal, Guid? PriorRecordId)>> RetriesReplacingAPriorLinkAsync(
@@ -734,7 +735,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             var query = new QueryExpression("sprk_decisionrecord")
             {
-                ColumnSet = new ColumnSet("sprk_steps", "createdon"),
+                ColumnSet = new ColumnSet("sprk_steps", "sprk_followons", "createdon"),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -752,20 +753,31 @@ public sealed class SignalReevaluationJob : IScheduledJob
         foreach (var signal in linked)
         {
             var prior = signal.DecisionRecordId!.Value;
-            if (!records.TryGetValue(prior, out var record)
-                || DecisionRecordWriter.IsConditionClearedRecordFor(record.GetAttributeValue<string>("sprk_steps"), signal.Id, signal.Episode))
+            // The writer's own record for this closure: already recorded, nothing to retry (not a drop worth reporting).
+            if (records.TryGetValue(prior, out var record)
+                && DecisionRecordWriter.IsConditionClearedRecordFor(record.GetAttributeValue<string>("sprk_steps"), signal.Id, signal.Episode))
             {
                 continue;
             }
 
-            // Adversarial pass 2: and only a D-128 link: a record that took only actions leaving the item open (a reminder or an inquiry).
-            // Any other prior link (a person's own decision, a record a person re-linked) is foreign, whatever the skip marker says.
-            if (DecisionRecordWriter.IsNonResolvingReviewRecord(record.GetAttributeValue<string>("sprk_steps"))
+            // Adversarial pass 2: and only a D-128 link: a record that took only actions leaving the item open (a reminder or an inquiry), or only
+            // created Next steps (uac-r2 re-check K2: the same rule as the commit's InquirySent). Any other prior link (a person's own decision, a
+            // record a person re-linked, a record not found among the writer's own) is foreign, whatever the skip marker says.
+            if (record is not null
+                && DecisionRecordWriter.IsNonResolvingReviewRecord(record.GetAttributeValue<string>("sprk_steps"), record.GetAttributeValue<string>("sprk_followons"))
                 && record.GetAttributeValue<DateTime?>("createdon") is { } created
                 && DateTime.SpecifyKind(created, DateTimeKind.Utc) < DateTime.SpecifyKind(signal.ResolvedOn!.Value, DateTimeKind.Utc))
             {
                 retries.Add((signal, prior));
+                continue;
             }
+
+            // uac-r2 re-check K2: never silent. This closure's record is not retried; say so, and count it.
+            _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                "Signal {SignalId} (episode {Episode}) was closed as ConditionCleared and links Decision Record {RecordId}, which is not one of the " +
+                "writer's own records that left the item open (reason={Reason}); its closure's record is not retried.",
+                signal.Id, signal.Episode, prior, OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink);
+            OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink);
         }
 
         return retries;

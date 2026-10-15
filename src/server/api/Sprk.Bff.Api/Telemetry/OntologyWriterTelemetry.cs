@@ -356,6 +356,11 @@ public static class OntologyWriterFailureReason
     /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
     public const string ClosureRecordSkippedForeignLink = "cleared_dr_skipped_foreign_link";
 
+    /// <summary>Ontology task 153 (uac-r2 re-check K2): a closed Signal links a Decision Record the retry does not recognise as a D-128 link
+    /// it may replace (not found among the writer's own records, created after the close, or with a code the catalog does not know), so
+    /// its closure's record is not retried. A counted skip, logged at Warning, never silent.</summary>
+    public const string ClosureRecordSkippedUnrecognisedPriorLink = "cleared_dr_skipped_unrecognised_prior_link";
+
     /// <summary>Ontology task 153 (adversarial pass 2 K1): a Do-lane condition-cleared closure's Decision Record was written, but before the
     /// job could link it a person's decision re-closed the Signal (with its own record). The human decision wins and the closure's record is
     /// left unlinked; a counted skip, logged at Warning, never retried.</summary>
