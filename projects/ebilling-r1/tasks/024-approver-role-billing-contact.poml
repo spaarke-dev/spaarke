@@ -4,7 +4,7 @@
     <title>sprk_billingapproverrole into source; firm billing contact</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New script file and a new lookup column; touches existing dev columns that hold data (preserve-only); no C# code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -104,6 +104,27 @@
   <notes>
     FR-14's "a record with an empty field resolves approvers from the settings default for its type (test per core type)" is approver-resolution behaviour and is tested in task 103, not here.
     Column logical names on the core tables are taken from dev as found (step 0); task 103 reads them from these notes.
+
+    STATUS 2026-10-15: IN PROGRESS. Everything except the Matter multi-select replacement is done and verified in dev. The Matter replacement is destructive and waits for the owner's OK (DEF-011, GitHub #1941). Acceptance criterion 1 ("multi-select column on sprk_matter ... in SpaarkeMaster") is met for Project and Work Assignment; for Matter the column is in SpaarkeMaster (whole-table component) but is still single-select.
+
+    Step 0 read (dev spaarkedev1, 2026-10-15), before the run:
+    - Global choice sprk_billingapproverrole, MetadataId 6ce9d250-0ec8-f111-a05c-0022482913fc, global, unmanaged, customizable. Values: 100000000 Assigned Attorney 1; 100000001 Assigned Attorney 2; 100000002 Assigned Paralegal 1; 100000003 Assigned Paralegal 2; 100000004 Assigned To Internal; 100000005 "Assigned to External" (lower-case "to"; D-33 text spells "Assigned To External": casing only, left as is, preserve-only); 100000006 Assigned To. Task 025 and task 103 use these values.
+    - Columns (logical name sprk_billingapproverrole, schema sprk_BillingApproverRole, display "Billing Approver Role", required None, bound to the global choice on all three): sprk_project = MultiSelectPicklist (id 10d5bb53-0fc8-f111-a05a-7c1e520a989f); sprk_workassignment = MultiSelectPicklist (id d827596c-0fc8-f111-a05c-3833c5e9614d); sprk_matter = single-select Picklist (id 3dba4a3d-0fc8-f111-a05c-7c1e52154cae) - contradicts D-33, see DEF-011.
+    - Rows holding a value: sprk_matter 0 of 65, sprk_project 0 of 23, sprk_workassignment 0 of 22 (all rows, all states; read twice, once by `ne null` and once by reading every row; the totals drift because other work deletes test rows). Identical after the run.
+    - solutioncomponents (SpaarkeMaster 1.2.3.0): sprk_matter, sprk_project, sprk_workassignment and sprk_organization are each a WHOLE-TABLE component (type 1, rootcomponentbehavior 0), so their columns, including the new sprk_billingcontact, are included without type-2 entries. The global choice was ALREADY a SpaarkeMaster component (type 9) before the run. D-33's "not yet in solution source" is about the git export (task 029), not the dev solution; the script's phase 4 found nothing to add.
+    - sprk_organization had no contact lookup other than sprk_primarycontact1 / 2, so the escalation trigger did not fire.
+
+    Run (Deploy-EbillingApproverRoleSchema.ps1, WhatIf then real, exit 0): created sprk_organization.sprk_billingcontact (lookup to contact, relationship sprk_organization_billingcontact_contact, delete RemoveLink, assign / share NoCascade), published sprk_matter / sprk_project / sprk_workassignment / sprk_organization plus the option set. Second run: created 0, changed 0, skipped 9, "nothing changed - no publish". The only deferred item is the Matter column.
+
+    Matter / DEF-011: see notes/defer-issues.md DEF-011. Evidence: 0 rows hold a value; RetrieveDependenciesForDelete lists 1 dependency, the platform-generated aiskillconfig ais_FormFillFieldOptOut_sprk_matter_sprk_billingapproverrole (type 10314, a form-fill opt-out config created with the column, in the Default solution); no form (5), view (9), personal view (1), chart or workflow / business rule of sprk_matter references the column. The script path is prepared: `-ReplaceMatterApproverRole` re-runs these guards, refuses on any row with a value, any dependency other than that skill config, or any reference in a form / view / chart / workflow, and only then drops and recreates the column as a multi-select on the same global choice. Because nothing places the column on a form or view today, there is nothing to re-add; if that changes before the switch is used the script stops and lists them. The switch was NOT run (not even with -WhatIf). The create body (MultiSelectPicklistAttributeMetadata + GlobalOptionSet@odata.bind) was checked by posting it against sprk_project, where Dataverse parsed it and refused it as a duplicate (0x80047013), no write.
+
+    sprk_assignedto: this task does not depend on it. 024 creates no approver resolution; it stores which assignment fields are approvers. Matter and Project have no sprk_assignedto lookup (confirmed by task 021's pre-check), so the option "Assigned To" (100000006) can only resolve on Work Assignment; task 103 must treat it as "no approver" on Matter and Project. Not handled in 024 beyond this note.
+
+    Billing contact docs: no data-model page documents sprk_organization, so the billing-contact note lives here: sprk_organization.sprk_billingcontact (display "Billing Contact", lookup to contact, optional): the firm's billing contact; firm notices (rejection, return, whole-invoice reject, approval with adjustments) go to the submitter and this contact (D-45, FR-39). Tasks reading it: 131 / 132 notification work.
+
+    Docs added: docs/data-model/sprk_workassignment.md and docs/data-model/sprk_invoice-matter-project.md (rows for sprk_billingapproverrole; Matter row states the single-select reality).
+
+    Not done by design: TASK-INDEX.md (parallel mode: the main session updates it), src/dataverse/solutions/SpaarkeMaster/** (task 029).
   </notes>
 
   <execution>

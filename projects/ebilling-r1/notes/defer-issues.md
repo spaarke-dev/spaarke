@@ -480,7 +480,7 @@ Port both changes to the other scripts, or move the helpers into one shared file
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Open - evidence gathered, replacement script prepared, awaiting owner OK |
 | **Urgency** | before task 024 and task 103 start |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 021 |
@@ -504,6 +504,17 @@ In task 024 decide with the owner: replace the Matter column with a multi-select
 **Blockers**: owner decision (destructive change)
 
 **Related**: D-33, D-54; ebilling-r1 tasks 024, 103
+
+**Evidence (task 024, 2026-10-15, dev spaarkedev1)**
+
+- Rows: `sprk_matter` 65 total (62 on the final read; test rows are being deleted by other work), **0 hold a value** in `sprk_billingapproverrole` (counted by `ne null` and by reading every row). Project 0 of 23, Work Assignment 0 of 22.
+- Dependencies (`RetrieveDependenciesForDelete`, component type 2): **1**, the platform-generated `aiskillconfig` `ais_FormFillFieldOptOut_sprk_matter_sprk_billingapproverrole` (type 10314, Default solution), created with the column. No form (5 forms), view (9), personal view (1), chart or workflow / business rule of `sprk_matter` references the column; no other table's dependency is listed. So no form or view needs re-adding after the replacement.
+- The column and the global choice are already SpaarkeMaster components (`sprk_matter` is a whole-table component).
+- Prepared path: `scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1 -ReplaceMatterApproverRole`. It re-runs the guards and refuses (exit 2, nothing changed) when any Matter row holds a value, when anything other than that skill config depends on the column, or when a form / view / chart / workflow references it; otherwise it deletes the single-select column, waits until it is gone and creates `sprk_billingapproverrole` as a multi-select on the same global choice, then verifies and publishes. `-WhatIf -ReplaceMatterApproverRole` runs the guards without writing. Without the switch the script only reports the evidence and lists the column as deferred. **The switch has not been run** (it needs the owner's OK: deleting a column).
+- The "Assigned To" option: Matter and Project have no `sprk_assignedto`; task 024 does not depend on it. Task 103 must treat option 100000006 as "no approver" on Matter and Project.
+- Side effect to check on first use: whether the platform recreates the `FormFillFieldOptOut` skill config for the new column (it is deleted with the old one). Harmless either way.
+
+**Next action**: owner OK for the destructive replacement (0 rows affected, 1 auto-generated dependency); then run the script with `-ReplaceMatterApproverRole`, close #1941 and set this item to Resolved. Task 024 stays in-progress until then.
 
 ---
 

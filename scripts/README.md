@@ -1845,6 +1845,15 @@ pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1
 ```
 
+### `ebilling/Deploy-EbillingApproverRoleSchema.ps1`
+
+Additive Dataverse metadata script (FR-14 / D-33, `ebilling-r1` task 024) that checks the global choice `sprk_billingapproverrole` and its columns on Matter, Project and Work Assignment (labels compared ignoring case, values preserved), and creates the firm billing contact lookup `sprk_organization.sprk_billingcontact` (to `contact`, delete RemoveLink). By default it only reports the Matter column, which is still single-select in dev (DEF-011, #1941). `-ReplaceMatterApproverRole` drops that column and recreates it as a multi-select on the same global choice, and refuses (exit 2, no change) if any Matter row holds a value or anything other than its auto-generated skill config depends on it; run it only with the owner's OK. Supports `-WhatIf`; publishes entity-scoped only when it changed something.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1
+```
+
 ### `ebilling/Deploy-EbillingExternalIdentifierSchema.ps1`
 
 Additive Dataverse metadata script (FR-12 / FR-05 / D-12 / D-68, `ebilling-r1` task 022) that creates the user-owned table `sprk_externalidentifier` (typed identifiers such as the firm invoice number, firm client-matter number, law-department matter number and PO as quoted): the eight-value local choice `sprk_identifiertype` (system-required), `sprk_identifiervalue`, `sprk_normalizedvalue` (system-required matching value), `sprk_issuingsystem`, the `sprk_issuingorganization` and `sprk_regardinginvoice` lookups, the ADR-024 `sprk_regarding*` lookups and five resolver fields, and the owner-decided alternate key (firm, type, normalized value, core record id). It waits for the key index to be Active and stops with exit 2, choosing no other key, if Dataverse refuses this one. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns and the key tests: `docs/data-model/sprk_externalidentifier.md`.
