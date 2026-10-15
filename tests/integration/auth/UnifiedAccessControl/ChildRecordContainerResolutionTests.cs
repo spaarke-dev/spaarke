@@ -650,6 +650,10 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
         + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_rescheduledby>contact;sprk_todoassigned>contact")]
+    // ebilling-r1 task 013: + sprk_regardingworkassignment (added by ebilling-r1 task 012, live spaarkedev1 2026-10-15).
+    // Task 012 also added sprk_supersedesinvoice > sprk_invoice and sprk_billingexport > sprk_billingexport; neither is
+    // a filing (a superseded invoice and an export batch confer no core record), and classifying them is a uac-r2
+    // decision reported by task 013, so they are not in this snapshot yet.
     [InlineData("sprk_invoice", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
@@ -657,6 +661,7 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_assignedtoattorney1>contact;sprk_assignedtoattorney2>contact;sprk_assignedtoparalegal1>contact;"
         + "sprk_assignedtoparalegal2>contact;sprk_matter>sprk_matter;sprk_project>sprk_project;"
         + "sprk_regardingagreement>sprk_agreement;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_securitybu>businessunit;sprk_vendororg>sprk_organization;transactioncurrencyid>transactioncurrency")]
     [InlineData("sprk_workassignment", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"

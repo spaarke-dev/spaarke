@@ -106,8 +106,9 @@ public sealed class CoreAncestorResolver
     /// access edge.
     /// </summary>
     /// <remarks>
-    /// ⚠️ Not every child entity carries all four: <c>sprk_invoice</c> carries none of them (it links through
-    /// typed <c>sprk_matter</c> / <c>sprk_project</c> lookups), while <c>sprk_todo</c> and <c>sprk_event</c>
+    /// ⚠️ Not every child entity carries all four: <c>sprk_invoice</c> carries only
+    /// <c>sprk_regardingworkassignment</c> (ebilling-r1 task 012; it links a matter or project through typed
+    /// <c>sprk_matter</c> / <c>sprk_project</c> lookups), while <c>sprk_todo</c> and <c>sprk_event</c>
     /// carry all four (live spaarkedev1, read-only, 2026-10-01 — an earlier note here
     /// that <c>sprk_todo</c> lacks <c>sprk_regardingservicerequest</c> was stale). Presence is therefore always
     /// resolved against live metadata, never assumed — reading a non-existent column would fault and turn a
@@ -179,7 +180,14 @@ public sealed class CoreAncestorResolver
             // CHILD target, so C# and TypeScript agree for a memo target. Without this entry the C# side read a memo
             // target as Unclassified while the TypeScript side derived it (verifier item 1).
             ["sprk_memo"] = StandardRootColumns(),
-            ["sprk_invoice"] = [("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter")],
+            // ebilling-r1 task 013 (FR-05): task 012 gave the invoice sprk_regardingworkassignment (live spaarkedev1,
+            // 2026-10-15) beside its typed sprk_matter / sprk_project, so an invoice filed under a work assignment is a root
+            // column too. The TypeScript mirror and RecordContainerResolver.ChildAncestorLinks changed in the same change.
+            ["sprk_invoice"] =
+            [
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            ],
             // The canonical document link vocabulary's (Spaarke.Dataverse.DocumentLinkFields — the one declaration)
             // links to a project / matter / work assignment: the typed column and its related twin. EXCLUDED, by name:
             // the related service request (a service request cannot carry sprk_issecure, and the storage resolver
@@ -687,6 +695,78 @@ public sealed class CoreAncestorResolver
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
     }
 
+    /// <summary>
+    /// ebilling-r1 task 013 (FR-05, D-75): the core record a STORED invoice-family row regards, read from the row's OWN
+    /// core-record lookups (<see cref="InvoiceFamilyCoreRecordGuard.ColumnsToRead"/>) and decided by
+    /// <see cref="InvoiceFamilyCoreRecordGuard.Check(string, Func{string, object?})"/>: exactly one, or a refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>D-75.</b> A line (<c>sprk_billingevent</c>) is never resolved through its <c>sprk_invoice</c>: that column is
+    /// not read, and a line with no core lookup of its own is refused. A line may in future not belong to exactly one
+    /// invoice.</para>
+    /// <para><b>Fail closed (NFR-01).</b> A metadata failure, a table missing one of its lookup columns in this
+    /// environment (the "exactly one" rule cannot be checked on a partial read) or a read failure is
+    /// <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/> — never <see cref="InvoiceFamilyCoreRecordGuard.NoCoreRecordCode"/>.
+    /// A row that does not exist is <see cref="InvoiceFamilyCoreRecordGuard.RecordNotFoundCode"/>. Does not throw.</para>
+    /// <para>This is NOT <see cref="ResolveStampsAsync"/>: it answers "which core record does this row name" for the family's
+    /// own writers and readers (tasks 026, 049, 100), and changes no stamp topology.</para>
+    /// </remarks>
+    public async Task<InvoiceFamilyCoreRecord> ResolveInvoiceFamilyCoreRecordAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct = default)
+    {
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        var columns = InvoiceFamilyCoreRecordGuard.ColumnsToRead(entity);
+        if (columns is null)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.UnknownEntityCode,
+                $"'{entity}' is not an invoice-family table.");
+        }
+
+        if (recordId == Guid.Empty)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                $"The {entity} id is Guid.Empty; refusing to derive its core record.");
+        }
+
+        Entity? row;
+        try
+        {
+            var present = await _columnProbe(entity, ct).ConfigureAwait(false);
+            var missing = columns.Where(c => !present.Contains(c)).ToList();
+            if (missing.Count > 0)
+            {
+                _logger.LogError(
+                    "{Entity} lacks its core-record lookup column(s) {Columns} in this environment; refusing to derive its core record.",
+                    entity, string.Join(", ", missing));
+                return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                    $"{entity} lacks {string.Join(", ", missing)} in this environment, so its core record cannot be checked.");
+            }
+
+            row = await _entityService.RetrieveAsync(entity, recordId, columns.ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            if (IsRecordNotFound(ex))
+            {
+                return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode,
+                    $"{entity}({recordId:D}) does not exist.");
+            }
+
+            _logger.LogError(ex, "Reading the core-record lookups of {Entity}({Id}) failed; failing closed per NFR-01.",
+                entity, recordId);
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                $"The core-record lookups of {entity}({recordId:D}) could not be read: {ex.Message}");
+        }
+
+        if (row is null)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode,
+                $"{entity}({recordId:D}) does not exist.");
+        }
+
+        return InvoiceFamilyCoreRecordGuard.Check(entity, column => row.Attributes.TryGetValue(column, out var value) ? value : null);
+    }
+
     /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
     private static bool IsRecordNotFound(Exception ex)
     {
@@ -704,7 +784,8 @@ public sealed class CoreAncestorResolver
     /// </summary>
     /// <remarks>
     /// A derived ancestor the host has no column for (a child entity lacking the matching
-    /// <c>sprk_regarding{core}</c> column — e.g. <c>sprk_invoice</c>, which carries none of them; the earlier
+    /// <c>sprk_regarding{core}</c> column — e.g. <c>sprk_invoice</c>, which carries only
+    /// <c>sprk_regardingworkassignment</c> (ebilling-r1 task 012); the earlier
     /// example, <c>sprk_todo</c> lacking <c>sprk_regardingservicerequest</c>, was stale as of live metadata on
     /// 2026-10-01) is a genuine hole in child inheritance. It is
     /// RETURNED as <c>unstampable</c> and logged, never silently dropped: it is a schema finding for the owner,

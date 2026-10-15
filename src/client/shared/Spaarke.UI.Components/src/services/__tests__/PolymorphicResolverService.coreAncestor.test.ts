@@ -508,6 +508,34 @@ describe('deriveCoreAncestorStamps — intermediate targets', () => {
     ]);
   });
 
+  // ebilling-r1 task 013: task 012 added sprk_invoice.sprk_regardingworkassignment (FR-05); the server's
+  // IntermediateRootColumns gained it in the same change.
+  it('derivesAnInvoicesWorkAssignmentFromItsRegardingWorkAssignment', async () => {
+    const { webApi, calls } = buildWebApi({
+      _sprk_matter_value: null,
+      _sprk_project_value: null,
+      _sprk_regardingworkassignment_value: WA_ID,
+    });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_invoice',
+      INVOICE_ID,
+      metadataFetchStub({ sprk_invoice: ['sprk_matter', 'sprk_project', 'sprk_regardingworkassignment'] })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_workassignment',
+        entitySet: 'sprk_workassignments',
+        lookupAttribute: 'sprk_regardingworkassignment',
+        recordId: WA_ID,
+      },
+    ]);
+    const select = /\$select=([^&]*)/.exec(calls.filter(c => c.query.includes('_value'))[0].query)?.[1] ?? '';
+    expect(select).toContain('_sprk_regardingworkassignment_value');
+  });
+
   it('derivesABudgetsProjectFromItsTypedLookup', async () => {
     const { webApi } = buildWebApi({ _sprk_matter_value: null, _sprk_project_value: PROJECT_ID });
     const result = await deriveCoreAncestorStamps(

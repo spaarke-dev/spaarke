@@ -60,7 +60,8 @@ internal sealed class StampWorld
             "sprk_regardingdocument", "sprk_regardinginvoice", "sprk_regardingrecordid", "sprk_regardingrecordtype",
             "sprk_documentid",
         ],
-        ["sprk_invoice"] = ["sprk_project", "sprk_matter", "sprk_regardingagreement"],
+        // ebilling-r1 task 012 added sprk_regardingworkassignment to the invoice (live spaarkedev1, 2026-10-15).
+        ["sprk_invoice"] = ["sprk_project", "sprk_matter", "sprk_regardingworkassignment", "sprk_regardingagreement"],
         ["sprk_document"] =
         [
             "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_relatedmatter", "sprk_relatedproject",

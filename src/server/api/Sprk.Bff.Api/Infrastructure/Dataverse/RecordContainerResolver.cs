@@ -1852,10 +1852,13 @@ public sealed partial class RecordContainerResolver
                 // (f3). An invoice carries no copy, so a set sprk_regardingagreement stays HELD (task 156). Task 150 (owner
                 // round 10 item 11): these links are the ONLY thing that decides an invoice — its own sprk_issecure is not
                 // a security input (SecurableEntityRegistry.FlagIsNotASecurityInput), so it is never read for a flag or a
-                // container.
+                // container. ebilling-r1 task 013 (FR-05): an invoice may instead be filed under a work assignment through
+                // sprk_regardingworkassignment — its third core-record link, in lockstep with
+                // CoreAncestorResolver.IntermediateRootColumns["sprk_invoice"].
                 ["sprk_invoice"] = new(polymorphic: true,
                 [
                     ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
                     ("sprk_regardingagreement", "sprk_agreement"),
                 ]),
                 // A ROOT that is itself filed regarding a matter / project (live: 9 of 22 work assignments) or a

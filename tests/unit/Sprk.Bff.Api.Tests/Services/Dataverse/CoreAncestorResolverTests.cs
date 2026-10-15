@@ -457,6 +457,32 @@ public class CoreAncestorResolverTests
                 "the stamp lands on the CHILD's sprk_regardingmatter, whatever the intermediate's own column is called");
     }
 
+    [Fact(DisplayName = "ebilling-r1 task 013: an invoice filed under a work assignment (sprk_regardingworkassignment) is an intermediate root column")]
+    public async Task InvoiceFiledUnderAWorkAssignment_DerivesTheWorkAssignment()
+    {
+        // Task 012 added sprk_invoice.sprk_regardingworkassignment (FR-05). Without it in the invoice's root columns a to-do
+        // filed under a work-assignment invoice carries no stamp (a silent FR-26 under-grant).
+        var waId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var row = new Entity("sprk_invoice", CommId)
+        {
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", waId),
+        };
+
+        CoreAncestorResolver.IntermediateRootColumns["sprk_invoice"].Should().BeEquivalentTo(
+            new[]
+            {
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            });
+
+        var result = await Build(EntityServiceReturning(row), Probe("sprk_project", "sprk_matter", "sprk_regardingworkassignment"))
+            .ResolveStampsAsync("sprk_invoice", CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle()
+            .Which.Should().Be(new CoreAncestorStamp("sprk_workassignment", "sprk_regardingworkassignment", waId));
+    }
+
     [Theory(DisplayName = "Task 156: agreement and report card derive from their own sprk_regardingmatter / sprk_regardingproject (they were Unclassified)")]
     [InlineData("sprk_agreement")]
     [InlineData("sprk_reportcard")]

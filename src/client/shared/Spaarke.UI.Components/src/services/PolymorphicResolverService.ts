@@ -972,6 +972,7 @@ export const INTERMEDIATE_ROOT_COLUMNS: ReadonlyArray<IIntermediateRootColumn> =
   { intermediate: 'sprk_memo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
   { intermediate: 'sprk_invoice', column: 'sprk_project', rootEntity: 'sprk_project' },
   { intermediate: 'sprk_invoice', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_invoice', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
   { intermediate: 'sprk_document', column: 'sprk_matter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_relatedmatter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_project', rootEntity: 'sprk_project' },
