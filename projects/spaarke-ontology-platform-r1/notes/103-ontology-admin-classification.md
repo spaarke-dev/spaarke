@@ -99,7 +99,7 @@ text, so damaged JSON still blocks.
    visible and neither is a communication in volume. This is the same boundary every as-the-caller admin read has.
    The list says when the references or the volume could not be read at all (`referencesAvailable` /
    `volumeAvailable`), but it cannot say a row was hidden by depth. **For a rename this is no longer a silent gap:**
-   section 9.1 refuses the rename unless the caller's read provably covers every business unit. The list and the
+   section 10.1 refuses the rename unless the caller's read provably covers every business unit (row by row). The list and the
    volume still show only what the caller can read.
 2. **TOCTOU.** A rule authored between the rename check and the PATCH can name the old category. The window is one
    round trip and the rule would hold the GUID, which survives a rename (evaluation does not break; only the
@@ -125,13 +125,13 @@ The reference read runs as the caller. Live, the Spaarke Ontology Administrator 
 old check let a rename through unchecked. No role change: `CheckRenameAsync` now verifies coverage first
 (`OntologyAdminClassificationService.CheckReadCoverageAsync`), all AS THE CALLER:
 
-1. `WhoAmI()` gives the caller's user id and business unit.
+1. `WhoAmI()` gives the caller's user id. (Round 2 dropped the caller's business unit: section 10.1.)
 2. **(Superseded by section 10: the decision is now row by row.)**
    `systemusers({id})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName` for `prvReadsprk_Policy` and for
    `prvReadsprk_PolicyVersion`. The depth is the highest across the rows returned (one row per role; no row means the
    privilege is not held). The shape was read live on spaarkedev1: `"Depth":"Global"` (a string), and the root business
    unit has `_parentbusinessunitid_value: null`.
-3. Complete coverage is **Global on both**, or **Deep on both and the caller's business unit has no parent** (Deep at the root
+3. **(Superseded by section 10.1: the caller's business unit was the wrong unit to test; this rule failed open.)** Complete coverage was **Global on both**, or **Deep on both and the caller's business unit has no parent** (Deep at the root
    reaches every business unit). Only Deep needs the business-unit read.
 
 Incomplete coverage is **409 `ontology.admin.classification.rename_unverifiable`** ("cannot be checked from your business

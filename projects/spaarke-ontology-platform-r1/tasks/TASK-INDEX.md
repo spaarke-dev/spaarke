@@ -338,7 +338,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ [done] 100 | [Slice (a): Rules read-only + On/Off + Retire](100-ontology-admin-rules-readonly-on-off-retire.poml) | FULL | sonnet/high | 104, 033, 034, 057, 026 | — | Writes as the caller; Retire closes at once | · **Done** 2026-10-16: [#2037](https://github.com/spaarke-dev/spaarke/pull/2037) merged `315d2d55c` (Opus review, fix round, Sonnet re-check clean; K4 notes in notes file) |
 | 🔲 [open] 101 | [Slice (b) BFF: catalog from the compiler, dry run, save, publish](101-ontology-admin-authoring-bff.poml) | FULL | **opus**/high | 104, 031, 033, 022, 036, 024 | — | `ValidateForSave`; catalog from verified joins (#46); dry run as the evaluator, filtered by caller (#39); publish stamps `sprk_inforceto` (**D-14**) · **[uac]** |
 | 🔲 [open] 102 | [Slice (b) UI: the rule-authoring wizard](102-ontology-admin-rule-wizard-ui.poml) | FULL | sonnet/**xhigh** | 056, 101, 057, 058 | — | Test gates Publish; no free-text JSON |
-| 🔲 [open] 103 | [Slice (c): Classification admin](103-ontology-admin-classification.poml) | FULL | sonnet/high | 104, 008, 057, 072, 074 | — | Rename blocked while a rule reads it; recall from 074's columns (**D-49**) |
+| ✅ [done] 103 | [Slice (c): Classification admin](103-ontology-admin-classification.poml) | FULL | sonnet/high | 104, 008, 057, 072, 074 | — | Rename blocked while a rule reads it; recall from 074's columns (**D-49**) | · **Done** 2026-10-16: [#2038](https://github.com/spaarke-dev/spaarke/pull/2038) merged `6b20467f4` (Opus review, 2 fix rounds, re-check + uac-r2 found and closed the per-row BU fail-open; seeding proof). Owner: sprk_name alternate key |
 
 ### Phase 11 — UAT
 
