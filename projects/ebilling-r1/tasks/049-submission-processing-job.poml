@@ -48,6 +48,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-87 (owner, 2026-10-16)">Every submission already carries its tracking number from creation (044 via the allocator). The job does not allocate; a submission without sprk_submissionsequence is a defect to fail closed on, not a case to repair.</constraint>
     <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
     <constraint source="ADR-002">This processor is the only code that creates sprk_invoice and its lines for eBilling; totals only through 016; status only through 014; core-ancestor fields through 013's guard; owner through IRecordOwnershipResolver.</constraint>
     <constraint source="FR-20 all-or-nothing">Invoice, lines, approval portion and document link are written in one Dataverse ExecuteTransaction (or, if the executor proves that impossible for these tables, by a compensation path that deletes every row it created before marking Failed). Signals are written after the transaction keyed so a retry never duplicates them; if a Signal write fails, the submission stays Processing and the job retries — re-delivery completes the missing Signals and never creates a second invoice.</constraint>
