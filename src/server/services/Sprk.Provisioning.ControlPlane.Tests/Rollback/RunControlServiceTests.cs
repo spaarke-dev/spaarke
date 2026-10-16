@@ -99,11 +99,13 @@ public sealed class RunControlServiceTests
         run.FailedHandlers.Add("H8");
         run.FailedHandlers.Add("H6");
         run.HandlerRetryAttempts["H6"] = 1;
+        run.HandlerAutoRetries["H8"] = 3; // T186 L44: auto-retries exhausted
         rig.Repo.Seed(run, "\"etag-1\"");
 
         var result = await rig.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
 
         var success = result.Should().BeOfType<RunResumeResult.Success>().Subject;
+        success.Run.HandlerAutoRetries.Should().NotContainKey("H8", "a resume restores the auto-retry budget (T186 L44)");
         success.HandlerId.Should().Be("H6");
         success.Attempt.Should().Be(2);
         rig.Enqueuer.Enqueued.Select(e => (e.HandlerId, e.Attempt))

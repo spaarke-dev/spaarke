@@ -248,6 +248,54 @@ public sealed class HandlerOutcomeApplierTests
         run.HandlerRetryAttempts["H1"].Should().Be(2);
     }
 
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_RetryableWithCleanup_StopsAfterMaxAutoRetries_AndLeavesTheRunForResume()
+    {
+        // T186 L44 — live, H9 re-ran ~370 times in 12 minutes: every RetryableWithCleanup failure re-enqueued.
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _, classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup),
+            enqueuer: enqueuer, guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0");
+        var failure = new HandlerResult.Failure(
+            FailureClass.RetryableWithCleanup, "scheduled-jobs-slot-guard-infra-fault", "ARM fault.");
+
+        for (var i = 0; i <= RollbackTransitions.MaxAutoRetries; i++)
+        {
+            await sut.ApplyHandlerOutcomeAsync(run, $"etag-{i}", failure, "H9", CancellationToken.None);
+        }
+
+        enqueuer.Envelopes.Should().HaveCount(RollbackTransitions.MaxAutoRetries,
+            "the failure after the last auto-retry is not re-enqueued");
+        run.Status.Should().Be(RunStatus.Failed);
+        run.FailedHandlers.Should().Equal("H9");
+        run.ErrorDetail.Should().Contain("Automatic retries exhausted").And.Contain("resume");
+        guard.ReleaseCalls.Should().BeEquivalentTo(
+            RollbackTransitions.ShouldReleaseCustomerGuard(FailureClass.Resumable)
+                ? new[] { (TestCustomerId, TestRunId) }
+                : Array.Empty<(string, string)>(),
+            "an exhausted retry is handled exactly as a Resumable failure");
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_AutoRetryBudget_IsRestoredBySuccessAndByOperatorReset()
+    {
+        var enqueuer = new RecordingEnqueuer();
+        var sut = BuildSut(out _, classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup), enqueuer: enqueuer);
+        var run = MakeRun(RunStatus.Running, "H0");
+        run.HandlerAutoRetries["H9"] = RollbackTransitions.MaxAutoRetries;
+        run.ResetAutoRetries("H9"); // what resume / gate advance do
+
+        var failure = new HandlerResult.Failure(FailureClass.RetryableWithCleanup, "x", "y");
+        var applied = await sut.ApplyHandlerOutcomeAsync(run, "etag-1", failure, "H9", CancellationToken.None);
+
+        applied.Reenqueued.Should().BeTrue();
+        run.HandlerAutoRetries["H9"].Should().Be(1);
+
+        run.MarkPhaseSucceeded("H9");
+        run.HandlerAutoRetries.Should().NotContainKey("H9");
+    }
+
     // -----------------------------------------------------------------------
     // ETag-Conflict-tolerant -- a concurrent writer already landed a
     // transition; OUR call must not re-enqueue or release the guard.

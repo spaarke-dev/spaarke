@@ -147,6 +147,7 @@ public sealed class RunControlService : IRunControlService
             run.HandlerRetryAttempts.TryGetValue(id, out var prior);
             attempts.Add((id, prior + 1));
             run.HandlerRetryAttempts[id] = prior + 1;
+            run.ResetAutoRetries(id); // T186 L44: an operator re-dispatch restores the auto-retry budget
         }
 
         var previousErrorDetail = run.ErrorDetail;
@@ -387,6 +388,7 @@ public sealed class RunControlService : IRunControlService
         run.HandlerRetryAttempts.TryGetValue(verifier, out var priorAttempts);
         var attempt = priorAttempts + 1;
         run.HandlerRetryAttempts[verifier] = attempt;
+        run.ResetAutoRetries(verifier); // T186 L44
 
         var replace = await _repository.ReplaceRunAsync(run, read.ETag, cancellationToken).ConfigureAwait(false);
         switch (replace)

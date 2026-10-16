@@ -217,6 +217,21 @@ public sealed class ProvisioningRun
     public IList<string> FailedHandlers { get; set; } = new List<string>();
 
     /// <summary>
+    /// Automatic (RetryableWithCleanup) re-dispatches each handler has used since it last succeeded or an operator
+    /// last re-dispatched it. T186 L44: the auto-retry re-enqueued with no limit — live, H9 failing at its slot guard
+    /// ran ~370 times in 12 minutes. <c>HandlerOutcomeApplier</c> stops re-enqueueing at
+    /// <c>RollbackTransitions.MaxAutoRetries</c> and leaves the run Failed for a resume. Unlike
+    /// <see cref="HandlerRetryAttempts"/> (which only ever grows, because it feeds the MessageId), this count is reset.
+    /// </summary>
+    [JsonPropertyName("handlerAutoRetries")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<int>), true)]
+    public IDictionary<string, int> HandlerAutoRetries { get; set; }
+        = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>An operator re-dispatch (resume, gate advance) gives the handler a fresh auto-retry budget (T186 L44).</summary>
+    public void ResetAutoRetries(string handlerId) => HandlerAutoRetries.Remove(handlerId);
+
+    /// <summary>
     /// The run-status transition for a handler failure the run does not retry by itself: the run takes
     /// <paramref name="status"/> (<see cref="RunStatus.Failed"/> or <see cref="RunStatus.Quarantined"/>) with
     /// <paramref name="handlerId"/> as its current phase, and the handler is recorded in <see cref="FailedHandlers"/>
@@ -279,6 +294,7 @@ public sealed class ProvisioningRun
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
 
         RemoveFailedHandler(handlerId);
+        ResetAutoRetries(handlerId);
 
         if (Status == RunStatus.Cancelled)
         {

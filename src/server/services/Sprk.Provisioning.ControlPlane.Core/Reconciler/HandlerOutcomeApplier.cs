@@ -131,6 +131,24 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
         var failure = (HandlerResult.Failure)outcome;
         var failureClass = _classifier.Classify(failure);
 
+        // T186 L44: the auto-retry is bounded. Once a handler has used its consecutive auto-retries, this failure is
+        // handled as Resumable — no re-enqueue, run Failed, guard released — exactly as if the handler had said so;
+        // a resume (or the handler's next success) restores the budget.
+        var autoRetriesExhausted = false;
+        if (failureClass == FailureClass.RetryableWithCleanup)
+        {
+            run.HandlerAutoRetries.TryGetValue(handlerId, out var autoRetriesUsed);
+            if (autoRetriesUsed >= RollbackTransitions.MaxAutoRetries)
+            {
+                failureClass = FailureClass.Resumable;
+                autoRetriesExhausted = true;
+            }
+            else
+            {
+                run.HandlerAutoRetries[handlerId] = autoRetriesUsed + 1;
+            }
+        }
+
         // §4C exhaustive-switch state mapping -- see RollbackTransitions.cs.
         var targetStatus = RollbackTransitions.MapToRunStatus(failureClass);
         var shouldReenqueue = RollbackTransitions.ShouldReEnqueue(failureClass);
@@ -157,6 +175,11 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
         // T186 L41: a Failed/Quarantined outcome goes through MarkPhaseFailed, which records the handler in
         // FailedHandlers so a later sibling failure cannot hide it from resume.
         var errorDetail = $"[{failure.RejectionCode}] {failure.Diagnostic}";
+        if (autoRetriesExhausted)
+        {
+            errorDetail += $" Automatic retries exhausted ({RollbackTransitions.MaxAutoRetries}); " +
+                "fix the cause, then POST /api/runs/{id}/resume.";
+        }
         if (targetStatus is RunStatus.Failed or RunStatus.Quarantined)
         {
             run.MarkPhaseFailed(handlerId, targetStatus, errorDetail);

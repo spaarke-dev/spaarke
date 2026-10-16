@@ -145,12 +145,15 @@ public sealed class BffDeployOptions
         = Path.Combine(AppContext.BaseDirectory, "deploy", "bff-artifacts");
 
     /// <summary>
-    /// Maximum time to wait for a single Kudu zip-deploy POST to complete
-    /// (synchronous — no <c>?isAsync=true</c> polling). Defaults to 15
-    /// minutes; a zip-deploy of a ~45 MB linux-x64 publish typically
-    /// completes in 1-3 minutes, the ceiling absorbs cold Kudu instances.
+    /// Maximum time for one Kudu zip-deploy: the async POST plus the
+    /// deployment-status poll (T186 L45). Defaults to 15 minutes; a
+    /// zip-deploy of a ~45 MB linux-x64 publish typically completes in 1-3
+    /// minutes, the ceiling absorbs cold Kudu instances.
     /// </summary>
     public TimeSpan KuduZipDeployTimeout { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Interval between Kudu deployment-status polls after the async zip-deploy POST (T186 L45).</summary>
+    public TimeSpan KuduDeploymentPollInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Validates the task-132 additions that have no safe default (per this

@@ -914,7 +914,9 @@ builder.Services.AddSingleton<IBffArtifactDownloader>(sp =>
     var logger = sp.GetRequiredService<ILogger<BlobArtifactDownloader>>();
     return new BlobArtifactDownloader(artifactsContainer, options, logger);
 });
-builder.Services.AddHttpClient<IKuduZipDeployer, KuduZipDeployer>();
+// T186 L45: HttpClient's default 100 s Timeout cut the zip-deploy off live; BffDeployOptions.KuduZipDeployTimeout
+// (the deployer's own linked token over POST + status poll) is the one ceiling.
+builder.Services.AddHttpClient<IKuduZipDeployer, KuduZipDeployer>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton<IAppServiceSlotSwapper>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
