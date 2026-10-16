@@ -1106,7 +1106,8 @@ public static class GrantExternalAccessEndpoint
         {
             var rows = await dataverseClient.QueryAsync<SystemUserRow>(
                 "systemusers",
-                filter: $"azureactivedirectoryobjectid eq {callerOid}",
+                // Issue #1576: "active" (above) means isdisabled = false — a disabled systemuser keeps its oid.
+                filter: $"azureactivedirectoryobjectid eq {callerOid} and isdisabled eq false",
                 select: "systemuserid",
                 top: 1,
                 cancellationToken: ct);

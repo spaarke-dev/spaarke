@@ -865,6 +865,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             NoLock = true,
         };
         query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, objectId);
+        // Issue #1576: a disabled systemuser keeps its oid; it is nobody's creator person.
+        query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
 
         var users = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
         if (users.Count == 1 && users[0].Id != Guid.Empty)
@@ -1798,6 +1800,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             NoLock = true
         };
         userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
+        // Issue #1576: a disabled systemuser keeps its oid and id; its business unit must not own a new record, so it
+        // resolves as "no user" and the save refuses (ActingUserUnresolved) rather than filing under that BU.
+        userQuery.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
 
         var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
         if (users.Entities.Count > 1)

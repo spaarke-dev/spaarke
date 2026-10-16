@@ -275,6 +275,8 @@ public class NoAccessEnforcementStore
         var found = new List<Guid>();
         foreach (var chunk in oids.Where(o => o != Guid.Empty).Distinct().Chunk(IdChunkSize))
         {
+            // includes disabled: a No Access entry must be enforced against every systemuser the oid names, disabled or
+            // not — a disabled account can be re-enabled, and the person state (isdisabled) is read separately below.
             var filter = string.Join(" or ", chunk.Select(o => $"azureactivedirectoryobjectid eq {o}"));
             using var doc = await GetAsync($"systemusers?$filter={filter}&$select=systemuserid", ct);
             found.AddRange(Values(doc).Select(r => GuidOf(r, "systemuserid")).OfType<Guid>());

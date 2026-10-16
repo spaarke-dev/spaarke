@@ -2052,6 +2052,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var initiator = query.AddLink("systemuser", "sprk_initiatedby", "systemuserid", JoinOperator.Inner);
         initiator.EntityAlias = initiatorAlias;
         initiator.Columns = new ColumnSet("azureactivedirectoryobjectid");
+        // includes disabled: this join scopes job rows to the caller's own (an ownership match on the row's initiator),
+        // not an identity resolution that grants anything; the caller was authenticated and resolved upstream.
         initiator.LinkCriteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, initiatorOid);
         // The caller's NEWEST row with this key decides (task 039).
         query.AddOrder("createdon", OrderType.Descending);
@@ -3510,11 +3512,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
         query.Criteria.Conditions.Add(
             new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdObjectId));
+        // Issue #1576: a disabled systemuser keeps its oid; it must not resolve as a sender or caller.
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("isdisabled", ConditionOperator.Equal, false));
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         if (results.Entities.Count == 0)
         {
-            _logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdObjectId);
+            _logger.LogWarning("No active Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdObjectId);
             return null;
         }
 

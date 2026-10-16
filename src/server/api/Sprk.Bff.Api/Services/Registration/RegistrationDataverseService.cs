@@ -724,6 +724,8 @@ public class RegistrationDataverseService : IDisposable
     public async Task<Guid?> ResolveSystemUserIdByAadObjectIdAsync(
         string aadObjectId, CancellationToken ct = default, string? targetDataverseUrl = null)
     {
+        // includes disabled: the one caller is DemoExpirationService, which removes an EXPIRED demo user from the demo
+        // team after disabling their Entra account — that systemuser may already be disabled and must still resolve.
         var filter = $"azureactivedirectoryobjectid eq '{EscapeODataValue(aadObjectId)}'";
         var url = $"{SystemUserEntitySet}?$filter={filter}&$select=systemuserid&$top=1";
 
