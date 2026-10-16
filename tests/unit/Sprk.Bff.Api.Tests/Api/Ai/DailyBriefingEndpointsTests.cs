@@ -102,7 +102,7 @@ public sealed class DailyBriefingEndpointsTests
 
     private static DailyBriefingNarrateResponse BuildResponse() => new()
     {
-        Tldr = new TldrResult { Summary = "composite summary", KeyTakeaways = ["k1"], TopAction = "act" },
+        Tldr = new TldrResult { Summary = "composite summary", KeyTakeaways = ["k1"] },
         ChannelNarratives =
         [
             new ChannelNarrationResult

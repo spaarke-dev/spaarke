@@ -288,6 +288,12 @@ public partial class RouteAuthorizationGuardTests
             + "table (a row whose core record the caller cannot read, a half pair or a non-core type is dropped without trace), then for "
             + "the Do lane the subject filtered to the caller's own work (task 097 decision B, D-44, D-129; a no-core row is Do-only, "
             + "D-35). An unresolved caller is the single 403 (D-29); a fault is 503, never a shorter list."),
+        new GovernedFile("Api/Ontology/OntologyAdminEndpoints.cs", Scope.RouteLevelGate,
+            "/api/v1/ontology/admin (ontology platform R1 task 104, D-22, FR-56) -- GET /capabilities, the Ontology admin capability "
+            + "probe: whether the CALLER holds prvCreatesprk_PolicyVersion, asked AS THE CALLER through IDataverseUserClient (WhoAmI, then "
+            + "RetrieveUserPrivilegeByPrivilegeName on the id WhoAmI returned). It decides only whether the Console shows the tab; it is "
+            + "never the security boundary. RequireAuthorization on the group; takes no id (Permanent CallerScopedOnly below). Tasks 100 "
+            + "and 101 add their admin routes to this group, each authorized as the caller."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -788,7 +794,11 @@ public partial class RouteAuthorizationGuardTests
     //
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
-    private const int ExpectedEndpointFileCount = 125;
+    //
+    // 125 -> 126 (2026-10-16, spaarke-ontology-platform-r1 task 104). Net +1: Api/Ontology/OntologyAdminEndpoints.cs ADDED --
+    // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
+    // The main session reconciles the count with the other ontology routes at integration.
+    private const int ExpectedEndpointFileCount = 126;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2791,6 +2801,11 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/reporting/status", PermanentBasis.CallerScopedOnly, "167",
             "Constant module status plus the caller's OWN privilege level from their role claims "
             + "(ReportingEndpoints.cs:141-148). Reads no report, takes no id."),
+        Permanent("GET /api/v1/ontology/admin/capabilities", PermanentBasis.CallerScopedOnly, "ontology-104",
+            "The caller's OWN privilege set: WhoAmI() as the caller (OntologyAdminCapabilityProbe.cs:103), then "
+            + "RetrieveUserPrivilegeByPrivilegeName on the systemuserid WhoAmI returned, also as the caller (:118, :137-138). Takes no id; "
+            + "returns one boolean. An unresolved caller is the single 403 (OntologyAdminEndpoints.cs:71-80). Display only (D-22): every admin write "
+            + "authorizes itself as the caller."),
         Permanent("GET /api/workspace/portfolio", PermanentBasis.CallerScopedOnly, "167",
             "Portfolio summary for the caller's own oid (WorkspaceEndpoints.cs:121, :140). Takes no id."),
         Permanent("GET /api/workspace/health", PermanentBasis.CallerScopedOnly, "167",
