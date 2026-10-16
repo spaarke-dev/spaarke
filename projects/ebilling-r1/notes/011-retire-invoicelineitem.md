@@ -66,6 +66,8 @@ Run the read-only report any time: `pwsh scripts/ebilling/Remove-EbillingInvoice
 | `-DeleteRows` without `-Delete` | exit 1 |
 | `-Delete -DeleteRows -OwnerApproval x -WhatIf` | exit 0, VERDICT READY (the four rows are the known four); the plan: backup, 3 form edits (the XML transform ran for real on the live form XML and left 0 mentions), relationship, 2 AI skill configs, 6 app registrations, 4 rows, 7 views, table; no write |
 
+Review fixes (adversarial pass, F2): the pre-flight now also runs the form transform on the three known forms and checks the timekeeper relationship name, so every refusal (exit 2, nothing changed) happens before the first write; the table's row count is re-read right before the final delete (a row created meanwhile refuses and names the steps already run); entity-scoped publishes run unconditionally (sprk_billingevent and sprk_invoice after the form edits, sprk_timekeeper after the lookup, all three after the delete); `-Delete` refuses an environment that came from `$env:DATAVERSE_URL` unless it is spaarkedev1 or `-EnvironmentUrl` is passed; a section / tab with no parent is skipped; dead `Get-Count` removed. Re-tested: report (BLOCKED, 4 rows), `-Delete` refused exit 2, env guard exit 2, `-WhatIf` READY exit 0.
+
 The destructive path itself (steps 1-9 for real) was **not run** - it is the owner-gated step.
 
 ## 4. Repo changes (step 3) and ArchTests

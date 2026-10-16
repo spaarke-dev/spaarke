@@ -102,18 +102,18 @@ function ConvertTo-FormWithoutLineItem([string]$FormXml, [string]$Table) {
     $removed = [System.Collections.Generic.List[string]]::new()
     foreach ($ctl in @($doc.SelectNodes("//control[parameters/TargetEntityType='$Table']"))) {
         $section = $ctl.SelectSingleNode('ancestor::section[1]')
-        if (-not $section) { continue }
+        if (-not $section -or -not $section.ParentNode) { continue }
         $tab = $section.SelectSingleNode('ancestor::tab[1]')
         $sectionName = $section.GetAttribute('name')
         [void]$section.ParentNode.RemoveChild($section)
         $removed.Add("subgrid $($ctl.GetAttribute('id')) (section $sectionName)")
-        if ($tab -and $tab.SelectNodes('.//section').Count -eq 0) {
+        if ($tab -and $tab.ParentNode -and $tab.SelectNodes('.//section').Count -eq 0) {
             $removed.Add("tab $($tab.GetAttribute('name')) (no section left)")
             [void]$tab.ParentNode.RemoveChild($tab)
         }
     }
     foreach ($nav in @($doc.SelectNodes('//NavBarByRelationshipItem'))) {
-        if ($nav.GetAttribute('RelationshipName') -match '(?i)InvoiceLineItem') {
+        if ($nav.ParentNode -and $nav.GetAttribute('RelationshipName') -match '(?i)InvoiceLineItem') {
             $removed.Add("navigation entry $($nav.GetAttribute('Id'))")
             [void]$nav.ParentNode.RemoveChild($nav)
         }
@@ -129,11 +129,6 @@ function ConvertTo-FormWithoutLineItem([string]$FormXml, [string]$Table) {
 # ---------------------------------------------------------------------------------------------------------------
 # Inventory (read-only)
 # ---------------------------------------------------------------------------------------------------------------
-
-function Get-Count([string]$Path) {
-    $r = Invoke-Dv $Path
-    return @($r.value).Count
-}
 
 function Get-Inventory {
     $inv = [ordered]@{}
@@ -174,6 +169,18 @@ function Get-Inventory {
     $inv.OtherLookupsToTable = @((Invoke-Dv "RelationshipDefinitions/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencingEntity&`$filter=ReferencedEntity eq '$Entity' and IsCustomRelationship eq true").value)
     $inv.GridConfigs = @((Invoke-Dv "sprk_gridconfigurations?`$select=sprk_name&`$filter=contains(sprk_entitylogicalname,'invoicelineitem') or contains(sprk_configjson,'invoicelineitem')").value)
     $inv.Privileges = @((Invoke-Dv "privileges?`$select=name&`$filter=contains(name,'invoicelineitem')").value)
+
+    # Pre-flight for the write phase, so every refusal happens before the first write: run the (pure) form transform on the
+    # three known forms, and read the schema name of the relationship behind the timekeeper lookup.
+    $inv.FormChecks = @(foreach ($formId in $KnownForms.Keys) {
+        $form = Get-DvOrNull "systemforms($formId)?`$select=name,formxml,objecttypecode"
+        if (-not $form) { [pscustomobject]@{ FormId = $formId; Name = '(form not found)'; Table = $KnownForms[$formId]; Missing = $true; Removed = 0; Remaining = 0 }; continue }
+        $res = ConvertTo-FormWithoutLineItem $form.formxml $Entity
+        [pscustomobject]@{ FormId = $formId; Name = $form.name; Table = $form.objecttypecode; Missing = $false; Removed = $res.Removed.Count; Remaining = $res.Remaining }
+    })
+    $inv.TimekeeperRelationships = if ($tkAttr) {
+        @((Invoke-Dv "EntityDefinitions(LogicalName='sprk_timekeeper')/ManyToOneRelationships?`$select=SchemaName,MetadataId&`$filter=ReferencingAttribute eq 'sprk_invoicelineitem'").value)
+    } else { @() }
 
     # RetrieveDependenciesForDelete for the table, each dependent classified.
     $deps = @((Invoke-Dv "RetrieveDependenciesForDelete(ObjectId=$id,ComponentType=1)").value)
@@ -217,6 +224,10 @@ function Get-Blockers($inv, [bool]$RowsMayGo) {
         elseif ($unknown.Count -gt 0) { $b.Add("$($unknown.Count) row(s) are not among the four known test rows: $(($unknown | ForEach-Object { $_.sprk_invoicelineitemid }) -join ', ')") }
     }
     if ($inv.TimekeeperRowsUsingLookup -gt 0) { $b.Add("$($inv.TimekeeperRowsUsingLookup) sprk_timekeeper row(s) hold a value in sprk_invoicelineitem") }
+    foreach ($fc in $inv.FormChecks | Where-Object { -not $_.Missing -and $_.Remaining -gt 0 }) { $b.Add("form '$($fc.Name)' ($($fc.Table), $($fc.FormId)) would still mention the table after removing its subgrid and navigation entry ($($fc.Remaining) mention(s))") }
+    if ($inv.TimekeeperLookupPresent -and (@($inv.TimekeeperRelationships).Count -ne 1 -or @($inv.TimekeeperRelationships)[0].SchemaName -ne $TimekeeperRelationship)) {
+        $b.Add("the relationship behind sprk_timekeeper.sprk_invoicelineitem is not exactly $TimekeeperRelationship")
+    }
     foreach ($f in $inv.ReferencingForms) { if (-not $KnownForms.ContainsKey($f.formid)) { $b.Add("system form '$($f.name)' ($($f.objecttypecode), $($f.formid)) mentions the table") } }
     foreach ($d in $inv.Dependencies | Where-Object { -not $_.Expected }) { $b.Add("unexpected dependency: $($d.Kind) $($d.Label)") }
     foreach ($v in $inv.OtherViews) { $b.Add("view '$($v.name)' of $($v.returnedtypecode) mentions the table") }
@@ -253,29 +264,34 @@ function Write-Inventory($inv) {
 # Removal steps
 # ---------------------------------------------------------------------------------------------------------------
 
+# Entity-scoped publish (never PublishAll: other sessions may have unpublished work in dev).
+function Publish-Tables([string[]]$Tables) {
+    if ($DryRun) { Write-Host "  WOULD PUBLISH $($Tables -join ', ')" -ForegroundColor Cyan; return }
+    $ents = ($Tables | ForEach-Object { "<entity>$_</entity>" }) -join ''
+    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities>$ents</entities></importexportxml>" } | Out-Null
+    Write-Host "  published $($Tables -join ', ')" -ForegroundColor Green
+}
+
+# The pre-flight (Get-Inventory / Get-Blockers) has already run this transform on every form, so the throw below is only a safety
+# net for a form that changed in between.
 function Remove-FormReferences {
-    $published = [System.Collections.Generic.List[string]]::new()
     foreach ($formId in $KnownForms.Keys) {
         $form = Invoke-Dv "systemforms($formId)?`$select=name,formxml,objecttypecode,ismanaged"
         $res = ConvertTo-FormWithoutLineItem $form.formxml $Entity
-        if ($res.Remaining -gt 0) { throw [EscalationException]::new("Form '$($form.name)' ($formId) still mentions the table after removing its subgrid and navigation entry ($($res.Remaining) mention(s)). Nothing further was changed.") }
+        if ($res.Remaining -gt 0) { throw [EscalationException]::new("Form '$($form.name)' ($formId) still mentions the table after removing its subgrid and navigation entry ($($res.Remaining) mention(s)); it changed after the pre-flight. Forms edited before this one stay edited; nothing else was removed.") }
         if ($res.Removed.Count -eq 0) { Write-Host "  skipped  $($form.objecttypecode) form '$($form.name)': no reference left" -ForegroundColor Yellow; continue }
         if ($DryRun) { Write-Host "  WOULD EDIT $($form.objecttypecode) form '$($form.name)': remove $($res.Removed -join '; ')" -ForegroundColor Cyan; continue }
         Invoke-Dv -Path "systemforms($formId)" -Method PATCH -Body @{ formxml = $res.Xml } | Out-Null
         Write-Host "  EDITED   $($form.objecttypecode) form '$($form.name)': removed $($res.Removed -join '; ')" -ForegroundColor Green
-        if (-not $published.Contains($form.objecttypecode)) { $published.Add($form.objecttypecode) }
     }
-    if ($published.Count -gt 0) {
-        $ents = ($published | ForEach-Object { "<entity>$_</entity>" }) -join ''
-        Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities>$ents</entities></importexportxml>" } | Out-Null
-        Write-Host "  published $($published -join ', ')" -ForegroundColor Green
-    }
+    # Always publish (a previous run may have edited the forms and stopped before publishing).
+    Publish-Tables @('sprk_billingevent', 'sprk_invoice')
 }
 
 function Remove-TimekeeperLookup($inv) {
     if (-not $inv.TimekeeperLookupPresent) { Write-Host "  skipped  sprk_timekeeper.sprk_invoicelineitem already gone" -ForegroundColor Yellow; return }
     $rel = @((Invoke-Dv "EntityDefinitions(LogicalName='sprk_timekeeper')/ManyToOneRelationships?`$select=SchemaName,MetadataId&`$filter=ReferencingAttribute eq 'sprk_invoicelineitem'").value)
-    if ($rel.Count -ne 1 -or $rel[0].SchemaName -ne $TimekeeperRelationship) { throw [EscalationException]::new("The relationship behind sprk_timekeeper.sprk_invoicelineitem is not exactly $TimekeeperRelationship. Nothing further was changed.") }
+    if ($rel.Count -ne 1 -or $rel[0].SchemaName -ne $TimekeeperRelationship) { throw [EscalationException]::new("The relationship behind sprk_timekeeper.sprk_invoicelineitem is not exactly $TimekeeperRelationship (it changed after the pre-flight). Steps before this one stay done.") }
     if ($DryRun) { Write-Host "  WOULD DELETE relationship $TimekeeperRelationship (column sprk_timekeeper.sprk_invoicelineitem and its name companion go with it)" -ForegroundColor Cyan; return }
     Invoke-WhilePropagating { Invoke-Dv -Path "RelationshipDefinitions($($rel[0].MetadataId))" -Method DELETE | Out-Null } | Out-Null
     $gone = $false
@@ -333,6 +349,9 @@ Write-Host ""
 
 try {
     if ($DeleteRows -and -not $Delete) { throw "-DeleteRows needs -Delete." }
+    if ($Delete -and -not $PSBoundParameters.ContainsKey('EnvironmentUrl') -and ([uri]$EnvironmentUrl).Host -ne 'spaarkedev1.crm.dynamics.com') {
+        throw [EscalationException]::new("-Delete refuses the environment '$EnvironmentUrl' that came from `$env:DATAVERSE_URL: pass -EnvironmentUrl explicitly (dev is https://spaarkedev1.crm.dynamics.com). Nothing was changed.")
+    }
     if ($Delete -and [string]::IsNullOrWhiteSpace($OwnerApproval)) {
         throw "-Delete needs -OwnerApproval '<date and who>': the owner's explicit OK is required before the table is deleted (project CLAUDE.md section 5)."
     }
@@ -363,20 +382,26 @@ try {
 
     Write-Host ""
     Write-Host "Owner approval recorded: $OwnerApproval" -ForegroundColor Cyan
+    $ran = [System.Collections.Generic.List[string]]::new()
     Write-Host "0. Backup" -ForegroundColor Cyan
-    if ($inv.RowCount -gt 0) { Export-RowBackup } else { Write-Host "  no rows - nothing to back up" -ForegroundColor Yellow }
+    if ($inv.RowCount -gt 0) { Export-RowBackup; $ran.Add('0 row backup written') } else { Write-Host "  no rows - nothing to back up" -ForegroundColor Yellow }
 
     Write-Host "1. Form subgrids and navigation entries (sprk_billingevent, sprk_invoice)" -ForegroundColor Cyan
     Remove-FormReferences
+    $ran.Add('1 form subgrids / navigation entries removed and sprk_billingevent, sprk_invoice published')
 
     Write-Host "2. sprk_timekeeper.sprk_invoicelineitem lookup" -ForegroundColor Cyan
     Remove-TimekeeperLookup $inv
+    Publish-Tables @('sprk_timekeeper')
+    $ran.Add('2 timekeeper lookup removed and sprk_timekeeper published')
 
     Write-Host "3. AI skill config opt-outs" -ForegroundColor Cyan
     Remove-ByIds 'aiskillconfig' 'aiskillconfigs' @($inv.AiSkillConfigs | ForEach-Object { $_.aiskillconfigid })
+    $ran.Add('3 AI skill configs removed')
 
     Write-Host "4. App module registrations" -ForegroundColor Cyan
     Remove-ByIds 'appmodulecomponent' 'appmodulecomponents' @($inv.AppModuleComponents | ForEach-Object { $_.appmodulecomponentid })
+    $ran.Add('4 app module registrations removed')
 
     Write-Host "5. RetrieveDependenciesForDelete must now be empty" -ForegroundColor Cyan
     if ($DryRun) { Write-Host "  WhatIf: not re-checked (nothing was removed)" -ForegroundColor Cyan }
@@ -389,10 +414,12 @@ try {
         }
         if ($left.Count -gt 0) { throw [EscalationException]::new("$($left.Count) dependent(s) remain after the removals: $(($left | ForEach-Object { "type $($_.dependentcomponenttype) $($_.dependentcomponentobjectid)" }) -join '; '). The table, its rows and the dependencies listed above were NOT deleted.") }
         Write-Host "  no dependents left" -ForegroundColor Green
+        $ran.Add('5 dependency re-check clean')
     }
 
     Write-Host "6. Rows" -ForegroundColor Cyan
     if ($inv.RowCount -gt 0) { Remove-ByIds 'row' $EntitySet @($inv.Rows | ForEach-Object { $_.sprk_invoicelineitemid }) } else { Write-Host "  none" -ForegroundColor Yellow }
+    if ($inv.RowCount -gt 0 -and -not $DryRun) { $ran.Add('6 rows deleted (backup file kept)') }
 
     Write-Host "7. The table's own views" -ForegroundColor Cyan
     foreach ($v in $inv.OwnViews) {
@@ -404,6 +431,11 @@ try {
     Write-Host "8. The table" -ForegroundColor Cyan
     if ($DryRun) { Write-Host "  WOULD DELETE EntityDefinitions($($inv.Entity.MetadataId)) ($Entity)" -ForegroundColor Cyan }
     else {
+        # A row may have been created since the pre-flight (nothing blocks a writer while this runs): recount right before the delete.
+        $nowRows = Get-RowCountExact $EntitySet 'sprk_invoicelineitemid'
+        if ($null -eq $nowRows -or $nowRows -gt 0) {
+            throw [EscalationException]::new("Refusing the final table delete: $(if ($null -eq $nowRows) { 'the rows could not be counted' } else { "$nowRows row(s) exist in $Entity" }). Steps already run: $($ran -join '; '). The table itself was NOT deleted; re-run once the rows are dealt with.")
+        }
         Invoke-WhilePropagating { Invoke-Dv -Path "EntityDefinitions($($inv.Entity.MetadataId))" -Method DELETE | Out-Null } | Out-Null
         $gone = $false
         for ($i = 0; $i -lt 24 -and -not $gone; $i++) {
@@ -412,6 +444,7 @@ try {
         }
         if (-not $gone) { throw "$Entity is still readable 120 s after the delete." }
         Write-Host "  DELETED  $Entity" -ForegroundColor Green
+        Publish-Tables @('sprk_billingevent', 'sprk_invoice', 'sprk_timekeeper')
     }
 
     Write-Host "9. Verify" -ForegroundColor Cyan
