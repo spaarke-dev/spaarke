@@ -135,5 +135,27 @@ ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed:
   - After the backfill, -Verify shows 0 active grants owned by an application user.
 - **Rigor and model:** this now touches the BFF and an authorization path. Run it on **opus**, effort high. Two adversarial passes (auth). §10 publish-size delta. Owner sign-off before merge (CLAUDE.md §6). On completion, close #1010 with the merge SHA.
     </amendment>
+    <amendment n="5" title="Delivered as three PRs under task id 099 (main session, 2026-10-16, after the executor's scoping read)">
+- **099a: the gated grant read.**
+  - Builds the `GET /api/external-access/record-grants` route: the `/can-manage-access` target case in `DelegationRuleFilter`, the `ExternalGrantLifecycle` row read, and a typed 503 on a read fault.
+  - Adds the ledger entry and the positive/negative test pairs.
+  - In `TrackingFieldTrio`, `fetchExistingGrants` calls the route through the control's existing BFF client and returns the expiry and `isExpired`. A failed read shows the error state, and the `context.webAPI` read of `sprk_externalrecordaccess` is removed.
+  - Includes the live check with a child-BU user.
+  - `RouteAuthorizationGuardTests.Ledger.cs` is shared with ontology PR #2019. Whichever merges second rebases.
+- **099b: D-11 team ownership on every grant create.**
+  - Set in ONE place, `GrantExternalAccessEndpoint.CreateGrantAsync`/`BuildGrantPayload`, through `IRecordOwnershipResolver`. It covers `/grant`, `ContactGrantEndpoints`, `InviteAndGrantExternalUserEndpoint` and `AssignedAccessMaterializer`.
+  - The materializer's Assigned-To grants are included deliberately: D-11 applies to every record, and there is no reason for an exception.
+  - Resolver faults follow the `ExternalIntakeEndpoints.cs:18-30` idiom: 503 on a read fault, refuse (500) when no team resolves, never an application-owned row.
+  - Starts after PR #2025 merges, since both touch the resolver and the grant endpoint.
+- **099b backfill decision (option c: extend what exists).** Extend `scripts/Backfill-RecordOwnership.ps1` with `sprk_externalrecordaccess`. That script is the existing D-11/I-6 backfill: it mirrors `RecordOwnershipResolver`'s record-first order, keeps a write-ahead reversal manifest, reads back each write, caps writes with -MaxWritesPerRun, and is idempotent.
+  - For a grant, the target is its root record lookup.
+  - A secure root goes to Secure Record Owners, as in `Migrate-SecureRecordsToNamedOwnerTeam.ps1`.
+  - No new BFF admin route (option a): a one-off data fix does not justify a permanent authenticated surface.
+  - No new standalone script (option b): this is the existing script's job.
+  - The script's existing safety model replaces the "-WhatIf/-Apply/-Verify" wording above. Dry-run is the default; -Verify is the dry-run reporting `ToWrite: 0` and application-owned = 0.
+  - The executor runs the dry-run only on dev. The main session runs -Apply after merge.
+- **099c: the Expiration picker** (amendments 1–2). Starts after 099a merges, because it reads 099a's expiry and both edit `TrackingFieldTrio/index.ts`. Covers the version bump in four places and `build:prod`.
+- Each PR: Opus, effort high, two adversarial passes for 099a and 099b (auth path), owner sign-off before merge. #1010 closes when 099a and 099b have both merged. #961 closes with 099c.
+    </amendment>
   </amendments>
 </task>
