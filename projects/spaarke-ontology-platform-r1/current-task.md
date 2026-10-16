@@ -1,35 +1,45 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-16 ~02:45Z (main session; 055 deployed, worklist unreachable → task 156 running). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-16 ~03:50Z (main session; 156 deployed, waiting for the owner's 055 browser check). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-147). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-104**).
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-148). Deferred work: one self-contained GitHub issue per item,
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-105**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | 156 — make the worklist reachable in the Console (section shim + "Worklist" `sprk_workspacelayout` row). Gates 055's browser check. |
-| **Status** | Implementer (sonnet/high) running in `C:\wts-156`, branch `task/ontology-156-worklist-reachable`; it opens a PR into `docs/ontology-platform-design` and does not merge. |
-| **Next Action** | On its report: independent review → fix round → re-check → merge (`merge-when-green3.sh`, run_in_background) → docs→master PR → update `C:\wts-055` to new master, rebuild Console, before-notices (word-add-in, R3, uac-r2), `pwsh scripts/Deploy-SpaarkeAi.ps1`, hash check, after-notices → run `scripts/seed-worklist-workspace-layout.ps1 -WhatIf` then for real on dev → owner browser check (below). |
+| **Task** | 055 — waiting for the owner's browser check. 156 done (#2004 → master #2008 `a8c3182ec`). |
+| **Status** | Console live from master `a8c3182ec` (03:44:12Z, hash `06d39356…218e1`); "Worklist" system layout row `202bcde0-…` seeded (sortorder 13). Peers notified. |
+| **Next Action** | When the owner reports the browser check: verify in Dataverse the DR, budget revision, To Do and Signal = Acted; then mark 055 done (POML + TASK-INDEX) and finish `notes/deploy-log.md`. |
 
-## Lanes in flight
+## Lanes in flight (launched 2026-10-16, owner: "continue ... in parallel")
 
-- 156 (above). Nothing else.
+Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs branch; don't merge). Each: review → fix round → re-check → merge.
+
+| Task | Worktree / branch | Model | State |
+|---|---|---|---|
+| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | PR #2018 in Opus review; after BFF deploy run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first) |
+| 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | ESCALATED: needs (sprk_matter, sprk_budget) VerifiedJoin; owner asked (recommend inside 063) |
+| 045 Decision Record tab [uac] | `C:\wts-045` | sonnet/medium | ✅ merged #2014 `1931b405c`; after Console deploys from master run `scripts/seed-decision-records-workspace-layout.ps1` (-WhatIf first) |
+| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | PR #2019 in Opus review; uac-r2 OK on ledger row. 100/101 routes each need their own ledger classification (uac-r2) |
+| 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
+| 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
+| 049 revoke Signal Write + DR Create | `C:\wts-049` `task/ontology-049` | sonnet/high | preparing PR (no live change; uac-r2 checks PR; main session applies after 055) |
+
+Next wave as slots free: 111 (wizard regression + deploy). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+eb5ba4011` (R3 + master `7315b3e85`), deployed by R3. Ontology does not deploy the BFF.
-- Console (`sprk_spaarkeai`) live from master `44b6a72c1`, 01:56:32Z, hash `0470e7f1…f23f2`. The worklist widget is in the bundle but no dropdown entry reaches it (task 156).
-- Grid config row `…5010` in sync.
-- D-146: five policies enabled; manual evaluator pass 01:56Z wrote 87 Signals (Open task 21, To Do 43, WA 19, Decide 4, Coming due 0), all team-owned.
-- 144/148 writes ON since 02:26:42Z (D-138 + owner "yes approve"). 144 repaired 50 at 02:30, then 0 stale of 130 at 02:35; 148 0 stale. Nightly evaluator 02:30: 87 unchanged, 0 written. Notices sent to R3, word-add-in, uac-r2.
+- BFF `1.0.0+eb5ba4011844…` (R3's line; read the version via Kudu VFS, project CLAUDE.md §6).
+- Console from master `a8c3182ec`; Worklist reachable via the workspace dropdown.
+- Grid config row `…5010` in sync. Five policies on; 87 Signals. 144/148 writes on and converged; uac-r2 post-enable check CLEAN.
 
-## 055 owner browser check (after 156 deploy)
+## 055 owner browser check
 
-Open https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai → workspace dropdown → Worklist. Check: both lanes render; one full review (Send budget inquiry with recipient = self, Revise budget, Next step Add To Do); network log; no console errors; Daily Briefing still fine. Then the main session verifies the DR, budget revision, To Do and Signal = Acted in Dataverse, marks 055 done and updates `notes/deploy-log.md`.
+Open https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai → workspace dropdown → Worklist. Check: both lanes render; one full review (Send budget inquiry with recipient = self, Revise budget, Next step Add To Do); network log; no console errors; Daily Briefing still fine.
 
 ## Next, in order (after 055)
 

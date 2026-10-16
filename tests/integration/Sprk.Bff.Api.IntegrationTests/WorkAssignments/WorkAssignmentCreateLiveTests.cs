@@ -416,7 +416,7 @@ public sealed class WorkAssignmentCreateLiveTests
         }
     }
 
-    private static async Task<HttpClient> DataverseClientAsync(string url, TokenCredential credential)
+    internal static async Task<HttpClient> DataverseClientAsync(string url, TokenCredential credential)
     {
         var token = await credential.GetTokenAsync(new TokenRequestContext(new[] { $"{url.TrimEnd('/')}/.default" }), default);
         var client = new HttpClient { BaseAddress = new Uri($"{url.TrimEnd('/')}/api/data/v9.2/") };
@@ -426,7 +426,8 @@ public sealed class WorkAssignmentCreateLiveTests
     }
 
     /// <summary>The BFF host with the production child-records route bound to the real environment.</summary>
-    private sealed class LiveWorkAssignmentFactory : DataverseIntegrationTestFixture
+    /// <remarks>Internal (ontology task 126): <c>BusinessOwnedAppendToLiveTests</c> drives the same route over it.</remarks>
+    internal sealed class LiveWorkAssignmentFactory : DataverseIntegrationTestFixture
     {
         private readonly TokenCredential _credential;
         private readonly ITestOutputHelper _out;

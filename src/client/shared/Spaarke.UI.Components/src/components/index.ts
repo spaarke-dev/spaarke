@@ -332,6 +332,9 @@ export * from './ConsoleKit';
 // task 051 (FR-25/FR-28, D-24).
 export * from './Worklist';
 
+// DecisionRecords - the Decision Record tab (task 045, D-47): decided items + their record, class filter, Open = wizard read-only.
+export * from './DecisionRecords';
+
 // DecisionWizard - the decision wizard: one WizardShell consumer for every Decide and Do decision,
 // mounted in-app (D-26), posting one review to the commit route (D-17). spaarke-ontology-platform-r1
 // task 058 (FR-26, FR-28).
