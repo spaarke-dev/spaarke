@@ -183,3 +183,9 @@ Known limits recorded:
 - The PDF check is the declared type plus the `%PDF-` header; a malformed PDF body is 049's to reject.
 - The external read and list are scoped to the caller's CONFERRING firms; a contact whose membership lapsed no longer sees their firm's submissions.
 - The list returns at most 50 rows across all root types and has no paging.
+
+## Second adversarial review: known limits (added by the main session, 2026-10-16)
+
+- K1: membership-unreadable -> 503 is tested on submit only, not on the external read-one and list; the code path is shared and correct.
+- K3: the whole file is buffered in memory (copy plus ToArray, about twice the file size per request), and the internal POST has no rate limit. Revisit with NFR-02 load measurement (task 112/160).
+- K4: the file-name stem is cut at 100 characters, which can split a UTF-16 surrogate pair; the GUID suffix still makes the name unique and safe.
