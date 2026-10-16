@@ -421,10 +421,9 @@ internal static class OntologyAdminClassificationService
     private const string PolicyReadPrivilegeName = "prvReadsprk_Policy";
     private const string VersionReadPrivilegeName = "prvReadsprk_PolicyVersion";
 
-    /// <summary>The depth a privilege is held at, lowest to highest. <c>None</c> means no row came back (the privilege is not held).</summary>
+    /// <summary>The depth a privilege is held at, lowest to highest.</summary>
     private enum ReadReach
     {
-        None = 0,
         Basic = 1,
         Local = 2,
         Deep = 3,
@@ -432,11 +431,19 @@ internal static class OntologyAdminClassificationService
     }
 
     /// <summary>
-    /// Null when the caller's read of the policies AND of their versions covers every business unit: Global depth on both, or Deep on both
-    /// while the caller sits in the root business unit (Deep at the root reaches every business unit under it). Otherwise the refusal:
-    /// 409 <c>rename_unverifiable</c> when the coverage is incomplete, 503 when it could not be established, and the single 403 when the
-    /// caller cannot be named. Reads as the caller: <c>WhoAmI()</c>, the privilege function once per privilege and, only when the depth
-    /// is Deep, the caller's business unit.
+    /// One RolePrivilege row of <c>RetrieveUserPrivilegeByPrivilegeName</c>: the depth, the business unit of the role copy that grants it
+    /// (Deep reaches only the subtree of THAT unit, which for a team role is the team's unit), and whether the grant is unconditional
+    /// (no <c>RecordFilterId</c>; a conditional privilege limits rows even at Global).
+    /// </summary>
+    private sealed record PrivilegeGrant(ReadReach Reach, Guid? BusinessUnitId, bool Unconditional);
+
+    /// <summary>
+    /// Null when the caller's read of the policies AND of their versions covers every business unit, row by row: a privilege is covered when
+    /// some row that grants it is unconditional and is either Global, or Deep on the ROOT business unit (Deep at the root reaches every unit
+    /// under it). The maximum depth over the rows is not enough: a Deep grant on a child unit's team role reaches only that subtree.
+    /// Otherwise the refusal: 409 <c>rename_unverifiable</c> when the coverage is incomplete, 503 when it could not be established, and the
+    /// single 403 when the caller cannot be named. Reads as the caller: <c>WhoAmI()</c>, the privilege function once per privilege and, only
+    /// when a Deep grant is the deciding row, the root business unit (once).
     /// </summary>
     private static async Task<ClassificationOperationResult<ClassificationRow>?> CheckReadCoverageAsync(
         IDataverseUserClient user, ILogger logger, CancellationToken ct)
@@ -444,58 +451,66 @@ internal static class OntologyAdminClassificationService
         var who = await CallAsync(() => user.GetAsync("WhoAmI()", ct), logger, ct).ConfigureAwait(false);
         if (!who.IsSuccess
             || who.Body is not { ValueKind: JsonValueKind.Object } whoBody
-            || ReadGuid(whoBody, "UserId") is not { } userId
-            || ReadGuid(whoBody, "BusinessUnitId") is not { } businessUnitId)
+            || ReadGuid(whoBody, "UserId") is not { } userId)
         {
             return CoverageFault(who, "the caller could not be identified", logger);
         }
 
-        var policies = await ReadReachAsync(user, userId, PolicyReadPrivilegeName, logger, ct).ConfigureAwait(false);
+        var policies = await ReadGrantsAsync(user, userId, PolicyReadPrivilegeName, logger, ct).ConfigureAwait(false);
         if (policies.Failure is not null)
         {
             return policies.Failure;
         }
 
-        var versions = await ReadReachAsync(user, userId, VersionReadPrivilegeName, logger, ct).ConfigureAwait(false);
+        var versions = await ReadGrantsAsync(user, userId, VersionReadPrivilegeName, logger, ct).ConfigureAwait(false);
         if (versions.Failure is not null)
         {
             return versions.Failure;
         }
 
-        var lowest = policies.Reach < versions.Reach ? policies.Reach : versions.Reach;
-        if (lowest == ReadReach.Global)
+        Guid? rootUnit = null;
+        foreach (var grants in new[] { policies.Grants, versions.Grants })
         {
-            return null;
-        }
-
-        if (lowest == ReadReach.Deep)
-        {
-            var unit = await CallAsync(
-                () => user.GetAsync($"businessunits({businessUnitId:D})?$select=_parentbusinessunitid_value", ct), logger, ct).ConfigureAwait(false);
-            if (!unit.IsSuccess
-                || unit.Body is not { ValueKind: JsonValueKind.Object } unitBody
-                || !unitBody.TryGetProperty("_parentbusinessunitid_value", out var parent)
-                || parent.ValueKind is not (JsonValueKind.Null or JsonValueKind.String))
+            if (grants.Any(g => g.Unconditional && g.Reach == ReadReach.Global))
             {
-                return CoverageFault(unit, "the caller's business unit could not be read", logger);
+                continue;
             }
 
-            if (parent.ValueKind == JsonValueKind.Null)
+            // Only a Deep grant needs the root unit, and only the first such grant reads it.
+            if (!grants.Any(g => g.Unconditional && g.Reach == ReadReach.Deep && g.BusinessUnitId is not null))
             {
-                return null;
+                return Unverifiable();
+            }
+
+            if (rootUnit is null)
+            {
+                var root = await ReadRootBusinessUnitAsync(user, logger, ct).ConfigureAwait(false);
+                if (root.Failure is not null)
+                {
+                    return root.Failure;
+                }
+
+                rootUnit = root.Id;
+            }
+
+            if (!grants.Any(g => g.Unconditional && g.Reach == ReadReach.Deep && g.BusinessUnitId == rootUnit))
+            {
+                return Unverifiable();
             }
         }
 
-        return new ClassificationOperationResult<ClassificationRow>(
+        return null;
+
+        static ClassificationOperationResult<ClassificationRow> Unverifiable() => new(
             ClassificationOutcome.RenameUnverifiable,
             Detail: "Whether a rule reads this category cannot be checked from your business unit, so it cannot be renamed here. "
                 + "Ask an administrator whose access covers every business unit to rename it.");
     }
 
-    private sealed record ReachRead(ReadReach Reach, ClassificationOperationResult<ClassificationRow>? Failure);
+    private sealed record GrantsRead(IReadOnlyList<PrivilegeGrant> Grants, ClassificationOperationResult<ClassificationRow>? Failure);
 
-    /// <summary>The caller's highest depth for one privilege (the function lists one row per role that grants it).</summary>
-    private static async Task<ReachRead> ReadReachAsync(
+    /// <summary>Every row that grants one privilege to the caller (the function lists one row per role that grants it).</summary>
+    private static async Task<GrantsRead> ReadGrantsAsync(
         IDataverseUserClient user, Guid userId, string privilegeName, ILogger logger, CancellationToken ct)
     {
         var response = await CallAsync(
@@ -507,10 +522,10 @@ internal static class OntologyAdminClassificationService
             || !body.TryGetProperty("RolePrivileges", out var rows)
             || rows.ValueKind != JsonValueKind.Array)
         {
-            return new ReachRead(ReadReach.None, CoverageFault(response, "the caller's read depth could not be read", logger));
+            return new GrantsRead([], CoverageFault(response, "the caller's read depth could not be read", logger));
         }
 
-        var reach = ReadReach.None;
+        var grants = new List<PrivilegeGrant>();
         foreach (var row in rows.EnumerateArray())
         {
             if (row.ValueKind != JsonValueKind.Object
@@ -519,15 +534,47 @@ internal static class OntologyAdminClassificationService
                 continue;
             }
 
-            // A depth that cannot be read counts as the lowest: it can only make the check stricter.
+            // A depth that cannot be read counts as the lowest, a unit that cannot be read as none, a filter that cannot be read as a
+            // condition: each can only make the check stricter.
             var depth = row.TryGetProperty("Depth", out var d) ? ParseDepth(d) : ReadReach.Basic;
-            if (depth > reach)
-            {
-                reach = depth;
-            }
+            grants.Add(new PrivilegeGrant(depth, ReadGuid(row, "BusinessUnitId"), HasNoRecordFilter(row)));
         }
 
-        return new ReachRead(reach, null);
+        return new GrantsRead(grants, null);
+    }
+
+    /// <summary>
+    /// True when the row carries no record filter: <c>RecordFilterId</c> absent, null or the all-zero GUID. A filter that is present but not
+    /// a GUID counts as a filter. The conditional-privilege semantics are inferred (not confirmed on Microsoft Learn); this fails closed.
+    /// </summary>
+    private static bool HasNoRecordFilter(JsonElement row)
+    {
+        if (!row.TryGetProperty("RecordFilterId", out var filter) || filter.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        return filter.ValueKind == JsonValueKind.String && Guid.TryParse(filter.GetString(), out var id) && id == Guid.Empty;
+    }
+
+    private sealed record RootUnitRead(Guid Id, ClassificationOperationResult<ClassificationRow>? Failure);
+
+    /// <summary>The one business unit with no parent, read as the caller. Anything but exactly one row is an unexpected shape (503).</summary>
+    private static async Task<RootUnitRead> ReadRootBusinessUnitAsync(IDataverseUserClient user, ILogger logger, CancellationToken ct)
+    {
+        var response = await CallAsync(
+            () => user.GetAsync("businessunits?$select=businessunitid&$filter=_parentbusinessunitid_value eq null", ct), logger, ct).ConfigureAwait(false);
+        if (!response.IsSuccess
+            || response.Body is not { ValueKind: JsonValueKind.Object } body
+            || !body.TryGetProperty("value", out var rows)
+            || rows.ValueKind != JsonValueKind.Array
+            || rows.GetArrayLength() != 1
+            || ReadGuid(rows[0], "businessunitid") is not { } id)
+        {
+            return new RootUnitRead(Guid.Empty, CoverageFault(response, "the root business unit could not be read", logger));
+        }
+
+        return new RootUnitRead(id, null);
     }
 
     /// <summary>Dataverse names the depth ("Basic", "Local", "Deep", "Global"); the numeric form (0 to 3) is read too. Anything else is Basic.</summary>

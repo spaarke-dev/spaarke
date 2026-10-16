@@ -81,8 +81,8 @@ public static class OntologyAdminClassificationEndpoints
             .WithName("UpdateOntologyAdminTriageCategory")
             .WithSummary("Edit a triage category's name and/or guidance")
             .WithDescription("Writes as the caller, conditional on the row version. A rename is refused (409) while any policy version reads "
-                + "the category (by id or by name), naming the rule; 409 rename_unverifiable when the caller's read of the policies does not "
-                + "cover every business unit (Global depth, or Deep at the root business unit); 409 rename_routed while the routing "
+                + "the category (by id or by name), naming the rule; 409 rename_unverifiable unless the caller's read of the policies and of their versions is "
+                + "unconditional and covers every business unit (a role copy at Global depth, or at Deep on the root business unit); 409 rename_routed while the routing "
                 + "configuration is keyed by the name; if the rules cannot be read the rename is refused (503). 409 also for a taken name or "
                 + "a row that changed since the form loaded it.")
             .Produces<ClassificationRow>(200)

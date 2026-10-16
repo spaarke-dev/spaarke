@@ -126,7 +126,8 @@ old check let a rename through unchecked. No role change: `CheckRenameAsync` now
 (`OntologyAdminClassificationService.CheckReadCoverageAsync`), all AS THE CALLER:
 
 1. `WhoAmI()` gives the caller's user id and business unit.
-2. `systemusers({id})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName` for `prvReadsprk_Policy` and for
+2. **(Superseded by section 10: the decision is now row by row.)**
+   `systemusers({id})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName` for `prvReadsprk_Policy` and for
    `prvReadsprk_PolicyVersion`. The depth is the highest across the rows returned (one row per role; no row means the
    privilege is not held). The shape was read live on spaarkedev1: `"Depth":"Global"` (a string), and the root business
    unit has `_parentbusinessunitid_value: null`.
@@ -167,7 +168,7 @@ entry would break the day routing is switched on. It runs before any Dataverse r
   `name_taken`. Turning Off never checks.
 - `LookupChoicesResolver.ResolveLookupAsync` removes duplicate names (`Distinct(OrdinalIgnoreCase)`, first spelling kept, order
   kept) from the choice list, so a duplicate never reaches the constrained-decoding enum. The resolver is shared by every
-  `lookup:` reference; its tests and the enrichment and scope-resolver tests were run (section 10).
+  `lookup:` reference; its tests and the enrichment and scope-resolver tests were run (section 9.10).
 - **Awaiting the owner:** the full fix is an alternate key on `sprk_triagecategory.sprk_name`. That is a Dataverse schema
   change, not made here. Until then two creates racing, or a row made outside this area, can still produce two rows with one
   name; this round only stops the second one being turned On and keeps the enum clean.
@@ -200,6 +201,59 @@ The PATCH and PUT HandlerDecisions in `RouteAuthorizationGuardTests.Ledger.cs` n
 check, the by-name scan and the On-time name check, with refreshed line references; the List and Create ones have refreshed
 line references only. No route was added; `ExpectedEndpointFileCount` is unchanged (127).
 
-## 10. Fix round 1 evidence
+### 9.10 Fix round 1 evidence
 
 See the PR body (test counts, the seeding result, lint).
+
+## 10. Review round 2 (PR #2038; head before the round `c0e3f43ae`)
+
+### 10.1 F1: the rename coverage check still failed open (confirmed live by uac-r2 and the re-check)
+
+Round 1 took the maximum `Depth` over all RolePrivilege rows and asked whether the CALLER's business unit is the root. That is
+wrong: Deep reaches only the subtree of the business unit of the role copy that grants it (for a team role, the team's unit),
+and a conditional privilege limits rows even at Global. A root-unit caller holding Basic directly and Deep through a child-unit
+team's copy passed the check, Dataverse trimmed the reference read to the team's subtree, and a rename silently broke a rule
+the caller could not see.
+
+**The rule now** (`OntologyAdminClassificationService.CheckReadCoverageAsync`, `ReadGrantsAsync`, `HasNoRecordFilter`,
+`ReadRootBusinessUnitAsync`), all AS THE CALLER:
+
+1. Every RolePrivilege row for the privilege is kept (name, depth, `BusinessUnitId`, `RecordFilterId`), not just the maximum depth.
+2. A privilege is **covered** when at least one row for it is unconditional (`RecordFilterId` null, missing or the all-zero GUID;
+   a value that is not a GUID counts as a condition) AND is either **Global**, or **Deep with `BusinessUnitId` equal to the root
+   business unit**. A row with a missing or unparseable `BusinessUnitId` never covers through the Deep branch.
+3. The root business unit is read once, only when a Deep row is the deciding row (a Global caller makes no business-unit
+   read): `businessunits?$select=businessunitid&$filter=_parentbusinessunitid_value eq null`. Exactly 1 row is expected;
+   0 or more than 1, a failed read or a body of another shape is **503**. The caller's own business unit is no longer read or used.
+4. BOTH `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion` must be covered, otherwise **409 `rename_unverifiable`** and NO
+   reference read is made (the check still runs before `LoadReferencesAsync` and is the only path to it).
+5. Fault handling is unchanged: a fault gives 503; a 401/403 or an unresolved caller gives the uniform 403.
+
+**Live row shape** (spaarkedev1, read-only):
+`{"PrivilegeName":..,"Depth":"Global","BusinessUnitId":"06fbf21c-...","RecordFilterId":"00000000-0000-0000-0000-000000000000","RecordFilterUniqueName":""}`.
+Dev has 5 child business units and teams in several of them. `sprk_policy` and `sprk_policyversion` are UserOwned.
+
+### 10.2 Closed by the re-check
+
+- **FLS is closed.** 0 secured attributes on `sprk_policy` and `sprk_policyversion`, checked live, so no field of the rule body
+  is hidden from the reference read by field-level security.
+- **Row scope is closed.** The reference read uses no `$filter` and reads every state and every page, so the only trimming left
+  is the caller's own read privilege, which is exactly what 10.1 now verifies.
+
+### 10.3 Known limits (recorded, not fixed)
+
+- **K (create/publish race).** A policy created or published between the coverage check and the rename cannot be closed by a read
+  check. The rule would hold the category GUID, which survives a rename (only the constrained-decoding enum name changes), so the
+  exposure is the by-name references only.
+- **K3.** A category name embedded inside a longer JSON string value, such as `"Category: Urgent"`, is not matched by
+  `CategoriesNamedIn`, which matches a whole string value (trimmed, case-insensitive) or the id. The compiler grammar uses ids
+  or exact values, so a rule authored through it cannot name a category that way.
+- **K4.** `LookupChoicesResolver` dedupe (`Distinct(OrdinalIgnoreCase)`) collapses lookup values that differ only by case.
+- **The `RecordFilterId` rule is inferred.** "A privilege with a record filter is conditional and limits rows even at Global"
+  follows conditional-privilege semantics but is not confirmed on Microsoft Learn. The rule fails closed: a filtered grant never
+  counts as coverage, so the worst case is an unnecessary 409 for an administrator, never a missed reference.
+
+### 10.4 Evidence
+
+Tests: `OntologyAdminClassificationEndpointTests` (must-fire 409, must-not-fire, 503 for the root-unit read, and the seeding
+proof) and the suites listed in the PR body.

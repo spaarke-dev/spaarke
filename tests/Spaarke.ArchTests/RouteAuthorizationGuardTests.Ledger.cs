@@ -1867,18 +1867,20 @@ public partial class RouteAuthorizationGuardTests
             + "(a Console User gets 403 not_permitted). The row is written with sprk_enabled = false (:183); the request has no enabled member."),
         new HandlerDecision("PATCH /api/v1/ontology/admin/classification/categories/{categoryId:guid}", "UpdateCategoryAsync", "IDataverseUserClient",
             new[] { "OntologyAdminClassificationService.UpdateAsync" },
-            "Ontology task 103: UpdateAsync (OntologyAdminClassificationEndpoints.cs:135) reads the row (OntologyAdminClassificationService.cs:745; "
+            "Ontology task 103: UpdateAsync (OntologyAdminClassificationEndpoints.cs:135) reads the row (OntologyAdminClassificationService.cs:792; "
             + "a row the caller cannot read is the uniform 404), then, for a rename only (:250), refuses it while the routing configuration is keyed by "
             + "the name (:342, in process through IOptionsMonitor, no app identity), unless the caller's own read covers every policy version "
-            + "(:351; WhoAmI :444, the caller's depth for prvReadsprk_Policy and prvReadsprk_PolicyVersion :502, the caller's business unit :474, "
-            + "all AS THE CALLER, so a Deep caller in a child business unit gets 409 rename_unverifiable and the reference read is never trusted), "
+            + "(:351; WhoAmI :451, then every RolePrivilege row for prvReadsprk_Policy and prvReadsprk_PolicyVersion :513, and, only when a Deep row "
+            + "decides, the root business unit :563, all AS THE CALLER; a privilege is covered only by a row that is Global, or Deep on the ROOT "
+            + "business unit, with no RecordFilterId: a Deep grant on a child unit (a team role), a conditional grant or a row with no business unit "
+            + "gives 409 rename_unverifiable and the reference read is never made, and a root-unit read that is not exactly one row is 503), "
             + "while any policy version reads the category by id or name, or when that cannot be checked (503). It then PATCHes AS THE CALLER "
-            + "through IDataverseUserClient, version-conditional (:761), so Dataverse enforces prvWritesprk_TriageCategory."),
+            + "through IDataverseUserClient, version-conditional (:808), so Dataverse enforces prvWritesprk_TriageCategory."),
         new HandlerDecision("PUT /api/v1/ontology/admin/classification/categories/{categoryId:guid}/enabled", "SetCategoryEnabledAsync", "IDataverseUserClient",
             new[] { "OntologyAdminClassificationService.SetEnabledAsync" },
-            "Ontology task 103: SetEnabledAsync (OntologyAdminClassificationEndpoints.cs:147) reads the row (OntologyAdminClassificationService.cs:745), "
+            "Ontology task 103: SetEnabledAsync (OntologyAdminClassificationEndpoints.cs:147) reads the row (OntologyAdminClassificationService.cs:792), "
             + "re-checks the name among the active categories when turning On, then PATCHes sprk_enabled AS THE CALLER through IDataverseUserClient, "
-            + "version-conditional (:761, from :320), so Dataverse enforces prvWritesprk_TriageCategory."),
+            + "version-conditional (:808, from :320), so Dataverse enforces prvWritesprk_TriageCategory."),
         new HandlerDecision("GET /api/v1/ontology/admin/rules", "ListRulesAsync", "IDataverseUserClient",
             new[] { "OntologyAdminRulesService.ListAsync" },
             "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.ListAsync (OntologyAdminRulesEndpoints.cs:83). It lists the "

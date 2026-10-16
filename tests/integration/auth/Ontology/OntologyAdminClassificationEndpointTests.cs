@@ -367,7 +367,9 @@ public class OntologyAdminClassificationEndpointTests : IClassFixture<Classifica
 
     // ── F2: the rename check must not fail open for a caller whose read does not cover every business unit ──────────
 
-    private static readonly string[] CoverageProbes = ["WhoAmI()", "RetrieveUserPrivilegeByPrivilegeName", "businessunits("];
+    private static readonly string[] CoverageProbes = ["WhoAmI()", "RetrieveUserPrivilegeByPrivilegeName", "businessunits"];
+
+    private static ClassificationTestFixture.PrivRow Grant(string depth, Guid? unit, string? filter = null) => new(depth, unit, filter);
 
     [Theory]
     [InlineData("Global", true)]    // Global depth covers every business unit
@@ -390,11 +392,11 @@ public class OntologyAdminClassificationEndpointTests : IClassFixture<Classifica
     }
 
     [Fact]
-    public async Task ARename_ByAGlobalCaller_DoesNotReadTheirBusinessUnit()
+    public async Task ARename_ByAGlobalCaller_DoesNotReadTheRootBusinessUnit()
     {
         await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
 
-        _f.Requests.Should().NotContain(r => r.Contains("businessunits(", StringComparison.Ordinal), "Global needs no business-unit check");
+        _f.Requests.Should().NotContain(r => r.Contains("businessunits", StringComparison.Ordinal), "an unconditional Global grant needs no business-unit check");
     }
 
     [Fact]
@@ -452,7 +454,7 @@ public class OntologyAdminClassificationEndpointTests : IClassFixture<Classifica
         response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
         Reason(body).Should().Be("ontology.admin.classification.rename_unverifiable");
         _f.Writes.Should().BeEmpty();
-        _f.Requests.Should().NotContain(r => r.Contains("businessunits(", StringComparison.Ordinal), "only Deep depends on the business unit");
+        _f.Requests.Should().NotContain(r => r.Contains("businessunits", StringComparison.Ordinal), "only Deep depends on the business unit");
     }
 
     [Fact]
@@ -466,6 +468,177 @@ public class OntologyAdminClassificationEndpointTests : IClassFixture<Classifica
         var (response, _) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // ── F1 (round 2): coverage is decided ROW BY ROW, not by the maximum depth and the caller's own business unit ──────
+
+    private async Task AssertRenameRefusedAsUnverifiable()
+    {
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_unverifiable");
+        _f.Writes.Should().BeEmpty();
+        _f.Categories[Marketing].Name.Should().Be("Marketing / Noise");
+        _f.Requests.Should().NotContain(r => r.StartsWith("GET sprk_polic", StringComparison.Ordinal), "no reference read is made, let alone trusted");
+    }
+
+    private async Task AssertRenameAllowed()
+    {
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body.ToString());
+        _f.Requests.Should().Contain(r => r.StartsWith("GET sprk_policyversions?", StringComparison.Ordinal), "the reference check ran");
+    }
+
+    private void BothPrivileges(params ClassificationTestFixture.PrivRow[] rows)
+    {
+        _f.PolicyRows = rows;
+        _f.VersionRows = rows;
+    }
+
+    // must-fire: 409, and no reference read
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForADeepGrantOnAChildUnit_WhileTheCallerSitsInTheRootUnit()
+    {
+        _f.CallerIsInRootBusinessUnit = true;
+        BothPrivileges(Grant("Deep", ClassificationTestFixture.ChildUnit));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForAGlobalGrantThatCarriesARecordFilter()
+    {
+        BothPrivileges(Grant("Global", ClassificationTestFixture.RootUnit, filter: "7f1c0a52-3b9e-4d1a-9c55-2a6b8e4d1f03"));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForADeepGrantOnTheRootUnitThatCarriesARecordFilter()
+    {
+        BothPrivileges(Grant("Deep", ClassificationTestFixture.RootUnit, filter: "7f1c0a52-3b9e-4d1a-9c55-2a6b8e4d1f03"));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForARecordFilterThatIsNotAGuid()
+    {
+        BothPrivileges(Grant("Global", ClassificationTestFixture.RootUnit, filter: "not-a-guid"));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForADeepGrantWhoseBusinessUnitIsMissing()
+    {
+        BothPrivileges(Grant("Deep", unit: null));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Fact]
+    public async Task ARename_IsRefused409_ForABasicGrantPlusAChildUnitTeamDeepGrant_TheUacR2Scenario()
+    {
+        // A root-unit caller holds Basic directly and Deep only through a child-unit team's role copy: the maximum depth is Deep and the
+        // caller sits in the root unit, yet Dataverse trims the reference read to the team's subtree.
+        _f.CallerIsInRootBusinessUnit = true;
+        BothPrivileges(
+            Grant("Basic", ClassificationTestFixture.RootUnit),
+            Grant("Deep", ClassificationTestFixture.ChildUnit));
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    [Theory]
+    [InlineData("policy")]
+    [InlineData("version")]
+    public async Task ARename_IsRefused409_WhenOnlyOneOfTheTwoPrivilegesIsCovered(string covered)
+    {
+        var good = new[] { Grant("Global", ClassificationTestFixture.RootUnit) };
+        var short_ = new[] { Grant("Deep", ClassificationTestFixture.ChildUnit) };
+        _f.PolicyRows = covered == "policy" ? good : short_;
+        _f.VersionRows = covered == "policy" ? short_ : good;
+
+        await AssertRenameRefusedAsUnverifiable();
+    }
+
+    // must-not-fire: the rename goes on to the reference check
+
+    [Fact]
+    public async Task ARename_IsAllowed_ForADeepGrantOnTheRootUnit_WhileTheCallerSitsInAChildUnit_AndTheRootUnitIsReadOnce()
+    {
+        _f.CallerIsInRootBusinessUnit = false;
+        BothPrivileges(Grant("Deep", ClassificationTestFixture.RootUnit));
+
+        await AssertRenameAllowed();
+
+        _f.Requests.Count(r => r.Contains("businessunits", StringComparison.Ordinal)).Should().Be(1, "the root unit is read once for both privileges");
+    }
+
+    [Fact]
+    public async Task ARename_IsAllowed_ForAGlobalGrantOnAChildUnit_WithNoRecordFilter()
+    {
+        BothPrivileges(Grant("Global", ClassificationTestFixture.ChildUnit));
+
+        await AssertRenameAllowed();
+    }
+
+    [Theory]
+    [InlineData(ClassificationTestFixture.FilterMissing)]
+    [InlineData(ClassificationTestFixture.FilterNull)]
+    public async Task ARename_IsAllowed_WhenTheRecordFilterIsMissingOrNull(string filter)
+    {
+        BothPrivileges(Grant("Global", ClassificationTestFixture.ChildUnit, filter));
+
+        await AssertRenameAllowed();
+    }
+
+    [Fact]
+    public async Task ARename_IsAllowed_ForAGlobalGrantAmongOtherRows()
+    {
+        BothPrivileges(
+            Grant("Basic", ClassificationTestFixture.RootUnit),
+            Grant("Deep", ClassificationTestFixture.ChildUnit),
+            Grant("Global", ClassificationTestFixture.RootUnit, filter: "7f1c0a52-3b9e-4d1a-9c55-2a6b8e4d1f03"),
+            Grant("Global", ClassificationTestFixture.ChildUnit));
+
+        await AssertRenameAllowed();
+    }
+
+    // 503: the root unit cannot be established
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task ARename_IsAFault503_WhenTheRootUnitReadDoesNotReturnExactlyOneRow(int rows)
+    {
+        BothPrivileges(Grant("Deep", ClassificationTestFixture.RootUnit));
+        _f.RootUnitRowCount = rows;
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.unavailable");
+        _f.Writes.Should().BeEmpty();
+        _f.Requests.Should().NotContain(r => r.StartsWith("GET sprk_polic", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARename_IsAFault503_WhenTheRootUnitReadFails()
+    {
+        BothPrivileges(Grant("Deep", ClassificationTestFixture.RootUnit));
+        _f.Faults.Add("businessunit");
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.unavailable");
+        _f.Writes.Should().BeEmpty();
+        _f.Requests.Should().NotContain(r => r.StartsWith("GET sprk_polic", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -871,8 +1044,32 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
 
     public string[]? VersionDepths { get; set; }
 
-    /// <summary>False: the caller's business unit has a parent business unit.</summary>
+    /// <summary>The root business unit (no parent) and a child business unit under it.</summary>
+    public static readonly Guid RootUnit = Guid.Parse("10300000-0000-4000-8000-0000000000b1");
+
+    public static readonly Guid ChildUnit = Guid.Parse("10300000-0000-4000-8000-0000000000b2");
+
+    /// <summary>Marks a <see cref="PrivRow.Filter"/> that is omitted from the row, or sent as JSON null.</summary>
+    public const string FilterMissing = "<missing>";
+
+    public const string FilterNull = "<null>";
+
+    /// <summary>
+    /// One RolePrivilege row of the privilege function. <see cref="Unit"/> null omits BusinessUnitId; <see cref="Filter"/> null is the live
+    /// all-zero GUID (no condition), <see cref="FilterMissing"/> omits the property, <see cref="FilterNull"/> sends JSON null.
+    /// </summary>
+    public sealed record PrivRow(string Depth, Guid? Unit, string? Filter = null);
+
+    /// <summary>False: the caller sits in a child business unit, where a role granted to them directly has its copy.</summary>
     public bool CallerIsInRootBusinessUnit { get; set; } = true;
+
+    /// <summary>When set, these rows replace the ones built from the depths, per privilege.</summary>
+    public PrivRow[]? PolicyRows { get; set; }
+
+    public PrivRow[]? VersionRows { get; set; }
+
+    /// <summary>How many parentless business units the root-unit read returns (the live answer is exactly 1).</summary>
+    public int RootUnitRowCount { get; set; } = 1;
 
     /// <summary>A raw JSON answer to the privilege function, in place of the one built from the depths.</summary>
     public string? PrivilegeAnswerOverride { get; set; }
@@ -901,6 +1098,9 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
         PolicyDepths = null;
         VersionDepths = null;
         CallerIsInRootBusinessUnit = true;
+        PolicyRows = null;
+        VersionRows = null;
+        RootUnitRowCount = 1;
         PrivilegeAnswerOverride = null;
         Routing = new CategoryRoutingOptions();
         EveryCallFails = null;
@@ -983,11 +1183,14 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
     private sealed class World(ClassificationTestFixture f) : IDataverseUserClient
     {
         private static readonly Guid CallerUserId = Guid.Parse("10300000-0000-4000-8000-0000000000c1");
-        private static readonly Guid CallerBusinessUnitId = Guid.Parse("10300000-0000-4000-8000-0000000000b1");
+        private Guid CallerBusinessUnitId => f.CallerIsInRootBusinessUnit ? RootUnit : ChildUnit;
 
         private static DataverseUserResponse Fail(int status, string code) => DataverseUserResponse.Fail(status, code, code);
 
         private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
+
+        /// <summary>Rows for a role granted to the caller directly: the role copy sits on the caller's own business unit, unconditional.</summary>
+        private PrivRow[] Direct(IEnumerable<string> depths) => depths.Select(d => new PrivRow(d, CallerBusinessUnitId)).ToArray();
 
         private DataverseUserResponse? Common(string what)
         {
@@ -1047,33 +1250,50 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
                 }
 
                 var privilege = relativePath[(relativePath.IndexOf(privilegeFunction, StringComparison.Ordinal) + privilegeFunction.Length)..].TrimEnd(')', '\'');
-                var depths = privilege switch
+                var grants = privilege switch
                 {
-                    "prvReadsprk_Policy" => f.PolicyDepths ?? (f.PolicyDepth is null ? [] : [f.PolicyDepth]),
-                    "prvReadsprk_PolicyVersion" => f.VersionDepths ?? (f.VersionDepth is null ? [] : [f.VersionDepth]),
+                    "prvReadsprk_Policy" => f.PolicyRows ?? Direct(f.PolicyDepths ?? (f.PolicyDepth is null ? [] : [f.PolicyDepth])),
+                    "prvReadsprk_PolicyVersion" => f.VersionRows ?? Direct(f.VersionDepths ?? (f.VersionDepth is null ? [] : [f.VersionDepth])),
                     _ => throw new InvalidOperationException($"The rename check asked about an unexpected privilege: {privilege}"),
                 };
                 return Task.FromResult(DataverseUserResponse.Ok(200, Json(new
                 {
-                    RolePrivileges = depths.Select(d => new Dictionary<string, object?>
+                    RolePrivileges = grants.Select(g =>
                     {
-                        ["Depth"] = d,
-                        ["PrivilegeId"] = Guid.NewGuid().ToString("D"),
-                        ["BusinessUnitId"] = CallerBusinessUnitId.ToString("D"),
-                        ["PrivilegeName"] = privilege,
+                        // The live shape: {"PrivilegeName","Depth","BusinessUnitId","RecordFilterId":"0000...","RecordFilterUniqueName":""}.
+                        var row = new Dictionary<string, object?>
+                        {
+                            ["Depth"] = g.Depth,
+                            ["PrivilegeId"] = Guid.NewGuid().ToString("D"),
+                            ["PrivilegeName"] = privilege,
+                            ["RecordFilterUniqueName"] = string.Empty,
+                        };
+                        if (g.Unit is { } unit)
+                        {
+                            row["BusinessUnitId"] = unit.ToString("D");
+                        }
+
+                        if (g.Filter != FilterMissing)
+                        {
+                            row["RecordFilterId"] = g.Filter == FilterNull ? null : g.Filter ?? Guid.Empty.ToString("D");
+                        }
+
+                        return row;
                     }),
                 })));
             }
 
-            if (relativePath.StartsWith($"businessunits({CallerBusinessUnitId:D})?", StringComparison.Ordinal))
+            if (relativePath.StartsWith("businessunits?", StringComparison.Ordinal))
             {
-                relativePath.Should().Contain("_parentbusinessunitid_value");
+                relativePath.Should().Be("businessunits?$select=businessunitid&$filter=_parentbusinessunitid_value eq null");
                 return Task.FromResult(f.Faults.Contains("businessunit")
                     ? Fail(500, DataverseUserClientErrorCodes.ServiceError)
-                    : DataverseUserResponse.Ok(200, Json(new Dictionary<string, object?>
+                    : DataverseUserResponse.Ok(200, Json(new
                     {
-                        ["_parentbusinessunitid_value"] = f.CallerIsInRootBusinessUnit ? null : Guid.NewGuid().ToString("D"),
-                        ["businessunitid"] = CallerBusinessUnitId.ToString("D"),
+                        value = Enumerable.Range(0, f.RootUnitRowCount).Select(i => new Dictionary<string, object?>
+                        {
+                            ["businessunitid"] = (i == 0 ? RootUnit : Guid.NewGuid()).ToString("D"),
+                        }),
                     })));
             }
 
