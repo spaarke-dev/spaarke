@@ -909,3 +909,61 @@ rows.** Both tables hold 0 rows in total after the run.
 - **Read-back** (`RetrieveRolePrivilegesRole`, before and after): **50 → 51; added exactly** `prvAppendToContact|Global`;
   nothing removed, no depth changed. No other role touched. Repo `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` updated.
 - **Next**: re-run 146 items 1, 2, 3, 9 and 11 (commit-route Decision Records) on dev. Other environments need the same grant.
+
+## 14. 2026-10-16 — Task 049 PREPARED, not applied (D-17, D-62, D-147; uac-r2 K-A)
+
+Status: repo role XML and the live-apply script are in the task 049 PR; **nothing has been changed on spaarkedev1**. The main
+session applies after uac-r2's check on the PR and appends the dated result below this section.
+
+**The three removals (and nothing else):** Console User `prvWritesprk_Signal` (D-17), Console User
+`prvCreatesprk_DecisionRecord` (D-62), Ontology Administrator `prvCreatesprk_DecisionRecord` (D-147), each on every
+business-unit copy. The two Create removals run before the Signal Write (uac-r2 K-A: Write on `sprk_signal` never goes without
+Create on `sprk_decisionrecord` in the same change). Repo: `Roles/Spaarke Console User.xml` (-2 lines) and
+`Roles/Spaarke Ontology Administrator.xml` (-1 line). Source guard: `tests/Spaarke.ArchTests/SpaarkeRoleLedgerPrivilegeGuardTests.cs`.
+
+**Client-write grep (POML constraint 2), 2026-10-16, branch `db1e7daf9` and `origin/master` `0ccc75b4c`:** no client write to
+`sprk_signal` or `sprk_decisionrecord`. Searched `src/` (ts, tsx, js, jsx, html, ps1, bundles) for `sprk_signal(s)` and
+`sprk_decisionrecord(s)`: every hit is a comment, a type or a display-name map (`WorklistWorkspaceWidget.tsx:10`,
+`consoleStatus.ts:77,82`, `decisionDisplay.ts:161`, `Worklist/types.ts`, `worklistService.ts`, `WorklistWidget.tsx:7`,
+`worklistWizardItem.ts:4`, `worklist.registration.ts:15`). No `Xrm.WebApi` update/create/delete, no `child-records` and no PATCH
+reaches either table. The only Signal write route the Console calls is `POST /api/v1/signals/{id}/decision`
+(`decisionWizardService.ts:7`, `DecisionCommitEndpoints.cs:31`). BFF side: every `sprk_signal` update is through the writer MI
+(`OntologyWriterDataverseClient`: `DecisionCommitService.cs:2027`, `SignalSuppressionService.cs:1296,1305,1325`,
+`SignalWriter.cs:650,907,1038,1079`); the only caller-identity access to `sprk_signals` is a read (`SignalCoreRecordAccess.cs:165`).
+The commit route's caller preflight asks for the caller's Write on each Signal's **subject** and AppendTo on the core record
+(`DecisionCommitService.cs:1462-1500`), never Write on the Signal. **No hit, so the escalation does not fire.**
+
+**uac-r2 re-read (POML constraint 4), `origin/master` `0ccc75b4c` fetched 2026-10-16.** Last commit per file:
+`SecureChildLineage.cs` `c1e16b784`; `config/secure-record-owner-role.json` `b2fc3fb78`; `RecordOwnershipResolver.cs` `ba9945149`;
+`CoreAncestorResolver.cs` `6a00d1c47`; `RecordRouteAccessAuthorizationFilter.cs` `c5f71487f`; `CallerRecordAccessProbe.cs` `c5f71487f`;
+`ExternalCallerContext.cs` `d254d7166`; `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` `720200e64`;
+`.claude/adr/ADR-034-user-record-membership.md` `97d6e0be3`; `.claude/adr/ADR-003-authorization-seams.md` `8c5c517a1`;
+`scripts/Set-SecureRecordOwnerRolePrivileges.ps1` `9fee1e8e2`. Against `7315b3e85` (the D-147 basis) the only change in any of
+them is `720200e64`, ledger prose and line cites for the Do-lane "mine" read (D-141/D-145a). The owner-role config lists
+**Reads only** for `sprk_signal` / `sprk_decisionrecord` (lines 233-245), so it names neither privilege being removed. No
+`config/*.json` role config lists any of the three. Open uac-r2 PRs #2016 (unshare-owner) and #2017 (demo SPE grant marker)
+touch neither. uac-r2's `current-task.md` lists "Task 049: confirm the Ontology Administrator change to ontology directly" as an
+open owner item. **Nothing changed in a way that invalidates the plan.**
+
+**Before (read-only, 2026-10-16T14:52Z, `-Verify`):** each of the 6 BU copies of Console User reports 23 privileges, of Ontology
+Administrator 38, of Ontology Service 50, identical per role (the copies mirror the root; §10.1's "0 on child copies" no longer
+holds, which is why the script acts per copy and skips a copy that already followed the root). Union:
+
+| Privilege | Holders now | After the three removals |
+|---|---|---|
+| Write on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer | unchanged |
+| Delete on `sprk_decisionrecord` | System Administrator, System Customizer, Service Deleter | unchanged |
+| Create on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
+| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, **Ontology Administrator (Deep)**, Ontology Service |
+
+🔴 **Finding for the owner.** The task goal says "no human role writes `sprk_signal`", but D-17 names only Console User.
+**Spaarke Ontology Administrator still holds Write (Deep) on `sprk_signal`** after the three removals (its only member is
+Ralph Schroeder; §3's matrix gives the admin Write, Delete and Assign on Signals). It was **not** removed here: it is outside the
+owner's scope. Decide whether to remove it as well, or accept it as the admin's override.
+
+**Evidence and commands.** `049-role-removal-evidence-whatif-*.md` (plan, projected union) and `-verify-*.md` (live before
+picture) in this folder carry the full `RetrieveRolePrivilegesRole` listing per copy. Script:
+`scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` (`-WhatIf`, `-Verify`, `-Apply`).
+Still to do by the main session after uac-r2's check: `-Apply`, `-Verify`, the live negatives (non-admin update of a
+`sprk_signal` row, and create of a `sprk_decisionrecord`, both refused: task 008 §10.4 method), and one decision recorded in
+the deployed dev Console.
