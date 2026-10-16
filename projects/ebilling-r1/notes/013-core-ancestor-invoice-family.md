@@ -25,7 +25,7 @@
 - **Creator person**: `sprk_createdbyperson` on the four tables (section 5).
 
 Not wired into any caller (POML notes: tasks 044, 049, 100, 104 call it). The generic child-record create route is a bypass,
-filed as ISS-010.
+filed as ISS-010. **Update:** ISS-010 has since been resolved by wiring the guard into the shared write core (section 11).
 
 ## 2. Decisions taken here (technical, recorded for review)
 
@@ -176,3 +176,91 @@ code-review and adr-check skills were not run as separate skills; the two indepe
    and the external invoices module's live-parent rule (withholding more invoices from external callers) — uac-r2 to decide.
 5. Deployment order (pass 2 K1): import the eBilling schema before deploying a BFF build with this change; the secure-child
    readers query every lineage table and column without a presence probe (fail closed, but reconciliation stops).
+
+## 11. ISS-010 / #1973 resolved (unified-access-control-r2 direction, 2026-10-15)
+
+Section 10 items 3 and 4 are answered by unified-access-control-r2. Those answers are binding, and uac-r2 reviews the write
+core as code it owns. Items 1, 2 and 5 stay open (2 is ISS-011 / #1974, unchanged here; `sprk_billingexport` stays outside
+the secure family).
+
+### 11.1 What uac-r2 decided and how it was built
+
+| uac-r2 answer | Built |
+|---|---|
+| Call the guard; do not refuse the tables. `sprk_invoice` and `sprk_billingevent` stay in `CreateTables` ("New Billing Event" is a ribbon create surface); `sprk_invoice` stays in `RefileTables`. | Route table sets unchanged. |
+| Invoke it from the shared write core (`OwnedChildWrite` create and re-file), keyed by table, not per route. The guard owns the rule; fail closed when it cannot read what it needs. | `OwnedChildWrite.CheckInvoiceFamilyAsync`, called from `CreateAsync` (after the caller's G5 check, so AppendTo on every bound record comes first) and first in `RefileAsync` (before the re-file / ordinary-update split, so the `NotARefile` PATCH is covered too). This guards `POST /api/v1/child-records/{table}`, `PATCH /api/v1/child-records/sprk_invoice/{id}`, the chat `dataverse.create_record` / `dataverse.update_record` tools and the decision route's in-process create. The rule is `InvoiceFamilyCoreRecordGuard.CheckWriteAsync` plus `GuardedLookups`. |
+| Merge stored row plus patch, once, in the write core, before any table guard. The effective lookups are the stored row's lookups overlaid with the patch. Read as the caller; fail closed on a read fault. Extend an existing reader rather than add a second one. | `OwnedChildWrite.ReadLookupsAsCallerAsync` (one `$select=_{col}_value` read as the caller) and `OwnedChildWrite.EffectiveLookups` (pure overlay: a bind replaces, a clear nulls, the rest is kept). Runs only when the patch sets or clears a guarded lookup. A read fault returns the caller's own error; a column missing from the answer is `invoice_family_read_failed`. Neither counts as "not set". |
+| `sprk_supersedesinvoice` is a peer reference, not a lineage parent. On create and update the two invoices must resolve to the same core record, or the write is refused with a stable code. | `invoice_family_supersedes_core_record_mismatch`. The superseded invoice's core lookups are read as the caller. A 403 or 404 on that read gets the uniform not-found; any other fault returns the caller's own error; a superseded invoice naming no single core record is a mismatch. |
+
+**Reader reuse (§11).** Existing stored-row readers were checked first:
+- `CoreAncestorResolver.ResolveInvoiceFamilyCoreRecordAsync` reads exactly these columns, but app-only (`IGenericEntityService`). The direction says read as the caller, so it was not reused.
+- The re-file core's caller reads (`CheckCallerMayRefileByPairAsync`, `KeepPairInStepAsync`) read the whole row only when the ADR-024 pair is written.
+
+`ReadLookupsAsCallerAsync` is therefore the one caller-identity lookup reader in the write core, and it serves both reads: the stored row and the superseded invoice. Folding the pair reads into it would be a refactor of uac-r2 code, so it is left as a follow-up suggestion.
+
+**HTTP contract** (`ChildRecordEndpoints.InvoiceFamilyRefused`):
+- 400 with the guard's code as `reasonCode` (`invoice_family_no_core_record`, `_multiple_core_records`, `_lookup_not_a_core_record`, `_supersedes_core_record_mismatch`);
+- 500 for `_read_failed`;
+- the uniform 404 `child_record.not_found` for a record that cannot be found.
+
+The chat tools return the guard's code as the error code.
+
+**Ribbon (pass-1 F1).** "New Billing Event" on an invoice form posted only `sprk_Invoice@odata.bind`. FR-05 refuses that, because the line's core record is its own lookup (D-75). `sprk_secure_child_ribbon.js` (and its SpaarkeMaster mirror) now reads the invoice's three core lookups through Xrm.WebApi and adds the one bind. When the invoice is not filed under exactly one core record, it refuses client-side and sends nothing. The server still never takes a line's core record from its invoice. **The web resource must be redeployed** (SpaarkeMaster) for this to reach dev.
+
+### 11.2 Files changed (uac-r2-owned flagged **[uac-r2]**)
+
+- **[uac-r2]** `src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs`: `Outcome` / `RefileOutcome.InvoiceFamilyRefusal`, the two call sites, `CheckInvoiceFamilyAsync`, `EffectiveLookups`, `ReadLookupsAsCallerAsync`.
+- **[uac-r2]** `src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs`: `InvoiceFamilyRefused`, plus one arm in each of the create and re-file refusal switches.
+- **[uac-r2]** `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs` (`OwnedCreateResult`) and `DataverseUpdateRecordHandler.cs` (`RefileRefusal`): one refusal arm each, on uac-r2 task 146's owned path.
+- **[uac-r2]** `src/client/webresources/js/sprk_secure_child_ribbon.js` and `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js` (mirror, parity guard #1651): `invoiceCoreBind`.
+- **[uac-r2]** `src/client/shared/Spaarke.UI.Components/src/utils/adapters/__tests__/secureChildRibbonScript.test.ts`: two invoice-host cases (3 tests) and a richer fake.
+- **[uac-r2]** `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs`: the `ScriptedUserClient` fake answers every `$select`ed `_x_value` (null when unset, as Dataverse does), gains `GetOverride`, and gains the invoice / billing-event task 012 lookups. New partial `SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs` (21 tests).
+- ebilling-r1: `InvoiceFamilyCoreRecordGuard.cs` (`SupersedesCoreRecordMismatchCode`, `SupersedesInvoiceColumn`, `GuardedLookups`, `CheckWriteAsync`), `InvoiceFamilyCoreRecordGuardTests.cs` (+8 tests), this note, `defer-issues.md` (ISS-010), `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (I-19).
+
+### 11.3 Open for uac-r2 / owner
+
+1. **Reverse supersedes (review pass 1, F1, escalated).** The forward check runs when the superseding invoice is written. Moving the SUPERSEDED invoice to another core record is not checked against the invoices that point at it. Example: Y supersedes X, both on matter A; X is re-filed to project P and accepted. Closing this needs a query for rows with `_sprk_supersedesinvoice_value eq X`. It must be app-only, because a caller-scoped query misses rows the caller cannot see, and a refusal would then reveal that an invoice the caller cannot read exists. uac-r2 / owner to choose: (a) app-only check with a non-disclosing code, (b) accept the gap and let the eBilling resubmission writer (task 044) own it, or (c) another option.
+2. **Read/write race (K).** The stored lookups are read, then the PATCH goes with `If-Match: *`. Two concurrent re-files of one invoice could each pass and together leave two core records. The fix is the row's `@odata.etag` as `If-Match`, but `IDataverseUserClient.PatchAsync` has no ETag parameter today, and the same race exists for every re-file invariant.
+3. **Field-secured lookups (K).** Dataverse returns a column the caller cannot read under field security as null, and the merge would read that as "not set". None of the guarded lookups is field-secured today. If one becomes so, refuse on `IsSecured` or read the stored lookups app-only after the caller's own read succeeds.
+4. **Invoice wizard (K).** `CreateInvoiceWizard` can finish with no association (no host context, or a host that is not a matter or project). That is now a 400 `invoice_family_no_core_record` at Finish, which FR-05 makes correct; the wizard should require the association up front.
+5. **Deployment order (K).** The invoice update read selects `_sprk_supersedesinvoice_value` and `_sprk_regardingworkassignment_value`. Import task 012's schema before deploying this BFF build, otherwise every invoice PATCH that touches a lookup fails closed with Dataverse's 400. This is the same rule as section 10 item 5.
+6. **Resolver fields.** The write core does not fill the five ADR-024 fields (`DeriveResolverFieldsAsync`), because the direction did not ask for it. The eBilling writers (044 / 049 / 100 / 104) fill them.
+7. **Writers outside the core.** `InvoiceReviewService` creates invoices app-only, matter-only by construction, without `OwnedChildWrite`; any new writer outside the core must call the guard itself. Existing observation, not changed: `OwnedChildWrite` treats a lookup to any ownership-parent table as a filing, so binding `sprk_supersedesinvoice` alone goes through the re-file path (`ReparentAsync`) with the superseded invoice counted as a parent for secure-if-any. That conflicts with "peer reference, not lineage"; it is uac-r2's to decide.
+
+### 11.4 Tests, review, size
+
+**New tests**
+- 21 route and chat-tool cases in `SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs`.
+- 9 guard cases in `InvoiceFamilyCoreRecordGuardTests`.
+- 3 ribbon cases in `secureChildRibbonScript.test.ts`.
+
+**Proof each test fails before the change**
+- **Seed A: guard call disabled in the write core.** 16 route and chat cases fail, every case that should refuse. The 3 positive controls pass: same-core supersedes created, matter-to-project move with the clear written, an edit that leaves the lookups alone neither read nor refused.
+- **Seed B: merge does not overlay.** `EffectiveLookups` fails, and so do the refile cases, including the three census refile cases for the invoice.
+- **Seed C: supersedes rule neutralised.** 6 guard cases fail, plus the route and chat supersedes cases.
+- **Seed D: catch on the stored-row read disabled.** The throwing-read case fails.
+- **Old ribbon script.** 3 failed, 20 passed. With the change: 23 passed.
+
+**Suites**
+- **Touched classes** (record ownership, child-record routes, invoice family, core ancestor, secure root/child, chat create/update, filing, external multi-root, parent lineage, decision route, work assignment): 2,275 passed, 0 failed.
+- **`Spaarke.ArchTests`:** 1,052 passed, 0 failed. The web-resource mirror parity guard (#1651) needed the SpaarkeMaster copy updated.
+- **Full `Sprk.Bff.Api.Tests`** (on the first commit, run while a review also ran tests): 23,473 passed, 65 failed, 23 skipped. Every failure is a WebApplicationFactory route, contract or seam test that timed out after 3 to 13 minutes under load. Rerun in isolation, those 46 classes gave 2,193 passed, 0 failed, 3 skipped. None touches the invoice family or the write core.
+
+**Review: two adversarial passes (record access)**
+- **Pass 1.**
+  - F1 ribbon "New Billing Event" refused: **fixed** (11.1).
+  - F1 reverse supersedes: **escalated** (11.3 item 1).
+  - F3 five update-path branches untested: **fixed**, 5 tests.
+  - K1 race (11.3 item 2), K2 field security (item 3), K4 wizard (item 4), K5 deployment order (item 5): recorded.
+  - K3 exception text in a refusal: **fixed**.
+- **Pass 2.** No F-class finding.
+  - K1 a throwing stored-row read escaped as a generic 500: **fixed**, it now returns `read_failed` without the fault text, with a test.
+  - K2 the guard's code was missing from the route warnings: **fixed**.
+  - K3 `DeriveResolverFieldsAsync` still puts `ex.Message` in `Reason` (no route calls it yet): left for the eBilling writers.
+  - K4 the I-19 wording called supersedes "not a filing" while the ownership core still treats it as a parent: **doc fixed** (11.3 item 7).
+  - K4 an invoice may supersede itself, and A→B→A cycles are not checked: left for task 044.
+
+**Publish size**
+- Same method as section 7: `git archive` short-path trees, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal`, 192 files each.
+- Base `87ac5a821` 38,985,863 B; final head (`93949f329` code) 38,991,743 B: **+5,880 B (+0.006 MB)**. The first commit measured +5,852 B.
+- No package reference changed, so there is no new CVE source. The total is about 37.2 MB, far below the 55 MB review threshold.

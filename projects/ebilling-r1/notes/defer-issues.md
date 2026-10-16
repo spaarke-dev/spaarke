@@ -104,7 +104,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-10-15 (unified-access-control-r2 direction; see "Resolution" below) |
 | **Urgency** | before the first eBilling writer ships (tasks 044 / 049) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 013 |
@@ -128,6 +128,14 @@ For a table in `InvoiceFamilyCoreRecordGuard.CoreRecordLookups`, call `Check` on
 **Blockers**: unified-access-control-r2 agreement (their route)
 
 **Related**: FR-05, D-75, task 013 notes
+
+**Resolution (2026-10-15, as unified-access-control-r2 directed; details in the task 013 notes, section 11)**
+
+- Call the guard, do not refuse the tables: `sprk_invoice` and `sprk_billingevent` stay in `CreateTables`, `sprk_invoice` in `RefileTables`.
+- The guard is invoked from the shared write core, not per route: `OwnedChildWrite.CreateAsync` (after the caller's G5 check) and `OwnedChildWrite.RefileAsync` (first, before re-file or ordinary update) call `OwnedChildWrite.CheckInvoiceFamilyAsync`, keyed by table. That covers `POST /api/v1/child-records/{table}`, `PATCH /api/v1/child-records/sprk_invoice/{id}`, and the chat create and update tools. `InvoiceFamilyCoreRecordGuard` owns the rule (`CheckWriteAsync`, `GuardedLookups`).
+- Merge: on an update that sets or clears a guarded lookup, the stored lookups are read once as the caller (`ReadLookupsAsCallerAsync`) and overlaid with the patch (`EffectiveLookups`) before the guard runs. A read fault is the caller's own error, and a column the answer lacks is `invoice_family_read_failed`. Neither counts as "not set".
+- `sprk_supersedesinvoice` is a peer reference. The superseding and superseded invoices must regard the same core record, or the write is refused with `invoice_family_supersedes_core_record_mismatch`. A superseded invoice the caller cannot read gets the uniform not-found.
+- Not done here: filling the five resolver fields on these routes (`DeriveResolverFieldsAsync`) was not in the direction, so it is left to the eBilling writers.
 
 ---
 
