@@ -1295,7 +1295,7 @@ internal static class OwnedChildWrite
     /// <item>Basic — only a <c>systemuser</c> target that is the caller (<paramref name="me"/>, which every caller takes
     /// from WhoAmI under the caller's own token); a team or business-unit target is denied.</item>
     /// </list>
-    /// A Local or Deep grant with no anchor reported is not counted. Anything unanswered — another business-owned table,
+    /// A grant with no anchor reported is not counted, at any depth (D-148). Anything unanswered — another business-owned table,
     /// an unknown depth, an unreadable or missing row, no business unit on it, a question Dataverse does not answer — is
     /// <c>false</c>, and the caller gets the uniform not-found.
     /// </summary>
@@ -1327,8 +1327,9 @@ internal static class OwnedChildWrite
         {
             var covers = depth switch
             {
-                PrivilegeDepth.Global => true,
-                PrivilegeDepth.Basic => string.Equals(lookup.RelatedTable, "systemuser", StringComparison.Ordinal) && lookup.RecordId == me,
+                PrivilegeDepth.Global => anchor != Guid.Empty,
+                PrivilegeDepth.Basic => anchor != Guid.Empty
+                    && string.Equals(lookup.RelatedTable, "systemuser", StringComparison.Ordinal) && lookup.RecordId == me,
                 PrivilegeDepth.Local => anchor != Guid.Empty && rowBusinessUnit == anchor,
                 PrivilegeDepth.Deep => anchor != Guid.Empty
                     && (rowBusinessUnit == anchor
@@ -1368,8 +1369,8 @@ internal static class OwnedChildWrite
     /// The grants of <paramref name="privilegeName"/> in a <c>RetrieveUserSetOfPrivilegesByNames</c> response, each with
     /// its depth and the business unit Dataverse anchors it at — live shape (spaarkedev1, 2026-10-16):
     /// <c>{"RolePrivileges":[{"Depth":"Local","BusinessUnitId":"…","PrivilegeName":"prvAppendToUser",…}]}</c>. A depth that
-    /// is not one of the four names is dropped (fail closed); a missing anchor is <see cref="Guid.Empty"/>, which no Local or
-    /// Deep grant counts with.
+    /// is not one of the four names is dropped (fail closed); a missing anchor is <see cref="Guid.Empty"/>, which no grant
+    /// counts with.
     /// </summary>
     internal static IReadOnlyList<(PrivilegeDepth Depth, Guid Anchor)> PrivilegeGrantsIn(JsonElement? body, string privilegeName)
     {

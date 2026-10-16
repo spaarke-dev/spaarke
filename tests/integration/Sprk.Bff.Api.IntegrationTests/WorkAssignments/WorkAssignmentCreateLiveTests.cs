@@ -460,17 +460,12 @@ public sealed class WorkAssignmentCreateLiveTests
         /// <summary>That user's real Entra object id — the inbound <c>oid</c> claim.</summary>
         public string? CallerObjectId { get; private set; }
 
-        /// <summary>That user's business unit — what WhoAmI under their own token reports (task 126).</summary>
-        public Guid? CallerBusinessUnitId { get; private set; }
-
         public async Task ActAsAsync(Guid systemUserId)
         {
             OperatorSystemUserId ??= (await _metadata.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
-            var user = await _metadata.GetFromJsonAsync<JsonElement>(
-                $"systemusers({systemUserId})?$select=azureactivedirectoryobjectid,_businessunitid_value");
+            var user = await _metadata.GetFromJsonAsync<JsonElement>($"systemusers({systemUserId})?$select=azureactivedirectoryobjectid");
             CallerSystemUserId = systemUserId;
             CallerObjectId = user.GetProperty("azureactivedirectoryobjectid").GetString();
-            CallerBusinessUnitId = user.GetProperty("_businessunitid_value").GetGuid();
             _out.WriteLine($"acting as systemuser {systemUserId} (oid {CallerObjectId})");
         }
 
@@ -544,11 +539,7 @@ public sealed class WorkAssignmentCreateLiveTests
             {
                 factory.Trace($"    as-caller GET WhoAmI() -> {caller} (the acting user; substitution 2)");
                 return Task.FromResult(DataverseUserResponse.Ok(200,
-                    JsonSerializer.SerializeToElement(new
-                    {
-                        UserId = caller.ToString("D"),
-                        BusinessUnitId = factory.CallerBusinessUnitId?.ToString("D"), // task 126: as the user's own WhoAmI reports it
-                    })));
+                    JsonSerializer.SerializeToElement(new { UserId = caller.ToString("D") })));
             }
 
             return SendAsync(HttpMethod.Get, $"/api/data/v9.2/{relativePath.TrimStart('/')}", null, cancellationToken);

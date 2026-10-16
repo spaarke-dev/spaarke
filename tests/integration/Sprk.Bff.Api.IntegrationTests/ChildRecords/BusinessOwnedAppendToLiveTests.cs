@@ -16,12 +16,13 @@
 //                                    a grant applies at its own anchor). No such user exists on spaarkedev1 (2026-10-16).
 //   SPAARKE_LIVE_126_BASIC_TEAM_USER_ID=<systemuserid of a user holding prvAppendToTeam at Basic; default the acting user>
 //                                    — known limit K1: a team target at Basic is denied (uniform not-found) by the real G5
-//                                    core, asked in-process (no create route binds a team lookup).
+//                                    core, asked in-process (no create route binds a team lookup). A user with no Basic
+//                                    prvAppendToTeam grant (Spaarke Basic/Core User grant none) logs "not configured".
 // and an `az login` session for an identity that may create sprk_analysis and impersonate (System Administrator).
 //
 // Substitutions are WorkAssignmentCreateLiveTests' (its factory is reused): the inbound token carries the acting user's
-// real oid; the caller's Dataverse is the operator's token + MSCRMCallerID (WhoAmI answered with the acting user and their
-// business unit, as their own token answers it); the BFF's outbound identity is AzureCliCredential.
+// real oid; the caller's Dataverse is the operator's token + MSCRMCallerID (WhoAmI answered with the acting user, as their
+// own token answers it); the BFF's outbound identity is AzureCliCredential.
 //
 // Every record is named "zz-126-test …" and deleted in `finally`; ids are registered BEFORE anything is asserted, every
 // delete is checked, and the zz-126 count is confirmed zero by query.
@@ -146,17 +147,43 @@ public sealed class BusinessOwnedAppendToLiveTests
         HttpClient dv, HttpClient bff, WorkAssignmentCreateLiveTests.LiveWorkAssignmentFactory factory, Guid user, List<Guid> created)
     {
         var userBu = await BusinessUnitOfAsync(dv, user);
-        var teams = (await dv.GetFromJsonAsync<JsonElement>(
+        var memberships = (await dv.GetFromJsonAsync<JsonElement>(
                 $"systemusers({user})?$select=systemuserid&$expand=teammembership_association($select=teamid,name,_businessunitid_value,teamtype)"))
-            .GetProperty("teammembership_association").EnumerateArray()
-            .Where(t => t.GetProperty("_businessunitid_value").GetGuid() != userBu)
-            .ToList();
-        _out.WriteLine($"[foreign] user {user} (BU {userBu}); teams in other BUs: " +
-                       string.Join(", ", teams.Select(t => $"{t.GetProperty("name").GetString()} (BU {t.GetProperty("_businessunitid_value").GetGuid()})")));
-        _out.WriteLine($"[foreign] prvAppendToUser as Dataverse reports it: {await PrivilegeAsync(dv, user, "prvAppendToUser")}");
-        teams.Should().NotBeEmpty("the foreign-team leg needs a user in an owner team of another business unit");
+            .GetProperty("teammembership_association").EnumerateArray().ToList();
 
-        var teamBu = teams[0].GetProperty("_businessunitid_value").GetGuid();
+        // An OWNER team (teamtype 0) in ANOTHER business unit whose role grants prvAppendToUser — the foreign anchor.
+        var foreignTeams = new List<(string Name, Guid Bu)>();
+        foreach (var team in memberships.Where(t => t.GetProperty("teamtype").GetInt32() == 0
+                                                    && t.GetProperty("_businessunitid_value").GetGuid() != userBu))
+        {
+            var roles = (await dv.GetFromJsonAsync<JsonElement>(
+                    $"teams({team.GetProperty("teamid").GetGuid()})?$select=teamid&$expand=teamroles_association($select=roleid)"))
+                .GetProperty("teamroles_association").EnumerateArray().Select(r => r.GetProperty("roleid").GetGuid());
+            foreach (var role in roles)
+            {
+                var privileges = await dv.GetFromJsonAsync<JsonElement>($"RetrieveRolePrivilegesRole(RoleId={role})");
+                if (privileges.GetProperty("RolePrivileges").EnumerateArray()
+                    .Any(p => p.GetProperty("PrivilegeName").GetString() == "prvAppendToUser"))
+                {
+                    foreignTeams.Add((team.GetProperty("name").GetString()!, team.GetProperty("_businessunitid_value").GetGuid()));
+                    break;
+                }
+            }
+        }
+
+        var reported = await PrivilegeAsync(dv, user, "prvAppendToUser");
+        _out.WriteLine($"[foreign] user {user} (BU {userBu}); owner teams in other BUs granting prvAppendToUser: " +
+                       string.Join(", ", foreignTeams.Select(t => $"{t.Name} (BU {t.Bu})")));
+        _out.WriteLine($"[foreign] prvAppendToUser as Dataverse reports it: {reported}");
+        foreignTeams.Should().NotBeEmpty("the foreign-team leg needs a user in an OWNER team of another business unit whose role grants prvAppendToUser");
+
+        var teamBu = foreignTeams[0].Bu;
+        using (var body = JsonDocument.Parse(reported))
+        {
+            Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToUser")
+                .Should().Contain(g => g.Anchor == teamBu, "Dataverse reports the team-inherited grant anchored at the team's business unit");
+        }
+
         await factory.ActAsAsync(user);
         foreach (var (label, bu) in new[] { ("team BU", teamBu), ("own BU", userBu) })
         {
@@ -184,11 +211,23 @@ public sealed class BusinessOwnedAppendToLiveTests
     /// </summary>
     private async Task BasicTeamLegAsync(HttpClient dv, WorkAssignmentCreateLiveTests.LiveWorkAssignmentFactory factory, Guid user)
     {
+        var reported = await PrivilegeAsync(dv, user, "prvAppendToTeam");
+        _out.WriteLine($"[K1] user {user}: prvAppendToTeam as Dataverse reports it: {reported}");
+        using (var body = JsonDocument.Parse(reported))
+        {
+            if (!Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToTeam")
+                    .Any(g => g.Depth == Sprk.Bff.Api.Infrastructure.Dataverse.PrivilegeDepth.Basic))
+            {
+                _out.WriteLine("[K1] K1 leg not configured: the user holds no Basic prvAppendToTeam grant " +
+                               "(SPAARKE_LIVE_126_BASIC_TEAM_USER_ID names one that does)");
+                return;
+            }
+        }
+
         var bu = await BusinessUnitOfAsync(dv, user);
         var team = (await dv.GetFromJsonAsync<JsonElement>(
                 $"teams?$select=teamid&$filter=_businessunitid_value eq {bu} and isdefault eq true"))
             .GetProperty("value").EnumerateArray().Single().GetProperty("teamid").GetGuid();
-        _out.WriteLine($"[K1] user {user}: prvAppendToTeam as Dataverse reports it: {await PrivilegeAsync(dv, user, "prvAppendToTeam")}");
 
         await factory.ActAsAsync(user);
         using var scope = factory.Services.CreateScope();
@@ -197,7 +236,7 @@ public sealed class BusinessOwnedAppendToLiveTests
             caller, user, "team", team, CancellationToken.None);
         _out.WriteLine($"[K1] AppendTo on the user's BU default team {team}: succeeded={outcome.Succeeded} " +
                        $"parentUnavailable={outcome.ParentUnavailable} denied={outcome.Denied}");
-        outcome.Succeeded.Should().BeFalse("a team target is never covered at Basic (nor without the privilege)");
+        outcome.Succeeded.Should().BeFalse("a team target is never covered at Basic");
         outcome.ParentUnavailable.Should().BeTrue("the refusal is the uniform not-found");
     }
 

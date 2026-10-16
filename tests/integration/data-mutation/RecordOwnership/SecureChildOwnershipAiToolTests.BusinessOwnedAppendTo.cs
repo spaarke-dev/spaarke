@@ -231,15 +231,20 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.UnderQuestions.Should().Equal(new[] { (Directory.SecureBu, Directory.GeneralBu) });
     }
 
+    /// <summary>D-148: a grant Dataverse reports with no anchor is denied at every depth — each case names a target the
+    /// same grant WITH an anchor would cover (Basic: the caller's own row), and Deep never reaches the hierarchy question.</summary>
     [Theory]
-    [InlineData("Local")]
-    [InlineData("Deep")]
-    public async Task AGrantWithNoAnchor_IsTheUniform404(string depth)
+    [InlineData("Global", false)]
+    [InlineData("Deep", false)]
+    [InlineData("Local", false)]
+    [InlineData("Basic", true)]
+    public async Task AGrantWithNoAnchor_IsTheUniform404_AtEveryDepth(string depth, bool theCallersOwnRow)
     {
         Holds(AppendToUser, depth);
         _user.Anchors[AppendToUser] = Guid.Empty;
 
-        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(Colleague));
+        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(theCallersOwnRow ? Caller : Colleague));
+        _user.UnderQuestions.Should().BeEmpty("an unanchored grant is refused before any hierarchy question");
     }
 
     // ── Several grants of one privilege: any one that covers is enough; none covering is the 404 ─────────────

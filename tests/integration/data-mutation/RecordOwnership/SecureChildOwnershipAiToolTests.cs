@@ -865,15 +865,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public HashSet<Guid> NoAppendTo { get; } = new();
 
-        /// <summary>Ontology task 126: the caller's business unit, as WhoAmI reports it (the fixture's caller sits in the
+        /// <summary>Ontology task 126: the business unit a grant is anchored at unless <see cref="Anchors"/> or
+        /// <see cref="Grants"/> say otherwise — the caller's own (a role assigned to them; the fixture's caller sits in the
         /// child business unit).</summary>
-        public Guid CallerBusinessUnit { get; set; } = Directory.ChildBu;
+        public Guid DefaultGrantAnchor { get; set; } = Directory.ChildBu;
 
         /// <summary>Ontology task 126: the depth a held privilege is reported at (default Basic).</summary>
         public Dictionary<string, string> Depths { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Ontology task 126: the business unit a held privilege is reported anchored at (default the caller's;
-        /// <see cref="Guid.Empty"/> reports no anchor).</summary>
+        /// <summary>Ontology task 126: the business unit a held privilege is reported anchored at (default
+        /// <see cref="DefaultGrantAnchor"/>; <see cref="Guid.Empty"/> reports no anchor).</summary>
         public Dictionary<string, Guid> Anchors { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Ontology task 126: several grants of one held privilege (depth, anchor), reported in this order — in place
@@ -1044,7 +1045,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         private DataverseUserResponse Get(string path)
         {
             if (path == "WhoAmI()")
-                return Ok(new { UserId = me, BusinessUnitId = CallerBusinessUnit });
+                return Ok(new { UserId = me });
 
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
             {
@@ -1080,7 +1081,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                             ? several
                             : new List<(string Depth, Guid Anchor)>
                             {
-                                (Depths.GetValueOrDefault(n, "Basic"), Anchors.TryGetValue(n, out var anchor) ? anchor : CallerBusinessUnit),
+                                (Depths.GetValueOrDefault(n, "Basic"), Anchors.TryGetValue(n, out var anchor) ? anchor : DefaultGrantAnchor),
                             })
                         .Select(g => g.Anchor == Guid.Empty
                             ? (object)new { g.Depth, PrivilegeName = n }
