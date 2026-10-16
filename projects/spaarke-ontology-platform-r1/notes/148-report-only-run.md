@@ -1,4 +1,4 @@
-# Task 148: dev report-only run (pending)
+# Task 148: dev report-only run (done: writes on 2026-10-16)
 
 Status 2026-10-16: **run (report-only), sent to uac-r2.** See "Run 2026-10-16" at the end.
 
@@ -39,3 +39,23 @@ Prerequisite: D-146 enabled the five policies at 01:56:00Z; manual `signal-reeva
 Owner baseline after the evaluator pass (for uac-r2): 87 Signals, all open, all team-owned (BU1 and root default teams), 0 user-owned, 0 Secure Record Owners.
 
 Next: uac-r2 review → (CLEAN) coordinate the app-setting change with R3 (owns the BFF line) → `ReportOnlyTables=","`, `WritesEnabled=true` → read the next runs.
+
+### Writes enabled (2026-10-16)
+
+uac-r2 reviewed the report-only run CLEAN. Under D-138, and with the owner's "yes approve" on 2026-10-15, the main session set `CoreAncestor__StampReconciliation__ReportOnlyTables=","` and `Ontology__TodoAssigneeOwner__WritesEnabled=true` at 02:26:42Z. R3, word-add-in and uac-r2 were notified before and after.
+- Restart: "Application started" at 02:27:12Z; healthz 200 at 02:28:00Z.
+- Writer MI `69040982-…` unchanged. Code unchanged: the live ProductVersion is `1.0.0+eb5ba4011844bcaf327af9cc6aec8ced5e33dc9a`, read through Kudu VFS.
+
+**Runs after enabling**
+- 144 at 02:30: repaired 50, failures 0.
+- 144 at 02:35: scanned 130, stale 0, repaired 0.
+- 148: stale 0.
+- Nightly `signal-reevaluation` at 02:30: hits 87, written 0, unchanged 87 (no unchanged rows stamped, D-61).
+
+uac-r2 post-enable check: **CLEAN**.
+
+**Why 50 and not 51:** Signal `cb6f5be3` left the stale set between the 02:10 and 02:15 report-only runs.
+- A write to its To Do `af1ba427` at 02:14:33Z triggered the live restamper cascade (`[CORE-ANCESTOR-RESTAMP] examined=2 changed=1`, mi-bff-api-dev).
+- That cascade stamped `sprk_regardingmatter=00aef0ab`, the value the report-only pass had proposed.
+
+**Note:** `ReportOnlyTables` gates only the reconciliation job. The live restamper writes Signal and DR stamps regardless (D-131, by design), so "report-only" never meant "no stamp writes on these tables".
