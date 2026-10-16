@@ -8,6 +8,8 @@
   <RolePrivileges>
     <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_Policy" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_PolicyVersion" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Signal" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Deep" />
