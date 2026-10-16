@@ -3,7 +3,8 @@
   <metadata>
     <title>Grant upsert must write sprk_expiresdate on the match path (H1) + amend FR-09 acceptance</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
+    <status-note>**Closed 2026-10-16.** The escalated contract question (clearing an expiry: omitted field versus explicit null) is settled by FR-33, which shipped server-side in task 097: every grant is bounded, an absent expiry keeps the existing one (else today + 90), and there is no clear operation (spec.md FR-33; notes/decisions/external-grant-expiry-mandatory.md §6). The write path itself shipped with this task. Task 099 (the toolbar picker) is UI only and does not change the contract.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the grant write path; interacts with task 007's read filter.</rigor-reason>
     <model-tier>sonnet</model-tier>
