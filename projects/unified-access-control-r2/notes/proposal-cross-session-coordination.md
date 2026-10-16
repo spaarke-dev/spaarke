@@ -1,5 +1,7 @@
 # Proposal: systematic project coordination and finding triage
 
+> **MOVED (2026-10-15):** this is now its own project, `projects/spaarke-project-coordination-r1/design.md` on branch `work/spaarke-project-coordination-r1`. Edit it there; this copy is frozen.
+
 > **Status:** revision 2, 2026-10-15. Draft for owner review. Revision 1 covered messaging and deploys only. This revision adds coordination-point detection, project status, finding triage and the triage board, following the owner's direction in the uac-r2 session.
 > **Next step:** a pilot on uac-r2's open issues (§10). Its lessons feed this document. It then goes to `/design-to-spec` as a small repo-wide project. It is not uac-r2 work.
 
