@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-13 (A9 tasks created; check-2 fixes 061–063 created)
+> **Last Updated**: 2026-10-16 (048 complete on the branch; dev BFF deploy approved, waiting on SPE-admin confirmation)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,17 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ADR-028 **A9** build (owner-approved design `notes/a9-bff-design.md`, Teams included; ADR amended `63b7c575b`). R3 owns it end to end. Owner check-2 fixes 061–063 |
-| **Step** | 2026-10-13: A9 tasks created (044–048, 058, 059, 074–076); 060 cancelled; 012/056 superseded-in-part notes; 071 widened (9 Teams runs); check-2 fixes 061/062 (startable), 063 (blocked: owner decision on app-only enqueue rule); 002 gained grid-config labels (issue 2). Drift check + POML validator green. SPA deployed to dev (run `38420637859`), S2a pass; owner checks 1–2 done |
-| **Status** | Commits after #1810 (`5bfedfe3d`, notes, `63b7c575b`, task creation) are on the branch, not on master: next PR needs `/conflict-check` (word-add-in PR #1815 may edit `.claude/constraints/auth.md` line 69, adjacent to ours) |
-| **Next Action** | 2026-10-16. **Dev BFF live = R3 `a6d30891a`**: R3 plus master `42aecf064`, i.e. UAC #2007 (every contact bind consumes a pending invite hash) and R3's fold of the 047 home bind onto it (closes #2005 K1/K3; UAC re-check clean). Deployed 14:39-14:41Z on the owner's go after all six BFF-deploying sessions confirmed. Full suite: 23,880 passed; 6 ISS-012 failures, which pass alone. Hash-verified, healthz 200, the ontology Writer MI and both app settings verified. Notices were sent; UAC is running #2007's server gate on dev. Ontology's #2012 and #2014 (BFF, in review) go into the next R3 BFF line when they land on master. **Dev external SPA = R3 `2c2fed38d`**: run `38906042329` at 13:13Z, dispatched from the R3 branch (pushed). It carries UAC's 185 invite-code SPA work and R3's 066 work. Local vitest: 1030 total, all pass (23 timed out under load and pass one file at a time). UAC was warned that a master-dispatched SPA run would now remove R3's SPA changes. Option 100000012 was applied on spaarkedev1 at 11:32Z. Registration still needs task 059 (Entra) before it can be used on dev. **Deploy rule (owner 2026-10-15):** before any dev BFF deploy, read the live DLL ProductVersion (Kudu), run `git merge-base --is-ancestor <live> <deploy>`, get every BFF-deploying session to confirm its work is in the build (SPE admin especially), and get fresh owner approval. Rebuild the TEST project after a merge (`dotnet build src/server/api/Sprk.Bff.Api/` does not rebuild it, and `--no-build` then runs stale tests). **046: DONE** (on dev). **047: DONE** (merged `176857143`; full suite on the merge: 3 TaskCanceled, which pass when rerun alone). The schema script's label lookup and the solution labels were fixed (`69eed60c7`; the agreement test now compares labels, seeded). K items: ISS-013 #2001 (removeUnverifiedEmailClaim) is owned by provisioning task 264; the raw tid/oid K item needs no change (auth.md:173). NOT on dev. UAC review #2005 (2026-10-16), done so far:
-- Master 709101aa6 merged as 344cb0cb3 (F4).
-- F1 + K2 fixed in 988579709 (the home bind consumes the invite hash; email reads log a label). Census entry added in 9e860c692.
-- UAC's re-check: F1 and K2 hold. F3 (the census Seam needed a guard) and the K2 error-body leak are fixed in 4eacd5934; UAC is re-checking that diff.
-- K1 and K3 close when BindHomeOidAsync folds onto UAC PR #2007's store-level fallback at the next master merge.
-- K1 removeUnverifiedEmailClaim is a stated deploy prerequisite in the 047 notes.
-
-UAC's re-check of 4eacd5934 came back CLEAN (2026-10-16), so 047 is clear to deploy to dev from UAC's side. **Option 100000012 was applied on spaarkedev1 at 11:32Z** with owner approval: -Apply DONE (it also published contact and systemuser), -Verify PASS, and the label reads back. Rollback: DeleteOptionValue, safe while no contact carries the value. **047 dev deploy:** the owner approved starting coordination (the final go is still needed). Live is eb5ba4011, an ancestor of 7f88d5e65. Master a8c3182ec's 15 newer commits touch no src/server or tests. The round was sent at about 11:35Z to SPE admin, UAC, ontology, provisioning, word-add-in, ebilling and spaarke-2d; b4 and assistant-enhancements hold messages for the owner. Next: collect the confirmations, ask the owner for the go, deploy with start and finish notices, then verify the version, healthz and the ontology Writer MI. Ontology turned on its 144/148 writes by an app-setting change (owner-approved, 02:26Z); the code stays `eb5ba4011`. ISS-012 #1930 filed. Uncommitted researcher agent-memory files await the owner. Then 048, 058, 075, 076, 074; 070-072; the R3 PR. |
+| **Task** | ADR-028 **A9** build (`notes/a9-bff-design.md`). 044–047 done; **048 done on the branch**; next 058 |
+| **Step** | 048 complete: commits `a9c5faf1d`, `6e6fa656b`, `543afaefa`, plus the code-review fix commit. Two Opus adversarial passes; code-review and adr-check done (0 ADR violations; W1/W2 recorded as path-A tensions in `spec.md` and project `CLAUDE.md` §2). Publish size +0.06 MB (37.22 MB). Details: `notes/task-048-notes.md`. Master `19d068ece` merged as `474771605` (ledger count 128 = R3 047/048 + ontology 104) |
+| **Status** | **Dev BFF deploy: owner-approved 2026-10-16.** Live = R3 `a6d30891a` (06:39), an ancestor of the branch. Deploy candidate = branch head (contains master `19d068ece`: UAC #2016 `2e4ffc654`, ontology #2020/#2031 `9381e6f62`). Confirmations: ontology OK, UAC OK, ebilling OK, provisioning N/A. **Not delivered (held, then expired, different permission mode): SPE-admin-r2 (required by the deploy rule), word-add-in ×2, assistant-enhancements, project-coordination** — the owner must approve a resend in those terminals or give their status. The three retired `Documents__ShareLinks__*` app settings are absent on dev (names read only) |
+| **Next Action** | 1. Get SPE-admin-r2's confirmation (via the owner), then re-read the live ProductVersion, run the ancestor check, deploy with `Deploy-BffApi.ps1` (pwsh), hash-verify, `/healthz`, and check the ontology Writer MI (`69040982-612e-469e-a85f-26d5172367c5`) is unchanged. 2. Send the ProductVersion and deploy time to ontology (it holds the 062 prompt sync and the decisionRecords layout seed until then) and the SHA to UAC (server gates for #994, #1620, #2002, share-link retirement). 3. Task 058 (SPA multitenant sign-in). Then 075, 076, 074; 070–072; the R3 PR (`/conflict-check` first). Uncommitted researcher agent-memory files await the owner |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -50,10 +43,9 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).
 
 ## Next actions (in order)
-1. Commit + push task creation; PR the post-#1810 commits (after `/conflict-check`).
-2. Owner answers above; then A9 Wave 1: 044 (owner-gated dev import) + 045 (opus, 2 adversarial passes); CHK2: 061 + 062.
-3. A9 Wave 2: 046 (rebase onto UAC 185 if merged) + 059 (live, owner-gated).
-4. 047 → 048 → 058 → 075 → 076 → 074; then 070/071/072.
+1. Dev BFF deploy (see Quick Recovery): SPE-admin confirmation, then deploy and notify ontology and UAC.
+2. 058 → 075 → 076 → 074 (074 and 059 are live and owner-gated).
+3. 070/071/072; then the R3 PR to master after `/conflict-check`.
 
 ## Dependencies tracked elsewhere
 - UAC task 185 = PR #1827 (head `df4ce6825`, one fix pending). Changes `ContactBindingDecision`, `ContactIdentityStore` (`BindOidAndConsumeInviteAsync`), `ContactIdentityBinder`, `CallerPrincipalResolver` (CIAM invite-code header), `CorsModule`; SPA `invite-code.ts`, `bff-client.ts`, `BffAccessState`, `WorkspaceHomePage`, `App.tsx`. Merge master into R3 when it lands, BEFORE 046/047/058 start. UAC will notify.

@@ -45,7 +45,9 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>r3 task 048 — the link route's contract, every refusal, and that the guest token is never logged or echoed.</summary>
-public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<ExternalWorkforceLinkEndpointsTests.LinkFixture>
+public sealed class ExternalWorkforceLinkEndpointsTests
+    : IClassFixture<ExternalWorkforceLinkEndpointsTests.LinkFixture>,
+      IClassFixture<ExternalWorkforceLinkEndpointsTests.SigningMetadataOutageFixture>
 {
     internal const string SpaarkeTenantId = "4a8b0c3e-7d21-4f5a-9e6b-048048048001";
     internal const string HomeTenantId = "4a8b0c3e-7d21-4f5a-9e6b-048048048002";
@@ -61,13 +63,18 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
     private readonly Guid _guestOid = Guid.NewGuid();
     private readonly Guid _systemUser = Guid.NewGuid();
 
-    public ExternalWorkforceLinkEndpointsTests(LinkFixture fixture)
+    private readonly SigningMetadataOutageFixture _outage;
+
+    public ExternalWorkforceLinkEndpointsTests(LinkFixture fixture, SigningMetadataOutageFixture outage)
     {
         _fixture = fixture;
+        _outage = outage;
         _store = fixture.Store;
         _store.Reset();
         fixture.Identity.Reset();
         fixture.Logs.Clear();
+        outage.Store.Reset();
+        outage.Identity.Reset();
     }
 
     // ── Success ────────────────────────────────────────────────────────────────────────────────────
@@ -204,6 +211,78 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
         _store.Reads.Count(r => r == "guest-systemuser").Should().Be(2, "the 412 re-reads before writing again");
         _store.Writes.Select(w => w.Op).Should().Equal("home-link");
         user.HomeObjectId.Should().Be(_homeOid.ToString("D"));
+    }
+
+    // ── Dataverse faults and an outage (retryable 503, or the environment's 500; nothing written) ────
+
+    [Theory]
+    [InlineData(LookupStatus.Failed, HttpStatusCode.ServiceUnavailable, ExternalWorkforceLinkEndpoints.ErrorUnavailable)]
+    [InlineData(LookupStatus.ColumnMissing, HttpStatusCode.InternalServerError, ExternalWorkforceLinkEndpoints.ErrorEnvironment)]
+    public async Task GuestSystemUserRead_NotReadable_IsItsStatus_AndWritesNothing(
+        LookupStatus readStatus, HttpStatusCode expected, string reasonCode)
+    {
+        var user = SeedGuestSystemUser();
+        _store.GuestSystemUserLookupStatus = readStatus;
+
+        var response = await Post(Body(GuestToken()));
+
+        await ShouldBeProblem(response, expected, reasonCode);
+        _store.Writes.Should().BeEmpty();
+        user.HomeObjectId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(StoreWriteStatus.Failed, HttpStatusCode.ServiceUnavailable, ExternalWorkforceLinkEndpoints.ErrorUnavailable)]
+    [InlineData(StoreWriteStatus.Forbidden, HttpStatusCode.InternalServerError, ExternalWorkforceLinkEndpoints.ErrorEnvironment)]
+    [InlineData(StoreWriteStatus.KeyMissing, HttpStatusCode.InternalServerError, ExternalWorkforceLinkEndpoints.ErrorEnvironment)]
+    public async Task HomeLinkWrite_Failing_IsRetryable503_OrTheEnvironments500_AndNothingIsLinked(
+        StoreWriteStatus writeStatus, HttpStatusCode expected, string reasonCode)
+    {
+        var user = SeedGuestSystemUser();
+        _store.HomeLinkWriteFailure = writeStatus;
+
+        var response = await Post(Body(GuestToken()));
+
+        await ShouldBeProblem(response, expected, reasonCode);
+        _store.Writes.Should().BeEmpty();
+        user.HomeObjectId.Should().BeNull();
+        user.HomeObjectIdKey.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TwoConsecutive412s_OnTheWrite_Is503Unavailable_AfterOneReRead_AndNothingIsLinked()
+    {
+        var user = SeedGuestSystemUser();
+        _store.BeforeHomeLinkWrite = u => u.Version += 1000; // another writer touches the row before our first write
+        var reads = 0;
+        _store.AfterRead = name =>
+        {
+            // …and again before the second write, after the re-read.
+            if (name == "guest-systemuser" && ++reads == 2)
+            {
+                _store.BeforeHomeLinkWrite = u => u.Version += 1000;
+            }
+        };
+
+        var response = await Post(Body(GuestToken()));
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalWorkforceLinkEndpoints.ErrorUnavailable);
+        _store.Reads.Count(r => r == "guest-systemuser").Should().Be(2, "one re-read, then it stops");
+        _store.Writes.Should().BeEmpty();
+        user.HomeObjectId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SigningMetadata_Unreachable_Is503Unavailable_NotARefusal_AndReadsAndWritesNothing()
+    {
+        // The default scheme's signing metadata cannot be fetched: an outage the caller retries, not a verdict on the token.
+        _outage.Store.AddSystemUser(_systemUser, _guestOid, "mike.okafor_customer.example#EXT#@spaarke.onmicrosoft.com");
+
+        var response = await Post(Body(GuestToken()), host: _outage);
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalWorkforceLinkEndpoints.ErrorUnavailable);
+        _outage.Store.Reads.Should().BeEmpty();
+        _outage.Store.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -391,9 +470,9 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
 
     private static string Body(string token) => JsonSerializer.Serialize(new { guestAccessToken = token });
 
-    private async Task<HttpResponseMessage> Post(string json, string scheme = AuthSchemes.WorkforceHome)
+    private async Task<HttpResponseMessage> Post(string json, string scheme = AuthSchemes.WorkforceHome, LinkFixture? host = null)
     {
-        using var client = _fixture.CreateClient();
+        using var client = (host ?? _fixture).CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, ExternalWorkforceLinkEndpoints.Route)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
@@ -425,7 +504,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
     /// store, the identity seam mocked) plus: the default scheme's signing metadata and issuer pinned to a local key and the
     /// Spaarke-tenant v2 issuer, the validator's A9 inputs from a GUID-tenant overlay, and a log capture.
     /// </summary>
-    public sealed class LinkFixture : ExternalRegistrationEndpointsTests.RegistrationFixtureBase
+    public class LinkFixture : ExternalRegistrationEndpointsTests.RegistrationFixtureBase
     {
         public const string SpaarkeIssuer = "https://login.microsoftonline.com/" + SpaarkeTenantId + "/v2.0";
 
@@ -447,6 +526,10 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
 
         protected override Guid? CustomerBusinessUnitId => null;
 
+        /// <summary>The default scheme's signing metadata: here a static copy of <paramref name="metadata"/> (local key).</summary>
+        protected virtual IConfigurationManager<OpenIdConnectConfiguration> CreateSigningMetadata(OpenIdConnectConfiguration metadata)
+            => new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
@@ -460,7 +543,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
                     jwk.AdditionalData["issuer"] = "https://login.microsoftonline.com/{tenantid}/v2.0";
                     metadata.JsonWebKeySet.Keys.Add(jwk);
                     metadata.SigningKeys.Add(EntraKey);
-                    options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
+                    options.ConfigurationManager = CreateSigningMetadata(metadata);
                     // The audience shape AuthorizationModule leaves when AgentToken:CopilotAudience is set (the singular
                     // folded into the plural list); Identity Web's own audience validator stays in the path.
                     options.TokenValidationParameters.ValidAudience = null;
@@ -482,6 +565,26 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
                     }).Build(),
                     sp.GetRequiredService<ILogger<SpaarkeGuestTokenValidator>>()));
             });
+        }
+    }
+
+    /// <summary>
+    /// The same host, except the default scheme's signing metadata cannot be fetched (the metadata endpoint is unreachable):
+    /// the real <see cref="ConfigurationManager{T}"/> over a retriever that throws, as in
+    /// <c>SpaarkeGuestTokenValidatorTests</c>.
+    /// </summary>
+    public sealed class SigningMetadataOutageFixture : LinkFixture
+    {
+        protected override IConfigurationManager<OpenIdConnectConfiguration> CreateSigningMetadata(OpenIdConnectConfiguration metadata)
+            => new ConfigurationManager<OpenIdConnectConfiguration>(
+                "https://metadata.invalid/.well-known/openid-configuration",
+                new OpenIdConnectConfigurationRetriever(),
+                new UnreachableMetadata());
+
+        private sealed class UnreachableMetadata : IDocumentRetriever
+        {
+            public Task<string> GetDocumentAsync(string address, CancellationToken cancel)
+                => throw new IOException("The metadata endpoint is unreachable.");
         }
     }
 

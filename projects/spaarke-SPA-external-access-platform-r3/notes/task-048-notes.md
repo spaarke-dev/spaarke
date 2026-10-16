@@ -29,6 +29,17 @@ There is no new package.
 | `IContactIdentityStore.WriteHomeLinkAsync` | `BindHomeOidAsync` (contact), `WriteAsync` | It reuses `WriteAsync`, `RowVersionPrecondition` and `NoRowVersion`; only the payload and the entity set are new. | No version-checked write of the pair and its mirrors in one request. |
 | `ImpersonatedRootSetSource.EvictionTenants` (pure) | `ExternalParticipationService.GrantCacheTenantIds` (the POML's reference) | That is an instance method that reads the request's `tid` claim and raw configuration strings. The remover runs outside a request and takes no participation service, so the same rule is a pure static beside the cache key it addresses. It uses the parsed `D` form, which is the form a token's `tid` carries. | 046 review K1: a record turned Restricted stays visible to a linked user's home sign-in for up to `CacheTtl`. |
 
+Added in the review-pass-1 fix round (`6e6fa656b`, line references as of `474771605`):
+
+| Surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ImpersonatedRootSetSource.CustomerTenantIdsOrNone(IOptionsMonitor<WorkforceIdentityOptions>?, ILogger)` (`ImpersonatedRootSetSource.cs:309`) | `WorkforceIdentityOptions.ParsedCustomerTenantIds` (`WorkforceIdentityOptions.cs:42`), which it calls | That parser throws through `CurrentValue` on an invalid reload. Eviction runs in `finally` blocks, so the call needs a wrapper that never throws and logs. | An invalid reload in the remover's or enforcer's `finally` skips all eviction, the deployment tenant included (pass 1, K→fixed). |
+| `ImpersonatedRootSetSource.CustomerTenantIdsOrNone(IConfiguration?)` (`:335`) | `ExternalParticipationService.GrantCacheTenantIds` (`ExternalParticipationService.cs:604`); `AuthorizationModule.cs:587` | `GrantCacheTenantIds` is an instance method on a request-scoped service. `AssignedAccessMaterializer` (a UAC file) already reads `IConfiguration` for its own cache tenants. Injecting `IOptionsMonitor` would change its constructor, which collides with UAC's open PR #2025 on the same file (UAC reviewed and accepted this form, note 1 = K7). | A job-written share leaves the root set stale under the customer tenants for up to `CacheTtl` (046 K1 at the fourth site). |
+| `InvalidateAsync(…, IReadOnlySet<Guid> customerTenantIds, logger)` (replaces the tenant-only overload, which was deleted in the code-review fix round) | The tenant-only `InvalidateAsync` it replaces | It is the same method with the customer tenants added. Keeping both left a production-dead overload that evicts the deployment tenant only (code-review finding 2). | `/share-user` and `/unshare-user` leave a linked user's home sign-in seeing a stale root set. |
+| Optional `[FromServices] IOptionsMonitor<WorkforceIdentityOptions>?` on `/share-user` and `/unshare-user` (`InternalShareEndpoints.cs`) | The handlers' existing injected services | The handlers are method groups, so a parameter is the only injection point. It is optional so the 18 direct test callers stay unchanged (K6). | As the row above. |
+| `NoAccessShareEnforcer` constructor dependency `IOptionsMonitor<WorkforceIdentityOptions>` | The remover's identical dependency | The enforcer has no other source for the setting. | The walled user's root set stays stale under the customer tenants (046 K1 at the enforcer). |
+| `HomeLinkRow.ETag` | `HomeLinkRow` (046 read side) | One field on the existing row. The 412 retry needs the version that was read. | The link write cannot be version-checked (`If-Match`), so a concurrent change to the systemuser could be overwritten. |
+
 ## How the proof works
 
 1. **WorkforceHome bearer only.** `WorkforcePrincipalResolver.WorkforceHomeIdentity(user)` returns null for a `Bearer` or `Ciam` identity → 403 `home_identity_required`. Anonymous is 401 at the policy.
@@ -137,6 +148,22 @@ No wrong-person, token-confusion, fail-open, shared-state or leakage defect was 
 | Stale notes (this file) | doc | Corrected |
 | K1–K5 | K | Recorded above (K1, K4, K5, K6, K8) |
 
+### Quality gates (code-review and adr-check, Sonnet, on `a9c5faf1d`, `6e6fa656b` and `543afaefa`)
+
+adr-check: 0 violations, 17 compliant, 4 warnings. W1 (the refuse-only UPN check) and W2 (the 047 and 048 routes outside the filtered group) are now recorded as path-A tensions in `spec.md` and the project `CLAUDE.md` §2. W3 (publish size) is measured below. W4 is K6.
+
+code-review: no critical findings. The fix-now findings and what was done:
+
+| Finding | Class | Done |
+|---|---|---|
+| The route's 503 and 500 mappings were untested, and two in-memory store failure switches were unused | F2 | Seven route tests: guest-systemuser read `Failed` → 503 and `ColumnMissing` → 500; write `Failed` → 503, `Forbidden` and `KeyMissing` → 500 `environment`; two consecutive 412s → 503; a signing-metadata outage at the route → 503 (`SigningMetadataOutageFixture`). Each asserts that nothing was written. |
+| The tenant-only `InvalidateAsync` overload was production-dead and kept the 046 K1 trap open | F2 | Deleted. Its three test callers pass an empty customer set. |
+| A third reader of `CustomerTenantIds` | F2 | Kept, with the reason in the §11 table: UAC file, and UAC's open PR #2025 touches the same file. Recorded as K7. |
+| The pass-1 surfaces had no §11 rows | F2 (documentation) | Six rows added under §11 |
+| Publish size not recorded | F4 | Measured (see "Publish size") |
+| Handler-level authorization instead of an endpoint filter | K4 | Path-A tension (W2 above) |
+| Null guards on non-nullable parameters; `Mock<IOptionsMonitor>` in the validator tests; hand-flipped theory cases | K4 | Not changed: this is the existing file style, and each is a test-readability item only |
+
 ### Seeding proofs added in the fix round
 
 | Guard broken | Test that failed |
@@ -144,6 +171,7 @@ No wrong-person, token-confusion, fail-open, shared-state or leakage defect was 
 | `NoAccessShareEnforcer`: customer tenants dropped | `Enforce_ClearsTheWalledUsersCacheKey_AlsoUnderEveryCustomerHomeTenant` (1 of 63) |
 | `ImpersonatedRootSetSource.InvalidateAsync` (the share routes): customer tenants dropped | `Unshare_ClearsTheUsersRootSet_AlsoUnderEveryCustomerHomeTenant` (1 of 130) |
 | `SpaarkeGuestTokenValidator`: signing-metadata pre-fetch removed (pass 2) | `ValidateAsync_WhenTheSigningMetadataCannotBeFetched_IsUnavailable_NotARefusal` (1 of 35) |
+| `ExternalWorkforceLinkEndpoints`: `Unavailable` → 503 branch removed (code review) | `SigningMetadata_Unreachable_Is503Unavailable_NotARefusal_AndReadsAndWritesNothing` (1 of 34; the route answered 403) |
 
 ## Counts
 
@@ -155,4 +183,11 @@ No wrong-person, token-confusion, fail-open, shared-state or leakage defect was 
 
 ## Publish size
 
-(filled at completion)
+Both builds were fresh Release publishes from short paths (`git archive` of `src`, `config` and the root build files into `C:\wt048m` / `C:\wt048b`), zipped with `Compress-Archive` in the same way:
+
+| Build | Zip | Files |
+|---|---|---|
+| master `19d068ece` | 37.16 MB | 192 |
+| branch `474771605` (048 plus master) | 37.22 MB | 192 |
+
+The delta is +0.06 MB, with the same file count and no new package. It is far below the +5 MB per-task threshold and the 55 MB / 60 MB totals. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.

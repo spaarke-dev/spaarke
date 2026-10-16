@@ -247,22 +247,6 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     internal static string CacheId(string userSegment, string entityTypeSegment) => $"{userSegment}:{entityTypeSegment}";
 
     /// <summary>
-    /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
-    /// Dataverse again. Called after that user's POA share on a record of that type changes (task 063): the set is
-    /// answered by an impersonated query, which sees shares natively, so an answer cached before the change is stale.
-    /// </summary>
-    /// <remarks>
-    /// <para>Non-fatal, and not bound to the request's token: the share has already been written, and a client that
-    /// disconnects must not stop the clean-up half-way. A miss is bounded by <see cref="CacheTtl"/>.</para>
-    /// <para>The tenant comes from the CALLER's token. When the caller and the affected user sign in to the same Entra
-    /// tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests wrote
-    /// under; when they do not, the removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
-    /// </remarks>
-    internal static Task InvalidateAsync(
-        ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType, ILogger logger)
-        => InvalidateForTenantAsync(cache, CacheTenantFor(caller), systemUserId, entityType, logger);
-
-    /// <summary>
     /// The tenant namespace a systemuser's OWN reads write their set under, when there is no caller to take it from
     /// (task 143: the No Access reconciliation job). Systemusers sign in through the deployment's workforce tenant, so
     /// that is <c>AzureAd:TenantId</c> (legacy <c>TENANT_ID</c>) — the value <see cref="CacheTenantFor"/> reads from
@@ -341,9 +325,19 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
            ?? new HashSet<Guid>();
 
     /// <summary>
-    /// <see cref="InvalidateAsync(ITenantCache, ClaimsPrincipal?, Guid, string, ILogger)"/> under the caller's namespace
-    /// AND every customer home directory (<see cref="EvictionTenants"/>, r3 task 048). Same non-fatal contract.
+    /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
+    /// Dataverse again, under the caller's namespace AND every customer home directory (<see cref="EvictionTenants"/>,
+    /// r3 task 048). Called after that user's POA share on a record of that type changes (task 063): the set is answered
+    /// by an impersonated query, which sees shares natively, so an answer cached before the change is stale.
     /// </summary>
+    /// <remarks>
+    /// <para>Non-fatal, and not bound to the request's token: the share has already been written, and a client that
+    /// disconnects must not stop the clean-up half-way. A miss is bounded by <see cref="CacheTtl"/>.</para>
+    /// <para>The caller's namespace comes from the CALLER's token. When the caller and the affected user sign in to the
+    /// same Entra tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests
+    /// wrote under; <paramref name="customerTenantIds"/> covers a linked user's home sign-in. Where neither matches, the
+    /// removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
+    /// </remarks>
     internal static async Task InvalidateAsync(
         ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType,
         IReadOnlySet<Guid> customerTenantIds, ILogger logger)
