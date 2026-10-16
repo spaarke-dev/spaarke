@@ -4,7 +4,7 @@
     <title>Rate card and timekeeper import and publish</title>
     <phase>3 Rules (WP3) — wave W2-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Admin data import with per-row validation over existing 017 tables; no AI, no ontology-owned code.</rigor-reason>
     <model-tier>sonnet</model-tier>

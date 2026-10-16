@@ -4,7 +4,7 @@
     <title>Concurrency-safe tracking numbers {invoice}.{n}</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Concurrency guarantee (two parallel submissions never share a number) enforced against a Dataverse alternate key; a wrong retry rule double-creates or loses rows.</rigor-reason>
     <model-tier>sonnet</model-tier>

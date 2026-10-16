@@ -4,7 +4,7 @@
     <title>UTBMS coding Action INVOICE-LINE-CODE@v1 and code-set resolution</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One Action + Binding through the 041 facade plus a deterministic resolver and a server-side code guard; follows the 042 pattern.</rigor-reason>
     <model-tier>sonnet</model-tier>
