@@ -365,6 +365,22 @@ function Test-CustomerMailboxRequest {
 
 function ConvertTo-FilterLiteral([string]$Value) { return $Value.Replace("'", "''") }
 
+function Test-ScopeGroupName {
+    <#
+    .SYNOPSIS
+        True when the scope group's Exchange Name is this customer's: exactly Spaarke-AppAccess-{customerId}, or that
+        name followed by exactly 14 digits. T186 L59: a group created in the admin center gets its Exchange Name from the
+        alias plus the creation time (live: 'Spaarke-AppAccess-acme20261014194847' for a group created 2026-10-14
+        19:48:47 UTC), while New-DistributionGroup -Name keeps the name as given. The suffix cannot make another
+        customer's group match: a customerId is 3-8 characters, so no other id followed by 0 or 14 digits spells this
+        id followed by 14.
+    #>
+    param([string]$Actual, [string]$Expected)
+    if ([string]::IsNullOrEmpty($Actual) -or [string]::IsNullOrEmpty($Expected)) { return $false }
+    if ([string]::Equals($Actual, $Expected, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return [regex]::IsMatch($Actual, '^' + [regex]::Escape($Expected) + '\d{14}$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+}
+
 function Get-CustomerMailboxFacts {
     <#
     .SYNOPSIS
@@ -382,7 +398,7 @@ function Get-CustomerMailboxFacts {
     if (-not $group) { return @{ group = $null; mailbox = $null; conflicts = @(); whenCreated = '' } }
     $conflicts = @()
     $groupName = Get-PropertyText $group 'Name'
-    if (-not [string]::Equals($groupName, [string]$Request.expectedScopeGroupName, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not (Test-ScopeGroupName -Actual $groupName -Expected ([string]$Request.expectedScopeGroupName))) {
         $conflicts += "Scope group '$($Request.scopeGroupId)' is named '$groupName', expected '$($Request.expectedScopeGroupName)' — it is not this customer's group (a mailbox joining it would be reachable by another stamp)."
     }
     $name = [string]$Request.name
@@ -443,13 +459,14 @@ function Test-CustomerMailboxWritePermission {
     .SYNOPSIS
         Exchange Online loads only the cmdlets and parameters the caller's roles allow. Returns the missing ones (empty =
         both writes are possible), so an ensure without PRQ-E-16 fails BEFORE creating a mailbox it could not join.
+        Writes the names to the pipeline; the caller collects them with @(). T186 L60: `return , $missing` here, under
+        that @(), made a one-element array holding the array, so the count was always 1 and every ensure was refused
+        with "cannot run System.Object[]" even with PRQ-E-16 applied.
     #>
-    $missing = @()
     $create = Get-Command New-Mailbox -ErrorAction SilentlyContinue
-    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { $missing += 'New-Mailbox -Shared' }
+    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { 'New-Mailbox -Shared' }
     $join = Get-Command Add-DistributionGroupMember -ErrorAction SilentlyContinue
-    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { $missing += 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
-    return , $missing
+    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
 }
 
 function Invoke-CustomerMailboxEnsure {

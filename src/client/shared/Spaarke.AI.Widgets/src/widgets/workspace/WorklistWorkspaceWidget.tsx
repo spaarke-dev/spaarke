@@ -12,7 +12,8 @@
  *   - `aggregateRow` - task 054's email reconciliation card, whose "Open Email Review" opens the Reconciliation tab through the pane
  *                      event bus (no-op in a bus-less host).
  *
- * The narrative slot is not filled here: the Briefing narrative's contract (task 062) is wired where it is built.
+ * The narrative slot is not filled here either: the shared widget asks `service.narrate` for the Assistant's summary of the list's counts
+ * (task 062), shows it while no filter is on, and a host-supplied `narrative` would win. This host supplies none.
  * The decision wizard itself is already mounted by the Console shell (`DecisionWizardHost` in `ThreePaneShell`, task 058), so there is
  * nothing to mount in this file.
  *

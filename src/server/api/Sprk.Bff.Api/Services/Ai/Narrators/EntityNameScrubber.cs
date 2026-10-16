@@ -58,8 +58,10 @@ public sealed class EntityNameScrubber : IEntityNameScrubber
 
     // Proper-Noun span detector. Matches sequences of Title-Case tokens, tolerating
     // short connector words ("of", "and", "&"), and "v." case-citation markers.
+    // The word connectors end in \b so a capitalised word followed by one that merely STARTS with a connector
+    // ("Decide lane", "Do office") is not read as "Decide la" / "Do of". "v." is excluded from the \b (it ends in a dot).
     private static readonly Regex ProperNounSpan = new(
-        @"\b[A-Z][A-Za-z0-9'’]*(?:\s+(?:[A-Z][A-Za-z0-9'’]*|&|of|and|the|von|de|del|la|le|v\.))*",
+        @"\b[A-Z][A-Za-z0-9'’]*(?:\s+(?:[A-Z][A-Za-z0-9'’]*|&|(?:of|and|the|von|de|del|la|le)\b|v\.))*",
         RegexOptions.Compiled);
 
     // Tokenizer for allow-list comparison — splits on whitespace and common punctuation.
@@ -182,21 +184,21 @@ public sealed class EntityNameScrubber : IEntityNameScrubber
 
     private static bool IsLikelySentenceStarterOnly(string term)
     {
-        if (term.Contains(' ')) return false;
-        var lower = term.ToLowerInvariant();
-
-        if (lower is "the" or "a" or "an" or "this" or "that" or "these" or "those" or
-            "his" or "her" or "its" or "our" or "their" or "my" or "your" or
-            "it" or "we" or "you" or "i" or "he" or "she" or "they" or
-            "if" or "and" or "or" or "but" or "so" or "yet" or "for" or "nor" or
-            "as" or "at" or "by" or "in" or "of" or "on" or "to" or "up" or
-            "is" or "was" or "are" or "were" or "be" or "been" or "being" or
-            "has" or "have" or "had" or "do" or "does" or "did" or "will" or "would" or
-            "can" or "could" or "should" or "may" or "might" or "must" or
-            "no" or "not" or "yes")
+        // A span of several Title-Case words ("Of the") is skipped only when EVERY word is a function word:
+        // a month or a weekday next to another capitalised word ("April May") could still be a person, so
+        // the time words below are single-word-only.
+        if (term.Contains(' '))
         {
-            return true;
+            var words = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return words.Length > 0 && words.All(w =>
+            {
+                var lw = w.ToLowerInvariant();
+                return lw is not ("may" or "will") && IsFunctionWord(lw);   // "May"/"Will" can be a given name
+            });
         }
+
+        var lower = term.ToLowerInvariant();
+        if (IsFunctionWord(lower)) return true;
 
         if (lower is "monday" or "tuesday" or "wednesday" or "thursday" or
             "friday" or "saturday" or "sunday" or
@@ -211,6 +213,23 @@ public sealed class EntityNameScrubber : IEntityNameScrubber
 
         return false;
     }
+
+    // Words that open a sentence in a count-only summary ("There are 3 items...", "Nothing to report", "Most items...",
+    // "Three items...") and can never be an entity name. Conservative on purpose: nothing here is a plausible surname
+    // or company name. (Task 062 round 2: the worklist narrative carries no names, so with an empty allow list every
+    // capitalised word not listed here was scrubbed and the whole narrative dropped.)
+    private static bool IsFunctionWord(string lower) =>
+        lower is "the" or "a" or "an" or "this" or "that" or "these" or "those" or
+            "his" or "her" or "its" or "our" or "their" or "my" or "your" or
+            "it" or "we" or "you" or "i" or "he" or "she" or "they" or
+            "if" or "and" or "or" or "but" or "so" or "yet" or "for" or "nor" or
+            "as" or "at" or "by" or "in" or "of" or "on" or "to" or "up" or
+            "is" or "was" or "are" or "were" or "be" or "been" or "being" or
+            "has" or "have" or "had" or "do" or "does" or "did" or "will" or "would" or
+            "can" or "could" or "should" or "may" or "might" or "must" or
+            "no" or "not" or "yes" or
+            "there" or "nothing" or "most" or "all" or "several" or "some" or
+            "one" or "two" or "three" or "four" or "five" or "six" or "seven" or "eight" or "nine" or "ten";
 
     private static IReadOnlySet<string> BuildAllowTokenIndex(IReadOnlyList<string> allowList)
     {
