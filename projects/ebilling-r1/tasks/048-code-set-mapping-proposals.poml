@@ -4,7 +4,7 @@
     <title>AI code-set mapping proposals (admin-confirmed)</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Proposal generation plus admin-only confirm endpoints; nothing is applied without confirmation, so the risk is bounded to the confirm route's authorization.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -104,7 +104,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-22 (admin action sentence). Shared append points: FinanceModule.cs, EndpointMappingExtensions.cs:376-377. Core records reach the reference rows through their sprk_mattertype / sprk_practicearea lookup columns (target tables sprk_mattertype_ref / sprk_practicearea_ref).</notes>
+  <notes>Spec FR-22 (admin action sentence). Shared append points: FinanceModule.cs, EndpointMappingExtensions.cs:376-377. Core records reach the reference rows through their sprk_mattertype / sprk_practicearea lookup columns (target tables sprk_mattertype_ref / sprk_practicearea_ref).
+Completed 2026-10-16. Full notes: projects/ebilling-r1/notes/048-code-set-mapping-proposals.md. No UI built; privilege names are mixed case (prvWritesprk_MatterType_Ref / prvWritesprk_PracticeArea_Ref, live names); ADR-010 ceiling 166 to 165 (ICodeSetSuggestionProvider gained its second implementation); publish-size delta +0.01 MB vs branch base (+0.15 MB branch vs fresh master); no live seeding needed. OPEN OWNER QUESTION (trigger 2): embeddings propose an obviously wrong set for 3 of 11 seeded reference rows (Commercial, Mergers and Acquisitions, Commercial Transactions); see notes section 3 for options (accept, minimum score, prompted Action). Adversarial pass not run (sub-agent limit).
+rework: none task 048</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
