@@ -4,7 +4,7 @@
     <title>Worklist: D-111 disposition picker; pass the rule sentence through; flip the Not filed fixture</title>
     <phase>5 The worklist surface</phase>
     <gate>059 and 154 merged into docs/ontology-platform-design</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend code calling a write route (disposition) from the Console's primary surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -4,11 +4,17 @@
  *
  * One population exercises every worklist rule:
  *  - Decide: matter M has two items (ask outside counsel, approve or rebudget); a service request has one (chase a reply)
- *  - Do: the groups arrive in a deliberately UNRANKED order (Not filed, work assignment, project, matter) so a test can prove the
- *    widget renders the route's order and never its own
+ *  - Do: the groups arrive work assignment, project, matter, then Not filed LAST (as the route emits them since task 154); the
+ *    widget renders the route's order and never its own, which a test proves with a separate body that puts Not filed first
  */
 
-import type { WorklistService, WorklistSetName } from '../worklistService';
+import type {
+  InquiryDispositionRequest,
+  InquiryForTodo,
+  RecordDispositionResult,
+  WorklistService,
+  WorklistSetName,
+} from '../worklistService';
 import { parseWorklistResponse } from '../worklistService';
 
 export const ID = {
@@ -118,14 +124,6 @@ export const lanesBody = body(
     ]),
   ],
   [
-    group(null, [
-      routeItem(D5, 'Do', {
-        subjectName: 'Call the client back',
-        ruleShortName: 'Overdue To Do',
-        workType: 'finishOrReschedule',
-        dueDate: '2026-10-05',
-      }),
-    ]),
     group(workAssignmentCore, [
       routeItem(D4, 'Do', {
         subjectName: 'Outside counsel response',
@@ -157,8 +155,77 @@ export const lanesBody = body(
         dueDate: '2026-10-11',
       }),
     ]),
+    group(null, [
+      routeItem(D5, 'Do', {
+        subjectName: 'Call the client back',
+        ruleShortName: 'Overdue To Do',
+        workType: 'finishOrReschedule',
+        dueDate: '2026-10-05',
+      }),
+    ]),
   ]
 );
+
+// ---- the inquiry-outcome To Do (task 155, D-111) ------------------------------------------------------------------------
+export const T1 = '60000000-0000-0000-0000-000000000001'; // Do, matter, a To Do (subject table sprk_todo): the inquiry-outcome one
+export const T2 = '60000000-0000-0000-0000-000000000002'; // Do, matter, another To Do: the route finds no inquiry for it (404)
+export const T3 = '60000000-0000-0000-0000-000000000003'; // Do, matter, an event (subject table sprk_event): never a lookup
+export const TODO_ID = {
+  inquiry: '70000000-0000-0000-0000-000000000001',
+  other: '70000000-0000-0000-0000-000000000002',
+  event: '70000000-0000-0000-0000-000000000003',
+};
+export const SERVICE_REQUEST_ID = '80000000-0000-0000-0000-000000000001';
+export const REPLY = {
+  newest: '90000000-0000-0000-0000-000000000002',
+  older: '90000000-0000-0000-0000-000000000001',
+};
+
+/** A Do lane with a To Do that records an inquiry's outcome, another To Do, and an event; plus one Decide row (no subject reference). */
+export const inquiryLanesBody = body(
+  'lanes',
+  [group(matterCore, [routeItem(A1, 'Decide', { subjectName: 'Invoice 4411', workType: 'askOutsideCounsel' })])],
+  [
+    group(matterCore, [
+      routeItem(T1, 'Do', {
+        subjectName: 'Record the outcome of the budget inquiry',
+        ruleShortName: 'Overdue To Do',
+        workType: 'finishOrReschedule',
+        dueDate: '2026-10-05',
+        sentence: 'A To Do is overdue.',
+        subjectRecordType: 'sprk_todo',
+        subjectRecordId: TODO_ID.inquiry,
+      }),
+      routeItem(T2, 'Do', {
+        subjectName: 'Call the client back',
+        workType: 'finishOrReschedule',
+        dueDate: '2026-10-05',
+        subjectRecordType: 'sprk_todo',
+        subjectRecordId: TODO_ID.other,
+      }),
+      routeItem(T3, 'Do', {
+        subjectName: 'Hearing on the 14th',
+        workType: 'comingDue',
+        dueDate: '2026-10-14',
+        subjectRecordType: 'sprk_event',
+        subjectRecordId: TODO_ID.event,
+      }),
+    ]),
+  ]
+);
+
+/** What `GET /api/v1/inquiries/for-todo/{todoId}` returns for the inquiry-outcome To Do: replies newest first. */
+export const inquiryForTodo: InquiryForTodo = {
+  serviceRequestId: SERVICE_REQUEST_ID,
+  replies: [
+    {
+      communicationId: REPLY.newest,
+      subject: 'RE: Budget inquiry - revised estimate',
+      receivedOn: '2026-10-08T15:00:00Z',
+    },
+    { communicationId: REPLY.older, subject: 'RE: Budget inquiry', receivedOn: '2026-10-02T09:00:00Z' },
+  ],
+};
 
 export const closedTodayBody = body(
   'closedToday',
@@ -238,8 +305,17 @@ export const ROUTE_BODIES: Record<WorklistSetName, Raw> = {
 /** A service over the bodies (through the real parser). `read` is a spy-able function; unknown sets read empty. */
 export function fakeService(bodies: Partial<Record<WorklistSetName, Raw>> = ROUTE_BODIES): WorklistService & {
   read: jest.Mock<ReturnType<WorklistService['read']>, [WorklistSetName]>;
+  findInquiryForTodo: jest.Mock<Promise<InquiryForTodo | null>, [string]>;
+  recordDisposition: jest.Mock<Promise<RecordDispositionResult>, [string, InquiryDispositionRequest]>;
 } {
   return {
     read: jest.fn(async (set: WorklistSetName) => parseWorklistResponse(bodies[set] ?? body(set, [], []), set)),
+    // No To Do is an inquiry's unless a test says so (the route answers 404).
+    findInquiryForTodo: jest.fn(async (_todoId: string): Promise<InquiryForTodo | null> => null),
+    recordDisposition: jest.fn(
+      async (_id: string, _request: InquiryDispositionRequest): Promise<RecordDispositionResult> => ({
+        todoCompleted: true,
+      })
+    ),
   };
 }

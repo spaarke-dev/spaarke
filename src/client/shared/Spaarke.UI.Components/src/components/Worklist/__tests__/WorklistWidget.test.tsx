@@ -95,14 +95,37 @@ describe('lanes', () => {
   it("shows the route's order exactly: the widget never re-sorts (unranked input stays unranked)", async () => {
     renderWidget();
     await ready();
-    // The Do groups arrive Not filed, work assignment, project, matter; items inside a group keep their order too.
+    // The Do groups arrive work assignment, project, matter, Not filed (last, as the route emits them); items inside a group keep
+    // their order too.
     expect(cardNames(lane('Do'))).toEqual([
-      'Not filed',
       'Review vendor agreement',
       'Contract refresh 2026',
       'Acme v. Beta',
+      'Not filed',
     ]);
-    expect(lineIds(lane('Do'))).toEqual([D5, D4, D3, D1, D2]);
+    expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
+  });
+
+  it('never moves the Not filed group, wherever the route puts it (the route is the order authority)', async () => {
+    // A body that puts Not filed FIRST and the matter before the project: the widget shows exactly that.
+    renderWidget({
+      service: fakeService({
+        lanes: body(
+          'lanes',
+          [],
+          [
+            group(null, [routeItem(D5, 'Do', { workType: 'finishOrReschedule' })]),
+            group(matterCore, [routeItem(D1, 'Do', { workType: 'finishOrReschedule' })]),
+            group({ recordType: 'sprk_project', recordId: ID.project, typeLabel: 'Project', name: 'P', number: '1' }, [
+              routeItem(D3, 'Do', { workType: 'comingDue' }),
+            ]),
+          ]
+        ),
+      }),
+    });
+    await ready();
+    expect(cardNames(lane('Do'))).toEqual(['Not filed', 'Acme v. Beta', 'P']);
+    expect(lineIds(lane('Do'))).toEqual([D5, D1, D3]);
   });
 
   it('renders one card per core record of any type, and Not filed only in the Do lane (D-34..D-36)', async () => {
@@ -111,10 +134,10 @@ describe('lanes', () => {
     expect(cardNames(lane('Decide'))).toEqual(['Acme v. Beta', 'Onboarding request from Northwind']);
     const doCards = within(lane('Do')).getAllByTestId('matter-card');
     expect(doCards.map(c => c.getAttribute('data-core-type'))).toEqual([
-      'not-filed',
       'sprk_workassignment',
       'sprk_project',
       'sprk_matter',
+      'not-filed',
     ]);
     expect(within(lane('Decide')).queryByText('Not filed')).not.toBeInTheDocument();
     // The work assignment and the service request each have their own card; the type label comes from the data.
@@ -222,7 +245,7 @@ describe('count filters', () => {
     await userEvent.click(countCard(lane('Do'), /^Coming due/));
     await userEvent.click(within(lane('Do')).getByRole('button', { name: 'Show all' }));
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
-    expect(lineIds(lane('Do'))).toEqual([D5, D4, D3, D1, D2]);
+    expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
     expect(screen.getByTestId('worklist-narrative')).toBeInTheDocument();
     expect(screen.getByTestId('agg')).toBeInTheDocument();
   });
@@ -263,7 +286,7 @@ describe('count filters', () => {
     renderWidget();
     await ready();
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
-    expect(lineIds(lane('Do'))).toEqual([D5, D4, D3, D1, D2]);
+    expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
     expect(setItem).not.toHaveBeenCalled();
     setItem.mockRestore();
   });
@@ -306,12 +329,12 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a line opens the wizard with the lane list in the route order', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[2]);
+    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[1]);
     expect(launchWizard).toHaveBeenCalledTimes(1);
     const request = launchWizard.mock.calls[0][0];
     expect(request.itemId).toBe(D3);
     expect(request.core).toEqual({ recordType: 'sprk_project', recordId: ID.project });
-    expect(request.visibleList).toEqual([D5, D4, D3, D1, D2]);
+    expect(request.visibleList).toEqual([D4, D3, D1, D2, D5]);
   });
 
   it('with a filter on, the browse set is the filtered list and nothing else', async () => {
@@ -345,7 +368,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a Not filed line opens with no core record (D-35)', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[4]); // Not filed is the last group
     expect(launchWizard.mock.calls[0][0]).toMatchObject({ itemId: D5, core: null });
   });
 
@@ -360,7 +383,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     expect(item.resolution).toBeNull();
     // Other OPEN items on the same core record in the same lane: A2 only (not itself, not the service request's A3).
     expect(item.otherOpenItems.map(i => i.signalId)).toEqual([A2]);
-    // The route returns no rule sentence; the wizard is told so rather than shown an invented one.
+    // A Signal that stores no sentence: the wizard is told null rather than shown an invented one.
     expect(item.sentence).toBeNull();
     expect((service.read as jest.Mock).mock.calls.length).toBe(callsBefore);
     await expect(launchWizard.mock.calls[0][0].loadItem!('missing')).rejects.toThrow(/no longer on the list/);
@@ -369,7 +392,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a Not filed item has no other open items to show', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[4]); // Not filed is the last group
     const item = await launchWizard.mock.calls[0][0].loadItem!(D5);
     expect(item.core).toBeNull();
     expect(item.otherOpenItems).toEqual([]);
@@ -660,7 +683,7 @@ describe('loading and failure', () => {
     });
     await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
     await screen.findByText('The worklist could not be refreshed. This is the last list that was read.');
-    expect(lineIds(lane('Do'))).toEqual([D5, D4, D3, D1, D2]);
+    expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
   });
 
   it('a filter whose cards empty after a refresh falls back to All', async () => {
@@ -685,7 +708,7 @@ describe('loading and failure', () => {
         : real(set)
     );
     await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
-    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D5, D4, D1]));
+    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
   });
 });
