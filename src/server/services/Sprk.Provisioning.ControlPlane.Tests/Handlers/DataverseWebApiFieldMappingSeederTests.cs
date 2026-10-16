@@ -109,9 +109,12 @@ public sealed class DataverseWebApiFieldMappingSeederTests
 
         using var firstProfileBody = JsonDocument.Parse(profilePosts[0].Body!);
         firstProfileBody.RootElement.GetProperty("sprk_name").GetString().Should().NotBeNullOrEmpty();
-        firstProfileBody.RootElement.GetProperty("sprk_sourcerecordtype@odata.bind").GetString()
+        // T186 L40: the bind names are $metadata's navigation properties, case and all (a lowercase bind is a 400).
+        firstProfileBody.RootElement.GetProperty("sprk_SourceRecordType@odata.bind").GetString()
             .Should().Be($"/sprk_recordtype_refs({RecordTypeIds["sprk_matter"]})");
-        firstProfileBody.RootElement.TryGetProperty("sprk_targetrecordtype@odata.bind", out _).Should().BeTrue();
+        firstProfileBody.RootElement.TryGetProperty("sprk_TargetRecordType@odata.bind", out _).Should().BeTrue();
+        firstProfileBody.RootElement.EnumerateObject().Select(p => p.Name)
+            .Should().NotContain(["sprk_sourcerecordtype@odata.bind", "sprk_targetrecordtype@odata.bind"]);
 
         using var firstRuleBody = JsonDocument.Parse(rulePosts[0].Body!);
         firstRuleBody.RootElement.GetProperty("sprk_mapping_type").GetInt32().Should().Be(0, "Copy");

@@ -182,8 +182,8 @@ The native form is the supported human path. When an agent (or a migration scrip
 ```json
 {
   "sprk_name": "Matter → Event (Attorney Matrix)",
-  "sprk_sourcerecordtype@odata.bind": "/sprk_recordtype_refs(<MATTER_RECORDTYPE_GUID>)",
-  "sprk_targetrecordtype@odata.bind": "/sprk_recordtype_refs(<EVENT_RECORDTYPE_GUID>)"
+  "sprk_SourceRecordType@odata.bind": "/sprk_recordtype_refs(<MATTER_RECORDTYPE_GUID>)",
+  "sprk_TargetRecordType@odata.bind": "/sprk_recordtype_refs(<EVENT_RECORDTYPE_GUID>)"
 }
 ```
 The profile is Active by default (`statecode`=0). Capture the returned `sprk_fieldmappingprofileid`.
