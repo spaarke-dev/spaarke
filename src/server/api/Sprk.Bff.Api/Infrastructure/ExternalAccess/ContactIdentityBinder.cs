@@ -395,8 +395,8 @@ public sealed class ContactIdentityBinder
     /// </summary>
     /// <param name="consumeInviteCode">
     /// Task 185 (owner Q5): true when this invite's marker-and-hash write landed, so the bind PATCH also clears the
-    /// now-inert code hash in the same request. False when the columns are not provisioned here: the bind payload is then
-    /// exactly the plain bind (a null for a missing column would fail it).
+    /// now-inert code hash in the same request. False when the columns are not provisioned here: no hash can exist, so the
+    /// plain bind is sent directly (the consuming bind would first be refused for the missing column, then fall back to it).
     /// </param>
     public async Task<StoreWriteResult> BindInvitedContactAsync(
         Guid contactId, string? etag, Guid ciamOid, bool consumeInviteCode, CancellationToken ct)
@@ -528,12 +528,10 @@ public sealed class ContactIdentityBinder
                     var target = known[decision.ContactId!.Value];
 
                     // Task 185 — E11's marker leg binds only with the invite code, and consumes it in the SAME conditional
-                    // write as the oid (single-use). Every other email bind (the workforce plane) is the plain bind.
-                    var write = decision.ConsumeInviteCode
-                        ? await _store.BindOidAndConsumeInviteAsync(target.ContactId, target.ETag, request.CallerOid,
-                            request.CallerPlane, ct).ConfigureAwait(false)
-                        : await _store.BindOidAsync(target.ContactId, target.ETag, request.CallerOid,
-                            request.CallerPlane, ct).ConfigureAwait(false);
+                    // write as the oid (single-use). #2005: every other email bind (the workforce plane) consumes a pending
+                    // hash the same way, so a bound contact never keeps a code an operator unbind could revive.
+                    var write = await _store.BindOidAndConsumeInviteAsync(target.ContactId, target.ETag,
+                        request.CallerOid, request.CallerPlane, ct).ConfigureAwait(false);
                     if (write.Status == StoreWriteStatus.Written)
                     {
                         _logger.LogInformation(
@@ -751,9 +749,10 @@ public sealed class ContactIdentityBinder
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
+                // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
                 var etag = known.TryGetValue(target, out var row) ? row.ETag : null;
-                var write = await _store.BindOidAsync(target, etag, request.CallerOid, IdentityPlaneMarker.Workforce, ct)
-                    .ConfigureAwait(false);
+                var write = await _store.BindOidAndConsumeInviteAsync(target, etag, request.CallerOid,
+                    IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
                 if (write.Status == StoreWriteStatus.KeyConflict)
                 {
                     return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
@@ -799,7 +798,8 @@ public sealed class ContactIdentityBinder
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
-                var write = await _store.BindOidAsync(target, known[target].ETag, request.CallerOid,
+                // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
+                var write = await _store.BindOidAndConsumeInviteAsync(target, known[target].ETag, request.CallerOid,
                     IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
                 if (write.Status == StoreWriteStatus.PreconditionFailed) return null;
                 if (write.Status == StoreWriteStatus.KeyConflict)

@@ -472,6 +472,67 @@ public class IdentityLinkReconciliationTests
         _store.SystemUsers[user].PrimaryContactId.Should().Be(linked, "the existing link is never cleared or re-pointed");
     }
 
+    // ── #2005: every systemuser bind consumes a pending invite-code hash ─────────────────────────────
+
+    /// <summary>
+    /// #2005: a licensed user email-bound onto a contact that holds a pending invite-code hash (a granted contact is
+    /// auto-invited, 185 §11) clears that hash in the SAME conditional write as the oid, so a later operator unbind cannot
+    /// revive the invite link. Where the hash column is not provisioned the bind is exactly the plain bind, as before.
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the systemuser <c>BindByEmail</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASystemUserEmailBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "invited.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "invited.member@spaarke.com");
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundAndLinked);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+        _store.SystemUsers[user].PrimaryContactId.Should().Be(contact);
+    }
+
+    /// <summary>
+    /// #2005: the same for a user already LINKED to an unbound contact (L12, <c>BindLinkedContact</c>).
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the <c>BindLinkedContact</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ALinkedContactBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "linked.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "linked.member@spaarke.com", primaryContactId: contact);
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundLinkedContact);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+    }
+
+    private void AssertBoundOnce(Guid contact, Guid oid, bool consumed)
+    {
+        _store.Writes.Where(w => w.Op == "bind").Should().ContainSingle().Which.Should().Be(("bind", (Guid?)contact,
+            consumed
+                ? $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"
+                : $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
+        _store.Contacts[contact].Oid.Should().Be(oid.ToString("D"));
+        _store.Contacts[contact].InviteCodeHash.Should().BeNull();
+    }
+
     // ── Failure shapes ───────────────────────────────────────────────────────────────────────────────
 
     [Fact]

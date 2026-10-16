@@ -155,15 +155,22 @@ public interface IContactIdentityStore
     /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
     /// conditional on <paramref name="etag"/>. Another contact holding the oid in its mirror makes the platform
-    /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>).
+    /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>). It never names the invite-code hash column, so it
+    /// is used only where that column is KNOWN to be absent (the invite's marker-and-hash write answered
+    /// <see cref="StoreWriteStatus.ColumnMissing"/>); every other bind is <see cref="BindOidAndConsumeInviteAsync"/>.
     /// </summary>
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
     /// <summary>
     /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c>, in ONE request
     /// conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code is consumed by
-    /// the same write that binds the oid, so it is single-use. The marker is not touched. A separate method so the
-    /// workforce and systemuser binds stay byte-identical.
+    /// the same write that binds the oid, so it is single-use. The marker is not touched.
+    /// <para>
+    /// #2005 — EVERY bind of an oid onto an existing contact uses this, on every plane (CIAM, workforce, systemuser), so a
+    /// bound contact never holds an unused code hash and an operator unbind cannot revive an earlier invite link. Where the
+    /// hash column is not provisioned the platform refuses the whole PATCH as a missing property; nothing was written, so
+    /// the plain bind is sent under the SAME row version and its result is returned (there is no hash to consume).
+    /// </para>
     /// </summary>
     Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
@@ -788,12 +795,37 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             : Task.FromResult(NoRowVersion("bind", contactId));
 
     /// <inheritdoc />
-    public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
+    public async Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
-        => RowVersionPrecondition(etag) is { } version
-            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", BindAndConsumeInvitePayload(oid, plane),
-                ("If-Match", version), ct)
-            : Task.FromResult(NoRowVersion("bind", contactId));
+    {
+        if (RowVersionPrecondition(etag) is not { } version)
+        {
+            return NoRowVersion("bind", contactId);
+        }
+
+        var path = $"contacts({contactId:D})";
+        var write = await WriteAsync(HttpMethod.Patch, path, BindAndConsumeInvitePayload(oid, plane), ("If-Match", version),
+            ct, missingColumns: InviteCodeHashColumn).ConfigureAwait(false);
+        if (write.Status != StoreWriteStatus.ColumnMissing)
+        {
+            return write;
+        }
+
+        // #2005: the hash column is not provisioned here, so no contact can hold a code to consume. The refused PATCH wrote
+        // nothing, so the plain bind goes out under the same row version: the bind behaves exactly as before the schema.
+        _logger.LogWarning(
+            "[ID-BIND] {Hash} is not provisioned in this environment: contact {ContactId} is bound without consuming an "
+            + "invite code. Apply scripts/Set-ExternalInviteCodeHashSchema.ps1.",
+            ContactBindingDecision.ExternalInviteCodeHashColumn, contactId);
+        return await WriteAsync(HttpMethod.Patch, path, BindPayload(oid, plane), ("If-Match", version), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The consuming bind's only extra column: a write fault naming it is a missing hash column (#2005).</summary>
+    private static readonly IReadOnlyList<string> InviteCodeHashColumn = new[]
+    {
+        ContactBindingDecision.ExternalInviteCodeHashColumn,
+    };
 
     /// <inheritdoc />
     public async Task<StoreWriteResult> CreateContactForOidAsync(

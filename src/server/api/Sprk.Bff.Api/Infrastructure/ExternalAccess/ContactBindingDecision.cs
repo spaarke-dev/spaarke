@@ -409,8 +409,10 @@ public sealed record BindingDecision(
     IReadOnlyList<Guid>? FlagContactIds = null)
 {
     /// <summary>
-    /// Task 185: set on a CIAM-plane <see cref="BindingAction.BindByEmail"/> made through E11's marker leg. The binder must
-    /// clear the contact's invite-code hash in the SAME conditional write as the oid bind, so the code is single-use.
+    /// Task 185: set on a CIAM-plane <see cref="BindingAction.BindByEmail"/> made through E11's marker leg: the bind was
+    /// proven by a presented invite code, which the bind's SAME conditional write clears, so the code is single-use. #2005:
+    /// the binder clears a pending hash on EVERY bind onto an existing contact, whatever the plane, so this flag records
+    /// the E11 proof; it no longer selects the write.
     /// </summary>
     public bool ConsumeInviteCode { get; init; }
 
