@@ -144,7 +144,8 @@ public class ContainerOperations
         }
         catch (Exception ex) when (ex is ContainerCreateOutcomeUnknownException or ContainerLeftActiveException)
         {
-            // Logged once, at Error, by the caller that reports it (#1755 rounds 2 and 3) — not here as well.
+            // Not logged again here: the caller that reports either one logs it at Error (#1755 rounds 2 and 3), and for a
+            // container left active BindNewContainerAsync has already logged the failed bind and the failed removal.
             throw;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
