@@ -58,6 +58,7 @@
     <constraint source="FR-21 / FR-26 / I-5">Document-level read failures (invoice.read.unreadable, page_limit, no_invoice) → Rejected with that reason code; invoice.read.service_failed and transient errors → retry, then Failed. Rule-based rejection comes only from 073's decider; AI output alone never rejects. Accepted-with-findings keeps every finding.</constraint>
     <constraint source="D-91 (owner, 2026-10-16)">The firm invoice number was typed at upload and the tracking number set at creation. Compare the number read from the PDF with the typed one (normalised: case, whitespace, punctuation); if they differ, record a finding that holds the invoice for review, citing both values. It never rejects on its own, and the tracking number is never changed.</constraint>
     <constraint source="ADR-015">Logs carry submission id, invoice id, counts, timings, reason codes — no extracted values or narratives.</constraint>
+    <constraint source="044 K4 (2026-10-16)">A job whose submission row does not exist is Success, not a retry or failure: 044 compensation deletes the row when the enqueue call reports failure even though Service Bus may have accepted the message. Log it with the submission id.</constraint>
   </constraints>
 
   <knowledge>
