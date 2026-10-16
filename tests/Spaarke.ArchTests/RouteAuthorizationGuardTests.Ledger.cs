@@ -391,6 +391,13 @@ public partial class RouteAuthorizationGuardTests
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
             + "not yet resolved). The handler admits a WorkforceHome identity only (:114) and registers only the caller "
             + "itself, keyed by its own token tid/oid/email; it takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/workforce/link (spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (a licensed "
+            + "user's home identity is not yet linked). The handler admits a WorkforceHome identity only (:101); the body's "
+            + "Spaarke-tenant guest token is validated with the default scheme's own parameters plus the A9 conditions (:127), "
+            + "and the link is written once onto THAT guest's enabled systemuser, keyed by the bearer's own tid/oid (:136). "
+            + "It takes no record or systemuser id."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -802,7 +809,16 @@ public partial class RouteAuthorizationGuardTests
     //            only the caller, from its own token). Pinned by
     //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs and by
     //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
-    private const int ExpectedEndpointFileCount = 126;
+    //
+    // 126 -> 127 (2026-10-16, spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9):
+    //
+    //   048  +1  Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs ADDED — POST /api/v1/external/workforce/link, a
+    //            licensed user's stored home link (dual-token proof), on its OWN /api/v1/external group
+    //            (ExternalCollaboration, no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent
+    //            CallerScopedOnly (it links only the caller's own two identities, from its own two tokens). Pinned by
+    //            tests/integration/auth/ExternalAccess/ExternalWorkforceLinkEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    private const int ExpectedEndpointFileCount = 127;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2769,6 +2785,12 @@ public partial class RouteAuthorizationGuardTests
             "Registers ONLY the caller: a WorkforceHome identity (ExternalRegistrationEndpoints.cs:114), keyed by its own "
             + "token tid/oid and email claim (:172), through ContactIdentityBinder.RegisterHomeContactAsync (:184). The "
             + "closed body carries names only; it takes no record, owner or contact id."),
+        Permanent("POST /api/v1/external/workforce/link", PermanentBasis.CallerScopedOnly, "r3-048",
+            "Links ONLY the caller's own two identities: a WorkforceHome bearer (ExternalWorkforceLinkEndpoints.cs:101), keyed "
+            + "by its own token tid/oid (:115), and the same person's Spaarke-tenant guest token from the closed body, "
+            + "validated with the default scheme's parameters (:127, SpaarkeGuestTokenValidator). The write targets that "
+            + "guest token's own enabled systemuser, once, never re-pointed (ContactIdentityBinder.LinkHomeSystemUserAsync, "
+            + ":136). It takes no record, systemuser or contact id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
             + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),

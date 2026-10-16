@@ -1737,6 +1737,8 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
     public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
     public Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeLinkedSystemUsersAsync(homeTenantId, homeObjectId, ct);
+    public Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct) => _inner.FindSystemUsersByGuestObjectIdAsync(guestObjectId, ct);
+    public Task<StoreWriteResult> WriteHomeLinkAsync(Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.WriteHomeLinkAsync(systemUserId, etag, homeTenantId, homeObjectId, ct);
     public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeContactsAsync(homeTenantId, homeObjectId, ct);
     public Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct) => _inner.FindEnabledSystemUsersByEmailAsync(email, ct);
     public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct) => _inner.FindDefaultOwnerTeamsAsync(businessUnitId, ct);

@@ -116,6 +116,9 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/servicerequests/{id:guid}/documents",
         "POST /api/v1/external/workassignments/{id:guid}/documents",
         "POST /api/v1/external/workassignments/{id:guid}/todos",
+        // r3 task 048 (ADR-028 A9): its OWN group, as 047; the handler admits WorkforceHome only and links only the
+        // caller's own two identities (RegistrationIsTheOnlyCallerOfTheWorkforceHomeWrites below).
+        "POST /api/v1/external/workforce/link",
         "POST /api/v1/external/{root}/{id:guid}/messages",
     };
 
@@ -273,6 +276,11 @@ public sealed class AuthenticationSchemeCensusTests
             typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
         (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails), "set_OwningTeamId",
             typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
+        // r3 task 048: the stored home link on a systemuser — only the link route, through the binder.
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder), "LinkHomeSystemUserAsync",
+            typeof(Sprk.Bff.Api.Api.ExternalAccess.ExternalWorkforceLinkEndpoints)),
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore), "WriteHomeLinkAsync",
+            typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
     };
 
     [Fact(DisplayName = "Task 047: only ExternalRegistrationEndpoints reaches the WorkforceHome create and bind")]
@@ -296,8 +304,9 @@ public sealed class AuthenticationSchemeCensusTests
             var others = callers.Where(c => c != allowed).Select(c => c.FullName).ToList();
             Assert.True(others.Count == 0,
                 $"{owner.Name}.{member} is reached from [{string.Join(", ", others)}]. ADR-028 A9 (r3 task 047): only the "
-                + "registration route (POST /api/v1/external/registration, WorkforceHome scheme only) may create or bind a "
-                + "WorkforceHome contact. Route the new caller through ExternalRegistrationEndpoints, or review it (UAC) "
+                + "registration route (POST /api/v1/external/registration) may create or bind a WorkforceHome contact, and "
+                + "(task 048) only the link route (POST /api/v1/external/workforce/link) may write a systemuser's stored home "
+                + "link — both WorkforceHome scheme only. Route the new caller through the allowed type, or review it (UAC) "
                 + "and widen this pin.");
         }
     }

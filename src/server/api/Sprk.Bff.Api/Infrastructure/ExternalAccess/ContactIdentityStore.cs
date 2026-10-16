@@ -191,6 +191,22 @@ public interface IContactIdentityStore
     Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
 
     /// <summary>
+    /// ADR-028 A9 (r3 task 048): the systemusers whose <c>azureactivedirectoryobjectid</c> is <paramref name="guestObjectId"/>
+    /// — a SPAARKE-TENANT object id, proven by a validated guest token, never a home oid. Any state, two rows, enabled first,
+    /// each with its stored home pair (the SECURED columns) and row version. Read-only; the link route's target.
+    /// </summary>
+    Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): writes the stored home link — <c>sprk_hometenantid</c>, <c>sprk_homeobjectid</c> and their
+    /// key mirrors <c>sprk_hometenantidkey</c>, <c>sprk_homeobjectidkey</c>, the same values — in ONE request, conditional on
+    /// <paramref name="etag"/> (no version → no write). A pair another systemuser holds fails on the mirrors' alternate key
+    /// (<see cref="StoreWriteStatus.KeyConflict"/>).
+    /// </summary>
+    Task<StoreWriteResult> WriteHomeLinkAsync(
+        Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): contacts on plane WorkforceHome whose <c>sprk_externaltenantid</c> is
     /// <paramref name="homeTenantId"/> and whose binding is <paramref name="homeObjectId"/>. Any state, two rows. Read-only.
     /// </summary>
@@ -515,6 +531,38 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <summary>The systemuser home-link uniqueness mirror (unsecured): the home probe's row filter (task 044).</summary>
     public const string HomeObjectIdKeyColumn = "sprk_homeobjectidkey";
 
+    /// <summary>The systemuser home-tenant uniqueness mirror (unsecured), written with the link (task 044). Never read.</summary>
+    public const string HomeTenantIdKeyColumn = "sprk_hometenantidkey";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): the link route's target read — systemusers by their Spaarke-tenant object id (the guest
+    /// token's <c>oid</c>), any state (a disabled user must be seen so it can refuse), two rows (an ambiguous id must be
+    /// visible), enabled first (as <see cref="BuildHomeLinkLookupPath"/>). Selects the SECURED pair the decision re-checks.
+    /// </summary>
+    public static string BuildGuestSystemUserLookupPath(Guid guestObjectId)
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + ContactBindingDecision.HomeObjectIdColumn
+           + $"&$filter=azureactivedirectoryobjectid eq {guestObjectId:D}&$top=2&$orderby=isdisabled asc";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): the link write's payload — the SECURED pair and its two unsecured key mirrors, the same
+    /// values (design §5). Pure.
+    /// </summary>
+    public static Dictionary<string, object?> HomeLinkPayload(Guid homeTenantId, Guid homeObjectId)
+    {
+        if (homeTenantId == Guid.Empty) throw new ArgumentException("A home link needs the home tenant.", nameof(homeTenantId));
+        if (homeObjectId == Guid.Empty) throw new ArgumentException("A home link needs the home object id.", nameof(homeObjectId));
+        var tenant = homeTenantId.ToString("D");
+        var oid = homeObjectId.ToString("D");
+        return new Dictionary<string, object?>
+        {
+            [ContactBindingDecision.HomeTenantIdColumn] = tenant,
+            [ContactBindingDecision.HomeObjectIdColumn] = oid,
+            [HomeTenantIdKeyColumn] = tenant,
+            [HomeObjectIdKeyColumn] = oid,
+        };
+    }
+
     /// <summary>The owner lookup bind key on a create.</summary>
     public const string OwnerBindKey = "ownerid@odata.bind";
 
@@ -545,10 +593,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            + ContactBindingDecision.ExternalTenantIdColumn
            + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}&$top=50";
 
-    /// <summary>The A9 systemuser probe: rows whose UNSECURED key mirror is set, with the secured pair they mirror.</summary>
+    /// <summary>
+    /// The A9 systemuser probe: rows whose UNSECURED key mirror is set, with the secured pair they mirror. It also selects
+    /// the tenant mirror (r3 task 048): the link write sets both mirrors, so an environment missing either column reports
+    /// ColumnMissing here, before any write, rather than failing the write as a retryable fault.
+    /// </summary>
     public static string BuildHomeLinkProbePath()
         => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
-           + ContactBindingDecision.HomeObjectIdColumn
+           + $"{ContactBindingDecision.HomeObjectIdColumn},{HomeTenantIdKeyColumn}"
            + $"&$filter={HomeObjectIdKeyColumn} ne null&$top=50";
 
     /// <summary>
@@ -653,7 +705,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         return new HomeLinkRow(
             id.Value, disabled,
             StringOf(row, ContactBindingDecision.HomeTenantIdColumn),
-            StringOf(row, ContactBindingDecision.HomeObjectIdColumn));
+            StringOf(row, ContactBindingDecision.HomeObjectIdColumn),
+            StringOf(row, "@odata.etag"));
     }
 
     /// <summary>The masking probe: rows that carry a plane marker.</summary>
@@ -1098,6 +1151,39 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var rows = Values(doc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList();
         return new HomeLinkLookup(LookupStatus.Read, rows);
     }
+
+    /// <inheritdoc />
+    public async Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildGuestSystemUserLookupPath(guestObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
+        {
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("guest systemuser lookup");
+                return HomeLinkLookup.ColumnMissing;
+            }
+
+            return HomeLinkLookup.Failed;
+        }
+
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return HomeLinkLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList();
+        return new HomeLinkLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteHomeLinkAsync(
+        Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"systemusers({systemUserId:D})", HomeLinkPayload(homeTenantId, homeObjectId),
+                ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("home link", systemUserId));
 
     /// <inheritdoc />
     public async Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)

@@ -45,6 +45,10 @@ public static class ExternalAccessEndpoints
         // WorkforceHome scheme only.
         app.MapExternalRegistrationEndpoints();
 
+        // POST /api/v1/external/workforce/link — ADR-028 A9 (r3 task 048). Its OWN group, as registration: a licensed user
+        // signed in with their home account is not resolvable until the link exists. WorkforceHome scheme only.
+        app.MapExternalWorkforceLinkEndpoints();
+
         // GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access — the per-record No Access
         // read (task 064, owner round 59 item 3). NOT on the management group: its DelegationRuleFilter demands Write for
         // every route, and the form banner (task 153) must answer callers who hold only Read. Each route carries the

@@ -308,9 +308,11 @@ public sealed record ContactLookup(LookupStatus Status, IReadOnlyList<ContactBin
 /// <summary>
 /// ADR-028 A9 (r3 task 046): one systemuser as the stored-link read returns it — the FIELD-SECURED home pair
 /// (<c>sprk_hometenantid</c>, <c>sprk_homeobjectid</c>) exactly as stored, and <c>isdisabled</c>. The unsecured key mirrors
-/// are never selected: nothing resolves by them (design §5).
+/// are never selected: nothing resolves by them (design §5). <paramref name="ETag"/> is the row version, read so the link
+/// write (r3 task 048) is conditional on it; the stored-link read does not need it.
 /// </summary>
-public sealed record HomeLinkRow(Guid SystemUserId, bool? IsDisabled, string? RawHomeTenantId, string? RawHomeObjectId);
+public sealed record HomeLinkRow(
+    Guid SystemUserId, bool? IsDisabled, string? RawHomeTenantId, string? RawHomeObjectId, string? ETag = null);
 
 /// <summary>The stored-link read: rows, or why there are none to trust.</summary>
 public sealed record HomeLinkLookup(LookupStatus Status, IReadOnlyList<HomeLinkRow> Rows)
@@ -343,6 +345,35 @@ public enum HomeLinkOutcome
 
 /// <summary>The stored-link decision.</summary>
 public sealed record HomeLinkDecision(HomeLinkOutcome Outcome, Guid? SystemUserId = null, string? DenyCode = null);
+
+/// <summary>What the link route does for a proven guest identity and home pair (ADR-028 A9, r3 task 048, design §5).</summary>
+public enum HomeLinkWriteAction
+{
+    /// <summary>The guest's enabled systemuser carries no link and no other systemuser holds the pair: write the link.</summary>
+    Write,
+
+    /// <summary>The guest's systemuser already carries exactly this pair: nothing to write.</summary>
+    AlreadyLinked,
+
+    /// <summary>No systemuser carries the guest's Spaarke-tenant object id.</summary>
+    NoSystemUser,
+
+    /// <summary>Only disabled systemusers carry the guest's object id.</summary>
+    SystemUserDisabled,
+
+    /// <summary>
+    /// The guest's systemuser carries a DIFFERENT (or unreadable) link, or another systemuser already holds the pair. A link
+    /// is never re-pointed (design §5).
+    /// </summary>
+    Collision,
+
+    /// <summary>A read failed, or the guest's object id is ambiguous: deny with <see cref="HomeLinkWriteDecision.DenyCode"/>.</summary>
+    Deny,
+}
+
+/// <summary>The link decision: the systemuser to write and its row version, or why not.</summary>
+public sealed record HomeLinkWriteDecision(
+    HomeLinkWriteAction Action, Guid? SystemUserId = null, string? ETag = null, string? DenyCode = null);
 
 /// <summary>
 /// ADR-028 A9 (r3 task 047): one systemuser as the licensed-user email read returns it — <c>isdisabled</c> and the two
@@ -697,6 +728,12 @@ public static class ContactBindingDecision
     /// Resolving to one of them would merge two people, so the caller is denied; an operator resolves it.
     /// </summary>
     public const string DenyHomeLinkAmbiguous = "sdap.access.deny.home_link_ambiguous";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): more than one ENABLED systemuser carries the guest token's Spaarke-tenant object id. Linking
+    /// one of them could link the wrong person, so the link is refused; an operator resolves it.
+    /// </summary>
+    public const string DenyGuestSystemUserAmbiguous = "sdap.access.deny.link_guest_systemuser_ambiguous";
 
     /// <summary>
     /// Reads a contact's binding as Unbound / Bound / Unreadable from its raw column values.
@@ -1505,6 +1542,79 @@ public static class ContactBindingDecision
 
         return new HomeLinkDecision(matches.Count > 0 ? HomeLinkOutcome.Disabled : HomeLinkOutcome.NotLinked);
     }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048, design §5 "Outcome"): may the home pair (<paramref name="homeTenantId"/>,
+    /// <paramref name="homeObjectId"/>) be written onto the guest's systemuser? Pure. Both identities are already proven by
+    /// the caller; this decides only the write, and never re-points a link.
+    /// <list type="number">
+    ///   <item><paramref name="guestSystemUsers"/> (the systemusers carrying the guest's Spaarke-tenant object id, any state):
+    ///   a failed read denies; two ENABLED rows deny <see cref="DenyGuestSystemUserAmbiguous"/>; none enabled →
+    ///   <see cref="HomeLinkWriteAction.SystemUserDisabled"/> when a disabled row exists, else
+    ///   <see cref="HomeLinkWriteAction.NoSystemUser"/>.</item>
+    ///   <item>The enabled systemuser's own SECURED pair: exactly this pair → <see cref="HomeLinkWriteAction.AlreadyLinked"/>;
+    ///   empty → go on; anything else (another pair, half a pair, an unparseable value) →
+    ///   <see cref="HomeLinkWriteAction.Collision"/>.</item>
+    ///   <item><paramref name="pairHolders"/> (the systemusers whose SECURED pair is this pair, any state): a failed read
+    ///   denies; any OTHER systemuser holding it → <see cref="HomeLinkWriteAction.Collision"/>.</item>
+    ///   <item>Otherwise <see cref="HomeLinkWriteAction.Write"/>, conditional on the row's version.</item>
+    /// </list>
+    /// The pair's key mirrors are never read: their alternate key refuses a duplicate at the write (412), which the caller
+    /// maps to a collision too.
+    /// </summary>
+    public static HomeLinkWriteDecision DecideHomeLinkWrite(
+        HomeLinkLookup guestSystemUsers, HomeLinkLookup pairHolders, Guid homeTenantId, Guid homeObjectId)
+    {
+        ArgumentNullException.ThrowIfNull(guestSystemUsers);
+        ArgumentNullException.ThrowIfNull(pairHolders);
+
+        if (guestSystemUsers.Status != LookupStatus.Read)
+        {
+            return new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: LookupDenyCode(guestSystemUsers.Status));
+        }
+
+        var rows = guestSystemUsers.Rows.Where(r => r.SystemUserId != Guid.Empty).ToList();
+        var enabled = rows.Where(r => r.IsDisabled == false).GroupBy(r => r.SystemUserId).Select(g => g.First()).ToList();
+        if (enabled.Count > 1)
+        {
+            return new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: DenyGuestSystemUserAmbiguous);
+        }
+
+        if (enabled.Count == 0)
+        {
+            return new HomeLinkWriteDecision(rows.Count > 0 ? HomeLinkWriteAction.SystemUserDisabled : HomeLinkWriteAction.NoSystemUser);
+        }
+
+        var target = enabled[0];
+        var targetLinked = !string.IsNullOrWhiteSpace(target.RawHomeTenantId) || !string.IsNullOrWhiteSpace(target.RawHomeObjectId);
+
+        // "Already linked" only in the exact form the 046 resolution reads (its filter compares the D-form text), so a
+        // hand-entered pair in another format is not reported as working while sign-in still fails.
+        if (targetLinked
+            && !(IsCanonicalGuid(target.RawHomeTenantId, homeTenantId) && IsCanonicalGuid(target.RawHomeObjectId, homeObjectId)))
+        {
+            return new HomeLinkWriteDecision(HomeLinkWriteAction.Collision, target.SystemUserId);
+        }
+
+        if (pairHolders.Status != LookupStatus.Read)
+        {
+            return new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: LookupDenyCode(pairHolders.Status));
+        }
+
+        if (pairHolders.Rows.Any(r => r.SystemUserId != Guid.Empty && r.SystemUserId != target.SystemUserId
+                                      && IsGuid(r.RawHomeTenantId, homeTenantId) && IsGuid(r.RawHomeObjectId, homeObjectId)))
+        {
+            // Another holder: a new link would collide, and an existing one is ambiguous to the 046 resolution.
+            return new HomeLinkWriteDecision(HomeLinkWriteAction.Collision, target.SystemUserId);
+        }
+
+        return targetLinked
+            ? new HomeLinkWriteDecision(HomeLinkWriteAction.AlreadyLinked, target.SystemUserId)
+            : new HomeLinkWriteDecision(HomeLinkWriteAction.Write, target.SystemUserId, target.ETag);
+    }
+
+    private static bool IsCanonicalGuid(string? raw, Guid expected)
+        => expected != Guid.Empty && Guid.TryParseExact(raw, "D", out var value) && value == expected;
 
     /// <summary>
     /// Design §3 step 3 / §4: the contact a home principal resolves to — plane WorkforceHome AND

@@ -192,6 +192,34 @@ public sealed record HomeRegistrationResult(
         => new(HomeRegistrationOutcome.Denied, null, denyCode, wrote);
 }
 
+/// <summary>What the A9 link route did (r3 task 048, design §5).</summary>
+public enum HomeLinkWriteOutcome
+{
+    /// <summary>The link was written onto the guest's systemuser.</summary>
+    Linked,
+
+    /// <summary>The guest's systemuser already carried exactly this link: nothing written.</summary>
+    AlreadyLinked,
+
+    /// <summary>No systemuser carries the guest's Spaarke-tenant object id: nothing written.</summary>
+    NoSystemUser,
+
+    /// <summary>The guest's systemuser is disabled: nothing written.</summary>
+    SystemUserDisabled,
+
+    /// <summary>A different link exists, or the pair is held elsewhere: nothing written, nothing re-pointed.</summary>
+    Collision,
+
+    /// <summary>Denied with <see cref="HomeLinkWriteResult.DenyCode"/> (a read, masking, schema or write fault).</summary>
+    Denied,
+}
+
+/// <summary>A link attempt's result.</summary>
+public sealed record HomeLinkWriteResult(HomeLinkWriteOutcome Outcome, Guid? SystemUserId = null, string? DenyCode = null)
+{
+    internal static HomeLinkWriteResult Denied(string denyCode) => new(HomeLinkWriteOutcome.Denied, null, denyCode);
+}
+
 /// <summary>Runs the binding decision and performs its writes. See the file header.</summary>
 public sealed class ContactIdentityBinder
 {
@@ -918,6 +946,119 @@ public sealed class ContactIdentityBinder
         return lookup.Status != LookupStatus.Read && decision?.DenyCode is { } fault
             ? HomeRegistrationResult.Denied(fault)
             : new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, DenyCode: decision?.DenyCode);
+    }
+
+    // ── ADR-028 A9 stored link (r3 task 048) ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048, design §5): writes the stored home link (<paramref name="homeTenantId"/>,
+    /// <paramref name="homeObjectId"/>) onto the ENABLED systemuser whose Spaarke-tenant object id is
+    /// <paramref name="guestObjectId"/>. The route has already proven both identities (the home bearer and the guest token);
+    /// this decides and performs the write only. Only <c>ExternalWorkforceLinkEndpoints</c> calls it.
+    /// <list type="number">
+    ///   <item>Probe that the A9 columns are readable: a masked secured pair would read as "no link" and let a write
+    ///   re-point an existing one, so anything but readable (or "nothing marked yet") denies before any other read.</item>
+    ///   <item>Read the guest's systemusers and the pair's current holders; decide
+    ///   (<see cref="ContactBindingDecision.DecideHomeLinkWrite"/>): write once, never re-point.</item>
+    ///   <item>Write the pair and its key mirrors in one request, conditional on the row version. A version race re-reads
+    ///   and decides again (once); the mirrors' duplicate-key fault is a collision.</item>
+    /// </list>
+    /// Logs carry the systemuser id and HASHED tid/oid only.
+    /// </summary>
+    public async Task<HomeLinkWriteResult> LinkHomeSystemUserAsync(
+        Guid guestObjectId, Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        if (guestObjectId == Guid.Empty || homeTenantId == Guid.Empty || homeObjectId == Guid.Empty)
+        {
+            throw new ArgumentException("A home link needs the guest object id and the home tenant and object id.");
+        }
+
+        var who = $"tid#{HashForLog(homeTenantId)} oid#{HashForLog(homeObjectId)}";
+
+        // NoMarkedRows: no systemuser or contact carries an A9 mirror yet, so no link exists that a mask could hide.
+        var home = await _store.ProbeHomeReadabilityAsync(ct).ConfigureAwait(false);
+        if (home is not (BindingReadability.Readable or BindingReadability.NoMarkedRows))
+        {
+            var probeCode = home switch
+            {
+                BindingReadability.ColumnMissing => ContactBindingDecision.DenyBindingColumnMissing,
+                BindingReadability.Masked => ContactBindingDecision.DenyBindingColumnMasked,
+                _ => ContactBindingDecision.DenyContactLookupFailed,
+            };
+            _logger.Log(
+                home == BindingReadability.Failed ? LogLevel.Warning : LogLevel.Error,
+                "[ID-BIND] Home link for {Who} DENIED ({DenyCode}): the A9 columns are {Home}. Nothing was written.",
+                who, probeCode, home);
+            return HomeLinkWriteResult.Denied(probeCode);
+        }
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var guestUsers = await _store.FindSystemUsersByGuestObjectIdAsync(guestObjectId, ct).ConfigureAwait(false);
+            var holders = await _store.FindHomeLinkedSystemUsersAsync(homeTenantId, homeObjectId, ct).ConfigureAwait(false);
+            var decision = ContactBindingDecision.DecideHomeLinkWrite(guestUsers, holders, homeTenantId, homeObjectId);
+
+            switch (decision.Action)
+            {
+                case HomeLinkWriteAction.AlreadyLinked:
+                    _logger.LogInformation(
+                        "[ID-BIND] Home link for {Who}: systemuser {SystemUserId} already carries it; nothing written",
+                        who, decision.SystemUserId);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.AlreadyLinked, decision.SystemUserId);
+
+                case HomeLinkWriteAction.NoSystemUser:
+                    _logger.LogWarning("[ID-BIND] Home link for {Who} refused: the guest identity has no systemuser", who);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.NoSystemUser);
+
+                case HomeLinkWriteAction.SystemUserDisabled:
+                    _logger.LogWarning("[ID-BIND] Home link for {Who} refused: the guest identity's systemuser is disabled", who);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.SystemUserDisabled);
+
+                case HomeLinkWriteAction.Collision:
+                    _logger.LogWarning(
+                        "[ID-BIND] Home link for {Who} refused (collision): systemuser {SystemUserId} carries another link, or "
+                        + "another systemuser holds this one. Nothing was re-pointed.",
+                        who, decision.SystemUserId);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.Collision, decision.SystemUserId);
+
+                case HomeLinkWriteAction.Deny:
+                    _logger.LogWarning("[ID-BIND] Home link for {Who} DENIED ({DenyCode})", who, decision.DenyCode);
+                    return HomeLinkWriteResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
+            }
+
+            var systemUserId = decision.SystemUserId!.Value;
+            var write = await _store.WriteHomeLinkAsync(systemUserId, decision.ETag, homeTenantId, homeObjectId, ct)
+                .ConfigureAwait(false);
+            switch (write.Status)
+            {
+                case StoreWriteStatus.Written:
+                    _logger.LogInformation("[ID-BIND] Home link for {Who} written onto systemuser {SystemUserId}", who, systemUserId);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.Linked, systemUserId);
+
+                case StoreWriteStatus.KeyConflict:
+                    _logger.LogWarning(
+                        "[ID-BIND] Home link for {Who} refused (collision): the pair's key mirror is held by another systemuser",
+                        who);
+                    return new HomeLinkWriteResult(HomeLinkWriteOutcome.Collision, systemUserId);
+
+                case StoreWriteStatus.PreconditionFailed:
+                    // The row changed since it was read: decide again on a fresh read (once).
+                    continue;
+
+                default:
+                    var writeCode = write.Status is StoreWriteStatus.Forbidden or StoreWriteStatus.KeyMissing
+                        ? ContactBindingDecision.DenyBindingColumnMasked
+                        : ContactBindingDecision.DenyContactBindFailed;
+                    _logger.LogWarning(
+                        "[ID-BIND] Home link for {Who} onto systemuser {SystemUserId} DENIED ({DenyCode}): the write ended {Status}",
+                        who, systemUserId, writeCode, write.Status);
+                    return HomeLinkWriteResult.Denied(writeCode);
+            }
+        }
+
+        _logger.LogWarning("[ID-BIND] Home link for {Who} DENIED ({DenyCode}): the systemuser kept changing; retryable",
+            who, ContactBindingDecision.DenyContactBindFailed);
+        return HomeLinkWriteResult.Denied(ContactBindingDecision.DenyContactBindFailed);
     }
 
     /// <summary>First 8 hex characters of SHA-256 (as <c>ServiceBusProvisioningEnqueuer.HashForLog</c>): correlates, never identifies.</summary>

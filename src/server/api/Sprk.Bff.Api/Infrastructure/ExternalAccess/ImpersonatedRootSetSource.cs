@@ -280,6 +280,27 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     }
 
     /// <summary>
+    /// ADR-028 A9 (r3 task 048, carrying 046 review K1): the tenant namespaces a removed user's root sets must be cleared
+    /// under — the caller-supplied <paramref name="cacheTenants"/> (blank and "anonymous" dropped) plus EVERY configured
+    /// customer home directory (<c>WorkforceIdentity:CustomerTenantIds</c>, in the <c>D</c> form a token's <c>tid</c>
+    /// carries). A licensed user with a stored home link reads under their CUSTOMER tenant's <c>tid</c> when they sign in
+    /// with their company account (<see cref="CacheTenantFor"/>), so clearing the deployment tenant alone would leave that
+    /// set visible for up to <see cref="CacheTtl"/>. Clearing a key nobody wrote is a no-op. Pure.
+    /// </summary>
+    internal static IReadOnlyList<string> EvictionTenants(
+        IEnumerable<string> cacheTenants, IReadOnlySet<Guid> customerTenantIds)
+    {
+        ArgumentNullException.ThrowIfNull(cacheTenants);
+        ArgumentNullException.ThrowIfNull(customerTenantIds);
+        return cacheTenants
+            .Where(t => !string.IsNullOrWhiteSpace(t) && t.Trim() != "anonymous")
+            .Select(t => t.Trim())
+            .Concat(customerTenantIds.Where(g => g != Guid.Empty).Select(g => g.ToString("D")))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
     /// <see cref="InvalidateAsync"/> with the tenant namespace named explicitly (task 143: the job, which has no
     /// caller). Same non-fatal contract.
     /// </summary>

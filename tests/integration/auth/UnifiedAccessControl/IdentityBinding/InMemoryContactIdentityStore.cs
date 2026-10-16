@@ -142,6 +142,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>A9 (r3 task 046): the stored-link read ends this way.</summary>
     public LookupStatus HomeLinkLookupStatus { get; set; } = LookupStatus.Read;
 
+    /// <summary>A9 (r3 task 048): the guest-systemuser read (the link route's target) ends this way.</summary>
+    public LookupStatus GuestSystemUserLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>A9 (r3 task 048): the link write fails with this status (null = it behaves like the platform).</summary>
+    public StoreWriteStatus? HomeLinkWriteFailure { get; set; }
+
+    /// <summary>A9 (r3 task 048): runs once, inside the link write, before its version check (a concurrent writer).</summary>
+    public Action<SystemUser>? BeforeHomeLinkWrite { get; set; }
+
     /// <summary>A9 (r3 task 046): the home contact read ends this way.</summary>
     public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
@@ -238,6 +247,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
             HomeLinkLookupStatus = LookupStatus.Read;
+            GuestSystemUserLookupStatus = LookupStatus.Read;
+            HomeLinkWriteFailure = null;
+            BeforeHomeLinkWrite = null;
             HomeContactLookupStatus = LookupStatus.Read;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
@@ -450,6 +462,75 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 .Select(u => new HomeLinkRow(u.Id, u.IsDisabled, u.HomeTenantId, u.HomeObjectId))
                 .ToArray();
             return Task.FromResult(HomeLinkLookup.Of(rows));
+        }
+    }
+
+    /// <summary>
+    /// A9 (r3 task 048): systemusers by their Spaarke-tenant object id, any state, enabled first, two rows — as the
+    /// Dataverse filter (<c>DataverseContactIdentityStore.BuildGuestSystemUserLookupPath</c>). Each row carries the SECURED
+    /// pair and its row version.
+    /// </summary>
+    public Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("guest-systemuser");
+            AfterRead?.Invoke("guest-systemuser");
+            if (GuestSystemUserLookupStatus != LookupStatus.Read)
+            {
+                return Task.FromResult(GuestSystemUserLookupStatus == LookupStatus.ColumnMissing
+                    ? HomeLinkLookup.ColumnMissing
+                    : HomeLinkLookup.Failed);
+            }
+
+            var rows = SystemUsers.Values
+                .Where(u => u.Oid == guestObjectId)
+                .OrderBy(u => u.IsDisabled)
+                .Take(2)
+                .Select(u => new HomeLinkRow(u.Id, u.IsDisabled, u.HomeTenantId, u.HomeObjectId, $"W/\"{u.Version}\""))
+                .ToArray();
+            return Task.FromResult(HomeLinkLookup.Of(rows));
+        }
+    }
+
+    /// <summary>
+    /// A9 (r3 task 048): the link write — the secured pair and both key mirrors in one write, conditional on the version.
+    /// The mirrors' alternate key (task 044) counts rows of every state: another systemuser holding the pair there makes the
+    /// platform refuse the write with the duplicate-key fault.
+    /// </summary>
+    public Task<StoreWriteResult> WriteHomeLinkAsync(
+        Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                Writes.Add(("refused-unversioned-home-link", systemUserId, string.Empty));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the home link"));
+            }
+
+            if (!SystemUsers.TryGetValue(systemUserId, out var u)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            var hook = BeforeHomeLinkWrite;
+            BeforeHomeLinkWrite = null; // one-shot
+            hook?.Invoke(u);
+            if (!VersionMatches(etag, u.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            if (HomeLinkWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
+
+            var tenant = homeTenantId.ToString("D");
+            var oid = homeObjectId.ToString("D");
+            if (SystemUsers.Values.Any(o => o.Id != systemUserId
+                                            && string.Equals(o.HomeTenantIdKey, tenant, StringComparison.OrdinalIgnoreCase)
+                                            && string.Equals(o.HomeObjectIdKey, oid, StringComparison.OrdinalIgnoreCase)))
+            {
+                Writes.Add(("refused-duplicate-key-home-link", systemUserId, oid));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.KeyConflict, Error: "0x80060892 duplicate key"));
+            }
+
+            u.HomeTenantId = u.HomeTenantIdKey = tenant;
+            u.HomeObjectId = u.HomeObjectIdKey = oid;
+            u.Version = NextVersion();
+            Writes.Add(("home-link", systemUserId, $"{tenant}|{oid}"));
+            return Task.FromResult(StoreWriteResult.Written);
         }
     }
 

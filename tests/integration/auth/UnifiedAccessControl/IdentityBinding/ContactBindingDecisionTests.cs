@@ -1105,6 +1105,77 @@ public class ContactBindingDecisionTests
         ContactLookup? oid = null, ReferenceLookup? refs = null)
         => ContactBindingDecision.CollisionStillHolds(party, flagged, email ?? NoRows, oid ?? NoRows, refs ?? ReferenceLookup.Of());
 
+    // ── r3 task 048: the A9 link write (DecideHomeLinkWrite) ──────────────────────────────────────────
+
+    private static readonly Guid LinkTenant = Guid.Parse("dddddddd-0000-4000-8000-0000000000d1");
+    private static readonly Guid LinkOid = Guid.Parse("dddddddd-0000-4000-8000-0000000000d2");
+    private static readonly Guid GuestUser = Guid.Parse("eeeeeeee-0000-4000-8000-0000000000e1");
+    private static readonly Guid OtherUser = Guid.Parse("eeeeeeee-0000-4000-8000-0000000000e2");
+
+    private static HomeLinkRow Guest(Guid id, bool? disabled = false, Guid? tenant = null, Guid? oid = null)
+        => new(id, disabled, tenant?.ToString("D"), oid?.ToString("D"), "W/\"7\"");
+
+    [Fact]
+    public void DecideHomeLinkWrite_OneEnabledUnlinkedSystemUser_NobodyHoldingThePair_WritesWithItsVersion()
+    {
+        var decision = ContactBindingDecision.DecideHomeLinkWrite(
+            HomeLinkLookup.Of(Guest(GuestUser)), HomeLinkLookup.Of(), LinkTenant, LinkOid);
+
+        decision.Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Write, GuestUser, "W/\"7\""));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_ItsOwnPairAlready_IsAlreadyLinked_AndADifferentPairIsNeverRePointed()
+    {
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant, oid: LinkOid)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.AlreadyLinked);
+
+        // Perturb ONE input: the stored oid is another person's — and a half-written row (tenant only) is a link too.
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant, oid: Guid.NewGuid())), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_ThePairOnAnotherSystemUser_IsACollision_WhateverItsState()
+    {
+        var holder = new HomeLinkRow(OtherUser, true, LinkTenant.ToString("D"), LinkOid.ToString("D"));
+
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser)), HomeLinkLookup.Of(holder), LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Collision, GuestUser));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_NoEnabledRow_IsNoSystemUserOrDisabled_AndTwoEnabledRowsAreAmbiguous()
+    {
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.NoSystemUser);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser, disabled: true)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.SystemUserDisabled);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser, disabled: null)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.SystemUserDisabled, "an unreadable state is never treated as enabled");
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser), Guest(OtherUser)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: ContactBindingDecision.DenyGuestSystemUserAmbiguous));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_AFailedOrMissingRead_OfEitherLookup_Denies_AndNeverWrites()
+    {
+        var target = HomeLinkLookup.Of(Guest(GuestUser));
+
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Failed, HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.ColumnMissing, HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyBindingColumnMissing);
+        ContactBindingDecision.DecideHomeLinkWrite(target, HomeLinkLookup.Failed, LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: ContactBindingDecision.DenyContactLookupFailed));
+    }
+
     private static CollisionParty Party(IdentityCollisionReason reason, Guid oid,
         IdentityPlaneMarker plane = IdentityPlaneMarker.Workforce)
         => new(oid, plane, reason, Now);
