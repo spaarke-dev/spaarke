@@ -11,8 +11,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done (34/78): 001-005, 010-014, 016-025, 027-029, 040-043, 045-047, 078, 108, 109. WIP (agents in worktrees, base 9db5d265e): 044 (opus), 048 (sonnet), 070 (opus), 106 (sonnet). ADR-010 ceiling 166 |
-| **Step** | Waiting on the four agents |
+| **Task** | Parallel mode. Done (36/78): 001-005, 010-014, 016-025, 027-029, 040-047, 078, 106, 108, 109. WIP: 048 (agent, worktree agent-ac039afd8d4dbe51f, commit dabb1ea20 so far), 070 (merged; fix-round-1 agent running; held for ontology-r1 review). ADR-010 ceiling 166; route ledger file count 129 |
+| **Step** | Waiting on 048 + 070 fix-round-1 agents; verification run on the merged branch |
+| **Pending relay** | Tell ontology-r1 (session closed when tried) that the owner approved D-92 (their D-138 question); collect their 070 review (Q1 throw vs failed result) |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | As each agent reports: cherry-pick its commits onto work/ebilling-r1 (conflicts on FinanceModule.cs / ADR010_DITests.cs: keep both sides, sum the ceiling), amend trailers to Opus 5.5 with hooks, mark ✅ in TASK-INDEX, run the build + targeted Finance tests + ArchTests. Then 107 and 026 (serial, opus), then 015 (needs owner OK, destructive) |
 
