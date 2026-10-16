@@ -135,6 +135,41 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ProvisioningCreate_WhenTheCallerCancelsDuringTheCreatePost_StillReadsTheIdBindsAndMarks()
+    {
+        // #1735/#1755: once the create POST is sent, Graph may commit the container. A client disconnect mid-POST used to
+        // throw TaskCanceledException before the answer (the only place the new id is) was read — a container nothing
+        // names, binds, marks or compensates.
+        _graph.StubPostExact(ContainersPath,
+            "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}", 201,
+            delay: TimeSpan.FromSeconds(2));
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        var created = await ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, caller.Token);
+
+        created!.Id.Should().Be("c-new");
+        caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the create POST was in flight");
+        AssertStamped(Unit);
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("PATCH", "GET", "PATCH");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheCallerHasCancelledBeforeTheCreate_SendsNothing()
+    {
+        // The other side of the boundary: before the POST is sent, the caller's token still stops the create.
+        StubCreated();
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+
+        var act = () => ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, caller.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _graph.AllRequests.Should().BeEmpty("a create the caller cancelled before it was sent must reach Graph not at all");
+    }
+
+    [Fact]
     public async Task ProvisioningCreate_WhenTheBindTimesOut_DeletesTheContainer_AndThrows()
     {
         StubCreated();

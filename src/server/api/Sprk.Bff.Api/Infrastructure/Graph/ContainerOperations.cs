@@ -34,9 +34,10 @@ public class ContainerOperations
     }
 
     /// <summary>
-    /// Bounds the bind of a container that already exists (#1652 round 1). The bind runs on its own token with this
-    /// timeout, never the caller's: a client disconnect mid-bind used to skip the compensating delete and leave a live,
-    /// unbound container. Settable for tests only.
+    /// Bounds the create POST (#1735) and the bind of the container it made (#1652 round 1). Each runs on its own token
+    /// with this timeout, never the caller's: a client disconnect mid-POST could leave a container whose id was never
+    /// read, and one mid-bind used to skip the compensating delete and leave a live, unbound container. Settable for
+    /// tests only.
     /// </summary>
     internal TimeSpan UncancellableStepTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
@@ -71,6 +72,11 @@ public class ContainerOperations
         // Resolve the marker value BEFORE creating, so an unresolved identity cannot leave an unmarked container.
         _ownership.RequireCustomerId();
 
+        // The caller's last chance to stop the create (#1735/#1755): once the POST is sent, Graph may commit a container
+        // whose id only its answer carries, so a cancel during the POST would leave one nothing can find or compensate.
+        // From the send on, the POST runs on its own token bounded by UncancellableStepTimeout, like the bind below.
+        ct.ThrowIfCancellationRequested();
+
         try
         {
             var graphClient = _ownership.ForTypeWideOperation();
@@ -82,8 +88,12 @@ public class ContainerOperations
                 ContainerTypeId = containerTypeId
             };
 
-            var createdContainer = await graphClient.Storage.FileStorage.Containers
-                .PostAsync(container, cancellationToken: ct);
+            FileStorageContainer? createdContainer;
+            using (var send = new CancellationTokenSource(UncancellableStepTimeout))
+            {
+                createdContainer = await graphClient.Storage.FileStorage.Containers
+                    .PostAsync(container, cancellationToken: send.Token);
+            }
 
             if (createdContainer == null)
             {

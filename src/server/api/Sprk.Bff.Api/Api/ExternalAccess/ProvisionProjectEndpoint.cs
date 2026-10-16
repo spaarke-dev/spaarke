@@ -173,6 +173,14 @@ public static class ProvisionProjectEndpoint
     /// <inheritdoc cref="SecureRecordOwnerTeam.DefaultOwnerTeamName"/>
     internal const string DefaultSecureOwnerTeamName = SecureRecordOwnerTeam.DefaultOwnerTeamName;
 
+    /// <summary>
+    /// Bounds Step 7, the write that records the container Step 6 created (#1755). It runs on its own token with this
+    /// timeout, never the request's: a client disconnect there used to leave an empty container no record names, and the
+    /// next call made another. The same bound as <see cref="ContainerOperations.UncancellableStepTimeout"/>. Settable for
+    /// tests only.
+    /// </summary>
+    internal static TimeSpan ContainerRecordTimeout { get; set; } = TimeSpan.FromSeconds(90);
+
     // ── Reason codes (ProblemDetails extensions["reasonCode"]) ───────────────
     //
     // Same convention as DelegationRuleFilter (task 008) and ProjectClosureEndpoint: a stable machine
@@ -1253,6 +1261,8 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
+        // Handed the request's token: a client that is gone before the create POST is sent stops it there. Once the POST
+        // is sent, ContainerOperations runs it and the bind on its own bounded token (#1735/#1755).
         // Bound to the Secure Record business unit — the unit that now owns the record (step 5) — so the SPE admin
         // plane's per-container rule (task 165, owner round 20) keeps it out of every customer administrator's reach.
         var containerResult = await CreateSpeContainerAsync(
@@ -1263,9 +1273,13 @@ public static class ProvisionProjectEndpoint
         var speContainerId = containerResult.ContainerId!;
 
         // ── Step 7: Record the container on the record — FAIL if it cannot be written ──
+        // The container exists now, so the write that records it no longer honours the request's token (#1755): a client
+        // disconnect here would leave a container no record names. Its own bound keeps it from hanging; a timeout is a
+        // failure like any other, and the catch below names the container.
         try
         {
-            await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, ct);
+            using var record = new CancellationTokenSource(ContainerRecordTimeout);
+            await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, record.Token);
         }
         catch (Exception ex)
         {

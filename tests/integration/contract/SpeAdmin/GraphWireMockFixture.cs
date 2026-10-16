@@ -154,15 +154,24 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
-    /// <summary>Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).</summary>
-    public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200)
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).
+    /// <paramref name="delay"/> holds the answer back, as on <see cref="StubPatch"/>.
+    /// </summary>
+    public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null)
     {
+        var response = Response.Create()
+            .WithStatusCode(statusCode)
+            .WithHeader("Content-Type", "application/json")
+            .WithBody(jsonBody);
+        if (delay is { } d)
+        {
+            response = response.WithDelay(d);
+        }
+
         _server
             .Given(Request.Create().WithPath(path).UsingPost())
-            .RespondWith(Response.Create()
-                .WithStatusCode(statusCode)
-                .WithHeader("Content-Type", "application/json")
-                .WithBody(jsonBody));
+            .RespondWith(response);
 
         return this;
     }

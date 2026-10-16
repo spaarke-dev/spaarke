@@ -468,6 +468,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool ContainerStampSucceeds { get; set; } = true;
 
     /// <summary>
+    /// When set, an UPDATE that RECORDS a container awaits this with the token the endpoint passed, before it is applied
+    /// (#1755). A hold that throws leaves the container unrecorded, as a cancelled or timed-out PATCH would. Default none.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnContainerRecord { get; set; }
+
+    /// <summary>
     /// When false, an UPDATE that CLEARS <c>sprk_containerid</c> (a null value) throws — the unlinking of a shared
     /// container before the owner move (task 133 r1). Default true.
     /// </summary>
@@ -707,6 +713,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         BusinessUnitUserReadSucceeds = true;
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
+        OnContainerRecord = null;
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
@@ -906,8 +913,18 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             client
                 .Setup(c => c.UpdateAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
-                .Returns((string entitySet, Guid id, object payload, CancellationToken _) =>
-                    ApplyUpdate(entitySet, id, payload));
+                .Returns(async (string entitySet, Guid id, object payload, CancellationToken ct) =>
+                {
+                    // #1755: the write that records a container, held on the token the endpoint gave it — the stand-in for
+                    // an HTTP PATCH honouring its token. It lands only when the hold returns.
+                    if (OnContainerRecord is { } hold
+                        && Flatten(payload).TryGetValue("sprk_containerid", out var recorded) && recorded is not null)
+                    {
+                        await hold(ct);
+                    }
+
+                    await ApplyUpdate(entitySet, id, payload);
+                });
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton(client.Object);

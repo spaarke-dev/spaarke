@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Xunit;
 
@@ -401,6 +402,86 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         problem.RootElement.GetProperty("speContainerId").GetString()
             .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId,
                 "an operator cannot reconcile an orphaned container whose id was never reported");
+    }
+
+    /// <summary>
+    /// #1755: a client that disconnects while Step 7 is recording the container Step 6 created does not stop the write.
+    /// It used to run on the request's token, so the disconnect left an empty container no record names — and the next
+    /// call created another.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheClientDisconnectsWhileTheContainerIsBeingRecorded_StillRecordsIt()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var disconnect = new CancellationTokenSource();
+        var heldToTheEnd = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.OnContainerRecord = async ct =>
+        {
+            disconnect.Cancel(); // the client goes away while the PATCH is in flight
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                heldToTheEnd.TrySetResult(true);
+            }
+            catch (OperationCanceledException)
+            {
+                heldToTheEnd.TrySetResult(false);
+                throw;
+            }
+        };
+        using var client = _fixture.CreateEntitledClient();
+
+        var send = () => client.PostAsJsonAsync(Route, new { projectId, projectRef = "P-2026-0001" }, disconnect.Token);
+
+        await send.Should().ThrowAsync<OperationCanceledException>("the client disconnected");
+        (await heldToTheEnd.Task.WaitAsync(TimeSpan.FromSeconds(30))).Should().BeTrue(
+            "the write that records an existing container must not be cancelled by the client going away");
+        await WaitUntilAsync(() => _fixture.ContainerIdOf(projectId) == ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// #1755: Step 7's own bound. A record write that never answers is a failure like any other: non-2xx, and the error
+    /// log and the problem both name the container, so the orphan is never silent.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OnContainerRecord = ct => Task.Delay(TimeSpan.FromSeconds(10), ct);
+        var bound = ProvisionProjectEndpoint.ContainerRecordTimeout;
+        ProvisionProjectEndpoint.ContainerRecordTimeout = TimeSpan.FromMilliseconds(500);
+        try
+        {
+            using var client = _fixture.CreateEntitledClient();
+
+            var response = await ProvisionAsync(client, projectId);
+
+            response.IsSuccessStatusCode.Should().BeFalse("a record write that timed out recorded nothing");
+            (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            problem.RootElement.GetProperty("speContainerId").GetString()
+                .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+            _fixture.Logs.Entries.Should().Contain(e =>
+                e.Level == LogLevel.Error
+                && e.Message.Contains(ProvisionProjectTestFixture.ProvisionedContainerId)
+                && e.Message.Contains(projectId.ToString()),
+                "the orphaned container's id is logged for the operator who reconciles it");
+            _fixture.ContainerIdOf(projectId).Should().NotBe(ProvisionProjectTestFixture.ProvisionedContainerId);
+        }
+        finally
+        {
+            ProvisionProjectEndpoint.ContainerRecordTimeout = bound;
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition() && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
