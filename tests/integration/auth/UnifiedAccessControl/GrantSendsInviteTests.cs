@@ -207,6 +207,36 @@ public class GrantSendsInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// #2005 F2: every bind consumes the code hash and leaves the marker, so a contact an operator unbinds after a bind holds a
+    /// current marker with no code anyone can use. That is not a pending invite: the grant sends a new code, and the first
+    /// CIAM sign-in with it binds. MUTATION: dropping the hash check from <c>AssessAsync</c> answers AlreadyPending, sends no
+    /// code, and the person is denied <c>contact_not_invited</c> for up to 30 days.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentMarkerWhoseCodeWasConsumed_InvitesAgain_WithANewCode()
+    {
+        var contact = UnboundContact();
+        var invitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        _h.Identities.Contacts[contact].InvitedOn = invitedOn;
+        _h.Identities.Contacts[contact].InviteCodeHash = null;
+        _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+        var code = TheOneInviteCode();
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash;
+        stored.Should().NotBeNull("a new code's hash is stored");
+        InviteCode.Matches(stored, code, contact).Should().BeTrue("the emailed code is the one whose hash was stored");
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBe(invitedOn, "the re-invite restarts the marker");
+
+        var oid = Guid.NewGuid();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(oid.ToString(), Email, code, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact, "the new code binds at the first sign-in");
+    }
+
     [Fact]
     public async Task Grant_ToAContactWhoseInviteHasExpired_InvitesAgain_WithANewCode()
     {

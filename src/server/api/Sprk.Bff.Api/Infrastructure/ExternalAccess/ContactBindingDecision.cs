@@ -1276,7 +1276,8 @@ public static class ContactBindingDecision
     /// <summary>
     /// <c>contact.sprk_externalinvitedon</c> — the pending-invite marker (task 184, owner round 96: the one column the
     /// no-schema rule was lifted for). A UTC date-and-time the BFF's invite flow writes BEFORE it creates the CIAM account,
-    /// overwritten by a re-invite, never cleared. "Pending" = set AND no oid binding. FIELD-SECURED so only the BFF can
+    /// overwritten by a re-invite, never cleared. "Pending" = current (<see cref="IsInviteMarkerCurrent"/>) AND its code
+    /// hash (<see cref="ExternalInviteCodeHashColumn"/>) not yet consumed by a bind (#2005). FIELD-SECURED so only the BFF can
     /// write it (<c>scripts/Set-ExternalInviteMarkerSchema.ps1</c>): a user who could set it could open E11's email bind.
     /// Read in its OWN query, never in <c>ContactSelect</c>, so a BFF deployed before the column keeps every binding read.
     /// It is NOT a binding and never touches <see cref="IdentityPlaneColumn"/>: "plane marker with no oid" stays Unreadable.

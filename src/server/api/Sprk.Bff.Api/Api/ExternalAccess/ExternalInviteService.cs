@@ -24,11 +24,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// </list>
 /// <para><b>The grant flows (§12).</b> <see cref="InviteOnGrantAsync"/> runs AFTER a grant was written: an unbound contact
 /// with an email is invited (I-1: a failed invite never undoes the grant; it is answered <see cref="GrantInviteStatus.Failed"/>
-/// with its code and logged at Warning without the code). A current marker (under 30 days) sends no new code
-/// (<see cref="GrantInviteStatus.AlreadyPending"/>, I-2). A bound contact, or one an internal user links to, needs none
-/// (<see cref="GrantInviteStatus.NotNeeded"/>). The grant flows decide the invite contact WITHOUT the binder's collision
-/// flagging: a grant is not an invite request, so an email it cannot invite onto (two active contacts, say) is answered
-/// <see cref="GrantInviteStatus.Failed"/> with the invite's own reason code, and only an explicit Invite flags it.</para>
+/// with its code and logged at Warning without the code). A pending invite (a marker under 30 days whose code no bind has
+/// consumed yet) sends no new code (<see cref="GrantInviteStatus.AlreadyPending"/>, I-2). A bound contact, or one an
+/// internal user links to, needs none (<see cref="GrantInviteStatus.NotNeeded"/>). The grant flows decide the invite contact
+/// WITHOUT the binder's collision flagging: a grant is not an invite request, so an email it cannot invite onto (two active
+/// contacts, say) is answered <see cref="GrantInviteStatus.Failed"/> with the invite's own reason code, and only an explicit
+/// Invite flags it. The one exception is the marker write's re-read when it holds no row version
+/// (<see cref="ContactIdentityBinder.MarkInviteSentAsync"/>), which can flag a workforce-bound collision.</para>
 /// <para><b>Contact-side grants (task 140, I-4).</b> They call <see cref="AssessAsync"/> only, never
 /// <see cref="InviteOnGrantAsync"/> (pinned by <c>ContactGrantGuardTests</c>): a contact never invites.</para>
 /// <para>The plaintext code goes only into the invite email's link: never logged, never in a response.</para>
@@ -115,12 +117,15 @@ public sealed class ExternalInviteService
         if (references.References.Any(r => r.LinkedContactId == contactId))
             return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.NotNeeded));
 
-        // §12 I-2: a current invite (marker under 30 days) is kept — a new code would break a link the person may be about
-        // to open. A marker column not provisioned here is "no invite yet", as E11 reads it.
+        // §12 I-2: a pending invite is kept — a new code would break a link the person may be about to open. Pending means a
+        // current marker (under 30 days) AND an unconsumed code: every bind clears the hash and leaves the marker (#2005),
+        // so a contact unbound after a bind holds a current marker with no code anyone can use, and needs a new one. A
+        // marker column not provisioned here is "no invite yet", as E11 reads it.
         var intent = await store.FindBindIntentAsync(contactId, ct).ConfigureAwait(false);
         if (intent.InviteStatus == LookupStatus.Failed || intent.ContactId != contactId)
             return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
         if (intent.InviteStatus == LookupStatus.Read
+            && !string.IsNullOrEmpty(intent.InviteCodeHash)
             && ContactBindingDecision.IsInviteMarkerCurrent(intent.InvitedOn, _time.GetUtcNow()))
             return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
 
