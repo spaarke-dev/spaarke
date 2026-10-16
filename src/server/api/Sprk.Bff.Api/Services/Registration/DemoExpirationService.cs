@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Services.Registration;
@@ -21,6 +22,7 @@ public sealed class DemoExpirationService : BackgroundService
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
     private readonly SpeContainerOwnershipGuard _ownership;
+    private readonly SpeContainerMembershipService _membership;
     private readonly DataverseEnvironmentService _environmentService;
     private readonly DemoProvisioningOptions _options;
     private readonly ILogger<DemoExpirationService> _logger;
@@ -32,12 +34,35 @@ public sealed class DemoExpirationService : BackgroundService
         SpeContainerOwnershipGuard ownership,
         DataverseEnvironmentService environmentService,
         IOptions<DemoProvisioningOptions> options,
+        ILogger<DemoExpirationService> logger,
+        ILoggerFactory loggerFactory)
+        : this(
+            graphUserService, dataverseService, emailService, ownership,
+            // #1363: the revoke goes through the ONE marked-grant primitive, like Step 8's grant. Stateless over the
+            // ownership guard (task 227d), so this singleton holds its own instance (the DemoProvisioningService shape).
+            new SpeContainerMembershipService(
+                ownership ?? throw new ArgumentNullException(nameof(ownership)),
+                (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>()),
+            environmentService, options, logger)
+    {
+    }
+
+    /// <summary>The test seam (ADR-038 §4): the marked-grant primitives are virtual, so a test substitutes them here.</summary>
+    internal DemoExpirationService(
+        GraphUserService graphUserService,
+        RegistrationDataverseService dataverseService,
+        RegistrationEmailService emailService,
+        SpeContainerOwnershipGuard ownership,
+        SpeContainerMembershipService membership,
+        DataverseEnvironmentService environmentService,
+        IOptions<DemoProvisioningOptions> options,
         ILogger<DemoExpirationService> logger)
     {
         _graphUserService = graphUserService ?? throw new ArgumentNullException(nameof(graphUserService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _membership = membership ?? throw new ArgumentNullException(nameof(membership));
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -321,51 +346,125 @@ public sealed class DemoExpirationService : BackgroundService
     }
 
     /// <summary>
-    /// Revokes SPE container permission for a user by listing permissions and deleting the matching entry.
-    /// Same pattern as RevokeExternalAccessEndpoint.
+    /// Removes the demo user's writer grant from the environment's SPE container through the marked-grant model (#1363):
+    /// the grant Step 8 recorded is removed with <see cref="SpeContainerMembershipService.RemoveMarkedGrantAsync"/>, which
+    /// deletes only a plain writer role, with <c>Prefer: onlyRemoveContainerScopedPermission</c>, and clears its marker.
     /// </summary>
-    private async Task RevokeSpeContainerAccessAsync(
+    /// <remarks>
+    /// <para>Which grant, in order:</para>
+    /// <list type="number">
+    /// <item>The <see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/> marker keyed by the user's Entra object
+    /// id — what Step 8 records.</item>
+    /// <item>A <see cref="SpeContainerMembershipService.StandingWriterMarkerPrefix"/> marker whose value is the user's
+    /// permission — what Step 8 recorded between task 171 and #1363 (keyed by a demo-environment systemuserid the
+    /// standing pass could never resolve), or a standing grant of the same user in a single-environment setup.</item>
+    /// <item>No marker names the user: a grant made before task 171, which carried no marker. It is deleted only while it
+    /// is a plain writer role (the only role Step 8 ever made), with the same <c>Prefer</c> header.</item>
+    /// </list>
+    /// <para><b>Fails closed.</b> Every read fault, an incomplete role list that cannot prove an absence, and a removal the
+    /// primitive reports as failed THROW, so the caller logs the error naming the request; the marker stays on the
+    /// container, so the grant remains recorded and removable — never orphaned. A container this stamp does not own is
+    /// refused before Graph is called (task 227d).</para>
+    /// <para><b>Internal</b> so the test assembly (InternalsVisibleTo) drives it directly.</para>
+    /// </remarks>
+    internal async Task RevokeSpeContainerAccessAsync(
         string containerId, string userId, CancellationToken ct)
     {
+        if (!Guid.TryParse(userId, out var objectId) || objectId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                $"The demo user's Entra object id '{userId}' is not a GUID; its grant on container {containerId} cannot be named.");
+        }
+
+        var access = await _membership.ReadAccessAsync(containerId, ct).ConfigureAwait(false);
+        if (access is null)
+        {
+            _logger.LogInformation(
+                "[Expire] Container {ContainerId} does not exist; nothing to revoke for user {UserId}", containerId, userId);
+            return;
+        }
+
+        var role = access.Roles.FirstOrDefault(r => r.IsFor(upn: null, objectId));
+
+        string? markerKey = null;
+        string? permissionId = null;
+        var demoKey = SpeContainerMembershipService.MarkerKey(SpeContainerMembershipService.DemoWriterMarkerPrefix, objectId);
+        if (access.Markers.TryGetValue(demoKey, out var demoPermission) && !string.IsNullOrWhiteSpace(demoPermission))
+        {
+            markerKey = demoKey;
+            permissionId = demoPermission.Trim();
+        }
+        else if (role is not null)
+        {
+            var standing = access.Markers.FirstOrDefault(m =>
+                m.Key.StartsWith(SpeContainerMembershipService.StandingWriterMarkerPrefix, StringComparison.Ordinal)
+                && string.Equals(m.Value?.Trim(), role.PermissionId, StringComparison.Ordinal));
+            if (standing.Key is not null)
+            {
+                markerKey = standing.Key;
+                permissionId = role.PermissionId;
+            }
+        }
+
+        if (markerKey is not null)
+        {
+            var outcome = await _membership
+                .RemoveMarkedGrantAsync(containerId, markerKey, permissionId!, access, ct)
+                .ConfigureAwait(false);
+            if (outcome == SpeContainerMembershipService.MarkedRemovalOutcome.Failed)
+            {
+                throw new InvalidOperationException(
+                    $"The marked grant {markerKey} (permission {permissionId}) on container {containerId} could not be removed; "
+                    + "its marker is kept, so the grant stays recorded for the next attempt or an operator.");
+            }
+
+            _logger.LogInformation(
+                "[Expire] Marked grant {MarkerKey} (permission {PermissionId}) for user {UserId} on container {ContainerId}: {Outcome}",
+                markerKey, permissionId, userId, containerId, outcome);
+            return;
+        }
+
+        // No marker names this user: a grant from before task 171, or none at all.
+        if (role is null)
+        {
+            if (!access.RolesComplete)
+            {
+                throw new InvalidOperationException(
+                    $"The roles on container {containerId} could not be fully enumerated, so user {userId} cannot be confirmed "
+                    + "to hold none. They may RETAIN file access.");
+            }
+
+            _logger.LogInformation(
+                "[Expire] No permission entry found for user {UserId} on container {ContainerId}", userId, containerId);
+            return;
+        }
+
+        if (!role.IsPlainWriter)
+        {
+            _logger.LogWarning(
+                "[Expire] User {UserId} holds an unrecorded role [{Roles}] (permission {PermissionId}) on container {ContainerId} "
+                + "that demo provisioning never grants; it is left in place for an operator.",
+                userId, string.Join(",", role.Roles), role.PermissionId, containerId);
+            return;
+        }
+
         // Refuses a container this BFF does not own before Graph is called (task 227d).
-        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
-
-        // List all permissions on the container
-        var permissions = await graphClient.Storage.FileStorage.Containers[containerId].Permissions
-            .GetAsync(cancellationToken: ct);
-
-        if (permissions?.Value == null || permissions.Value.Count == 0)
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+        try
         {
-            _logger.LogInformation(
-                "[Expire] No permissions found on container {ContainerId}, nothing to revoke",
-                containerId);
-            return;
+            await graphClient.Storage.FileStorage.Containers[containerId]
+                .Permissions[role.PermissionId]
+                .DeleteAsync(rc => rc.Headers.Add("Prefer", SpeContainerMembershipService.OnlyContainerScopedPrefer), ct)
+                .ConfigureAwait(false);
         }
-
-        // Find permission entry matching the user's AAD object ID
-        var userPermission = permissions.Value.FirstOrDefault(p =>
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
         {
-            var user = p.GrantedToV2?.User;
-            return user?.Id != null &&
-                   user.Id.Equals(userId, StringComparison.OrdinalIgnoreCase);
-        });
-
-        if (userPermission?.Id == null)
-        {
-            _logger.LogInformation(
-                "[Expire] No permission entry found for user {UserId} on container {ContainerId}",
-                userId, containerId);
-            return;
+            // Already gone — the state expiry wanted.
         }
-
-        // Delete the permission entry
-        await graphClient.Storage.FileStorage.Containers[containerId]
-            .Permissions[userPermission.Id]
-            .DeleteAsync(cancellationToken: ct);
 
         _logger.LogInformation(
-            "[Expire] Removed permission {PermissionId} for user {UserId} from container {ContainerId}",
-            userPermission.Id, userId, containerId);
+            "[Expire] Removed unrecorded (pre-task-171) permission {PermissionId} for user {UserId} from container {ContainerId}",
+            role.PermissionId, userId, containerId);
     }
 
     /// <summary>

@@ -267,7 +267,8 @@ public class DemoExpirationServiceTargetEnvironmentTests
             _guard,
             registry,
             options,
-            _log);
+            _log,
+            NullLoggerFactory.Instance);
     }
 
     /// <summary>The environment registry at its virtual reads (no HTTP double); records what was asked of it.</summary>
