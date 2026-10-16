@@ -4,7 +4,7 @@
     <title>Ontology admin slice (b), BFF: dry run, authorable catalog, save version, publish with supersede</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>104, 031, 033, 022, 036, 024 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Admin write path for rules (save, publish) and a dry run that must not leak rows; the publish closes and re-raises live Signals.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -104,6 +104,8 @@
     <criterion testable="true">Negative: a Console User is refused by every write route; an unresolved caller gets 403; every route is in the census.</criterion>
     <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2039 merged `e153d225e` into docs/ontology-platform-design. Catalog (compiler lists + caller's triage read), dry run gated on a fresh caller check of prvCreatesprk_PolicyVersion (WhoAmI + RetrieveUserPrivilegeByPrivilegeName, never the 104 probe), save (new rule Off; any pointer failure after the creates = saved-Off 503 with policyId), publish (stamp, conditional pointer move, reevaluate; after the first write on CancellationToken.None; compensation only while the re-read pointer still names the previous version; a FRESH (under 2 min) end stamp on the current version = 409 policy_changed, an older one heals). Reviews: Opus pass 1, fix round 1, Opus pass 2 + uac-r2 code pass (gate sound), fix round 2, Sonnet re-check (F2 stale-stamp 409), fix round 3, main-session review, uac-r2 OK. LIVE: OntologyAdminAuthoringLiveTests 2/2 on spaarkedev1 2026-10-16 (admin publish supersedes + re-raises episode 2; Console User refused), zero leaks. PENDING OWNER: role change (Append on sprk_policy + sprk_policyversion at Deep for Ontology Administrator; repo XML done) and dry-run oracle options (b) column allow-list / (c) ADR-028 tension. Known limits: notes section 10.</completion>
 
   <notes>spec.md FR-16, FR-21 (amended), FR-58; D-13, D-14, D-22; #39, #40, #46.</notes>
 

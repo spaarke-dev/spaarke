@@ -60,7 +60,7 @@ public class SpeFileStore : ISpeFileOperations
     /// </param>
     /// <param name="description">Optional description.</param>
     /// <param name="ct">Cancellation token.</param>
-    public virtual Task<ContainerDto?> CreateContainerAsync(
+    public virtual Task<ContainerDto> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
         Guid owningBusinessUnitId,
