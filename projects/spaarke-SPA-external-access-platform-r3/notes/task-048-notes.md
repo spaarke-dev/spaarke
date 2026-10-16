@@ -89,23 +89,69 @@ Each guard was broken in place, the named filter was run, and the guard was rest
 
 ## Test fixture facts worth keeping
 
-- **The shared test host's audience.** It sets `AzureAd:Audience = api://test-app-id`. Identity Web's `RegisterValidAudience.ValidateAudience` then checks that value for v1 and v2 tokens alike. The validator also sets `AudienceValidator = null` on the parameters it is given, so it must only ever see a clone (the validator clones; production `JwtBearerHandler` does too).
+- **The shared test host's audience.** It sets `AzureAd:Audience = api://test-app-id`. Identity Web's `RegisterValidAudience.ValidateAudience` then checks that value for v1 and v2 tokens alike. Identity Web's validator also sets `AudienceValidator = null` on the parameters it is handed. So `SpaarkeGuestTokenValidator` only ever passes it a clone, as production `JwtBearerHandler` does; the shared options are never mutated.
 - `BuildCiamValidAudiences` derives the second audience form only for a GUID app id. So the link fixture uses a GUID app and the audience shape `AuthorizationModule` leaves when Copilot is configured (`ValidAudiences = [api://{app}, {copilot}]`).
 - **Fixture overrides.** The fixture pins the default scheme's issuer validator and signing metadata, because the shared host's `AzureAd:TenantId` is not a GUID. Identity Web's audience validator and the AAD signing-key issuer check (IDX40004) stay in the path.
 
 ## Known limits
 
-- **K1, the UPN check on live tenants.** A B2B guest's `#EXT#` UPN derives from the *invited email*, which can differ from the person's home UPN (alias, changed UPN, email ≠ UPN). The check can then refuse a genuine person (`upn_mismatch`). It can never admit a wrong one. Task 074 (live verification) must confirm the claim shapes on dev guests before the route is relied on.
+- **K1, the UPN check on live tenants.** It can never admit a wrong person, but it can refuse a genuine one (`upn_mismatch`):
+  - A B2B guest's `#EXT#` UPN derives from the *invited email*, which can differ from the person's home UPN (an alias, a changed UPN, or email ≠ UPN).
+  - In a v1 guest token, `unique_name` may carry the home UPN without `#EXT#`. `GuestHomeUpn` then falls back to `email`, which can differ from the UPN.
+
+  Task 074 (live verification) must confirm the claim shapes on dev guests before the route is relied on.
 - **K2 (046 review, accepted).** The external notification last-seen marker is keyed by (token `tid`, principal id), so a linked user's unread state differs between their company sign-in and their guest sign-in. No change, per the POML.
-- **K3, Forbidden on the write.** A 403 from the PATCH maps to `DenyBindingColumnMasked` → 500 `environment`. The app user lacks write rights on the secured columns, which is an environment fault, not a caller fault.
+- **K3, Forbidden on the write.** A 403 from the PATCH maps to `DenyBindingColumnMasked` → 500 `environment`. It means the app user lacks write rights on the secured columns, which is an environment fault, not a caller fault.
+- **K4, Identity Web's `AadIssuerValidator` is never run by a test.** The shared test host's tenant is not a GUID, so the fixture replaces the issuer validator. The audience validator and the AAD signing-key issuer check stay in the path. The live check is task 074.
+- **K5, the only-caller pin is narrow.** It sees calls through `IContactIdentityStore.WriteHomeLinkAsync` and `ContactIdentityBinder.LinkHomeSystemUserAsync`. It does not see a direct call on the concrete store, or a raw write of `HomeLinkPayload` through another Dataverse client. This is the same shape as 047's `BindHomeOidAsync` pin.
+- **K6, the share routes' options injection.** `/share-user` and `/unshare-user` take the customer tenants as an optional `[FromServices]` parameter. Minimal APIs inject it, because both are mapped as method groups and the options are registered. Only the 18 direct test callers pass null. If the handler is ever wrapped in a lambda, the customer-tenant eviction silently stops, and no host-level test would notice. The `/share-user` clean-up path has no customer-tenant test; it is a grant clean-up, not a removal (UAC review note 2).
+- **K7, the two customer-tenant readers differ on a bad reload.** On an invalid reloaded configuration, the options reader (`CustomerTenantIdsOrNone(IOptionsMonitor)`) falls back to none: `CurrentValue` throws, and the throw is caught and logged. The configuration reader used by the materializer skips non-GUID entries and keeps the valid ones (UAC review note 1). Startup validation (`ValidateOnStart`) makes this a reload-only case.
+- **K8, the "anonymous" key on `/share-user` and `/unshare-user`.** The new overload drops "anonymous", as `EvictionTenants` does everywhere. A default-scheme caller always carries `tid`, so nothing real was cleared there.
 
-## Open
+## Reviews
 
-- **NoAccessShareEnforcer eviction (046 K1, second site).** UAC PR #2016 edits `NoAccessShareEnforcer.cs` next to the eviction loop (~1159). Agreed with UAC: this change lands on top of #2016 after it merges (UAC will message), with its own test. `RestrictedExternalShareRemover` is done here.
+### Pass 1 (adversarial, Opus)
+
+No path links the wrong person. The fix-now findings and what was done:
+
+| Finding | Class | Done |
+|---|---|---|
+| The new route was missing from the route ledger, the scheme census and the only-caller pin | F4 | Added: `GovernedFile` (RouteLevelGate), `Permanent` CallerScopedOnly `r3-048`, count 127, the census route, and `WorkforceHomeWrites` pins for `LinkHomeSystemUserAsync` and `WriteHomeLinkAsync` |
+| 046 K1 also applies at `InternalShareEndpoints` (share and unshare), `AssignedAccessMaterializer` and `NoAccessShareEnforcer` | F1 | All four sites now go through `EvictionTenants`, after merging master with UAC #2016 (`2e4ffc654`, merge `1e5e51325`). UAC reviewed the three UAC-file edits: OK |
+| The ambiguous guest systemuser answered 503 "try again" | F1 | Now 403 `sdap.access.link.systemuser_ambiguous` |
+| A missing `sprk_hometenantidkey` got past the probe | F1 | The probe selects it |
+| The test comment overstated coverage, and the token shape was unrealistic | F3 | Comment corrected. The test token is now v1 (`aud api://{app}`, `sts.windows.net` issuer), the shape the stamp app issues under `AzureAd:Audience = api://{app}` |
+| A validator throw answered 403 (K) | K→fixed | 503 `unavailable` |
+| An invalid options reload in the remover's `finally` would skip all eviction (K) | K→fixed | Reader that never throws |
+| Already-linked in a non-canonical form, or with a second holder (K) | K→fixed | Both are now `Collision` |
+| No test of the 412 retry (K3) | K→fixed | `AConcurrentChangeToTheSystemUser_Is412_ReReadOnce_ThenLinked` |
+
+### Pass 2 (adversarial, Opus, whole change set)
+
+No wrong-person, token-confusion, fail-open, shared-state or leakage defect was found. The eviction key format matches: `CacheTenantFor` uses the raw lowercase `tid`, and `EvictionTenants` emits `D`.
+
+| Finding | Class | Done |
+|---|---|---|
+| A signing-metadata outage answered 403 (the token handler swallows the fetch failure) | F1 (plausible) | The validator fetches the metadata first; a throw is 503 `unavailable`. Test: `ValidateAsync_WhenTheSigningMetadataCannotBeFetched_IsUnavailable_NotARefusal` |
+| Stale line references in the ledger | doc | Corrected (`:107`, `:121`, `:133`, `:147`) |
+| Stale notes (this file) | doc | Corrected |
+| K1–K5 | K | Recorded above (K1, K4, K5, K6, K8) |
+
+### Seeding proofs added in the fix round
+
+| Guard broken | Test that failed |
+|---|---|
+| `NoAccessShareEnforcer`: customer tenants dropped | `Enforce_ClearsTheWalledUsersCacheKey_AlsoUnderEveryCustomerHomeTenant` (1 of 63) |
+| `ImpersonatedRootSetSource.InvalidateAsync` (the share routes): customer tenants dropped | `Unshare_ClearsTheUsersRootSet_AlsoUnderEveryCustomerHomeTenant` (1 of 130) |
+| `SpaarkeGuestTokenValidator`: signing-metadata pre-fetch removed (pass 2) | `ValidateAsync_WhenTheSigningMetadataCannotBeFetched_IsUnavailable_NotARefusal` (1 of 35) |
 
 ## Counts
 
-(filled at completion)
+- **ArchTests:** 1052/1052 on `6e6fa656b`. After pass 2, the ledger and census tests: 93/93.
+- **048-affected suites after pass 2:** 550/550. These are the validator, link endpoint, binding decision, enforcer, share, remover and materializer tests.
+- **Full BFF unit suite (`6e6fa656b`, machine under load: 39 dotnet processes, 88 % CPU):**
+  - About 40 failures, all host-based contract tests, each after 2–17 minutes (the load gotcha).
+  - The 36 failing classes re-run in isolation: 541 passed, 7 skipped, 0 failed. None is real.
 
 ## Publish size
 

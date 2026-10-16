@@ -182,6 +182,39 @@ public sealed class SpaarkeGuestTokenValidatorTests
         }
     }
 
+    [Fact]
+    public async Task ValidateAsync_WhenTheSigningMetadataCannotBeFetched_IsUnavailable_NotARefusal()
+    {
+        // The token handler would swallow this fetch failure and refuse a good token as invalid (403); an outage is 503.
+        var manager = new Microsoft.IdentityModel.Protocols.ConfigurationManager<
+            Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(
+            "https://metadata.invalid/.well-known/openid-configuration",
+            new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfigurationRetriever(),
+            new UnreachableMetadata());
+        var options = new Mock<IOptionsMonitor<JwtBearerOptions>>();
+        options.Setup(o => o.Get(JwtBearerDefaults.AuthenticationScheme)).Returns(new JwtBearerOptions
+        {
+            TokenValidationParameters = new TokenValidationParameters { ValidIssuer = Issuer, ValidAudience = "api://" + AppId },
+            ConfigurationManager = manager,
+        });
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AzureAd:TenantId"] = SpaarkeTenant,
+            ["AzureAd:ClientId"] = AppId,
+        }).Build();
+        var sut = new SpaarkeGuestTokenValidator(options.Object, configuration, NullLogger<SpaarkeGuestTokenValidator>.Instance);
+
+        var result = await sut.ValidateAsync(RawToken(), HomeTenant, HomeUpn, CancellationToken.None);
+
+        result.Should().Be(new GuestTokenValidation(null, GuestTokenDeny.Unavailable));
+    }
+
+    private sealed class UnreachableMetadata : Microsoft.IdentityModel.Protocols.IDocumentRetriever
+    {
+        public Task<string> GetDocumentAsync(string address, CancellationToken cancel)
+            => throw new IOException("The metadata endpoint is unreachable.");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────
 
     private const string Issuer = "https://login.microsoftonline.com/" + SpaarkeTenant + "/v2.0";

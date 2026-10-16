@@ -394,9 +394,9 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/workforce/link (spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (a licensed "
-            + "user's home identity is not yet linked). The handler admits a WorkforceHome identity only (:101); the body's "
-            + "Spaarke-tenant guest token is validated with the default scheme's own parameters plus the A9 conditions (:127), "
-            + "and the link is written once onto THAT guest's enabled systemuser, keyed by the bearer's own tid/oid (:136). "
+            + "user's home identity is not yet linked). The handler admits a WorkforceHome identity only (:107); the body's "
+            + "Spaarke-tenant guest token is validated with the default scheme's own parameters plus the A9 conditions (:133), "
+            + "and the link is written once onto THAT guest's enabled systemuser, keyed by the bearer's own tid/oid (:147). "
             + "It takes no record or systemuser id."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
@@ -2790,11 +2790,11 @@ public partial class RouteAuthorizationGuardTests
             + "token tid/oid and email claim (:172), through ContactIdentityBinder.RegisterHomeContactAsync (:184). The "
             + "closed body carries names only; it takes no record, owner or contact id."),
         Permanent("POST /api/v1/external/workforce/link", PermanentBasis.CallerScopedOnly, "r3-048",
-            "Links ONLY the caller's own two identities: a WorkforceHome bearer (ExternalWorkforceLinkEndpoints.cs:101), keyed "
-            + "by its own token tid/oid (:115), and the same person's Spaarke-tenant guest token from the closed body, "
-            + "validated with the default scheme's parameters (:127, SpaarkeGuestTokenValidator). The write targets that "
+            "Links ONLY the caller's own two identities: a WorkforceHome bearer (ExternalWorkforceLinkEndpoints.cs:107), keyed "
+            + "by its own token tid/oid (:121), and the same person's Spaarke-tenant guest token from the closed body, "
+            + "validated with the default scheme's parameters (:133, SpaarkeGuestTokenValidator). The write targets that "
             + "guest token's own enabled systemuser, once, never re-pointed (ContactIdentityBinder.LinkHomeSystemUserAsync, "
-            + ":136). It takes no record, systemuser or contact id."),
+            + ":147). It takes no record, systemuser or contact id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
             + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),

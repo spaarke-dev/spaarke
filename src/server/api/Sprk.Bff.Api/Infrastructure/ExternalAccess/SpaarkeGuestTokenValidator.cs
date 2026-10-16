@@ -114,6 +114,9 @@ public sealed class SpaarkeGuestTokenValidator
             // configuration's issuer and keys are added.
             if (options.ConfigurationManager is BaseConfigurationManager baseManager)
             {
+                // Fetched here first: the token handler swallows a failed metadata fetch and validates with no keys, which
+                // would refuse a good token (403). A fetch that throws is an outage — Unavailable, 503, try again.
+                _ = await baseManager.GetBaseConfigurationAsync(ct).ConfigureAwait(false);
                 parameters.ConfigurationManager = baseManager;
             }
             else if (options.ConfigurationManager is not null)
