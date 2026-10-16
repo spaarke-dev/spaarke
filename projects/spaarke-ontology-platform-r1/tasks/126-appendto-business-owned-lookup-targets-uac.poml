@@ -4,7 +4,7 @@
     <title>ISS-009 (#1399): G5 AppendTo for business-owned lookup targets (systemuser, team, businessunit) per the rule uac-r2 picks — own PR, uac-r2 review</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>#1391 merged AND task 048 merged (rule named, D-113)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization check on the shared Dataverse write core; a wrong depth over-grants.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -59,6 +59,8 @@ uac-r2 state re-read when this task was created (2026-10-08, origin/master 6cd5d
   <escalation>
     <trigger>uac-r2's rule conflicts with ADR-034 or with Dataverse's own run-as-user behaviour as measured live: STOP and escalate with the evidence.</trigger>
   </escalation>
+
+  <completion date="2026-10-16">PR #2012 merged `c7e0f8106` into docs/ontology-platform-design. AppendTo on a business-owned lookup target (systemuser/team/businessunit) applies each grant at its own anchor BU (D-148, uac-r2's amendment of D-113); a missing anchor is denied at every depth; the row must be readable as the caller; every refusal is the uniform 404. Two Opus adversarial passes + two fix rounds; uac-r2 reviewed CLEAN twice (comments on #2012, D-113 amendment #1355 comment 6216856049). Live proof on spaarkedev1 PASSED at 27938a073 (Dataverse run-as-user agrees; operator Global anchored 06fbf21c; 0 zz-126 rows left). Foreign-team leg opt-in, awaiting owner approval of a test user. Master merge carries uac-r2 approval (D-115).</completion>
 
   <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Coordination channel: #1355.</notes>
 

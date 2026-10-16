@@ -21,12 +21,14 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
-| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | implementing |
-| 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | implementing |
-| 045 Decision Record tab [uac] | `C:\wts-045` `task/ontology-045` | sonnet/medium | implementing |
+| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | PR #2018 in Opus review; after BFF deploy run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first) |
+| 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | ESCALATED: needs (sprk_matter, sprk_budget) VerifiedJoin; owner asked (recommend inside 063) |
+| 045 Decision Record tab [uac] | `C:\wts-045` `task/ontology-045` | sonnet/medium | PR #2014 fix round (forged-DR writer check, Acknowledged-with-DR, 401) |
 | 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | implementing |
+| 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
+| 073 memo source #2 | `C:\wts-073` `task/ontology-073` | sonnet/high | implementing |
 
-Next wave as slots free: 073 (memo source #2), 111 (wizard regression + deploy), 126 (gate: #1391 + 048 merged). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
+Next wave as slots free: 111 (wizard regression + deploy). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
