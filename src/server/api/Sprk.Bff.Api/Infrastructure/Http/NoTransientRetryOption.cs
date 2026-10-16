@@ -15,7 +15,8 @@ namespace Sprk.Bff.Api.Infrastructure.Http;
 /// it. It is the same instance, so the handler records on it what the caller then reads.</para>
 /// <para><b>What it records</b> (#1755 round 2): the handler marks each attempt as it goes to the wire and records the
 /// answer it got. A failure that never reached Graph — an open circuit, a token that could not be acquired, a timeout
-/// while waiting out a 429 — leaves nothing sent, so the caller can say nothing was created. Only the LAST attempt
+/// while waiting out a 429, a refused connect or a name that did not resolve (round 3) — leaves nothing sent, so the
+/// caller can say nothing was created. Only the LAST attempt
 /// matters: the request is retried only after a 429, which Graph did not process.</para>
 /// <para>One option per request. <see cref="CloseAndReadOutcomeUnknown"/> closes it: an attempt not yet sent when the
 /// caller reads the outcome is not sent at all, so the answer the caller acts on cannot be overtaken by a late send.</para>
@@ -58,6 +59,12 @@ public sealed class NoTransientRetryOption : IRequestOption
 
         return true;
     }
+
+    /// <summary>
+    /// Records that the attempt in flight never reached the server: the connection was refused or the name did not
+    /// resolve (#1755 round 3). Nothing was sent, so nothing was carried out.
+    /// </summary>
+    internal void RecordNotSent() => Interlocked.CompareExchange(ref _lastAttempt, NothingSent, InFlight);
 
     /// <summary>Records the answer the attempt in flight got.</summary>
     internal void RecordAnswer(HttpStatusCode status) =>

@@ -83,7 +83,7 @@ public class ContainerOperations
         // The caller's last chance to stop the create (#1735/#1755): once the POST is sent, Graph may commit a container
         // whose id only its answer carries, so a cancel during the POST would leave one nothing can find or compensate.
         // From the send on, the POST runs on its own token, not the caller's. It is bounded by the Graph handler's
-        // pessimistic timeout (30 s across all attempts); UncancellableStepTimeout bounds the bind below.
+        // pessimistic timeout (30 s across all attempts); UncancellableStepTimeout bounds the activate and bind below.
         ct.ThrowIfCancellationRequested();
 
         try
@@ -142,9 +142,9 @@ public class ContainerOperations
                 createdContainer.Description,
                 createdContainer.CreatedDateTime ?? DateTimeOffset.UtcNow);
         }
-        catch (ContainerCreateOutcomeUnknownException)
+        catch (Exception ex) when (ex is ContainerCreateOutcomeUnknownException or ContainerLeftActiveException)
         {
-            // Logged once, at Error, by the caller that reports it (#1755 round 2) — not here as well.
+            // Logged once, at Error, by the caller that reports it (#1755 rounds 2 and 3) — not here as well.
             throw;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
@@ -180,11 +180,18 @@ public class ContainerOperations
         option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 };
 
     /// <summary>
-    /// Stamps the just-created container, reads the stamp back, and on any failure soft-deletes it and throws
-    /// <see cref="InvalidOperationException"/> (the caller's existing "container could not be created" path).
+    /// Activates the just-created container, stamps it, reads the stamp back, and on any failure soft-deletes it and throws
+    /// <see cref="InvalidOperationException"/> (the caller's existing "container could not be created" path) — or, when
+    /// that delete fails too, <see cref="ContainerLeftActiveException"/> naming the container left active (#1755 round 3).
     /// Runs on its own token bounded by <see cref="UncancellableStepTimeout"/>, and compensates for EVERY failure,
     /// cancellation and timeout included (#1652 round 1).
     /// </summary>
+    /// <remarks>
+    /// Graph creates a container <c>inactive</c> and deletes it on its own if it is not activated within 24 hours. A
+    /// modifying write such as the stamp PATCH may activate it implicitly, but nothing has measured that it does, so the
+    /// container is activated explicitly (#1755 round 3), as the control plane's <c>GraphContainerProvisioner</c> does.
+    /// Activate is idempotent, so it keeps the Graph handler's transient retry (no <c>NoTransientRetryOption</c>).
+    /// </remarks>
     private async Task BindNewContainerAsync(
         GraphServiceClient graphClient, string containerId, Guid owningBusinessUnitId)
     {
@@ -192,6 +199,8 @@ public class ContainerOperations
         var ct = step.Token;
         try
         {
+            await graphClient.Storage.FileStorage.Containers[containerId].Activate.PostAsync(cancellationToken: ct);
+
             await SpeAdminGraphService.WriteBusinessUnitStampAsync(graphClient, containerId, owningBusinessUnitId, ct);
 
             var readBack = await SpeAdminGraphService.ReadContainerBindingAsync(graphClient, containerId, deleted: false, ct);
@@ -200,13 +209,13 @@ public class ContainerOperations
                 throw new InvalidOperationException("The business-unit stamp did not read back after the write.");
             }
 
-            _logger.LogInformation("Container {ContainerId} bound to business unit {BusinessUnitId}",
+            _logger.LogInformation("Container {ContainerId} activated and bound to business unit {BusinessUnitId}",
                 containerId, owningBusinessUnitId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Container {ContainerId} was created but could not be bound to business unit {BusinessUnitId} — removing it.",
+                "Container {ContainerId} was created but could not be activated and bound to business unit {BusinessUnitId} — removing it.",
                 containerId, owningBusinessUnitId);
 
             try
@@ -218,10 +227,17 @@ public class ContainerOperations
                 _logger.LogCritical(deleteEx,
                     "Container {ContainerId} is UNBOUND and could not be removed; no admin route reaches it until the backfill " +
                     "binds it (-Bind) or an operator removes it.", containerId);
+
+                // #1755 round 3: not the "so it was removed" failure below — a live container exists that nothing names,
+                // and the caller must say so with its id instead of "nothing needs undoing".
+                throw new ContainerLeftActiveException(containerId,
+                    $"The SPE container '{containerId}' was created but could not be activated and bound to its owning " +
+                    "business unit, and removing it failed: it is left in place, unbound.", ex);
             }
 
             throw new InvalidOperationException(
-                $"The SPE container '{containerId}' was created but could not be bound to its owning business unit, so it was removed.", ex);
+                $"The SPE container '{containerId}' was created but could not be activated and bound to its owning business " +
+                "unit, so it was removed.", ex);
         }
     }
 

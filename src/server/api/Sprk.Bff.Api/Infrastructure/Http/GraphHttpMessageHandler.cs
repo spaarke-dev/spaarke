@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.CircuitBreaker;
@@ -71,10 +72,45 @@ public class GraphHttpMessageHandler : DelegatingHandler
                 throw new OperationCanceledException("The request's outcome was already read; this attempt was not sent.");
             }
 
-            var response = await base.SendAsync(request, ct);
+            HttpResponseMessage response;
+            try
+            {
+                response = await base.SendAsync(request, ct);
+            }
+            catch (HttpRequestException ex) when (NeverConnected(ex))
+            {
+                // #1755 round 3: a refused connect or a name that did not resolve fails before any byte of the request
+                // is sent, so Graph cannot have carried it out. Any other fault stays in flight: an unknown outcome.
+                option.RecordNotSent();
+                throw;
+            }
+
             option.RecordAnswer(response.StatusCode);
             return response;
         }, cancellationToken);
+
+    /// <summary>
+    /// True when <paramref name="ex"/> is a failure to reach the server at all: the name did not resolve, or the
+    /// connection was refused. Nothing was sent. A reset, a timeout or a dropped connection is not this: the request may
+    /// have arrived.
+    /// </summary>
+    internal static bool NeverConnected(HttpRequestException ex)
+    {
+        if (ex.HttpRequestError == HttpRequestError.NameResolutionError)
+        {
+            return true;
+        }
+
+        for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is SocketException { SocketErrorCode: SocketError.ConnectionRefused or SocketError.HostNotFound })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private (IAsyncPolicy<HttpResponseMessage> Standard, IAsyncPolicy<HttpResponseMessage> NonIdempotent) BuildResiliencePolicies()
     {

@@ -269,16 +269,18 @@ public class SpeAppOnlyContainerIsolationTests
         created!.Id.Should().Be("new-container");
         graph.Requests.Select(r => $"{r.Method} {r.Path}").Should().Equal(
             "POST /v1.0/storage/fileStorage/containers",
+            "POST /v1.0/storage/fileStorage/containers/new-container/activate",            // explicit activate (#1755 round 3)
             "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties",   // business-unit stamp (uac-r2 165)
             "GET /v1.0/storage/fileStorage/containers/new-container",                      // stamp read back
             "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties");  // ownership marker (T227d)
         graph.Requests[^1].Body.Should().Contain(SpeContainerOwnershipGuard.MarkerPropertyName).And.Contain(Customer);
     }
 
-    /// <summary>Graph for a create: POST answers <c>new-container</c>; its business-unit stamp reads back.</summary>
+    /// <summary>Graph for a create: POST answers <c>new-container</c>, its activate 204; its business-unit stamp reads back.</summary>
     private static RoutedGraph NewContainerGraph(string displayName, Guid businessUnit)
         => new RoutedGraph()
             .Respond("POST", "/v1.0/storage/fileStorage/containers", $$$"""{"id":"new-container","displayName":"{{{displayName}}}"}""")
+            .Respond("POST", "/v1.0/storage/fileStorage/containers/new-container/activate", "", HttpStatusCode.NoContent)
             .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}")
             .Respond("GET", "/v1.0/storage/fileStorage/containers/new-container",
                 System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>

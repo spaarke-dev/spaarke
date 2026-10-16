@@ -4009,11 +4009,33 @@ public static class ProvisionProjectEndpoint
             return new SpeContainerCreationResult(null, Problem(
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
-                "creator, but the request that creates its own SPE container got no answer that settles it, so a " +
+                "creator, but the request that creates its own SPE container got no answer that names the container, so a " +
                 $"container named '{ex.DisplayName}' may have been created that no record names. The record has no " +
                 "container recorded: calling provisioning again (the same caller may) resumes from here and creates a " +
                 "new one. Report this traceId so an administrator can find and remove the possible orphan.",
                 traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+        }
+        catch (ContainerLeftActiveException ex)
+        {
+            // #1755 round 3: the container was created, a step after it (activate, bind or mark) failed, and so did the
+            // delete that undoes it. It is live, its id is known, and no record names it — not "nothing needs undoing".
+            logger.LogError(ex,
+                "[PROVISION] SPE container {ContainerId} was created for {RecordType} {RecordId} but could not be set up, " +
+                "and removing it failed: a container exists that no record names. An operator should remove it. " +
+                "TraceId={TraceId}",
+                ex.ContainerId, root.WireToken, recordId, traceId);
+
+            return new SpeContainerCreationResult(null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
+                $"creator. Its own SPE container '{ex.ContainerId}' was created but could not be set up, and removing it " +
+                "failed, so a container exists that no record names. It holds nothing. The record has no container " +
+                "recorded: calling provisioning again (the same caller may) resumes from here and creates a new one. " +
+                "Report this traceId and the container id so an administrator can remove it.",
+                traceId,
+                (ReasonKey, ReasonContainerCreationFailed),
+                ("speContainerId", ex.ContainerId),
+                ("ownerTeamId", ownerTeamId)));
         }
         catch (Exception ex)
         {

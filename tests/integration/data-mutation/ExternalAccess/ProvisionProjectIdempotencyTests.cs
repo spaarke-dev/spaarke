@@ -597,6 +597,8 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
         var detail = await DetailOf(response);
         detail.Should().Contain("may have been created").And.NotContain("Nothing needs undoing");
+        // K1 (#1755 round 3): true of every unknown case, a 2xx with no id included — not "no answer that settles it".
+        detail.Should().Contain("got no answer that names the container").And.NotContain("settles it");
         var traceId = await TraceIdOf(response);
         var displayName = _fixture.CreatedContainerDisplayNames.Should().ContainSingle().Subject;
         _fixture.Logs.Entries.Should().Contain(e =>
@@ -636,6 +638,94 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         _fixture.Logs.Entries.Where(e => e.Level >= LogLevel.Error).Should().ContainSingle(
             "one unknown create is one Error, at the endpoint, with what finds the container")
             .Which.Message.Should().Contain(projectId.ToString());
+    }
+
+    /// <summary>
+    /// #1755 round 3 (F1 and item 5), through the REAL <see cref="ContainerOperations"/> over a fake Graph: a step after
+    /// the create (activate or bind) fails, and so may the delete that undoes it. A failed delete used to be reported as
+    /// "Nothing needs undoing" while a live container remained; it now names the container, logged once at the endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("activate", false)]
+    [InlineData("activate", true)]
+    [InlineData("bind", false)]
+    [InlineData("bind", true)]
+    public async Task ProvisionProject_WhenASetUpStepAfterTheCreateFails_SaysWhetherAContainerIsLeft(
+        string failingStep, bool deleteFails)
+    {
+        const string containers = "/storage/fileStorage/containers";
+        const string graphError = "{\"error\":{\"code\":\"x\",\"message\":\"x\"}}";
+        using var graph = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.GraphWireMockFixture();
+        graph.StubPostExact(containers, "{\"id\":\"c-left\",\"displayName\":\"x\",\"status\":\"inactive\"}", 201);
+        graph.StubPostExact($"{containers}/c-left/activate", failingStep == "activate" ? graphError : "",
+            failingStep == "activate" ? 400 : 204);
+        graph.StubPatch($"{containers}/c-left/customProperties", graphError, 400);
+        graph.StubDelete($"{containers}/c-left", deleteFails ? graphError : "", deleteFails ? 500 : 204);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graph.CreateGraphClient());
+        using var loggers = new LoggerFactory(new[] { _fixture.Logs });
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            loggers.CreateLogger<ContainerOperations>());
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        var body = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(body);
+        var detail = problem.RootElement.GetProperty("detail").GetString()!;
+        var provisionErrors = _fixture.Logs.Entries
+            .Where(e => e.Level >= LogLevel.Error && e.Message.Contains("[PROVISION]")).ToList();
+        if (deleteFails)
+        {
+            detail.Should().Contain("no record names").And.Contain("c-left").And.NotContain("Nothing needs undoing");
+            problem.RootElement.GetProperty("speContainerId").GetString().Should().Be("c-left");
+            provisionErrors.Should().ContainSingle("the endpoint logs the container left active once")
+                .Which.Message.Should().Contain("c-left").And.Contain(projectId.ToString());
+        }
+        else
+        {
+            detail.Should().Contain("Nothing needs undoing").And.NotContain("no record names");
+            problem.RootElement.TryGetProperty("speContainerId", out _).Should().BeFalse();
+        }
+
+        graph.RequestsFor($"{containers}/c-left").Should().Contain(r => r.Method == "DELETE");
+    }
+
+    /// <summary>
+    /// K2 (#1755 round 3), through the real <see cref="ContainerOperations"/> and production's Graph resilience handler:
+    /// a create whose connection is refused sent nothing. It used to be reported as "a container may have been created".
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheCreateConnectionIsRefused_SaysNothingNeedsUndoing()
+    {
+        var baseUrl = $"http://127.0.0.1:{Sprk.Bff.Api.Tests.Contract.SpeAdmin.ContainerCreationStampContractTests.ClosedLoopbackPort()}";
+        var handler = new Sprk.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.GraphResilienceOptions
+            {
+                RetryCount = 3, RetryBackoffSeconds = 0, HonorRetryAfterHeader = false, TimeoutSeconds = 30,
+                CircuitBreakerFailureThreshold = 100
+            }))
+        { InnerHandler = new HttpClientHandler() };
+        var graphClient = new Microsoft.Graph.GraphServiceClient(
+            new HttpClient(handler) { BaseAddress = new Uri(baseUrl) },
+            new Microsoft.Kiota.Abstractions.Authentication.AnonymousAuthenticationProvider(), baseUrl);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graphClient);
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ContainerOperations>.Instance);
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await DetailOf(response)).Should().Contain("Nothing needs undoing").And.NotContain("may have been created");
     }
 
     private static async Task<string> DetailOf(HttpResponseMessage response)

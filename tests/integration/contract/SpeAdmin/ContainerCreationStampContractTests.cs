@@ -105,7 +105,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         // Then the ownership marker (task 227d) — its own PATCH, after the stamp read back, so a container whose
         // stamp did not land is never marked.
         var requests = _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).ToList();
-        requests.Should().Equal("PATCH", "GET", "PATCH");
+        requests.Should().Equal("POST", "PATCH", "GET", "PATCH");
         var marker = _graph.PatchRequestsFor($"{ContainersPath}/c-new")
             .Single(p => p.Body!.Contains(SpeContainerOwnershipGuard.MarkerPropertyName));
         using var body = JsonDocument.Parse(marker.Body!);
@@ -139,7 +139,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
         created!.Id.Should().Be("c-new");
         caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the stamp PATCH was in flight");
-        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("PATCH", "GET", "PATCH");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("POST", "PATCH", "GET", "PATCH");
     }
 
     [Fact]
@@ -153,6 +153,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         _graph.StubPostExact(ContainersPath,
             "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}", 201,
             onReceived: caller.Cancel);
+        StubActivated();
         _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
         _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
 
@@ -161,7 +162,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         created!.Id.Should().Be("c-new");
         caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the create POST was in flight");
         AssertStamped(Unit);
-        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("PATCH", "GET", "PATCH");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("POST", "PATCH", "GET", "PATCH");
     }
 
     [Fact]
@@ -245,6 +246,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     {
         // A 429 means Graph did not process the request, so the create is retried as before.
         _graph.StubPostExactSequence(ContainersPath, (GraphError, 429), (CreatedBody, 201));
+        StubActivated();
         _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
         _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
 
@@ -404,11 +406,170 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         _graph.AllRequests.Count(r => r.Method == "GET").Should().Be(1 + RetryCount, "a GET is retried on 503");
     }
 
+    // ── #1755 round 3 ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheBindFailsAndSoDoesItsDelete_ThrowsContainerLeftActive_WithTheId()
+    {
+        // F1 (#1755 round 3): the delete that undoes a failed bind failed too. That used to be a plain
+        // InvalidOperationException saying "so it was removed", which the endpoint reported as "Nothing needs undoing"
+        // while a live, unbound container remained.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", GraphError, 500);
+        _graph.StubDelete($"{ContainersPath}/c-new", GraphError, 500);
+
+        var act = () => ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<ContainerLeftActiveException>()).Which;
+        ex.ContainerId.Should().Be("c-new");
+        ex.Message.Should().NotContain("so it was removed");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Should().Contain(r => r.Method == "DELETE");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheBindFailsAndItsDeleteSucceeds_IsNotContainerLeftActive()
+    {
+        // The other side: the container was removed, so nothing was left active.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", GraphError, 500);
+        _graph.StubDelete($"{ContainersPath}/c-new");
+
+        var act = () => ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().NotBeOfType<ContainerLeftActiveException>();
+    }
+
+    [Theory]
+    [InlineData(204, false)]
+    [InlineData(500, true)]
+    public async Task OwnershipMark_WhenItFails_SaysWhetherTheContainerWasLeftActive(int deleteStatus, bool leftActive)
+    {
+        // F1 (#1755 round 3), the guard's compensation: a mark whose delete also failed names the container left active.
+        // Still an InvalidOperationException with the same message either way: the SPE admin create shares this path.
+        _graph.StubPatch($"{ContainersPath}/c-x/customProperties", GraphError, 500);
+        _graph.StubDelete($"{ContainersPath}/c-x", deleteStatus == 204 ? "" : GraphError, deleteStatus);
+        var guard = TestSpeOwnership.Real(new WireMockGraphClientFactory(() => _graph.CreateGraphClient()));
+
+        var act = () => guard.MarkOwnedAsync("c-x", CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
+        if (leftActive)
+        {
+            ex.Should().BeOfType<ContainerLeftActiveException>().Which.ContainerId.Should().Be("c-x");
+            ex.Message.Should().Contain("Deleting it failed too");
+        }
+        else
+        {
+            ex.Should().NotBeOfType<ContainerLeftActiveException>();
+            ex.Message.Should().Contain("was deleted again");
+        }
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_ActivatesTheContainerOnce_AfterTheCreate_BeforeTheBind()
+    {
+        // Item 5 (#1755 round 3): Graph creates a container inactive and deletes it after 24 hours unless it is activated.
+        // The provisioning create used to rely on the stamp PATCH activating it implicitly; it now activates it.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        await ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        ActivatePosts().Should().Be(1);
+        _graph.AllRequests.Select(r => $"{r.Method} {r.Path}").Take(3).Should().Equal(
+            $"POST {ContainersPath}", $"POST {ActivatePath}", $"PATCH {ContainersPath}/c-new/customProperties");
+    }
+
+    [Theory]
+    [InlineData(204, false)]
+    [InlineData(500, true)]
+    public async Task ProvisioningCreate_WhenTheActivateFails_DeletesTheContainer_AndSaysWhetherItWasLeftActive(
+        int deleteStatus, bool leftActive)
+    {
+        // Item 5: a failed activate is compensated like a failed bind — the container is deleted, and only a failed
+        // delete leaves one active (named by its id).
+        _graph.StubPostExact(ContainersPath, CreatedBody, 201);
+        StubActivated(400);
+        _graph.StubDelete($"{ContainersPath}/c-new", deleteStatus == 204 ? "" : GraphError, deleteStatus);
+
+        var act = () => ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
+        if (leftActive)
+        {
+            ex.Should().BeOfType<ContainerLeftActiveException>().Which.ContainerId.Should().Be("c-new");
+        }
+        else
+        {
+            ex.Should().NotBeOfType<ContainerLeftActiveException>();
+        }
+
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal(new[] { "POST", "DELETE" },
+            "nothing is stamped or marked on a container that could not be activated");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheActivateGets503Then204_RetriesIt_AndSucceeds()
+    {
+        // Item 5: activate is idempotent, so it keeps the Graph handler's transient retry (no NoTransientRetryOption).
+        _graph.StubPostExact(ContainersPath, CreatedBody, 201);
+        _graph.StubPostExactSequence(ActivatePath, (GraphError, 503), ("", 204));
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        created.Id.Should().Be("c-new");
+        ActivatePosts().Should().Be(2, "the 503 activate is sent again");
+        CreatePosts().Should().Be(1);
+        _graph.AllRequests.Should().NotContain(r => r.Method == "DELETE");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheConnectionIsRefused_IsNotAnUnknownOutcome()
+    {
+        // K2 (#1755 round 3): a refused connect fails before any byte of the create is sent. The handler marked the
+        // attempt in flight before sending, so this used to be reported as "a container may have been created".
+        var baseUrl = $"http://127.0.0.1:{ClosedLoopbackPort()}";
+        var handler = ResilienceHandler();
+        handler.InnerHandler = new HttpClientHandler();
+        var client = new GraphServiceClient(
+            new HttpClient(handler) { BaseAddress = new Uri(baseUrl) }, new AnonymousAuthenticationProvider(), baseUrl);
+
+        var act = () => Operations(() => client).CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<Exception>()).Which;
+        ex.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        ex.Should().BeAssignableTo<HttpRequestException>("the connect was refused");
+    }
+
+    /// <summary>A loopback port nothing listens on: bound once to get a free one, then released.</summary>
+    internal static int ClosedLoopbackPort()
+    {
+        using var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private void StubCreated() =>
+    /// <summary>The create answers 201 with <c>c-new</c>, and its activate answers 204 (#1755 round 3).</summary>
+    private void StubCreated()
+    {
         _graph.StubPostExact(ContainersPath,
             "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}", 201);
+        StubActivated();
+    }
+
+    private const string ActivatePath = ContainersPath + "/c-new/activate";
+
+    /// <summary><c>POST …/containers/c-new/activate</c> answers <paramref name="status"/> (Graph: 204, no body).</summary>
+    private void StubActivated(int status = 204) => _graph.StubPostExact(ActivatePath, status == 204 ? "" : GraphError, status);
+
+    private int ActivatePosts() => _graph.AllRequests.Count(r => r.Method == "POST" && r.Path == ActivatePath);
 
     private static string Container(Guid? unit, string id = "c-new") =>
         "{\"id\":\"" + id + "\",\"containerTypeId\":\"" + TypeId + "\",\"customProperties\":" +
