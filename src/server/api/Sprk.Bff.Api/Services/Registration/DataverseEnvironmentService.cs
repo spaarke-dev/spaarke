@@ -25,20 +25,20 @@ public class DataverseEnvironmentService : IDisposable
     /// <summary>The Dataverse error code for "the record does not exist" — the only 404 that means absent (#1363).</summary>
     internal const string RecordNotFoundErrorCode = "0x80040217";
 
+    /// <summary>
+    /// Named <see cref="IHttpClientFactory"/> client for environment-registry reads.
+    /// Registered in <c>RegistrationModule</c> so HTTP connections are pooled per ADR-010
+    /// (avoids ad-hoc HttpClient instantiation, which starves the connection pool).
+    /// Separate from <see cref="RegistrationDataverseService.HttpClientName"/> so neither service's
+    /// client configuration (headers, handlers) leaks into the other's.
+    /// </summary>
+    public const string HttpClientName = "DataverseEnvironment";
+
     public DataverseEnvironmentService(
         IConfiguration configuration,
         TokenCredential credential,
+        IHttpClientFactory httpClientFactory,
         ILogger<DataverseEnvironmentService> logger)
-        : this(configuration, credential, logger, handler: null)
-    {
-    }
-
-    /// <summary>Test seam: the same service over a supplied HTTP handler (the admin Dataverse double).</summary>
-    internal DataverseEnvironmentService(
-        IConfiguration configuration,
-        TokenCredential credential,
-        ILogger<DataverseEnvironmentService> logger,
-        HttpMessageHandler? handler)
     {
         _logger = logger;
         _credential = credential;
@@ -51,7 +51,9 @@ public class DataverseEnvironmentService : IDisposable
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger.LogInformation("DataverseEnvironmentService targeting Dataverse at {ApiUrl}", _apiUrl);
 
-        _httpClient = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        // Factory-created client (pooled handler per ADR-010). BaseAddress is set here because the
+        // Dataverse URL is resolved from runtime config, not known at DI registration time.
+        _httpClient = httpClientFactory.CreateClient(HttpClientName);
         _httpClient.BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/");
     }
 
@@ -189,8 +191,8 @@ public class DataverseEnvironmentService : IDisposable
 
     public void Dispose()
     {
+        // _httpClient is owned by IHttpClientFactory (pooled handler) — not disposed here.
         _tokenSemaphore?.Dispose();
-        _httpClient?.Dispose();
     }
 
     #endregion

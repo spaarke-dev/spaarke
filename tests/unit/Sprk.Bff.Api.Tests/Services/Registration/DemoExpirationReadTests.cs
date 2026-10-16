@@ -144,7 +144,14 @@ public class DemoExpirationReadTests
     };
 
     private static DataverseEnvironmentService Registry(Func<HttpRequestMessage, HttpResponseMessage> respond)
-        => new(Configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance, new Handler(respond));
+    {
+        var handler = new Handler(respond);
+        var http = new Mock<IHttpClientFactory>();
+        http.Setup(f => f.CreateClient(DataverseEnvironmentService.HttpClientName))
+            .Returns(() => new HttpClient(handler, disposeHandler: false));
+        return new DataverseEnvironmentService(
+            Configuration, new StaticTokenCredential(), http.Object, NullLogger<DataverseEnvironmentService>.Instance);
+    }
 
     private static RegistrationDataverseService Requests(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {

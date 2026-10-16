@@ -318,7 +318,11 @@ public class DemoExpirationJobTargetEnvironmentTests
     /// <summary>The environment registry at its virtual reads (no HTTP double); records what was asked of it.</summary>
     private sealed class RegistryDouble(
         IConfiguration configuration, Func<Guid, DataverseEnvironmentRecord?> byId, List<DataverseEnvironmentRecord> active)
-        : DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            new StaticTokenCredential(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public List<Guid> ReadIds { get; } = [];
         public int ActiveListReads { get; private set; }

@@ -881,7 +881,11 @@ public class IdentityLinkReconciliationTests
 
     /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
     private sealed class RegistryDouble(IConfiguration configuration, string[] activeUrls, bool fails)
-        : DataverseEnvironmentService(configuration, Mock.Of<TokenCredential>(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            Mock.Of<TokenCredential>(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public override Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
             => fails

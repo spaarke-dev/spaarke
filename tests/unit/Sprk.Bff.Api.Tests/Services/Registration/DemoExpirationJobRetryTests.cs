@@ -385,7 +385,11 @@ public class DemoExpirationJobRetryTests
 
     /// <summary>The environment registry at its virtual read: the request's target environment (or none, or a fault).</summary>
     private sealed class Registry(IConfiguration configuration, Func<DataverseEnvironmentRecord?> read)
-        : DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            new StaticTokenCredential(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public override Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
             => Task.FromResult(read());

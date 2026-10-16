@@ -65,6 +65,7 @@ public static class RegistrationModule
         // BaseAddress/default headers are set per-instance in the service ctor because the
         // Dataverse URL is resolved from runtime config, not known at registration time.
         services.AddHttpClient(RegistrationDataverseService.HttpClientName);
+        services.AddHttpClient(DataverseEnvironmentService.HttpClientName);
 
         // ADR-010: Concrete registrations (no interfaces). These four are shared with other modules
         // (external access, communication, identity-link reconciliation) and are registered everywhere.

@@ -286,7 +286,11 @@ public class DemoSpeGrantLifecycleTests
             new RegistrationEmailService(null!, Options.Create(new CommunicationOptions()), NullLogger<RegistrationEmailService>.Instance),
             TestSpeOwnership.AllowAll(factory.Object),
             _container,
-            new DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance),
+            new DataverseEnvironmentService(
+                configuration,
+                new StaticTokenCredential(),
+                Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+                NullLogger<DataverseEnvironmentService>.Instance),
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             TimeProvider.System,
             options,
