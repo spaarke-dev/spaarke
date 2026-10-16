@@ -1908,6 +1908,15 @@ pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
 ```
 
+### `ebilling/Deploy-EbillingRolePrivileges.ps1`
+
+Grants table privileges on the eBilling tables for `ebilling-r1` decision D-90 (follow-up to task 029 finding B: non-admins got 0x80040220 on `sprk_invoiceapproval`). For `Spaarke Core User`, and for `Spaarke Basic User` while it holds `sprk_invoice` privileges, it reads the role's own privileges on `sprk_invoice` and mirrors them: on the working tables (`sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_invoicecorrection`, `sprk_externalidentifier`, `sprk_billingexport`) the same privileges at the same depth; on the configuration tables (`sprk_ebillingsetting`, `sprk_ratecard`, `sprk_ratecardrate`, `sprk_billingcodeset`, `sprk_billingcode`, `sprk_ruleset`, `sprk_timekeeper`) Read at the invoice Read depth (Global on the organization-owned tables, which offer nothing else) plus AppendTo only where a working table's lookup targets the table (none today). It only ever adds (`AddPrivilegesRole` on the root-business-unit role): a privilege already held at or above the target is skipped, nothing is removed or lowered, and the script stops with exit 2 if a read-back shows a lowered privilege. It reads the added privileges back and checks the per-business-unit role copies picked them up. Supports `-WhatIf` (prints each privilege it would add); a second run reports no change. No publish is involved; the role source under `src/dataverse/solutions/SpaarkeMaster/Roles` is updated from an export (`projects/ebilling-r1/notes/029-wp1-apply-and-export.md`, "Role privileges (D-90)").
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.

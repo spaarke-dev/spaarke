@@ -142,7 +142,7 @@ Kept as in the repo (the export differs; needs deploying separately): `WebResour
 ## 7. Open findings (owner / follow-up)
 
 A. **Add the 7 tables to the apps by hand** (app designer, make.powerapps.com, then Save and Publish): sprk_ebillingsetting, sprk_timekeeper, sprk_ratecard, sprk_billingcodeset, sprk_ruleset to sprk_SpaarkeAdministration; sprk_invoicesubmission, sprk_billingexport to sprk_MatterManagement. `AddAppComponents` returns 204 but adds nothing, `appmodulecomponent` has no Create (0x80040800) and rows cannot be DELETEd. Until then the sitemap entries open nothing and `ValidateApp` warns for the Administration sitemap. The source AppModule.xml entries (section 6) cover the release import. The Administration app also gained an `entity` component row when it was republished (a PublishXml side effect, 18 to 19 rows; Matter Management already carries one); it cannot be removed through the API and was not copied to source.
-B. **Roles lack privileges on the new tables.** A non-admin user gets 0x80040220 (no prvRead) on sprk_invoiceapproval, so "Invoices to review" fails for non-admins until a roles / privileges task grants Read on the new tables (and Append / AppendTo where lookups need it). Out of scope here ("do not change roles").
+B. **Roles lack privileges on the new tables.** A non-admin user gets 0x80040220 (no prvRead) on sprk_invoiceapproval, so "Invoices to review" fails for non-admins until a roles / privileges task grants Read on the new tables (and Append / AppendTo where lookups need it). Out of scope here ("do not change roles"). **Resolved by D-90: section 11.**
 C. **sprk_amount is read-only for all billing-event lines**, not only Adjustment lines (section 3).
 D. **Ribbon hide not live in dev** (section 6): needs the release import.
 E. **secure_child_ribbon.js** needs a SpaarkeMaster redeploy (section 6).
@@ -195,10 +195,101 @@ Also covered by the same export diff: sprk_agreement (`sprk_billingapproverrole`
 3. Export with `Export-SpaarkeMasterSource.ps1 -OutputFolder <temp>` (use the PATH workaround of finding G if `pac` fails), diff against `src/dataverse/solutions/SpaarkeMaster` ignoring line endings, copy only eBilling files and hunks (section 6 lists the usual mixed files).
 4. `pac solution pack --packagetype Both` to a temp zip, `Import-SolutionScoped.ps1 -PlanOnly`, then `Test-SolutionCompleteness.ps1 -FailOnDrift:$false`; compare with section 5.
 
+## 11. Role privileges (D-90)
+
+Owner decision D-90 (2026-10-16, explicit owner approval of this role change): the table privileges that finding B (section 7) said were missing. Script: `scripts/ebilling/Deploy-EbillingRolePrivileges.ps1` (new, idempotent, `-WhatIf`, add-only). Dev `https://spaarkedev1.crm.dynamics.com`. Raw output: `C:\tmp\eb029r\d90-whatif.txt`, `d90-real1.txt`, `d90-real2.txt` (temp, not in the repo).
+
+**Rule applied.** The script reads the role's own `sprk_invoice` privileges and mirrors them. Working tables (`sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_invoicecorrection`, `sprk_externalidentifier`, `sprk_billingexport`): the same privilege set at the same depth. Configuration tables (`sprk_ebillingsetting`, `sprk_ratecard`, `sprk_ratecardrate`, `sprk_billingcodeset`, `sprk_billingcode`, `sprk_ruleset`, `sprk_timekeeper`): Read only.
+
+**Step 0 - what the roles held on `sprk_invoice` before** (root role, business unit `06fbf21c-...`; the per-business-unit copies follow the root role):
+
+| Role | `sprk_invoice` privileges | Action |
+|---|---|---|
+| Spaarke Core User (`75e1b627-2ab6-f111-aaad-0022482913fc`) | Create, Read, Write, Delete, Append, AppendTo, Assign, Share, all Deep (also Read Deep on `sprk_billingevent` and `sprk_timekeeper`) | mirrored |
+| Spaarke Basic User (`11f93c04-ddf6-f011-8406-7c1e520aa4df`) | Read Deep, AppendTo Deep (also Read Deep on `sprk_billingevent` and `sprk_timekeeper`) | same mirror rule applied: it gets only Read and AppendTo |
+| every other role (Secure Record Owner, admin roles, Console / Ontology / Office roles, ...) | not touched | - |
+
+**Added (62 privileges, all in the first real run; none removed or lowered):**
+
+| Role | Table | Privileges added (depth) |
+|---|---|---|
+| Core User | `sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_invoicecorrection`, `sprk_externalidentifier`, `sprk_billingexport` | Create, Read, Write, Delete, Append, AppendTo, Assign, Share (Deep each; 8 x 5 = 40) |
+| Core User | `sprk_ratecard`, `sprk_ratecardrate`, `sprk_ruleset` | Read (Deep) |
+| Core User | `sprk_ebillingsetting`, `sprk_billingcodeset`, `sprk_billingcode` | Read (**Global**, see below) |
+| Core User | `sprk_timekeeper` | nothing: Read Deep already held |
+| Basic User | the five working tables | Read, AppendTo (Deep each; 10) |
+| Basic User | `sprk_ratecard`, `sprk_ratecardrate`, `sprk_ruleset` | Read (Deep) |
+| Basic User | `sprk_ebillingsetting`, `sprk_billingcodeset`, `sprk_billingcode` | Read (Global) |
+| Basic User | `sprk_timekeeper` | nothing: Read Deep already held |
+
+Core User 737 -> 783 privileges (+46), Basic User 655 -> 671 (+16).
+
+**Decisions inside the rule (for the owner to confirm).**
+1. Read on the three organization-owned configuration tables (`sprk_ebillingsetting`, `sprk_billingcodeset`, `sprk_billingcode`) is **Global**. An organization-owned table's privileges offer only Global depth (the metadata says Basic / Local / Deep are not allowed), so "the depth the role holds on `sprk_invoice`" (Deep) does not exist for them. Global read of a table that has no owner and is org-wide configuration is what Deep means for the user-owned ones.
+2. **No configuration table received AppendTo.** AppendTo on a target table is needed only when a record a user writes carries a lookup to it; the script computes this from the metadata and none of the five working tables looks up any of the seven configuration tables (their lookups go to `sprk_invoice`, `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_workassignment`, `sprk_organization`, `sprk_recordtype_ref`, `sprk_decisionrecord`, `contact`, `systemuser`, and to themselves).
+3. Basic User holds `sprk_invoice` Read and AppendTo, so it got the same mirror (Read and AppendTo on the working tables, Read on the configuration tables); no Create / Write.
+
+**Script runs (dev).**
+
+| Run | Result |
+|---|---|
+| `-WhatIf` | 62 privileges listed as "WOULD ADD", 2 skipped (`sprk_timekeeper` Read held, both roles), nothing written |
+| First real run | `added: 62`, `held / skipped: 2`; each role read back after the add (every added privilege present at its depth, no existing privilege lower than before); the 5 per-business-unit copies of each role hold the added privileges |
+| Second real run | `nothing to add for Spaarke Core User`, `nothing to add for Spaarke Basic User`, `added: 0`, `held / skipped: 64` |
+
+**Evidence: the roles' privileges on the 13 tables after the run** (the script's own read-back; `sprk_invoice` shown for reference):
+
+```
+Spaarke Core User
+  sprk_invoice               Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_invoiceapproval       Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_invoicesubmission     Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_invoicecorrection     Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_externalidentifier    Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_billingexport         Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep
+  sprk_ebillingsetting       Read=Global
+  sprk_ratecard              Read=Deep
+  sprk_ratecardrate          Read=Deep
+  sprk_billingcodeset        Read=Global
+  sprk_billingcode           Read=Global
+  sprk_ruleset               Read=Deep
+  sprk_timekeeper            Read=Deep
+Spaarke Basic User
+  sprk_invoice               Read=Deep AppendTo=Deep
+  sprk_invoiceapproval       Read=Deep AppendTo=Deep
+  sprk_invoicesubmission     Read=Deep AppendTo=Deep
+  sprk_invoicecorrection     Read=Deep AppendTo=Deep
+  sprk_externalidentifier    Read=Deep AppendTo=Deep
+  sprk_billingexport         Read=Deep AppendTo=Deep
+  sprk_ebillingsetting       Read=Global
+  sprk_ratecard              Read=Deep
+  sprk_ratecardrate          Read=Deep
+  sprk_billingcodeset        Read=Global
+  sprk_billingcode           Read=Global
+  sprk_ruleset               Read=Deep
+  sprk_timekeeper            Read=Deep
+```
+
+**Verification as non-admin users (impersonation, `MSCRMCallerID`).** Before the change this failed with 0x80040220 (section 4, finding B).
+- "Invoices to review" (`0c7694d8-14c9-f111-a05a-7c1e520a989f`) now runs without error for Test User 1 (Core + Basic), Jessica Broyles (Core), the UAC child-business-unit test user and a Basic-User-only user (0 rows each: no invoices of theirs).
+- All 12 new tables return HTTP 200 on a `$top=1` read for three Core-User identities (settings 1 row, code sets 1, codes 1, the rest empty).
+- End to end as Test User 1 (temporary data, all deleted afterwards; 0 left): created a contact linked to himself, an In Review invoice, a Pending `sprk_invoiceapproval` for it (Create + Append / AppendTo on the new table) and associated himself as eligible approver. The view returned exactly that invoice (1 row); `sprk_invoiceapprovals` read back 1 row.
+- Observation, not a defect of this change: when the same contact was created by the admin (owner in the parent business unit) instead of by the user, the view returned 0 rows for Test User 1, because the view's join to `contact` is subject to the user's Read depth on `contact` and the admin's contact is outside his business unit. Eligible-approver contacts of non-admin approvers must be readable by the approver (same business unit or shared); tasks 044 / 049 should create them with that in mind.
+
+**Source.** `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Core User.xml` (+46 `RolePrivilege` lines) and `Spaarke Basic User.xml` (+16), taken from a fresh export (`Export-SpaarkeMasterSource.ps1 -OutputFolder C:\tmp\eb029r\exp`, same F12 failure on the 6 identity leaks as finding F; the unpack had finished). Exactly the added lines, in the export's order, no removals. Not taken from the export: `prvReadsprk_Policy` in Basic User (another project's change, as in section 6). The other 10 role files were not touched.
+
 ## Deviations
 
 - The brief's "AddSolutionComponent for eBilling findings" was not needed (no eBilling finding).
 - The tables could not be added to the apps through the API (finding A); the script prints the manual step instead of failing.
-- Roles for the new tables were not touched (finding B).
+- Roles for the new tables were not touched by task 029 itself (finding B); D-90 did it afterwards: section 11.
 - The ribbon hide is in source only (finding D).
 - Inventory file patched by hand (eBilling hunks), not regenerated.
+
+**Follow-up (main session, 2026-10-16).** These points are deliberately left as they are:
+- No AppendTo on `sprk_billingcode` or `sprk_timekeeper` for the line lookups.
+- No Write on `sprk_billingevent`.
+
+Today users only read invoice lines, and the server writes them. Mirroring the full invoice access onto `sprk_billingevent` would have let users create and delete lines directly, so it was not applied. Task 100 carries the constraint: line-decision writes go through the server, or the role change becomes an owner decision first.
+
+Contact visibility, for tasks 044 and 049: an approver whose Read on `contact` is business-unit scoped cannot see a contact created outside their business unit. The approval rows these tasks write must reference contacts the approver can read.

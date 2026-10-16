@@ -44,6 +44,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-90 / task 029 notes section 11 (2026-10-16)">Spaarke Core User and Basic User hold only Read on sprk_billingevent, and no AppendTo on sprk_billingcode / sprk_timekeeper. If any line-decision write runs as the caller (OBO), it would be refused: either write lines server-side through the owning service (the default, consistent with I-1 and the write-path rules), or raise the needed privileges (Write and Append on sprk_billingevent, AppendTo on sprk_billingcode and sprk_timekeeper) as an owner decision first. Do not widen roles inside this task without that decision.</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019">Own endpoints file; each route has its own AddFinanceAuthorizationFilter and RequireEbillingEnabled() (040, 503 ebilling.disabled); ProblemDetails with stable codes (e.g. ebilling.invoice.not_in_review, ebilling.line.reason_required).</constraint>
     <constraint source="FR-31, root CLAUDE.md section 6">Reads: "finance.read" on sprk_invoices(route invoiceId). Writes: "ebilling.invoice.decide" (Write) on the same id. Every line id in a body must belong to that invoice (uniform 404 otherwise), checked before any write.</constraint>
     <constraint source="ADR-002, I-1">Only the server computes totals (016); no request field sets a total or a status. Writes only while statuscode is In Review (409 otherwise).</constraint>
