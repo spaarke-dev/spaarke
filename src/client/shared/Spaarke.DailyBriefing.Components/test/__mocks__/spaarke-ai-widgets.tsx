@@ -10,3 +10,12 @@ import * as React from 'react';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const AnalysisHubWidget: React.FC<any> = () => null;
+
+// `worklist.registration.ts` (ontology task 156) imports these two. The real ones are exercised via the spies in
+// `worklistSectionRegistration.test.tsx`; here they are inert.
+export interface WorklistLookupDataSource {
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const createWorklistLookup: (source: WorklistLookupDataSource) => any = () => async () => [];
+export const useOptionalDispatchPaneEvent: () => (channel: string, event: unknown) => void = () => () => undefined;
