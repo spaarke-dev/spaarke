@@ -29,7 +29,7 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 | 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
 | 049 revoke Signal Write + DR Create | `C:\wts-049` `task/ontology-049` | sonnet/high | preparing PR (no live change; uac-r2 checks PR; main session applies after 055) |
 
-111: code + deploys done (dev SemanticSearchControl 1.1.85 = master, 2026-10-16 check); only the owner browser rows 1-5 remain (row 4 external SPA DocumentUploadPage never deployed; it rides the external SPA deploy). Docs->master #2020 (126+045) merging; lane merges into docs wait for it. Next wave as slots free: 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
+111: code + deploys done (dev SemanticSearchControl 1.1.85 = master, 2026-10-16 check); only the owner browser rows 1-5 remain (row 4 external SPA DocumentUploadPage never deployed; it rides the external SPA deploy). Docs->master #2020 (126+045) MERGED 93850f961 (2026-10-16). R3 session not running: tell R3 when it is back so 93850f961 goes into its next BFF line; then seed the decisionRecords layout row. 049 PR #2022 (head cf6e09a39) re-sent to uac-r2 (session `spaarke-wt-unified-access-control-r2-e1`). Next wave as slots free: 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
