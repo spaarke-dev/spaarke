@@ -1,0 +1,394 @@
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
+using Xunit;
+using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+
+namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
+
+/// <summary>
+/// ebilling-r1 ISS-010 (#1973), as unified-access-control-r2 answered it: the write core (<see cref="OwnedChildWrite"/>
+/// create and re-file) invokes <see cref="InvoiceFamilyCoreRecordGuard"/> for every write of an invoice-family table, so
+/// <c>POST /api/v1/child-records/{table}</c>, <c>PATCH /api/v1/child-records/sprk_invoice/{id}</c> and the chat create /
+/// update tools are all guarded. An update is decided on the stored lookups (read as the caller) overlaid with the change;
+/// a read the guard needs that fails refuses (fail closed); an invoice supersedes only an invoice of the same core record.
+/// Driven through the REAL handlers and core over the scripted caller's Dataverse.
+/// </summary>
+public sealed partial class SecureChildOwnershipAiToolTests
+{
+    private static readonly Guid GuardInvoice = Guid.Parse("a2470000-0000-4000-8000-0000000013a1");
+    private static readonly Guid SupersededInvoice = Guid.Parse("a2470000-0000-4000-8000-0000000013a2");
+    private static readonly Guid OrdinaryProject = Guid.Parse("a2470000-0000-4000-8000-0000000013a3");
+
+    /// <summary>A stored invoice as the caller reads it: its core lookups (the scripted row answers the rest as null).</summary>
+    private void StoredInvoice(Guid id, string column, Guid core)
+    {
+        _user.RowValues[id] = new Dictionary<string, object?> { [$"_{column}_value"] = core.ToString("D") };
+        _world.WithRecord("sprk_invoice", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { [column] = new EntityReference(column, core) });
+    }
+
+    // ── Create: POST /api/v1/child-records/{table} ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_invoice", "sprk_Matter", "sprk_Project")]
+    [InlineData("sprk_billingevent", "sprk_matter", "sprk_project")]
+    public async Task ChildCreate_AnInvoiceFamilyRowNamingTwoCoreRecords_IsRefusedWithTheGuardsCode_AndCreatesNothing(
+        string table, string matterNavigation, string projectNavigation)
+    {
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await CreateChild(table, new()
+        {
+            ["sprk_name"] = "x",
+            [$"{matterNavigation}@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            [$"{projectNavigation}@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        _appCreates.Should().BeEmpty("FR-05: refused, never picked");
+    }
+
+    [Fact]
+    public async Task ChildCreate_ABillingEventNamingOnlyItsInvoice_IsRefusedNoCoreRecord_TheLinesCoreRecordIsItsOwn()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+
+        var result = await CreateChild("sprk_billingevent", new()
+        {
+            ["sprk_name"] = "New billing event",
+            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode, "D-75: never derived from the invoice");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceOfAnotherCoreRecord_IsRefusedMismatch_AndCreatesNothing()
+    {
+        StoredInvoice(SupersededInvoice, "sprk_matter", SecureMatter);
+
+        var result = await CreateChild("sprk_invoice", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceOfTheSameCoreRecord_IsCreated()
+    {
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+
+        var result = await CreateChild("sprk_invoice", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _appCreates.Should().ContainSingle().Which.Table.Should().Be("sprk_invoice");
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceTheCallerCannotRead_IsTheUniformNotFound_AndCreatesNothing()
+    {
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+        _user.UnreadableRows.Add(SupersededInvoice);
+
+        var result = await CreateChild("sprk_invoice", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode, "fail closed, and nothing about the row is disclosed");
+        _appCreates.Should().BeEmpty();
+    }
+
+    // ── Update: PATCH /api/v1/child-records/sprk_invoice/{id} — the stored lookups overlaid with the change ─────
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedMultiple_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode,
+            "the stored matter stays, so the row would name a matter and a project");
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceMovedFromItsMatterToAProject_ClearingTheMatter_IsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new()
+        {
+            ["sprk_Matter@odata.bind"] = null,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle("the clear and the bind overlay the stored matter: one core record");
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceGivenASupersededInvoiceOfAnotherCoreRecord_IsRefusedMismatch_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", SecureMatter);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode,
+            "the stored matter is the superseding invoice's core record");
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheStoredLookupsCannotBeRead_FailsClosed_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.GetOverride = path => path.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=_sprk_matter_value", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "Service unavailable.")
+            : null;
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new()
+        {
+            ["sprk_Matter@odata.bind"] = null,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status503ServiceUnavailable, Detail(result));
+        _user.Patches.Should().BeEmpty("a read fault is never \"no stored lookup\"");
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheStoredRowLacksAGuardedColumn_FailsClosedReadFailed_AndNothingIsWritten()
+    {
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.GetOverride = path => path.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=_sprk_matter_value", StringComparison.Ordinal)
+            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { _sprk_project_value = (string?)null }))
+            : null;
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "a column not returned is never \"not set\"");
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheStoredLookupReadThrows_FailsClosedReadFailed_WithoutTheFaultsText()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.GetOverride = path => path.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=_sprk_matter_value", StringComparison.Ordinal)
+            ? throw new TimeoutException("socket 10.0.0.7 timed out")
+            : null;
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new()
+        {
+            ["sprk_Matter@odata.bind"] = null,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        Detail(result).Should().NotContain("10.0.0.7");
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceUpdateThatLeavesItsGuardedLookupsAlone_IsNotReadOrRefused()
+    {
+        // A stored invoice that names no core record (two such rows live, task 013 T6): an edit that does not touch its
+        // lookups cannot change what the guard decides, so it is neither read for them nor refused.
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new() { ["sprk_name"] = "Renamed" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle();
+        reads.Should().NotContain(p => p.Contains("_sprk_matter_value", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceGivenASupersededInvoiceTheCallerCannotRead_IsTheUniformNotFound_AndNothingIsWritten()
+    {
+        // On an update the guard reads the superseded invoice BEFORE any AppendTo check on it: as the caller, and a row they
+        // cannot read answers exactly as one that does not exist.
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+        _user.UnreadableRows.Add(SupersededInvoice);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        Detail(result).Should().NotContain(SupersededInvoice.ToString("D")).And.NotContain("privilege");
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheSupersededInvoiceReadFaults_FailsClosedWithTheCallersError_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+        _user.GetOverride = path => path.StartsWith($"sprk_invoices({SupersededInvoice:D})?$select=", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(429, DataverseUserClientErrorCodes.ServiceError, "Too many requests.")
+            : null;
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status429TooManyRequests, Detail(result));
+        _user.Patches.Should().BeEmpty("a superseded invoice that could not be read is never a match");
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceMovedToAnotherCoreRecord_KeepingItsStoredSupersedes_IsRefusedMismatch()
+    {
+        // The merge keeps the stored supersedes (read from the written row's own table) while the change moves the core
+        // record: the superseded invoice stays on the old matter, so the pair no longer regards one record.
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _user.RowValues[GuardInvoice]["_sprk_supersedesinvoice_value"] = SupersededInvoice.ToString("D");
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new()
+        {
+            ["sprk_Matter@odata.bind"] = null,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnInvoiceWhoseCoreLookupIsWrittenAsAPlainValue_IsRefused_NeverReadAsUnset()
+    {
+        var result = await CreateChild("sprk_invoice", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({FlaggedProject:D})",
+            ["sprk_matter"] = OrdinaryMatter.ToString("D"),
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    // ── The chat tools share the same core ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateRecordTool_AnInvoiceGivenASupersededInvoiceOfAnotherCoreRecord_IsRefusedMismatch()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", SecureMatter);
+
+        var result = await UpdateRecord("sprk_invoice", GuardInvoice,
+            Lookup("sprk_supersedesinvoice", "sprk_invoice", SupersededInvoice));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateRecordTool_ABillingEventNamingTwoCoreRecords_IsRefusedWithTheGuardsCode()
+    {
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await CreateRecord("sprk_billingevent",
+            ("sprk_name", JsonSerializer.SerializeToElement("x")),
+            Lookup("sprk_matter", "sprk_matter", OrdinaryMatter),
+            Lookup("sprk_project", "sprk_project", OrdinaryProject));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedWithTheGuardsCode()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await UpdateRecord("sprk_invoice", GuardInvoice, Lookup("sprk_project", "sprk_project", OrdinaryProject));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    // ── The merge itself (pure) ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void EffectiveLookups_OverlaysTheChangeOnTheStoredLookups()
+    {
+        var stored = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["sprk_project"] = null,
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", SecureMatter),
+        };
+        var change = new DataverseWriteItemMapper.MappedItem("{}", new[] { "sprk_project", "sprk_regardingworkassignment" })
+        {
+            Lookups = new[] { new DataverseWriteItemMapper.MappedLookup("sprk_project", "sprk_project", "sprk_projects", OrdinaryProject) },
+            ClearedColumns = new[] { "sprk_regardingworkassignment" },
+        };
+
+        var effective = OwnedChildWrite.EffectiveLookups(stored, change);
+
+        effective["sprk_matter"].Should().BeEquivalentTo(new EntityReference("sprk_matter", OrdinaryMatter), "kept as stored");
+        effective["sprk_project"].Should().BeEquivalentTo(new EntityReference("sprk_project", OrdinaryProject), "the bind wins");
+        effective["sprk_regardingworkassignment"].Should().BeNull("the clear wins");
+    }
+}

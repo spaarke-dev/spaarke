@@ -528,6 +528,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             { ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
             { Invalid: { } invalid } => Error(tool, $"The update was NOT written: {invalid}", ToolErrorCodes.ValidationFailed, startedAt),
+            // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the re-file core — its stable code.
+            { InvoiceFamilyRefusal: { } family } => Error(tool, $"The update was NOT written: {family.Reason} ({family.RefusalCode}).",
+                family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
             { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
             { SecureFilingRefused: { } owner } => Error(tool,
                 $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +

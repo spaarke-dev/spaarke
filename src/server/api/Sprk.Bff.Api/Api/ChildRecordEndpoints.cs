@@ -263,14 +263,16 @@ public static class ChildRecordEndpoints
         {
             logger.LogWarning(
                 "[CHILD-RECORD] create of {Entity} refused: denied={Denied} parentUnavailable={ParentUnavailable} " +
-                "owner={OwnerCode} plan={PlanCode} secureFiling={SecureFiling} clientStatus={ClientStatus}",
+                "owner={OwnerCode} plan={PlanCode} secureFiling={SecureFiling} family={FamilyCode} clientStatus={ClientStatus}",
                 entity, owned.Denied is not null, owned.ParentUnavailable, owned.OwnerRefusal?.RefusalCode,
-                owned.PlanRefusal?.RefusalCode, owned.SecureFilingRefused is not null, owned.ClientFailure?.StatusCode);
+                owned.PlanRefusal?.RefusalCode, owned.SecureFilingRefused is not null, owned.InvoiceFamilyRefusal?.RefusalCode,
+                owned.ClientFailure?.StatusCode);
             return owned switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
                 { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
+                { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { PlanRefusal: { } plan } => PlanRefused(plan, entity, httpContext.TraceIdentifier),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),
@@ -405,6 +407,22 @@ public static class ChildRecordEndpoints
     };
 
     /// <summary>
+    /// ebilling-r1 FR-05 (ISS-010, #1973): the invoice-family guard's refusal, run by the write core
+    /// (<see cref="OwnedChildWrite.CheckInvoiceFamilyAsync"/>), in this route's contract with the guard's own stable code as
+    /// <c>reasonCode</c>. What the row names is wrong (none, two or three core records, a value that is not a lookup, an
+    /// invoice superseding one of another core record): 400. A read the guard needed that could not be used: 500 (fail
+    /// closed, never "not set"). A record that cannot be found: the uniform not-found.
+    /// </summary>
+    internal static IResult InvoiceFamilyRefused(InvoiceFamilyCoreRecord refusal, string entity) => refusal.RefusalCode switch
+    {
+        InvoiceFamilyCoreRecordGuard.RecordNotFoundCode => ParentNotFound(entity),
+        InvoiceFamilyCoreRecordGuard.ReadFailedCode or InvoiceFamilyCoreRecordGuard.UnknownEntityCode =>
+            Problem(StatusCodes.Status500InternalServerError, refusal.RefusalCode!, $"The {Noun(entity)} was not saved: {refusal.Reason}"),
+        _ => Problem(StatusCodes.Status400BadRequest, refusal.RefusalCode ?? InvalidPayloadCode,
+            $"The {Noun(entity)} was not saved: {refusal.Reason}"),
+    };
+
+    /// <summary>
     /// A WhoAmI failure that means the caller has no Dataverse identity — Dataverse refusing them, no user context on the
     /// request, or no On-Behalf-Of token for them — the codes <c>SignalCoreRecordAccess</c> reads as unresolved (D-29).
     /// Throttling, a 5xx or a transport fault says nothing about who they are and stays their own error.
@@ -509,13 +527,14 @@ public static class ChildRecordEndpoints
         {
             logger.LogWarning(
                 "[CHILD-RECORD] re-file of {Entity} {Id} refused: denied={Denied} forbidden={Forbidden} owner={OwnerCode} " +
-                "clientStatus={ClientStatus}", entity, id, outcome.Denied is not null, outcome.Forbidden is not null,
-                outcome.OwnerRefusal?.RefusalCode, outcome.ClientFailure?.StatusCode);
+                "family={FamilyCode} clientStatus={ClientStatus}", entity, id, outcome.Denied is not null, outcome.Forbidden is not null,
+                outcome.OwnerRefusal?.RefusalCode, outcome.InvoiceFamilyRefusal?.RefusalCode, outcome.ClientFailure?.StatusCode);
             return outcome switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
                 { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
+                { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { Forbidden: { } forbidden } => ProblemDetailsHelper.RecordOwnerRefused(forbidden, Noun(entity), httpContext.TraceIdentifier),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),

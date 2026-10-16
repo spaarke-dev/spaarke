@@ -31,6 +31,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// Web API payload) with the row's lookups AS THEY WILL BE after the write (for an update, the stored values merged with
 /// the change), then <see cref="DeriveResolverFieldsAsync"/>, and writes <see cref="InvoiceFamilyResolverFields.ToFields"/>
 /// with the lookup. A refusal means nothing is written; <see cref="InvoiceFamilyCoreRecord.RefusalCode"/> is stable.</para>
+/// <para><b>The write core invokes it (ISS-010, #1973; unified-access-control-r2).</b> <c>OwnedChildWrite.CreateAsync</c> and
+/// <c>OwnedChildWrite.RefileAsync</c> — the core every child-record route and chat create / update tool writes through —
+/// call <see cref="CheckWriteAsync"/> for every write of a family table, keyed by table: on an update, on the stored
+/// lookups read as the caller and overlaid with the change (<see cref="GuardedLookups"/>). This class owns the rule; the
+/// core only assembles the row and reads what the rule needs.</para>
+/// <para><b>Supersedes.</b> <c>sprk_invoice.sprk_supersedesinvoice</c> is a peer reference, not a lineage parent: the
+/// superseding and the superseded invoice must regard the same core record (<see cref="SupersedesCoreRecordMismatchCode"/>).</para>
 /// <para><b>Refuses, never picks.</b> Two or three lookups set is <see cref="MultipleCoreRecordsCode"/>; none is
 /// <see cref="NoCoreRecordCode"/>. A value that is not a lookup to the column's core table is
 /// <see cref="LookupNotACoreRecordCode"/> (a mis-built payload must not read as "unset").</para>
@@ -67,6 +74,16 @@ public static class InvoiceFamilyCoreRecordGuard
 
     /// <summary>One of the five resolver fields cannot be filled (no record-type row, no name or no number).</summary>
     public const string ResolverFieldsIncompleteCode = "invoice_family_resolver_fields_incomplete";
+
+    /// <summary>
+    /// An invoice supersedes an invoice filed under a different core record (or one that names none, or more than one).
+    /// <c>sprk_supersedesinvoice</c> is a peer reference, not a lineage parent (unified-access-control-r2, ISS-010): the two
+    /// invoices must regard the same matter, project or work assignment.
+    /// </summary>
+    public const string SupersedesCoreRecordMismatchCode = "invoice_family_supersedes_core_record_mismatch";
+
+    /// <summary><c>sprk_invoice.sprk_supersedesinvoice</c> (lookup to <c>sprk_invoice</c>, task 012): the invoice this one replaces.</summary>
+    public const string SupersedesInvoiceColumn = "sprk_supersedesinvoice";
 
     /// <summary>The external identifier table, the one family table whose row may regard an invoice only (D-68).</summary>
     public const string ExternalIdentifierEntity = "sprk_externalidentifier";
@@ -131,6 +148,92 @@ public static class InvoiceFamilyCoreRecordGuard
         }
 
         return columns;
+    }
+
+    /// <summary>
+    /// Every lookup a write of <paramref name="entityLogicalName"/> is decided on, with the one table it targets: the core
+    /// lookups (<see cref="CoreRecordLookups"/>), an external identifier's invoice (D-68) and an invoice's
+    /// <see cref="SupersedesInvoiceColumn"/>. Never a line's <c>sprk_invoice</c> (D-75). Null for a table outside the family.
+    /// The write core reads these from the stored row and overlays the change before <see cref="CheckWriteAsync"/>.
+    /// </summary>
+    public static IReadOnlyList<(string Column, string Table)>? GuardedLookups(string entityLogicalName)
+    {
+        if (string.IsNullOrWhiteSpace(entityLogicalName)
+            || !CoreRecordLookups.TryGetValue(entityLogicalName.Trim(), out var lookups))
+        {
+            return null;
+        }
+
+        var columns = lookups.Select(l => (l.Column, l.CoreEntity)).ToList();
+        if (IsExternalIdentifier(entityLogicalName))
+            columns.Add((ExternalIdentifierInvoiceColumn, InvoiceEntity));
+        if (IsInvoice(entityLogicalName))
+            columns.Add((SupersedesInvoiceColumn, InvoiceEntity));
+
+        return columns;
+    }
+
+    /// <summary>
+    /// The rule for a write (create or update) of an invoice-family row: <see cref="Check(string, Func{string, object?})"/>
+    /// on the row AS IT WILL BE after the write, then, for an invoice that supersedes another, the superseded invoice must
+    /// regard the SAME core record (<see cref="SupersedesCoreRecordMismatchCode"/> otherwise — never accepted because one
+    /// side could not be decided). A failure to read the superseded invoice is <see cref="ReadFailedCode"/> or
+    /// <see cref="RecordNotFoundCode"/>, never a match.
+    /// </summary>
+    /// <param name="entityLogicalName">The table written.</param>
+    /// <param name="read">Each guarded lookup's value after the write (<see cref="GuardedLookups"/>; null = not set).</param>
+    /// <param name="resolveSuperseded">Decides the superseded invoice's core record from its stored row — read by the
+    /// writer, as its caller; its refusal (a read fault included) is taken as given.</param>
+    public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
+        string entityLogicalName,
+        Func<string, object?> read,
+        Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> resolveSuperseded,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(resolveSuperseded);
+        var decided = Check(entityLogicalName, read);
+        if (decided.IsRefused || !IsInvoice(decided.EntityLogicalName))
+            return decided;
+
+        if (!TryReadReference(read(SupersedesInvoiceColumn), InvoiceEntity, out var superseded))
+        {
+            return decided.Refuse(LookupNotACoreRecordCode,
+                $"{InvoiceEntity}.{SupersedesInvoiceColumn} must be a lookup to {InvoiceEntity}; the value given is not.");
+        }
+
+        if (superseded is null)
+            return decided;
+
+        InvoiceFamilyCoreRecord other;
+        try
+        {
+            other = await resolveSuperseded(superseded, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The reason reaches the caller (a 500's detail): the fault's own text stays out of it.
+            return decided.Refuse(ReadFailedCode,
+                $"The invoice it supersedes could not be read ({ex.GetType().Name}); nothing was written.");
+        }
+
+        if (other.RefusalCode is ReadFailedCode or RecordNotFoundCode)
+            return decided.Refuse(other.RefusalCode, other.Reason ?? $"The superseded {InvoiceEntity} could not be read; nothing was written.");
+
+        var own = decided.Regarding!; // decided, so it names its record
+        if (other.IsRefused || other.Regarding is not { } otherCore
+            || !string.Equals(otherCore.LogicalName, own.LogicalName, StringComparison.OrdinalIgnoreCase)
+            || otherCore.Id != own.Id)
+        {
+            return decided.Refuse(SupersedesCoreRecordMismatchCode,
+                $"{InvoiceEntity} regards {own.LogicalName}({own.Id:D}) but the invoice it supersedes "
+                + (other.Regarding is { } r && !other.IsRefused
+                    ? $"regards {r.LogicalName}({r.Id:D})"
+                    : $"names no single core record ({other.RefusalCode})")
+                + "; an invoice supersedes only an invoice of the same matter, project or work assignment. Nothing was written.");
+        }
+
+        return decided;
     }
 
     /// <summary>Decide the record an SDK payload (or a stored row) regards. Its <see cref="Entity.LogicalName"/> names the table.</summary>
@@ -311,6 +414,9 @@ public static class InvoiceFamilyCoreRecordGuard
 
     private static bool IsExternalIdentifier(string entity) =>
         string.Equals(entity.Trim(), ExternalIdentifierEntity, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsInvoice(string entity) =>
+        string.Equals(entity.Trim(), InvoiceEntity, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A value is unset (null, or a reference with an empty id), a reference to <paramref name="core"/> (a reference

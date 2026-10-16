@@ -513,4 +513,110 @@ public class InvoiceFamilyCoreRecordGuardTests
         result.IsInvoiceOnly.Should().BeTrue();
         result.Regarding!.Id.Should().Be(InvoiceId);
     }
+
+    // ── ISS-010 (unified-access-control-r2): the write rule — supersedes is a peer of the same core record ──────────
+
+    private static Func<string, object?> Reads(params (string Column, object? Value)[] values) =>
+        column => values.FirstOrDefault(v => v.Column == column).Value;
+
+    private static Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> SupersededRegarding(string core, Guid id) =>
+        (_, _) => Task.FromResult(InvoiceFamilyCoreRecordGuard.Check("sprk_invoice",
+            Reads((InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == core).Column,
+                new EntityReference(core, id)))));
+
+    private static readonly Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> NeverRead =
+        (_, _) => throw new InvalidOperationException("must not be read");
+
+    [Fact]
+    public void GuardedLookups_AreTheCoreLookups_PlusTheInvoicesSupersedes_AndTheExternalIdentifiersInvoice_NeverALinesInvoice()
+    {
+        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_invoice").Should().BeEquivalentTo(new[]
+        {
+            ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"),
+            ("sprk_regardingworkassignment", "sprk_workassignment"), ("sprk_supersedesinvoice", "sprk_invoice"),
+        });
+        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_billingevent")!.Select(g => g.Column)
+            .Should().NotContain("sprk_invoice", "D-75");
+        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_externalidentifier")!.Should().Contain(("sprk_regardinginvoice", "sprk_invoice"));
+        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_todo").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CheckWrite_AnInvoiceSupersedingAnInvoiceOfTheSameMatter_IsDecided()
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            SupersededRegarding("sprk_matter", MatterId));
+
+        result.IsRefused.Should().BeFalse(result.Reason);
+        result.Regarding.Should().BeEquivalentTo(new EntityReference("sprk_matter", MatterId));
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", "22222222-2222-2222-2222-222222222222")] // another matter
+    [InlineData("sprk_project", "11111111-1111-1111-1111-111111111111")] // the same id, another core table
+    public async Task CheckWrite_AnInvoiceSupersedingAnInvoiceOfAnotherCoreRecord_IsRefusedMismatch(string core, string id)
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            SupersededRegarding(core, Guid.Parse(id)));
+
+        result.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
+    }
+
+    [Fact]
+    public async Task CheckWrite_AnInvoiceSupersedingAnInvoiceThatNamesNoSingleCoreRecord_IsRefusedMismatch()
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            (_, _) => Task.FromResult(InvoiceFamilyCoreRecordGuard.Check("sprk_invoice", _ => null)));
+
+        result.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
+    }
+
+    [Theory]
+    [InlineData(InvoiceFamilyCoreRecordGuard.ReadFailedCode)]
+    [InlineData(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode)]
+    public async Task CheckWrite_WhenTheSupersededInvoiceCannotBeRead_FailsClosedWithThatCode_NeverAMatch(string code)
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            (invoice, _) => Task.FromResult(new InvoiceFamilyCoreRecord { EntityLogicalName = "sprk_invoice", RefusalCode = code, Reason = "x" }));
+
+        result.RefusalCode.Should().Be(code);
+    }
+
+    [Fact]
+    public async Task CheckWrite_WhenReadingTheSupersededInvoiceThrows_FailsClosedReadFailed()
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            (_, _) => throw new HttpRequestException("boom"));
+
+        result.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+    }
+
+    [Fact]
+    public async Task CheckWrite_ASupersedesValueThatIsNotAnInvoice_IsRefused_AndNoSupersedesMeansNoRead()
+    {
+        var notAnInvoice = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_matter", OtherInvoiceId))),
+            NeverRead);
+        var none = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))), NeverRead);
+        var twoCores = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)), ("sprk_project", new EntityReference("sprk_project", ProjectId)),
+                ("sprk_supersedesinvoice", new EntityReference("sprk_invoice", OtherInvoiceId))),
+            NeverRead);
+
+        notAnInvoice.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
+        none.IsRefused.Should().BeFalse(none.Reason);
+        twoCores.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode, "the row's own rule is asked first");
+    }
 }
