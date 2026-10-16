@@ -9,6 +9,14 @@
 //                                    at Local — spaarkedev1: "# UAC Child BU Test User", BU1, Spaarke Basic User + Core User>
 //   SPAARKE_LIVE_126_SAME_BU_USER_ID=<systemuserid of another user in the acting user's business unit>
 //   SPAARKE_LIVE_126_OTHER_BU_USER_ID=<systemuserid of a user in a business unit that is NOT the acting user's>
+// Optional legs:
+//   SPAARKE_LIVE_126_FOREIGN_TEAM_USER_ID=<systemuserid of a user whose ONLY Local prvAppendToUser comes from an OWNER TEAM
+//                                    in another business unit> — compares Dataverse's own run-as-user create with the route
+//                                    for a reviewer in the team's business unit and one in the user's own (D-113 as amended:
+//                                    a grant applies at its own anchor). No such user exists on spaarkedev1 (2026-10-16).
+//   SPAARKE_LIVE_126_BASIC_TEAM_USER_ID=<systemuserid of a user holding prvAppendToTeam at Basic; default the acting user>
+//                                    — known limit K1: a team target at Basic is denied (uniform not-found) by the real G5
+//                                    core, asked in-process (no create route binds a team lookup).
 // and an `az login` session for an identity that may create sprk_analysis and impersonate (System Administrator).
 //
 // Substitutions are WorkAssignmentCreateLiveTests' (its factory is reused): the inbound token carries the acting user's
@@ -24,6 +32,7 @@ using System.Text;
 using System.Text.Json;
 using Azure.Identity;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.IntegrationTests.WorkAssignments;
 using Xunit;
 using Xunit.Abstractions;
@@ -89,6 +98,7 @@ public sealed class BusinessOwnedAppendToLiveTests
             await RegisterCreatedAsync(refused, created); // registered in case it was (wrongly) created
             var refusedBody = await refused.Content.ReadAsStringAsync();
             _out.WriteLine($"[route] other BU -> HTTP {(int)refused.StatusCode} {refusedBody}");
+            var countAfterRefusal = await CountZzAsync(dv); // before step 4 creates its own row (live run 1 counted it: 3 vs 2)
 
             // 4. The operator (System Administrator: prvAppendToUser at Global) binds the other-BU user through the route.
             await factory.ActAsAsync(operatorId);
@@ -104,8 +114,16 @@ public sealed class BusinessOwnedAppendToLiveTests
                 "_sprk_reviewerby_value").Should().Be(sameBu.ToString("D"));
             refused.StatusCode.Should().Be(HttpStatusCode.NotFound, "no AppendTo reaching the user's business unit is the uniform 404");
             refusedBody.Should().Contain("child_record.not_found");
-            (await CountZzAsync(dv)).Should().Be(count, "a refused create writes nothing");
+            countAfterRefusal.Should().Be(count, "a refused create writes nothing");
             global.StatusCode.Should().Be(HttpStatusCode.Created, "Global covers any business unit");
+
+            if (Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_126_FOREIGN_TEAM_USER_ID"), out var foreign))
+                await ForeignTeamLegAsync(dv, bff, factory, foreign, created);
+            else
+                _out.WriteLine("foreign-team leg not configured (SPAARKE_LIVE_126_FOREIGN_TEAM_USER_ID)");
+
+            await BasicTeamLegAsync(dv, factory,
+                Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_126_BASIC_TEAM_USER_ID"), out var basic) ? basic : acting);
         }
         finally
         {
@@ -117,6 +135,70 @@ public sealed class BusinessOwnedAppendToLiveTests
             leaks.Should().BeEmpty("every zz-126 row is removed");
             remaining.Should().Be(0, "no zz-126 row is left behind");
         }
+    }
+
+    /// <summary>
+    /// A user whose prvAppendToUser comes only from an owner team in ANOTHER business unit: what anchor Dataverse reports for
+    /// it, and, for a reviewer in the team's business unit and one in the user's own, that the route answers exactly as
+    /// Dataverse's own run-as-user create does.
+    /// </summary>
+    private async Task ForeignTeamLegAsync(
+        HttpClient dv, HttpClient bff, WorkAssignmentCreateLiveTests.LiveWorkAssignmentFactory factory, Guid user, List<Guid> created)
+    {
+        var userBu = await BusinessUnitOfAsync(dv, user);
+        var teams = (await dv.GetFromJsonAsync<JsonElement>(
+                $"systemusers({user})?$select=systemuserid&$expand=teammembership_association($select=teamid,name,_businessunitid_value,teamtype)"))
+            .GetProperty("teammembership_association").EnumerateArray()
+            .Where(t => t.GetProperty("_businessunitid_value").GetGuid() != userBu)
+            .ToList();
+        _out.WriteLine($"[foreign] user {user} (BU {userBu}); teams in other BUs: " +
+                       string.Join(", ", teams.Select(t => $"{t.GetProperty("name").GetString()} (BU {t.GetProperty("_businessunitid_value").GetGuid()})")));
+        _out.WriteLine($"[foreign] prvAppendToUser as Dataverse reports it: {await PrivilegeAsync(dv, user, "prvAppendToUser")}");
+        teams.Should().NotBeEmpty("the foreign-team leg needs a user in an owner team of another business unit");
+
+        var teamBu = teams[0].GetProperty("_businessunitid_value").GetGuid();
+        await factory.ActAsAsync(user);
+        foreach (var (label, bu) in new[] { ("team BU", teamBu), ("own BU", userBu) })
+        {
+            var reviewer = (await dv.GetFromJsonAsync<JsonElement>(
+                    $"systemusers?$select=systemuserid&$top=1&$filter=_businessunitid_value eq {bu} and isdisabled eq false and systemuserid ne {user}"))
+                .GetProperty("value").EnumerateArray().Select(u => u.GetProperty("systemuserid").GetGuid()).FirstOrDefault();
+            if (reviewer == Guid.Empty)
+            {
+                _out.WriteLine($"[foreign] no other enabled user in the {label} ({bu}); leg skipped");
+                continue;
+            }
+
+            var direct = await CreateAsUserAsync(dv, Payload($"zz-126-test foreign direct {label}", reviewer), user, created);
+            var route = await bff.PostAsJsonAsync(Route, Payload($"zz-126-test foreign route {label}", reviewer));
+            await RegisterCreatedAsync(route, created);
+            _out.WriteLine($"[foreign] reviewer in the {label}: Dataverse run-as-user -> {direct}; route -> HTTP {(int)route.StatusCode}");
+            (route.StatusCode == HttpStatusCode.Created).Should().Be(direct == HttpStatusCode.Created,
+                $"the route allows a reviewer in the {label} exactly when Dataverse's own create does");
+        }
+    }
+
+    /// <summary>
+    /// Known limit K1: a TEAM target at Basic depth is denied by the G5 core (Basic covers only the caller's own user row).
+    /// No create route binds a team lookup, so the REAL core is asked in-process with the caller's live Dataverse.
+    /// </summary>
+    private async Task BasicTeamLegAsync(HttpClient dv, WorkAssignmentCreateLiveTests.LiveWorkAssignmentFactory factory, Guid user)
+    {
+        var bu = await BusinessUnitOfAsync(dv, user);
+        var team = (await dv.GetFromJsonAsync<JsonElement>(
+                $"teams?$select=teamid&$filter=_businessunitid_value eq {bu} and isdefault eq true"))
+            .GetProperty("value").EnumerateArray().Single().GetProperty("teamid").GetGuid();
+        _out.WriteLine($"[K1] user {user}: prvAppendToTeam as Dataverse reports it: {await PrivilegeAsync(dv, user, "prvAppendToTeam")}");
+
+        await factory.ActAsAsync(user);
+        using var scope = factory.Services.CreateScope();
+        var caller = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
+        var outcome = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+            caller, user, "team", team, CancellationToken.None);
+        _out.WriteLine($"[K1] AppendTo on the user's BU default team {team}: succeeded={outcome.Succeeded} " +
+                       $"parentUnavailable={outcome.ParentUnavailable} denied={outcome.Denied}");
+        outcome.Succeeded.Should().BeFalse("a team target is never covered at Basic (nor without the privilege)");
+        outcome.ParentUnavailable.Should().BeTrue("the refusal is the uniform not-found");
     }
 
     private static Dictionary<string, object?> Payload(string name, Guid reviewer) => new()

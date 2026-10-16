@@ -13,9 +13,10 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// Ontology task 126 (#1399): G5 AppendTo on a BUSINESS-OWNED lookup target (<c>systemuser</c>, <c>team</c>,
 /// <c>businessunit</c>), uac-r2's rule (#1355 comment 6089838200 §6, D-113). Dataverse refuses RetrievePrincipalAccess on
 /// those tables (live, spaarkedev1 2026-10-08), so before this change every create binding one was the uniform 404 for
-/// every caller. The rule: the caller holds the table's AppendTo privilege at a depth covering the ROW's business unit —
-/// Global any, Deep the caller's or one under it, Local the caller's only, Basic only a systemuser that is the caller — and
-/// the row is readable as the caller; anything else is the uniform 404. One positive and one negative per depth, and a
+/// every caller. The rule (as amended by uac-r2's review of PR #2012): the caller holds the table's AppendTo privilege and
+/// some grant of it covers the ROW's business unit from the grant's OWN anchor — Global any, Deep the anchor or one under
+/// it, Local the anchor only, Basic only a systemuser that is the caller — and the row is readable as the caller; anything
+/// else is the uniform 404. By default a grant is anchored at the caller's business unit (a role assigned to them). One positive and one negative per depth, and a
 /// cross-business-unit refusal, through the REAL <c>POST /api/v1/child-records/sprk_analysis</c> handler (its live
 /// <c>sprk_ReviewerBy</c> systemuser lookup) and, for the team and business-unit targets no create route binds today,
 /// through the REAL G5 core.
@@ -199,15 +200,102 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── Fail closed on what the rule does not describe ─────────────────────────────────────────────────────────
 
+    // ── Each grant applies at ITS OWN anchor (D-113 as amended by uac-r2's review of PR #2012): a privilege inherited
+    //    through a team in another business unit reaches that business unit, as Dataverse evaluates it ─────────────
+
+    [Fact]
+    public async Task Local_AnchoredAtAnotherBusinessUnit_CoversThatBusinessUnit()
+    {
+        Holds(AppendToUser, "Local");
+        _user.Anchors[AppendToUser] = Directory.SecureBu;
+
+        ShouldBeCreatedWithReviewer(await CreateAnalysisReviewedBy(SiblingBuUser), SiblingBuUser);
+    }
+
+    [Fact]
+    public async Task Local_AnchoredAtAnotherBusinessUnit_DoesNotCoverTheCallersOwn()
+    {
+        Holds(AppendToUser, "Local");
+        _user.Anchors[AppendToUser] = Directory.SecureBu;
+
+        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(Colleague));
+    }
+
+    [Fact]
+    public async Task Deep_AnchoredAtAnotherBusinessUnit_CoversABusinessUnitUnderIt_AskedFromTheAnchor()
+    {
+        Holds(AppendToUser, "Deep");
+        _user.Anchors[AppendToUser] = Directory.GeneralBu;
+
+        ShouldBeCreatedWithReviewer(await CreateAnalysisReviewedBy(SiblingBuUser), SiblingBuUser);
+        _user.UnderQuestions.Should().Equal(new[] { (Directory.SecureBu, Directory.GeneralBu) });
+    }
+
     [Theory]
     [InlineData("Local")]
     [InlineData("Deep")]
-    public async Task AGrantAnchoredAtAnotherBusinessUnit_DoesNotCountForLocalOrDeep(string depth)
+    public async Task AGrantWithNoAnchor_IsTheUniform404(string depth)
     {
         Holds(AppendToUser, depth);
-        _user.Anchors[AppendToUser] = Directory.GeneralBu;
+        _user.Anchors[AppendToUser] = Guid.Empty;
 
         ShouldBeTheUniform404(await CreateAnalysisReviewedBy(Colleague));
+    }
+
+    // ── Several grants of one privilege: any one that covers is enough; none covering is the 404 ─────────────
+
+    [Fact]
+    public async Task SeveralGrants_AnUncountedGrantBeforeACoveringOne_IsBound()
+    {
+        Holds(AppendToUser, "Local");
+        _user.Grants[AppendToUser] = new() { ("Local", Directory.SecureBu), ("Local", Directory.ChildBu) };
+
+        ShouldBeCreatedWithReviewer(await CreateAnalysisReviewedBy(Colleague), Colleague);
+    }
+
+    [Fact]
+    public async Task SeveralGrants_AnUncountedGrantBeforeAGlobalOne_IsBound()
+    {
+        Holds(AppendToUser, "Local");
+        _user.Grants[AppendToUser] = new() { ("Local", Directory.SecureBu), ("Global", Directory.GeneralBu) };
+
+        ShouldBeCreatedWithReviewer(await CreateAnalysisReviewedBy(Colleague), Colleague);
+    }
+
+    [Fact]
+    public async Task SeveralGrants_NoneCovering_IsTheUniform404()
+    {
+        Holds(AppendToUser, "Local");
+        _user.Grants[AppendToUser] = new() { ("Local", Directory.SecureBu), ("Deep", Directory.SecureBu), ("Basic", Directory.ChildBu) };
+
+        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(Colleague));
+    }
+
+    // ── Fail closed when Dataverse does not answer ────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(403)]
+    [InlineData(503)]
+    public async Task ThePrivilegeQuestionFailing_IsTheUniform404(int status)
+    {
+        Holds(AppendToUser, "Global");
+        _user.PrivilegesFault = (AppendToUser, status);
+
+        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(Colleague));
+    }
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(500)]
+    [InlineData(503)]
+    public async Task TheHierarchyQuestionFailing_IsTheUniform404(int status)
+    {
+        Holds(AppendToUser, "Deep");
+        _user.HierarchyFault = status;
+
+        ShouldBeTheUniform404(await CreateAnalysisReviewedBy(GrandchildUser));
+        _user.UnderQuestions.Should().ContainSingle("the hierarchy question was asked, and its failure denied");
     }
 
     [Theory]
@@ -279,11 +367,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     public async Task AUserOwnedTarget_IsStillAnsweredByRetrievePrincipalAccess_WithNoPrivilegeQuestion()
     {
         Holds(AppendToUser, "Global");
+        Holds("prvAppendTosprk_matter", "Global");
         _user.NoAppendToIn.Add(("sprk_matters", OrdinaryMatter));
 
         var denied = await AppendToAsTheCaller("sprk_matter", "sprk_matters", OrdinaryMatter);
 
-        denied.Succeeded.Should().BeFalse("a user-owned row is answered by its own access rights, never by a table privilege");
+        denied.Succeeded.Should().BeFalse(
+            "a user-owned row is answered by its own access rights, never by a table privilege — even one held at Global");
+        denied.ParentUnavailable.Should().BeTrue();
+        _user.PrivilegeQuestions.Should().BeEmpty("no privilege question is asked about a user-owned target");
         _user.UnderQuestions.Should().BeEmpty();
     }
 

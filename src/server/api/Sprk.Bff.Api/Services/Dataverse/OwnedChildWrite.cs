@@ -1283,21 +1283,24 @@ internal static class OwnedChildWrite
     /// AS THE CALLER, a BUSINESS-OWNED target (<c>systemuser</c>, <c>team</c>, <c>businessunit</c>) — ontology task 126
     /// (#1399), uac-r2's rule (#1355 comment 6089838200 §6, D-113), mirroring what a create run as the user checks:
     /// <c>true</c> only when the caller holds the table's AppendTo privilege
-    /// (<c>RetrieveUserSetOfPrivilegesByNames</c>, which returns its depth), the row is readable as the caller, and the
-    /// depth covers the ROW's business unit:
+    /// (<c>RetrieveUserSetOfPrivilegesByNames</c>, which returns each grant's depth and the business unit it is anchored
+    /// at), the row is readable as the caller, and some grant covers the ROW's business unit FROM ITS OWN ANCHOR — the way
+    /// Dataverse evaluates it (a privilege inherited through a team applies at the team's business unit; D-113 as amended
+    /// by uac-r2's review of PR #2012):
     /// <list type="bullet">
     /// <item>Global — any business unit;</item>
-    /// <item>Deep — the caller's business unit or one under it (<c>UnderOrEqual</c>, the Web API's EqOrUnder, on
-    /// <c>businessunitid</c>, read as the caller);</item>
-    /// <item>Local — the caller's business unit only;</item>
-    /// <item>Basic — only a <c>systemuser</c> target that is the caller.</item>
+    /// <item>Deep — the anchor business unit or one under it (<c>UnderOrEqual</c>, the Web API's EqOrUnder, on
+    /// <c>businessunitid</c>, asked as the caller);</item>
+    /// <item>Local — the anchor business unit only;</item>
+    /// <item>Basic — only a <c>systemuser</c> target that is the caller (<paramref name="me"/>, which every caller takes
+    /// from WhoAmI under the caller's own token); a team or business-unit target is denied.</item>
     /// </list>
-    /// A Local or Deep grant counts only when Dataverse reports it anchored at the caller's own business unit (the
-    /// response's per-privilege <c>BusinessUnitId</c>): a grant anchored anywhere else is not one the rule describes, so it
-    /// is not counted (narrower than the rule, never wider). Anything unanswered — another business-owned table, an
-    /// unknown depth, an unreadable or missing row, no business unit on it, a question Dataverse does not answer — is
+    /// A Local or Deep grant with no anchor reported is not counted. Anything unanswered — another business-owned table,
+    /// an unknown depth, an unreadable or missing row, no business unit on it, a question Dataverse does not answer — is
     /// <c>false</c>, and the caller gets the uniform not-found.
     /// </summary>
+    /// <remarks>The depth meanings repeat <c>SecureBuRoleDepthAssertion.Reaches</c> on purpose: that census evaluator walks a
+    /// business-unit tree it reads app-only, where this question must be asked as the caller.</remarks>
     private static async Task<bool> CallerMayAppendToBusinessOwnedAsync(
         IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, string appendTo, CancellationToken ct)
     {
@@ -1314,15 +1317,6 @@ internal static class OwnedChildWrite
         if (grants.Count == 0)
             return false;
 
-        // The caller's own business unit: WhoAmI under their token (no privilege needed, and it cannot name anyone else).
-        var who = await user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
-        if (!who.IsSuccess
-            || GuidIn(who.Body, "UserId") != me
-            || GuidIn(who.Body, "BusinessUnitId") is not { } callerBusinessUnit)
-        {
-            return false;
-        }
-
         // The row, read as the caller: it must be readable, and it reports the business unit the depth must reach.
         var row = await user.GetAsync($"{lookup.RelatedEntitySet}({lookup.RecordId:D})?$select={businessUnitColumn}", ct)
             .ConfigureAwait(false);
@@ -1331,15 +1325,14 @@ internal static class OwnedChildWrite
 
         foreach (var (depth, anchor) in grants)
         {
-            var anchoredAtCaller = anchor == callerBusinessUnit;
             var covers = depth switch
             {
                 PrivilegeDepth.Global => true,
                 PrivilegeDepth.Basic => string.Equals(lookup.RelatedTable, "systemuser", StringComparison.Ordinal) && lookup.RecordId == me,
-                PrivilegeDepth.Local => anchoredAtCaller && rowBusinessUnit == callerBusinessUnit,
-                PrivilegeDepth.Deep => anchoredAtCaller
-                    && (rowBusinessUnit == callerBusinessUnit
-                        || await IsBusinessUnitUnderAsync(user, rowBusinessUnit, callerBusinessUnit, ct).ConfigureAwait(false)),
+                PrivilegeDepth.Local => anchor != Guid.Empty && rowBusinessUnit == anchor,
+                PrivilegeDepth.Deep => anchor != Guid.Empty
+                    && (rowBusinessUnit == anchor
+                        || await IsBusinessUnitUnderAsync(user, rowBusinessUnit, anchor, ct).ConfigureAwait(false)),
                 _ => false,
             };
             if (covers)
@@ -1375,8 +1368,8 @@ internal static class OwnedChildWrite
     /// The grants of <paramref name="privilegeName"/> in a <c>RetrieveUserSetOfPrivilegesByNames</c> response, each with
     /// its depth and the business unit Dataverse anchors it at — live shape (spaarkedev1, 2026-10-16):
     /// <c>{"RolePrivileges":[{"Depth":"Local","BusinessUnitId":"…","PrivilegeName":"prvAppendToUser",…}]}</c>. A depth that
-    /// is not one of the four names is dropped (fail closed); a missing anchor is <see cref="Guid.Empty"/>, which never
-    /// equals the caller's business unit.
+    /// is not one of the four names is dropped (fail closed); a missing anchor is <see cref="Guid.Empty"/>, which no Local or
+    /// Deep grant counts with.
     /// </summary>
     internal static IReadOnlyList<(PrivilegeDepth Depth, Guid Anchor)> PrivilegeGrantsIn(JsonElement? body, string privilegeName)
     {

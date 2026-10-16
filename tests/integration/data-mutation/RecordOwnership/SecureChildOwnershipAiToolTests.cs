@@ -872,8 +872,23 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Ontology task 126: the depth a held privilege is reported at (default Basic).</summary>
         public Dictionary<string, string> Depths { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Ontology task 126: the business unit a held privilege is reported anchored at (default the caller's).</summary>
+        /// <summary>Ontology task 126: the business unit a held privilege is reported anchored at (default the caller's;
+        /// <see cref="Guid.Empty"/> reports no anchor).</summary>
         public Dictionary<string, Guid> Anchors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Ontology task 126: several grants of one held privilege (depth, anchor), reported in this order — in place
+        /// of the single <see cref="Depths"/>/<see cref="Anchors"/> grant.</summary>
+        public Dictionary<string, List<(string Depth, Guid Anchor)>> Grants { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Ontology task 126: every <c>RetrieveUserSetOfPrivilegesByNames</c> question asked (the names).</summary>
+        public List<string[]> PrivilegeQuestions { get; } = new();
+
+        /// <summary>Ontology task 126 fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this privilege
+        /// fails with this status (other privilege questions, e.g. the table's Create, still answer).</summary>
+        public (string Privilege, int Status)? PrivilegesFault { get; set; }
+
+        /// <summary>Ontology task 126 fault switch: the status the <c>UnderOrEqual</c> question fails with.</summary>
+        public int? HierarchyFault { get; set; }
 
         /// <summary>Ontology task 126: the business unit a systemuser or team row reports (<c>_businessunitid_value</c>).</summary>
         public Dictionary<Guid, Guid> BusinessUnitOf { get; } = new();
@@ -1054,14 +1069,22 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (path.Contains("RetrieveUserSetOfPrivilegesByNames", StringComparison.Ordinal))
             {
                 var asked = JsonSerializer.Deserialize<string[]>(path[(path.IndexOf("@p1=", StringComparison.Ordinal) + 4)..])!;
+                PrivilegeQuestions.Add(asked);
+                if (PrivilegesFault is { } privilegesFault && asked.Contains(privilegesFault.Privilege, StringComparer.OrdinalIgnoreCase))
+                    return DataverseUserResponse.Fail(privilegesFault.Status, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
+
                 return Ok(new
                 {
-                    RolePrivileges = asked.Where(Held.Contains).Select(n => new
-                    {
-                        Depth = Depths.GetValueOrDefault(n, "Basic"),
-                        BusinessUnitId = Anchors.TryGetValue(n, out var anchor) ? anchor : CallerBusinessUnit,
-                        PrivilegeName = n,
-                    }),
+                    RolePrivileges = asked.Where(Held.Contains).SelectMany(n =>
+                        (Grants.TryGetValue(n, out var several)
+                            ? several
+                            : new List<(string Depth, Guid Anchor)>
+                            {
+                                (Depths.GetValueOrDefault(n, "Basic"), Anchors.TryGetValue(n, out var anchor) ? anchor : CallerBusinessUnit),
+                            })
+                        .Select(g => g.Anchor == Guid.Empty
+                            ? (object)new { g.Depth, PrivilegeName = n }
+                            : new { g.Depth, BusinessUnitId = g.Anchor, PrivilegeName = n })),
                 });
             }
 
@@ -1075,6 +1098,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 var candidate = Guid.Parse(under.Groups["candidate"].Value);
                 var ancestor = Guid.Parse(under.Groups["ancestor"].Value);
                 UnderQuestions.Add((candidate, ancestor));
+                if (HierarchyFault is { } hierarchyFault)
+                    return DataverseUserResponse.Fail(hierarchyFault, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
                 var reaches = false;
                 for (Guid? unit = candidate; unit is { } current; unit = BusinessUnitParents.TryGetValue(current, out var parent) ? parent : null)
                 {
