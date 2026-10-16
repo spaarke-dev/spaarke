@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Shared dev environment (BFF App Service, Dataverse, external SPA) and serial edits of SpaarkeMaster solution source.</parallel-reason>
-    <deps>042, 043, 044, 045, 046, 047, 048, 049, 050, 051</deps>
+    <deps>042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 054</deps>
     <tags>deploy, bff, external-spa</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
