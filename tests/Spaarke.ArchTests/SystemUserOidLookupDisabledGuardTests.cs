@@ -14,7 +14,8 @@ namespace Spaarke.ArchTests;
 /// unit. No behavioural test notices: every fixture's users are active. The rule is stated on
 /// <c>ISystemUserIdentityResolver</c> (the shared resolver new code should use); this guard enforces it on the ad-hoc
 /// copies. Enforced by: this guard (ArchTests, CI and the Stop hook), per CLAUDE.md §16.</para>
-/// <para><b>What counts as a lookup</b> (code text, line comments stripped, <see cref="SourceScan"/>):</para>
+/// <para><b>What counts as a lookup</b> (code text with <c>/* */</c> block comments blanked by a string-aware pass here,
+/// then line comments stripped by <see cref="SourceScan.CodeText"/>):</para>
 /// <list type="bullet">
 ///   <item>an OData <c>azureactivedirectoryobjectid eq</c> clause;</item>
 ///   <item>a <c>"azureactivedirectoryobjectid", ConditionOperator</c> condition, also through a <c>const string</c> alias
@@ -22,16 +23,24 @@ namespace Spaarke.ArchTests;
 ///   <item>a FetchXML <c>condition attribute=</c> on the column;</item>
 ///   <item>the alternate-key read <c>systemusers(azureactivedirectoryobjectid=…)</c> in a URL (preceded by <c>/</c> or a
 ///   quote — a message string such as <c>"GET systemusers(…) failed"</c> is not a read);</item>
+///   <item>the OData query-function form <c>PropertyName='azureactivedirectoryobjectid'</c>
+///   (<c>Microsoft.Dynamics.CRM.In(PropertyName=…,PropertyValues=[…])</c>);</item>
+///   <item>a <c>QueryByAttribute</c> whose <c>Attributes = { … }</c> initializer holds the column literal;</item>
+///   <item>an SDK alternate key: a <c>KeyAttributeCollection</c> initializer keyed by the column
+///   (<c>{ ["azureactivedirectoryobjectid"] = oid }</c> or <c>{ { "azureactivedirectoryobjectid", oid } }</c>), or a
+///   <c>KeyAttributes["azureactivedirectoryobjectid"] =</c> assignment;</item>
 ///   <item>the column literal passed as an argument to a HELPER method (<c>ResolveFromUserAsync("azureactivedirectoryobjectid",
 ///   oid)</c>). Not a lookup: the literal inside a collection (<c>[…]</c>, <c>{…}</c>, a column array or <c>$select</c>), or
 ///   as an argument to a column-reading call (<see cref="NonLookupCallees"/>: <c>ColumnSet</c>, <c>GetAttributeValue</c>,
 ///   <c>GuidOf</c>, <c>TryGetProperty</c>, …).</item>
 /// </list>
 /// <para><b>What satisfies it</b> — evidence in the METHOD that holds the lookup (from its declaration to the next member
-/// declaration), or for the helper shape in the HELPER's method in the same file:</para>
+/// declaration), or for the helper shape in the HELPER's method in the same file — in EVERY same-named method when the
+/// helper is overloaded (the scan cannot tell which overload the call binds to, so it fails safe):</para>
 /// <list type="bullet">
 ///   <item>a FILTER on <c>isdisabled</c>: <c>isdisabled eq false</c> / <c>eq 0</c>, a <c>"isdisabled", ConditionOperator</c>
-///   condition, or a FetchXML <c>condition attribute="isdisabled"</c>; or</item>
+///   condition, a FetchXML <c>condition attribute="isdisabled"</c>, an OData <c>PropertyName='isdisabled'</c>, or
+///   <c>"isdisabled"</c> in a <c>QueryByAttribute</c>'s <c>Attributes = { … }</c>; or</item>
 ///   <item>the value READ AND CHECKED: <c>GetAttributeValue&lt;bool?&gt;("isdisabled")</c>, a <c>GetProperty</c> /
 ///   <c>TryGetProperty("isdisabled")</c> read, a DTO's <c>.IsDisabled</c> / <c>.isdisabled</c> read, or <c>IsStandingEligible(</c> (which
 ///   rejects disabled users).</item>
@@ -48,26 +57,44 @@ namespace Spaarke.ArchTests;
 ///   <item>"Read and checked" is recognised by the read's shape, not by proving the value gates the outcome.</item>
 ///   <item>Member boundaries are found by an access-modifier declaration regex; a nested local function shares its
 ///   container's method.</item>
+///   <item>A <c>//</c> INSIDE a string literal (a <c>"https://…"</c> URL) cuts the rest of that line, because the shared
+///   <see cref="SourceScan.CodeText"/> strips line comments without understanding strings: a lookup or evidence after it on
+///   the same line is not seen. Kept, not fixed here: changing the shared SourceScan semantics would move every other
+///   guard built on it.</item>
+///   <item>The block-comment pass tracks regular, verbatim, raw and char literals, but not quotes nested inside an
+///   interpolation hole (<c>$"{(a ? "x" : "y")}"</c>); a <c>/*</c> it mis-reads as code blanks text up to the next
+///   <c>*/</c>.</item>
+///   <item>Shapes not listed above are not recognised as such: <c>QueryByAttribute.Attributes.Add(…)</c>,
+///   <c>AddAttributeValue(…)</c> and <c>new EntityReference("systemuser", "azureactivedirectoryobjectid", oid)</c> are
+///   caught only as helper-shaped calls (no such helper in the file → violation); an OData parameter alias
+///   (<c>PropertyName=@p1</c>) and a column name supplied at run time are not seen at all.</item>
 /// </list>
-/// <para><b>Ratchet.</b> <see cref="Baseline"/> lists lookups left unfixed because another open PR edits the file. A new
-/// violation fails; a baseline entry that no longer violates also fails, so the list only shrinks.</para>
+/// <para><b>Ratchet.</b> <see cref="Baseline"/> lists lookups left unfixed because another open PR edits the file, keyed by
+/// file AND the number of flagged sites in it. A new violation fails — including a new site in a baselined file (its count
+/// rises); a baseline entry whose file now has fewer sites (or none) also fails, so the list only shrinks.</para>
 /// </remarks>
 public class SystemUserOidLookupDisabledGuardTests
 {
     /// <summary>Lines above a lookup searched for an <c>includes disabled:</c> marker.</summary>
     internal const int MarkerLookback = 6;
 
+    /// <summary>A baseline entry: the exact number of flagged sites the file is allowed, and why they are unfixed.</summary>
+    internal sealed record BaselineEntry(int Sites, string Reason);
+
     /// <summary>
-    /// Known unfiltered lookups, by file, each with the open PR or active project branch that keeps it unfixed (editing
-    /// the file here would conflict with that work).
+    /// Known unfiltered lookups, by file, with the number of flagged sites in it and the open PR or active project branch
+    /// that keeps them unfixed (editing the file here would conflict with that work).
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> Baseline = new Dictionary<string, string>(StringComparer.Ordinal)
+    private static readonly IReadOnlyDictionary<string, BaselineEntry> Baseline = new Dictionary<string, BaselineEntry>(StringComparer.Ordinal)
     {
         ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/UserProvisioning/DataverseWebApiGuestUserWriter.cs"] =
-            "active project customer-provisioning-orchestration-r1 (branch work/customer-provisioning-orchestration-r1) edits "
-            + "this file. Expected disposition once it merges: a deliberate exception — the alternate-key read is how Dataverse "
-            + "ADDS a security-group member as a user, and provisioning must find the row, disabled or not, to assign its "
-            + "business unit and roles",
+            new(Sites: 1,
+                "EnsureGuestUserAsync's alternate-key GET systemusers(azureactivedirectoryobjectid=…) is how Dataverse ADDS a "
+                + "security-group member as a Dataverse user. An alternate-key GET cannot take a $filter, and excluding disabled "
+                + "users there would turn an existing, disabled user into a misleading 404 (\"no such user\") instead of the row "
+                + "provisioning has to assign a business unit and roles to. A deliberate exception, not a defect: once "
+                + "work/customer-provisioning-orchestration-r1 (which edits that line) merges, this entry becomes an "
+                + "`// includes disabled:` marker on the lookup and leaves the baseline"),
     };
 
     private const string Column = "azureactivedirectoryobjectid";
@@ -87,6 +114,14 @@ public class SystemUserOidLookupDisabledGuardTests
         new("\"" + Column + "\"" + @"\s*,\s*ConditionOperator\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"attribute\s*=\s*(?:""""|\\""|')" + Column, RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"[/""']systemusers\(\s*" + Column + @"\s*=", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        // OData query function: Microsoft.Dynamics.CRM.In(PropertyName='azureactivedirectoryobjectid',PropertyValues=[…]).
+        new(@"\bPropertyName\s*=\s*(?:'|\\""|"""")" + Column + @"\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        // QueryByAttribute { Attributes = { "azureactivedirectoryobjectid" }, Values = { oid } }.
+        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*""" + Column + @"""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        // SDK alternate key: new KeyAttributeCollection { ["…"] = oid } or { { "…", oid } }; or KeyAttributes["…"] = oid.
+        new(@"\bKeyAttributeCollection\b[^;]*?\{\s*(?:\[\s*""" + Column + @"""\s*\]\s*=|\{\s*""" + Column + @"""\s*,)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        new(@"\bKeyAttributes\s*\[\s*""" + Column + @"""\s*\]\s*=", RegexOptions.Compiled | RegexOptions.CultureInvariant),
     };
 
     private static readonly Regex ColumnLiteral = new("\"" + Column + "\"", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -100,6 +135,8 @@ public class SystemUserOidLookupDisabledGuardTests
         new(@"\bisdisabled\s+eq\s+(?:false|0)\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
         new(@"""isdisabled""\s*,\s*ConditionOperator\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"attribute\s*=\s*(?:""""|\\""|')isdisabled", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        new(@"\bPropertyName\s*=\s*(?:'|\\""|"""")isdisabled\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         // Read and checked.
         new(@"GetAttributeValue\s*<\s*bool\??\s*>\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"\b(?:Try)?GetProperty\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
@@ -119,11 +156,11 @@ public class SystemUserOidLookupDisabledGuardTests
     /// evidence in its method (or its helper's) and no marker. Empty when the rule holds.</summary>
     internal static IReadOnlyList<int> Violations(IReadOnlyList<string> rawLines)
     {
-        var code = SourceScan.CodeText(rawLines);
+        var code = SourceScan.CodeText(WithoutBlockComments(rawLines));
         var declarations = MemberDeclaration.Matches(code).Select(m => (m.Index, Name: m.Groups["name"].Value)).ToList();
 
-        // (index of the lookup, the code span whose evidence decides it)
-        var lookups = new List<(int Index, string Span)>();
+        // (index of the lookup, the code spans that must ALL carry evidence)
+        var lookups = new List<(int Index, IReadOnlyList<string> Spans)>();
 
         var patterns = LookupPatterns.ToList();
         foreach (Match alias in ColumnAlias.Matches(code))
@@ -137,7 +174,7 @@ public class SystemUserOidLookupDisabledGuardTests
         {
             foreach (Match m in pattern.Matches(code))
             {
-                lookups.Add((m.Index, MethodSpan(code, declarations, m.Index)));
+                lookups.Add((m.Index, [MethodSpan(code, declarations, m.Index)]));
             }
         }
 
@@ -149,24 +186,108 @@ public class SystemUserOidLookupDisabledGuardTests
             }
 
             // A helper: its own method in this file must carry the evidence. Not found here → empty span → violation.
-            var helper = declarations.FindIndex(d => d.Name == callee);
-            var span = helper < 0 ? string.Empty : Span(code, declarations, helper);
-            lookups.Add((literal.Index, span));
+            // Overloaded: the scan cannot tell which overload the call binds to, so EVERY same-named method must carry it.
+            var helpers = Enumerable.Range(0, declarations.Count).Where(i => declarations[i].Name == callee)
+                .Select(i => Span(code, declarations, i)).ToList();
+            lookups.Add((literal.Index, helpers.Count == 0 ? [string.Empty] : helpers));
         }
 
         var violations = new SortedSet<int>();
-        foreach (var (index, span) in lookups)
+        foreach (var (index, spans) in lookups)
         {
             var line = SourceScan.LineOf(code, index);
             var marked = Enumerable.Range(Math.Max(0, line - 1 - MarkerLookback), Math.Min(line, MarkerLookback + 1))
                 .Any(i => i < rawLines.Count && Marker.IsMatch(rawLines[i]));
-            if (!marked && !DisabledEvidence.Any(e => e.IsMatch(span)))
+            if (!marked && !spans.All(span => DisabledEvidence.Any(e => e.IsMatch(span))))
             {
                 violations.Add(line);
             }
         }
 
         return violations.ToList();
+    }
+
+    /// <summary>
+    /// <paramref name="lines"/> with every <c>/* … */</c> block comment blanked to spaces (newlines kept, so line numbers
+    /// still match). String-aware, so a <c>/*</c> inside a literal (<c>"application/*"</c>) is not a comment, and a
+    /// <c>//</c> line comment hides a <c>/*</c> after it. Local to this guard: the shared <see cref="SourceScan"/> semantics
+    /// stay as the other guards expect them.
+    /// </summary>
+    internal static IReadOnlyList<string> WithoutBlockComments(IReadOnlyList<string> lines)
+    {
+        var source = string.Join("\n", lines);
+        var text = source.ToCharArray();
+        var n = text.Length;
+        var i = 0;
+        while (i < n)
+        {
+            var c = text[i];
+            var next = i + 1 < n ? text[i + 1] : '\0';
+            if (c == '/' && next == '/')
+            {
+                while (i < n && text[i] != '\n') i++;
+            }
+            else if (c == '/' && next == '*')
+            {
+                var close = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                var stop = close < 0 ? n : close + 2;
+                for (var k = i; k < stop; k++)
+                {
+                    if (text[k] != '\n') text[k] = ' ';
+                }
+
+                i = stop;
+            }
+            else if (c == '\'')
+            {
+                // A char literal ('x', '\x'); any other apostrophe is stepped over.
+                if (next == '\\' && i + 3 < n && text[i + 3] == '\'') i += 4;
+                else if (i + 2 < n && text[i + 2] == '\'') i += 3;
+                else i++;
+            }
+            else if (c == '"')
+            {
+                var verbatim = i > 0 && (text[i - 1] == '@' || (text[i - 1] == '$' && i > 1 && text[i - 2] == '@'));
+                var quotes = 0;
+                while (i + quotes < n && text[i + quotes] == '"') quotes++;
+                if (!verbatim && quotes >= 3)
+                {
+                    // A raw string literal: it ends at the next run of at least as many quotes.
+                    var close = source.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
+                    i = close < 0 ? n : close + quotes;
+                    while (i < n && text[i] == '"') i++;
+                    continue;
+                }
+
+                i++;
+                while (i < n)
+                {
+                    if (verbatim)
+                    {
+                        if (text[i] == '"')
+                        {
+                            if (i + 1 < n && text[i + 1] == '"') { i += 2; continue; }
+                            i++;
+                            break;
+                        }
+
+                        i++;
+                    }
+                    else
+                    {
+                        if (text[i] == '\\') { i += 2; continue; }
+                        if (text[i] is '"' or '\n') { i++; break; }
+                        i++;
+                    }
+                }
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return new string(text).Split('\n');
     }
 
     /// <summary>The method containing <paramref name="index"/>: its declaration to the next declaration. A lookup before
@@ -240,6 +361,23 @@ public class SystemUserOidLookupDisabledGuardTests
         return null;
     }
 
+    /// <summary>The ratchet over the per-file violations: files (or extra sites in a baselined file) the baseline does not
+    /// allow, and baseline entries whose file now has fewer sites than recorded.</summary>
+    internal static (List<string> Unexpected, List<string> Stale) Ratchet(
+        IReadOnlyList<(string File, IReadOnlyList<int> Lines)> found, IReadOnlyDictionary<string, BaselineEntry> baseline)
+    {
+        // A baselined file may hold at most its recorded number of sites: one more is a NEW unfiltered lookup.
+        var unexpected = found.Where(r => !baseline.TryGetValue(r.File, out var entry) || r.Lines.Count > entry.Sites)
+            .Select(r => $"{r.File}:{string.Join(",", r.Lines)}"
+                         + (baseline.TryGetValue(r.File, out var entry) ? $" ({r.Lines.Count} sites, baseline allows {entry.Sites})" : string.Empty))
+            .ToList();
+        int SitesNow(string file) => found.Where(r => r.File == file).Select(r => r.Lines.Count).FirstOrDefault();
+        var stale = baseline.Where(b => SitesNow(b.Key) < b.Value.Sites)
+            .Select(b => $"{b.Key} (baseline {b.Value.Sites} sites, now {SitesNow(b.Key)})")
+            .ToList();
+        return (unexpected, stale);
+    }
+
     [Fact(DisplayName = "Issue #1576: every oid → systemuser lookup excludes disabled users or says why it includes them")]
     public void EverySystemUserOidLookup_ExcludesDisabledUsers_OrCarriesTheMarker()
     {
@@ -250,10 +388,7 @@ public class SystemUserOidLookupDisabledGuardTests
             .Where(r => r.Lines.Count > 0)
             .ToList();
 
-        var unexpected = found.Where(r => !Baseline.ContainsKey(r.File))
-            .Select(r => $"{r.File}:{string.Join(",", r.Lines)}")
-            .ToList();
-        var stale = Baseline.Keys.Where(k => found.All(r => r.File != k)).ToList();
+        var (unexpected, stale) = Ratchet(found.Select(r => (r.File, r.Lines)).ToList(), Baseline);
 
         Assert.True(unexpected.Count == 0,
             "These lookups map an Entra oid to a Dataverse systemuser without excluding disabled users (issue #1576): "
@@ -262,14 +397,18 @@ public class SystemUserOidLookupDisabledGuardTests
             + "helper's), prefer ISystemUserIdentityResolver.ResolveSystemUserIdAsync, or — where a disabled user must "
             + "resolve — add a `// includes disabled: <reason>` comment on or just above the lookup.");
         Assert.True(stale.Count == 0,
-            "These baseline entries no longer violate the rule; remove them from SystemUserOidLookupDisabledGuardTests.Baseline "
-            + "so the ratchet only shrinks: " + string.Join("; ", stale));
+            "These baseline entries have fewer violations than recorded; lower their Sites (or remove the entry) in "
+            + "SystemUserOidLookupDisabledGuardTests.Baseline so the ratchet only shrinks: " + string.Join("; ", stale));
     }
 
     [Fact(DisplayName = "Issue #1576: every baseline entry names the open PR or active project branch that keeps it unfixed")]
     public void EveryBaselineEntry_NamesTheOverlappingWork()
     {
-        Assert.All(Baseline, entry => Assert.Matches(@"#\d+|work/[\w.-]+", entry.Value));
+        Assert.All(Baseline, entry =>
+        {
+            Assert.Matches(@"#\d+|work/[\w.-]+", entry.Value.Reason);
+            Assert.True(entry.Value.Sites > 0, $"{entry.Key}: a baseline entry allows at least one site");
+        });
     }
 
     // ── Controls ──────────────────────────────────────────────────────────────────────────────────────
@@ -354,6 +493,70 @@ public class SystemUserOidLookupDisabledGuardTests
         """
         var url = $"systemusers?$filter=azureactivedirectoryobjectid eq {oid}&$select=systemuserid,isdisabled";
         """,
+        // (pass 2) QueryByAttribute keyed by the column, isdisabled not among its attributes.
+        """
+        var query = new QueryByAttribute("systemuser")
+        {
+            ColumnSet = new ColumnSet("systemuserid"),
+            Attributes = { "azureactivedirectoryobjectid" },
+            Values = { oid },
+        };
+        """,
+        // (pass 2) SDK alternate key, indexer initializer, the value never checked.
+        """
+        var key = new KeyAttributeCollection { ["azureactivedirectoryobjectid"] = oid };
+        var user = await _service.RetrieveAsync(new EntityReference("systemuser", key), new ColumnSet("systemuserid"), ct);
+        """,
+        // (pass 2) SDK alternate key, collection-initializer pair form.
+        """
+        var key = new KeyAttributeCollection
+        {
+            { "azureactivedirectoryobjectid", oid },
+        };
+        """,
+        // (pass 2) SDK alternate key set through KeyAttributes.
+        """
+        var target = new Entity("systemuser");
+        target.KeyAttributes["azureactivedirectoryobjectid"] = oid;
+        """,
+        // (pass 2) OData query-function form.
+        """
+        var url = $"systemusers?$filter=Microsoft.Dynamics.CRM.In(PropertyName='azureactivedirectoryobjectid',PropertyValues=[{list}])";
+        """,
+        // (pass 2) isdisabled evidence only inside a /* */ block comment does not count — single-line and multi-line.
+        """
+        var url = $"systemusers?$filter=azureactivedirectoryobjectid eq {oid}"; /* and isdisabled eq false */
+        """,
+        """
+        /*
+         * query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+         */
+        query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, oid);
+        """,
+        // (pass 2) A /* inside a string literal is not a comment: the lookup after it is still seen.
+        """
+        request.Headers.Add("Accept", "application/*");
+        var url = $"systemusers?$filter=azureactivedirectoryobjectid eq {oid}";
+        var done = "*/";
+        """,
+        // (pass 2) Overloaded helper: the FIRST overload filters, the other does not — the call cannot be resolved to
+        // one of them, so it needs evidence in every overload (fail safe).
+        """
+        private Task<Guid?> ResolveAsync(Guid oid, CancellationToken ct) => UsersWhereAsync("azureactivedirectoryobjectid", oid, ct);
+
+        private async Task<Guid?> UsersWhereAsync(string column, Guid value, CancellationToken ct)
+        {
+            query.Criteria.AddCondition(column, ConditionOperator.Equal, value);
+            query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+            return null;
+        }
+
+        private async Task<Guid?> UsersWhereAsync(string column, Guid value, int top, CancellationToken ct)
+        {
+            query.Criteria.AddCondition(column, ConditionOperator.Equal, value);
+            return null;
+        }
+        """,
     };
 
     public static TheoryData<string> MustNotFire => new()
@@ -404,6 +607,50 @@ public class SystemUserOidLookupDisabledGuardTests
             return null;
         }
         """,
+        // (pass 2) QueryByAttribute with isdisabled among its attributes.
+        """
+        var query = new QueryByAttribute("systemuser")
+        {
+            ColumnSet = new ColumnSet("systemuserid"),
+            Attributes = { "azureactivedirectoryobjectid", "isdisabled" },
+            Values = { oid, false },
+        };
+        """,
+        // (pass 2) SDK alternate key, the value read and checked after the retrieve.
+        """
+        var key = new KeyAttributeCollection { ["azureactivedirectoryobjectid"] = oid };
+        var user = await _service.RetrieveAsync(new EntityReference("systemuser", key), new ColumnSet("systemuserid", "isdisabled"), ct);
+        if (user.GetAttributeValue<bool?>("isdisabled") != false) return null;
+        """,
+        // (pass 2) OData query-function form with the isdisabled clause.
+        """
+        var url = $"systemusers?$filter=Microsoft.Dynamics.CRM.In(PropertyName='azureactivedirectoryobjectid',PropertyValues=[{list}]) and isdisabled eq false";
+        """,
+        // (pass 2) A lookup that exists only inside a block comment is not a lookup.
+        """
+        /* Old shape, kept for reference:
+           var url = $"systemusers?$filter=azureactivedirectoryobjectid eq {oid}";
+        */
+        var columns = new ColumnSet("systemuserid");
+        """,
+        // (pass 2) Overloaded helper where EVERY overload filters.
+        """
+        private Task<Guid?> ResolveAsync(Guid oid, CancellationToken ct) => UsersWhereAsync("azureactivedirectoryobjectid", oid, ct);
+
+        private async Task<Guid?> UsersWhereAsync(string column, Guid value, CancellationToken ct)
+        {
+            query.Criteria.AddCondition(column, ConditionOperator.Equal, value);
+            query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+            return null;
+        }
+
+        private async Task<Guid?> UsersWhereAsync(string column, Guid value, int top, CancellationToken ct)
+        {
+            query.Criteria.AddCondition(column, ConditionOperator.Equal, value);
+            query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+            return null;
+        }
+        """,
     };
 
     [Theory(DisplayName = "Issue #1576 guard control: an oid → systemuser lookup that keeps disabled users is a violation")]
@@ -415,4 +662,36 @@ public class SystemUserOidLookupDisabledGuardTests
     [MemberData(nameof(MustNotFire))]
     public void Control_FilteredMarkedOrNonLookup_IsNotAViolation(string source)
         => Assert.Empty(Violations(source.Split('\n')));
+
+    private const string BaselinedFile = "src/server/Some/Baselined.cs";
+
+    private static readonly IReadOnlyDictionary<string, BaselineEntry> OneSiteBaseline =
+        new Dictionary<string, BaselineEntry> { [BaselinedFile] = new(Sites: 1, "kept by work/some-project") };
+
+    [Fact(DisplayName = "Issue #1576 ratchet control: a NEW site in a baselined file fails (the baseline counts sites, not files)")]
+    public void Ratchet_NewSiteInABaselinedFile_IsUnexpected()
+    {
+        var (unexpected, stale) = Ratchet([(BaselinedFile, [282, 310])], OneSiteBaseline);
+
+        Assert.Single(unexpected);
+        Assert.Empty(stale);
+    }
+
+    [Fact(DisplayName = "Issue #1576 ratchet control: a baselined file at its recorded count passes")]
+    public void Ratchet_BaselinedFileAtItsCount_Passes()
+    {
+        var (unexpected, stale) = Ratchet([(BaselinedFile, [282])], OneSiteBaseline);
+
+        Assert.Empty(unexpected);
+        Assert.Empty(stale);
+    }
+
+    [Fact(DisplayName = "Issue #1576 ratchet control: a baseline entry whose file no longer violates is stale")]
+    public void Ratchet_FixedBaselinedFile_IsStale()
+    {
+        var (unexpected, stale) = Ratchet([], OneSiteBaseline);
+
+        Assert.Empty(unexpected);
+        Assert.Single(stale);
+    }
 }
