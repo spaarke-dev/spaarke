@@ -753,7 +753,7 @@ public class InvoiceContextServiceTests
     public async Task AnUnreadableSibling_IsExcludedFromPriorInvoices_DisallowHistory_AndPreviousRates()
     {
         var h = FullFixture();
-        h.Access.OnlyReadable(SiblingA, SiblingC);   // B ("INV-099.1", Approved, with disallowed lines) is not the caller's to see
+        h.Access.Refuse(SiblingB);   // B ("INV-099.1", Approved, with disallowed lines) is not the caller's to see
         h.PreviousLines.Add(PreviousLine(Alice, 777m, new DateTime(2026, 5, 1), owner: SiblingB));
 
         var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
@@ -788,14 +788,15 @@ public class InvoiceContextServiceTests
 
         await h.Service().GetAsync(InvoiceId, Caller);
 
-        h.Access.Calls.Should().BeEquivalentTo(new[] { SiblingA, SiblingB, SiblingC }.Select(id => ("caller-oid", "sprk_invoices", id, (string?)"caller-token")));
+        h.Access.Calls.Where(c => c.EntitySet == "sprk_invoices").Should()
+            .BeEquivalentTo(new[] { SiblingA, SiblingB, SiblingC }.Select(id => ("caller-oid", "sprk_invoices", id, (string?)"caller-token")));
     }
 
     [Fact]
     public async Task WhenNoSiblingIsReadable_TheSectionsAreEmpty_NotUnavailable_AndNoLineQueryRuns()
     {
         var h = FullFixture();
-        h.Access.OnlyReadable();
+        h.Access.Refuse(SiblingA, SiblingB, SiblingC);
 
         var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
@@ -857,6 +858,8 @@ public class InvoiceContextServiceTests
         context.PriorInvoices.Code.Should().Be(InvoiceContextService.CodePriorAccessCheckFailed);
         context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowAccessCheckFailed);
         context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateAccessCheckFailed);
+        context.CoreRecord.Code.Should().Be(InvoiceContextService.CodeCoreAccessCheckFailed, "the core record needs the caller's rights too");
+        context.Budget.Code.Should().Be(InvoiceContextService.CodeBudgetAccessCheckFailed);
         h.Access.Calls.Should().BeEmpty();
         h.Count(Kind.Disallow).Should().Be(0);
         h.Count(Kind.PreviousLines).Should().Be(0);
@@ -872,7 +875,7 @@ public class InvoiceContextServiceTests
 
         var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
-        h.Access.Calls.Should().HaveCount(InvoiceContextService.MaxSiblingAccessChecks);
+        h.Access.Calls.Count(c => c.EntitySet == "sprk_invoices").Should().Be(InvoiceContextService.MaxSiblingAccessChecks);
         context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
         context.PriorInvoices.Data!.HasMore.Should().BeTrue();
         context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowTooLarge, "a total over some of the readable invoices would be wrong, so it is not given");
@@ -882,13 +885,13 @@ public class InvoiceContextServiceTests
     /// <summary>The caller's rights on each sibling invoice, answered the way Dataverse's RetrievePrincipalAccess would.</summary>
     private sealed class SiblingAccess : IAccessDataSource
     {
-        private HashSet<Guid>? _readable;
+        private readonly HashSet<Guid> _refused = [];
         private readonly HashSet<Guid> _faulted = [];
         private readonly HashSet<Guid> _throws = [];
 
         public List<(string UserId, string EntitySet, Guid Id, string? Token)> Calls { get; } = [];
 
-        public void OnlyReadable(params Guid[] ids) => _readable = [.. ids];
+        public void Refuse(params Guid[] ids) => _refused.UnionWith(ids);
 
         public void FaultFor(Guid id) => _faulted.Add(id);
 
@@ -907,7 +910,7 @@ public class InvoiceContextServiceTests
                 return Task.FromException<AccessSnapshot>(new InvalidOperationException("Dataverse unreachable"));
             }
 
-            var readable = !_faulted.Contains(recordId) && (_readable is null || _readable.Contains(recordId));
+            var readable = !_faulted.Contains(recordId) && !_refused.Contains(recordId);
             return Task.FromResult(new AccessSnapshot
             {
                 UserId = userId,
@@ -919,6 +922,140 @@ public class InvoiceContextServiceTests
 
         public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
             throw new InvalidOperationException("The panel asks about invoices, not documents.");
+    }
+
+    // =========================================================================================
+    // The core record is the caller's to read too (fix-round-3)
+    // =========================================================================================
+
+    [Fact]
+    public async Task ACoreRecordTheCallerCannotRead_GivesNoDetailsNoBudgetAndNoCoreScopedRates()
+    {
+        var h = FullFixture();
+        h.Access.Refuse(MatterId);   // Read on the invoice (the route's check), none on its matter
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.CoreRecord.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.CoreRecord.Code.Should().Be(InvoiceContextService.CodeCoreAccessDenied);
+        context.CoreRecord.Data.Should().BeNull();
+        context.Budget.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.Budget.Code.Should().Be(InvoiceContextService.CodeBudgetAccessDenied);
+        context.Budget.Data.Should().BeNull();
+        context.RateHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateAccessDenied);
+        context.RateHistory.Data.Should().BeNull();
+
+        // Nothing of the matter was even read: no core row, no rollups, no rate-card read.
+        h.Count(Kind.Core).Should().Be(0);
+        h.Count(Kind.Budget).Should().Be(0);
+        h.Count(Kind.Rates).Should().Be(0);
+        var json = JsonSerializer.Serialize(context);
+        json.Should().NotContain("Acme v. Globex").And.NotContain("MAT-001").And.NotContain("10000");
+
+        // The sections about OTHER INVOICES depend on the invoices' rights, not the matter's.
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Available);
+    }
+
+    [Theory]
+    [InlineData(AccessFailure.LookupFaulted)]
+    [InlineData(AccessFailure.LookupThrows)]
+    public async Task AFailedCoreRecordAccessCheck_MakesTheCoreSectionsUnavailable_NeverTheData(AccessFailure failure)
+    {
+        var h = FullFixture();
+        if (failure == AccessFailure.LookupFaulted)
+        {
+            h.Access.FaultFor(MatterId);
+        }
+        else
+        {
+            h.Access.ThrowFor(MatterId);
+        }
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.CoreRecord.Code.Should().Be(InvoiceContextService.CodeCoreAccessCheckFailed);
+        context.Budget.Code.Should().Be(InvoiceContextService.CodeBudgetAccessCheckFailed);
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateAccessCheckFailed);
+        new[] { context.CoreRecord.Status, context.Budget.Status, context.RateHistory.Status }
+            .Should().OnlyContain(st => st == ContextSectionStatus.Unavailable);
+        context.CoreRecord.Data.Should().BeNull();
+        context.Budget.Data.Should().BeNull();
+        context.RateHistory.Data.Should().BeNull();
+        h.Count(Kind.Core).Should().Be(0);
+        h.Count(Kind.Budget).Should().Be(0);
+        h.Count(Kind.Rates).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(CoreKindCase.Matter, "sprk_matters")]
+    [InlineData(CoreKindCase.Project, "sprk_projects")]
+    [InlineData(CoreKindCase.WorkAssignment, "sprk_workassignments")]
+    public async Task TheCoreRecordIsCheckedOnItsOwnEntitySet_AsTheCaller(CoreKindCase kind, string entitySet)
+    {
+        var h = FullFixture();
+        Guid id;
+        switch (kind)
+        {
+            case CoreKindCase.Matter:
+                id = MatterId;
+                break;
+            case CoreKindCase.Project:
+                id = ProjectId;
+                h.Header = InvoiceHeader(project: ProjectId);
+                break;
+            default:
+                id = WorkAssignmentId;
+                h.Header = InvoiceHeader(workAssignment: WorkAssignmentId);
+                h.CoreRow = new Entity("sprk_workassignment", WorkAssignmentId) { ["sprk_name"] = "WA", ["statuscode"] = new OptionSetValue(1) };
+                break;
+        }
+
+        await h.Service().GetAsync(InvoiceId, Caller);
+
+        h.Access.Calls.Should().Contain(("caller-oid", entitySet, id, (string?)"caller-token"));
+        h.Access.Calls.Count(c => c.EntitySet != "sprk_invoices").Should().Be(1, "one check, shared by the three sections that need it");
+    }
+
+    public enum CoreKindCase { Matter, Project, WorkAssignment }
+
+    [Fact]
+    public async Task AWorkAssignmentsBudget_IsStillNotTracked_WhateverTheCallersRights()
+    {
+        var h = FullFixture();
+        h.Header = InvoiceHeader(workAssignment: WorkAssignmentId);
+        h.CoreRow = new Entity("sprk_workassignment", WorkAssignmentId) { ["sprk_name"] = "WA", ["statuscode"] = new OptionSetValue(1) };
+        h.Access.Refuse(WorkAssignmentId);
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.Budget.Status.Should().Be(ContextSectionStatus.NotTracked, "nothing is read for it, so there is nothing to withhold");
+        context.CoreRecord.Code.Should().Be(InvoiceContextService.CodeCoreAccessDenied);
+    }
+
+    // =========================================================================================
+    // InvoicesConsidered counts the invoices examined (fix-round-3)
+    // =========================================================================================
+
+    [Fact]
+    public async Task InvoicesConsidered_CountsEveryDecidedReadableInvoice_NotOnlyThoseWithCuts()
+    {
+        var h = new Harness();
+        var decided = Enumerable.Range(1, 12).Select(_ => Guid.NewGuid()).ToList();
+        h.Prior = decided.Select((id, i) => PriorInvoice(id, $"INV-{i:00}", new DateTime(2026, 1, 1).AddDays(-i), 10m, null, InvoiceStatusCodes.Paid)).ToList();
+        h.Prior.Add(PriorInvoice(Guid.NewGuid(), "INV-RET", new DateTime(2025, 1, 1), 10m, null, InvoiceStatusCodes.ReturnedToFirm));   // not decided
+        h.DisallowLines =
+        [
+            DisallowLine(decided[0], InvoiceLineStatus.Disallowed, 10m, null, "x"),
+            DisallowLine(decided[1], InvoiceLineStatus.Reduced, 10m, 5m, "y"),
+        ];
+
+        var disallow = (await h.Service().GetAsync(InvoiceId, Caller))!.DisallowHistory.Data!;
+
+        disallow.InvoicesConsidered.Should().Be(12, "12 decided invoices were examined, 2 of them had cuts");
+        disallow.DisallowedCount.Should().Be(1);
+        disallow.ReducedCount.Should().Be(1);
     }
 
     // =========================================================================================

@@ -149,6 +149,7 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
         await using var host = await Host.StartAsync();
         host.GrantRead();
         host.Header = Header(matter: true);
+        host.GrantCoreRead();
 
         var response = await host.SendAsync(Request(Url(InvoiceId)));
 
@@ -166,11 +167,34 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
     }
 
     [Fact]
+    public async Task AnInvoiceReaderWithoutReadOnTheMatter_NeverSeesTheMatterBudgetOrDetails()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRead();   // Read on the invoice, none on its matter (sprk_matters)
+        host.Header = Header(matter: true);
+
+        var response = await host.SendAsync(Request(Url(InvoiceId)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["coreRecord"]!["code"]!.GetValue<string>().Should().Be("context.core-record.access-denied");
+        json["budget"]!["code"]!.GetValue<string>().Should().Be("context.budget.access-denied");
+        json["coreRecord"]!["data"].Should().BeNull();
+        json["budget"]!["data"].Should().BeNull();
+        body.Should().NotContain("Acme v. Globex").And.NotContain("10000");
+        host.Access.Calls.Should().Contain(new FinAuth.AccessCall(
+            FinAuth.AccessPath.Record, "sprk_matters", Guid.Parse("00000000-0000-0000-0000-0000000000b1"), HasToken: true));
+        host.Queries.Select(q => q.EntityName).Should().NotContain("sprk_matter", "the matter row and its rollups were never read");
+    }
+
+    [Fact]
     public async Task EverySourceFailing_StillReturns200_WithAMessageAndStableCodePerSection()
     {
         await using var host = await Host.StartAsync();
         host.GrantRead();
         host.Header = Header(matter: true);
+        host.GrantCoreRead();
         host.FailEverythingButTheHeader = true;
 
         var response = await host.SendAsync(Request(Url(InvoiceId)));
@@ -200,6 +224,7 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
         await using var host = await Host.StartAsync();
         host.GrantRead();
         host.Header = Header(matter: true);
+        host.GrantCoreRead();
         var readable = Guid.Parse("00000000-0000-0000-0000-00000000e001");
         var hidden = Guid.Parse("00000000-0000-0000-0000-00000000e002");
         host.Siblings.Add(Sibling(readable, "INV-READABLE"));
@@ -232,6 +257,7 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
         await using var host = await Host.StartAsync();
         host.GrantRead();
         host.Header = Header(matter: false);
+        host.GrantCoreRead();
 
         var response = await host.SendAsync(Request(Url(InvoiceId)));
 
@@ -339,6 +365,13 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
         }
 
         public void GrantRead() => Access.Grant(InvoiceSet, InvoiceId, AccessRights.Read);
+
+        /// <summary>Read on the invoice's core record (the matter, or the work assignment) - a separate right from Read on the invoice.</summary>
+        public void GrantCoreRead()
+        {
+            Access.Grant("sprk_matters", Guid.Parse("00000000-0000-0000-0000-0000000000b1"), AccessRights.Read);
+            Access.Grant("sprk_workassignments", Guid.Parse("00000000-0000-0000-0000-0000000000d1"), AccessRights.Read);
+        }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client.SendAsync(request);
 
