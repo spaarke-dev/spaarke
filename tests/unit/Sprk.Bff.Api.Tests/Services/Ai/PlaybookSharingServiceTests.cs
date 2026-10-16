@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
@@ -407,6 +408,42 @@ public class PlaybookSharingServiceTests
 
         Assert.Empty(request.TeamIds);
         Assert.True(request.OrganizationWide);
+    }
+
+    #endregion
+
+    #region Dataverse access-mask mapping (#994)
+
+    // The masks are Dataverse's AccessRights literals (Microsoft.Crm.Sdk.Proxy): Read 1, Write 2, Append 4,
+    // AppendTo 16, Create 32, Delete 65536, Share 262144, Assign 524288. Written as numbers, not derived from the
+    // enum the service uses, so a wrong bit in the service cannot also be the expected value here.
+
+    [Theory]
+    [InlineData(0, PlaybookAccessRights.None)]
+    [InlineData(1, PlaybookAccessRights.Read)]
+    [InlineData(2, PlaybookAccessRights.Write)]
+    [InlineData(4, PlaybookAccessRights.None)]          // Append — not surfaced
+    [InlineData(16, PlaybookAccessRights.None)]         // AppendTo — not surfaced
+    [InlineData(32, PlaybookAccessRights.None)]         // Create — not surfaced
+    [InlineData(65536, PlaybookAccessRights.None)]      // Delete — not surfaced
+    [InlineData(262144, PlaybookAccessRights.Share)]    // Share
+    [InlineData(524288, PlaybookAccessRights.None)]     // Assign — no Assign member; must NOT read as Share
+    [InlineData(1 + 2 + 4 + 16 + 262144, PlaybookAccessRights.Full)]
+    [InlineData(1 + 524288, PlaybookAccessRights.Read)] // Read + Assign → Read only
+    public void MapFromDataverseAccessRights_MapsEachDataverseBit(int mask, PlaybookAccessRights expected)
+    {
+        Assert.Equal(expected, PlaybookSharingService.MapFromDataverseAccessRights(mask));
+    }
+
+    [Theory]
+    [InlineData(PlaybookAccessRights.None, "")]
+    [InlineData(PlaybookAccessRights.Read, "ReadAccess")]
+    [InlineData(PlaybookAccessRights.Write, "WriteAccess,AppendAccess,AppendToAccess")]
+    [InlineData(PlaybookAccessRights.Share, "ShareAccess")]
+    [InlineData(PlaybookAccessRights.Full, "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess")]
+    public void MapToDataverseAccessRights_EmitsDataverseRightNames(PlaybookAccessRights rights, string expected)
+    {
+        Assert.Equal(expected, PlaybookSharingService.MapToDataverseAccessRights(rights));
     }
 
     #endregion

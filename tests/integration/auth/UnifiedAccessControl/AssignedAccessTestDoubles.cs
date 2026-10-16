@@ -50,6 +50,15 @@ internal static class AssignedAccessTestDoubles
         public ConcurrentDictionary<Guid, int?> OrganizationStates { get; } = new();
         public ConcurrentDictionary<Guid, string> Names { get; } = new();
 
+        /// <summary>
+        /// #1620: each root's owner as the root read returns it (<c>null</c> = the read carried neither owner column).
+        /// Unseeded: owned by <see cref="DefaultRootOwningTeamId"/> — a team, so a revoke there is the app-only one.
+        /// </summary>
+        public ConcurrentDictionary<(ExternalGrantRootType, Guid), DataversePrincipalRef?> RootOwners { get; } = new();
+
+        /// <summary>The team an unseeded root is owned by (#1620).</summary>
+        public static readonly Guid DefaultRootOwningTeamId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+
         public bool FailRootRead { get; set; }
         public bool FailLedgerRead { get; set; }
         public bool FailLinkRead { get; set; }
@@ -343,7 +352,8 @@ internal static class AssignedAccessTestDoubles
                 return Task.FromResult<AssignedRootSnapshot?>(null);
 
             return Task.FromResult<AssignedRootSnapshot?>(new AssignedRootSnapshot(
-                fields.ToDictionary(f => f, f => values.TryGetValue(f, out var v) ? v : null, StringComparer.OrdinalIgnoreCase)));
+                fields.ToDictionary(f => f, f => values.TryGetValue(f, out var v) ? v : null, StringComparer.OrdinalIgnoreCase),
+                RootOwners.TryGetValue((rootType, rootId), out var owner) ? owner : DataversePrincipalRef.Team(DefaultRootOwningTeamId)));
         }
 
         internal override Task<IReadOnlyList<AssignedLinkCandidate>> ReadLinkCandidatesAsync(

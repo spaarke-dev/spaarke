@@ -64,7 +64,11 @@ export interface ISendEmailDialogMockProps {
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
 // `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
-export const describeSendFailure: (...args: unknown[]) => { title: string; message: string; reference?: string } = () => ({
+export const describeSendFailure: (...args: unknown[]) => {
+  title: string;
+  message: string;
+  reference?: string;
+} = () => ({
   title: 'Email not sent',
   message: '',
 });
@@ -199,10 +203,16 @@ export const AggregateCard: React.FC<AggregateCardProps> = () => null;
 // `createWorklistService` / `launchDecisionWizard` are inert stubs; `worklistSectionRegistration.test.ts` spies on them to assert the wiring.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const WorklistWidget: React.FC<any> = () => null;
+// `decisionRecords.registration.ts` (ontology task 045) imports `DecisionRecordsWidget`; it renders nothing here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const DecisionRecordsWidget: React.FC<any> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createWorklistService: (...args: any[]) => any = () => ({});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({ opened: false, reason: 'no-host' });
+export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({
+  opened: false,
+  reason: 'no-host',
+});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —
@@ -451,6 +461,7 @@ export const SECTION_METADATA_CATALOG: ReadonlyArray<{ id: string; widthPreferen
   { id: 'email' },
   { id: 'reconciliation' },
   { id: 'worklist' },
+  { id: 'decisionRecords' },
   { id: 'analysis' },
   { id: 'communications' },
 ];
@@ -476,6 +487,7 @@ const _driftGuard = {
   sanitizeEmailHtml,
   DataGridViewSelector,
   WorklistWidget,
+  DecisionRecordsWidget,
   createWorklistService,
   launchDecisionWizard,
   EntityCreationService,
