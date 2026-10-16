@@ -138,6 +138,29 @@ public class RecordGrantsEndpointTests : IClassFixture<DelegationRuleTestFixture
         document.RootElement.GetProperty("grants").GetArrayLength().Should().Be(RecordGrantsEndpoint.MaxGrantsListed);
     }
 
+    /// <summary>
+    /// The boundary twin (verifier pass 2, F3): exactly <c>MaxGrantsListed</c> rows is the whole list — every row listed and
+    /// <c>truncated: false</c>, so a record AT the cap is never told its list is partial (a <c>&gt;=</c> comparison fails here).
+    /// </summary>
+    [Fact]
+    public async Task GetRecordGrants_AtExactlyTheCap_ListsEveryRowAndIsNotTruncated()
+    {
+        var recordId = Guid.NewGuid();
+        var rows = Enumerable.Range(0, RecordGrantsEndpoint.MaxGrantsListed)
+            .Select(_ => Row(ExternalGrantRootType.Matter, recordId, contactId: Guid.NewGuid(), expires: new DateOnly(2099, 1, 31)))
+            .ToArray();
+        _fixture.SeedRootGrantRows(recordId, rows);
+        using var client = _fixture.CreateClientWithRights(Delegator);
+
+        var response = await client.GetAsync($"{GrantsPath}?recordType=matter&recordId={recordId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("truncated").GetBoolean().Should().BeFalse(
+            "a record with exactly the cap's number of rows has its whole list shown");
+        document.RootElement.GetProperty("grants").GetArrayLength().Should().Be(RecordGrantsEndpoint.MaxGrantsListed);
+    }
+
     /// <summary>The negative twin: a caller who can read the record but not write it is refused, and no grant row is read.</summary>
     [Fact]
     public async Task GetRecordGrants_ForCallerWithoutWrite_Is403AndReadsNothing()
