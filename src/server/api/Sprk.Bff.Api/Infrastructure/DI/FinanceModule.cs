@@ -98,6 +98,10 @@ public static class FinanceModule
         // by the (firm, tracking number) alternate key with a bounded retry. Scoped (takes the scoped IGenericEntityService),
         // unconditional (flag rule above). Caller: 044 (a resubmission, D-37, is a new submission through the same route).
         services.AddScoped<ITrackingNumberAllocator, TrackingNumberAllocator>();
+        // Invoice submission (ebilling-r1 task 044, FR-17): the one intake both the SPA and the internal route call (validate, store the
+        // PDF, create the document and the submission through the allocator, enqueue processing). Concrete (ADR-010: one implementation).
+        // Scoped like its scoped dependencies (SpeFileStore, RecordContainerResolver, the allocator); unconditional (flag rule above).
+        services.AddScoped<InvoiceSubmissionService>();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
