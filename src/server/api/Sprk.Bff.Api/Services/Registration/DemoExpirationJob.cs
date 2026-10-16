@@ -244,9 +244,11 @@ public sealed class DemoExpirationJob : IScheduledJob
                 await _graphUserService.DisableUserAsync(aadObjectId, ct);
                 _logger.LogInformation("[Expire] Disabled Entra account {AadObjectId}", aadObjectId);
             }
-            catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+            catch (Microsoft.Graph.Models.ODataErrors.ODataError ex)
+                when (ex.ResponseStatusCode == 404 && Guid.TryParse(aadObjectId, out _))
             {
-                // The account no longer exists (deleted): at least as closed as disabled, so the step is done.
+                // The account no longer exists (deleted): at least as closed as disabled, so the step is done. Only for
+                // a GUID id: Graph resolves anything else as a UPN, and its 404 then proves nothing about the account.
                 _logger.LogInformation(
                     "[Expire] Entra account {AadObjectId} of request {RequestId} no longer exists; nothing to disable",
                     aadObjectId, request.Id);

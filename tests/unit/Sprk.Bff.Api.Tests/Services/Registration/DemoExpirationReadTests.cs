@@ -84,21 +84,48 @@ public class DemoExpirationReadTests
         requested[1].Should().Be(next);
     }
 
-    [Fact(DisplayName = "#1363: a next-page link to another host is refused; the bearer token is not sent there")]
-    public async Task ProvisionedList_RefusesAForeignNextLink()
+    /// <summary>MUTATION: comparing the host only lets <c>http://</c> (the token in cleartext) or another port through;
+    /// a relative link is refused rather than resolved.</summary>
+    [Theory(DisplayName = "#1363: a next-page link to another host, scheme or port (or a relative one) is refused; the bearer token is not sent there")]
+    [InlineData("https://elsewhere.example/api/data/v9.2/sprk_registrationrequests?$skiptoken=x")]
+    [InlineData("http://admin.crm.dynamics.com/api/data/v9.2/sprk_registrationrequests?$skiptoken=x")]
+    [InlineData("https://admin.crm.dynamics.com:8443/api/data/v9.2/sprk_registrationrequests?$skiptoken=x")]
+    [InlineData("/api/data/v9.2/sprk_registrationrequests?$skiptoken=x")]
+    public async Task ProvisionedList_RefusesAForeignNextLink(string next)
     {
         var requested = new List<string>();
         var service = Requests(request =>
         {
-            requested.Add(request.RequestUri!.Host);
-            return Respond(HttpStatusCode.OK,
-                Page("https://elsewhere.example/api/data/v9.2/sprk_registrationrequests?$skiptoken=x", Guid.NewGuid()));
+            requested.Add(request.RequestUri!.ToString());
+            if (requested.Count > 5)
+                throw new TimeoutException("looped: the refused link was followed");
+            return Respond(HttpStatusCode.OK, Page(next, Guid.NewGuid()));
         });
 
         var act = () => service.GetRequestsByStatusAsync(RegistrationStatus.Provisioned);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
-        requested.Should().Equal(new Uri(AdminDataverse).Host);
+        requested.Should().ContainSingle().Which.Should().StartWith(AdminDataverse + "/");
+    }
+
+    /// <summary>MUTATION: with no <c>top</c> the loop ends only when the server omits the link, so a repeated link spins
+    /// forever and grows the list without bound.</summary>
+    [Fact(DisplayName = "#1363: a next-page link that repeats is refused instead of looping")]
+    public async Task ProvisionedList_RefusesARepeatedNextLink()
+    {
+        var next = $"{AdminDataverse}/api/data/v9.2/sprk_registrationrequests?$skiptoken=again";
+        var requests = 0;
+        var service = Requests(_ =>
+        {
+            if (Interlocked.Increment(ref requests) > 50)
+                throw new TimeoutException("looped: the link was followed again and again");
+            return Respond(HttpStatusCode.OK, Page(next, Guid.NewGuid()));
+        });
+
+        var act = () => service.GetRequestsByStatusAsync(RegistrationStatus.Provisioned);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("repeated");
+        requests.Should().Be(2, "the first page and the one page the link names; the repeat is never followed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────

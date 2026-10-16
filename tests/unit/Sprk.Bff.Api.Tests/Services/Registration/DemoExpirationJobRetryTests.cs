@@ -202,6 +202,22 @@ public class DemoExpirationJobRetryTests
             && e.Message.Contains(RequestId.ToString()) && e.Message.Contains("no longer exists"));
     }
 
+    /// <summary>MUTATION: counting every 404 as "deleted" — Graph also answers 404 for a non-GUID id (it resolves it as a
+    /// UPN), so a malformed <c>sprk_demouserobjectid</c> would expire the request with the account never disabled.</summary>
+    [Fact(DisplayName = "#1363: a 404 for a NON-GUID object id fails the disable step; the request stays Provisioned")]
+    public async Task NonGuidObjectId404_FailsTheDisableStep()
+    {
+        _dataverse.Expiring();
+        _dataverse.DemoUserObjectId = "jane@demo.spaarke.com";
+        _graph.Deleted = true;
+
+        await Run();
+
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned);
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("Failed to disable Entra account"));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("no longer exists"));
+    }
+
     /// <summary>MUTATION: reading a group answer with no collection as "not a member" skips the removal and expires the
     /// request with the user possibly still in the demo group.</summary>
     [Fact(DisplayName = "#1363: a group membership read with no collection fails the step; the request stays Provisioned")]
@@ -387,6 +403,9 @@ public class DemoExpirationJobRetryTests
         public int FailNextStatusWrites { get; set; }
         public bool FailRequestReads { get; set; }
 
+        /// <summary>The request's <c>sprk_demouserobjectid</c>; a GUID unless a test says otherwise.</summary>
+        public string DemoUserObjectId { get; set; } = ObjectId.ToString();
+
         public void Expiring() => _expires = Today.AddDays(-1);
 
         public void ExpiredOn(DateTimeOffset expires) => _expires = expires;
@@ -407,7 +426,7 @@ public class DemoExpirationJobRetryTests
                       "sprk_status":{{(int)RegistrationStatus.Provisioned}},
                       "sprk_email":"jane@contoso.example",
                       "sprk_firstname":"Jane",
-                      "sprk_demouserobjectid":"{{ObjectId}}",
+                      "sprk_demouserobjectid":"{{DemoUserObjectId}}",
                       "sprk_expirationdate":"{{_expires.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}}",
                       "_sprk_dataverseenvironmentid_value":"{{EnvironmentId}}"
                     }]}

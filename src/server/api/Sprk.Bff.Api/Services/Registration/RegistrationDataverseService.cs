@@ -315,6 +315,7 @@ public class RegistrationDataverseService : IDisposable
         _logger.LogDebug("GET registration requests by status {Status}", status);
 
         var records = new List<RegistrationRequestRecord>();
+        var seenLinks = new HashSet<string>(StringComparer.Ordinal);
         string? next = url;
         while (next is not null)
         {
@@ -332,12 +333,23 @@ public class RegistrationDataverseService : IDisposable
             next = page?.NextLink;
             if (next is not null)
             {
-                // The next page must come from the same Dataverse: the bearer token is never sent anywhere else.
+                // The next page must come from the same Dataverse (same scheme, host and port; an absolute link only):
+                // the bearer token is never sent anywhere else, nor in cleartext.
+                var baseAddress = _httpClient.BaseAddress!;
                 if (!Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
-                    || !string.Equals(nextUri.Host, _httpClient.BaseAddress!.Host, StringComparison.OrdinalIgnoreCase))
+                    || !string.Equals(nextUri.Scheme, baseAddress.Scheme, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(nextUri.Host, baseAddress.Host, StringComparison.OrdinalIgnoreCase)
+                    || nextUri.Port != baseAddress.Port)
                 {
                     throw new InvalidOperationException(
-                        $"Dataverse returned a next page link outside {_httpClient.BaseAddress!.Host}; the {status} list was not read whole.");
+                        $"Dataverse returned a next page link outside {baseAddress.GetLeftPart(UriPartial.Authority)}; the {status} list was not read whole.");
+                }
+
+                // A link already followed would loop forever (with no top, only a missing link ends the read).
+                if (!seenLinks.Add(nextUri.AbsoluteUri))
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse repeated a next page link; the {status} list was not read whole.");
                 }
             }
         }
