@@ -108,6 +108,10 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/projects/{id:guid}/documents",
         "POST /api/v1/external/projects/{id:guid}/events",
         "POST /api/v1/external/projects/{id:guid}/todos",
+        // r3 task 047 (ADR-028 A9): its OWN group, ExternalCollaboration WITHOUT CallerPrincipalAuthorizationFilter (the
+        // caller is not yet resolved); the handler admits WorkforceHome only. The only caller of the WorkforceHome create
+        // (RegistrationIsTheOnlyCallerOfTheWorkforceHomeWrites below).
+        "POST /api/v1/external/registration",
         "POST /api/v1/external/servicerequests",
         "POST /api/v1/external/servicerequests/{id:guid}/documents",
         "POST /api/v1/external/workassignments/{id:guid}/documents",
@@ -250,5 +254,74 @@ public sealed class AuthenticationSchemeCensusTests
                 + string.Join("\n  ", admittingScheme.Except(PinnedExternalCollaborationRoutes)
                     .Concat(PinnedExternalCollaborationRoutes.Except(admittingScheme).Select(r => "(missing) " + r))));
         }
+    }
+
+    // ── r3 task 047: only the registration route reaches the WorkforceHome create and bind ──────────────────────────────
+
+    /// <summary>
+    /// The WorkforceHome writes and the ONE type allowed to reference each (by its outermost declaring type, so closures and
+    /// async state machines count as their owner). A WorkforceHome create needs <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails"/>'s
+    /// home tenant and owner (<c>CreatePayload</c> refuses one without them), so setting either is the create's fingerprint.
+    /// </summary>
+    private static readonly (Type Owner, string Member, Type AllowedCaller)[] WorkforceHomeWrites =
+    {
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder), "RegisterHomeContactAsync",
+            typeof(Sprk.Bff.Api.Api.ExternalAccess.ExternalRegistrationEndpoints)),
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore), "BindHomeOidAsync",
+            typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails), "set_ExternalTenantId",
+            typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails), "set_OwningTeamId",
+            typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder)),
+    };
+
+    [Fact(DisplayName = "Task 047: only ExternalRegistrationEndpoints reaches the WorkforceHome create and bind")]
+    public void RegistrationIsTheOnlyCallerOfTheWorkforceHomeWrites()
+    {
+        var assembly = typeof(Sprk.Bff.Api.Api.ExternalAccess.ExternalRegistrationEndpoints).Assembly;
+        var references = IlCallScan.MethodReferences(assembly.GetTypes()).ToList();
+
+        foreach (var (owner, member, allowed) in WorkforceHomeWrites)
+        {
+            var callers = references
+                .Where(r => r.Target.DeclaringType == owner && r.Target.Name == member)
+                .Select(r => IlCallScan.Outermost(r.Caller))
+                .Distinct()
+                .ToList();
+
+            // Must fire: the scan sees the allowed caller (a scan that saw nothing would pass vacuously).
+            Assert.True(callers.Contains(allowed),
+                $"{owner.Name}.{member}: the IL scan did not see {allowed.Name} call it — the guard would be vacuous.");
+
+            var others = callers.Where(c => c != allowed).Select(c => c.FullName).ToList();
+            Assert.True(others.Count == 0,
+                $"{owner.Name}.{member} is reached from [{string.Join(", ", others)}]. ADR-028 A9 (r3 task 047): only the "
+                + "registration route (POST /api/v1/external/registration, WorkforceHome scheme only) may create or bind a "
+                + "WorkforceHome contact. Route the new caller through ExternalRegistrationEndpoints, or review it (UAC) "
+                + "and widen this pin.");
+        }
+    }
+
+    [Fact(DisplayName = "Task 047: the only-caller guard fires on a caller it does not allow")]
+    public void TheOnlyCallerGuard_SeesACallerItDoesNotAllow()
+    {
+        // Must fire: the seeded reference below is visible to the same scan and attributed to a type no pin allows.
+        var callers = IlCallScan.MethodReferences(new[] { typeof(OnlyCallerSeed) })
+            .Where(r => r.Target.DeclaringType == typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails)
+                        && r.Target.Name == "set_OwningTeamId")
+            .Select(r => IlCallScan.Outermost(r.Caller))
+            .ToList();
+
+        Assert.Equal(new[] { typeof(AuthenticationSchemeCensusTests) }, callers);
+        Assert.DoesNotContain(WorkforceHomeWrites, w => callers.Contains(w.AllowedCaller));
+    }
+
+    /// <summary>A seeded disallowed caller for <see cref="TheOnlyCallerGuard_SeesACallerItDoesNotAllow"/>. Never run.</summary>
+    private static class OnlyCallerSeed
+    {
+        internal static object Seed() => new Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails("a", "b", null)
+        {
+            OwningTeamId = Guid.Empty,
+        };
     }
 }

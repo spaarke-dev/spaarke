@@ -40,6 +40,11 @@ public static class ExternalAccessEndpoints
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
 
+        // POST /api/v1/external/registration — ADR-028 A9 (r3 task 047). Its OWN group: the ExternalCollaboration policy
+        // WITHOUT CallerPrincipalAuthorizationFilter (the caller is by definition not yet resolved); the handler admits the
+        // WorkforceHome scheme only.
+        app.MapExternalRegistrationEndpoints();
+
         // GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access — the per-record No Access
         // read (task 064, owner round 59 item 3). NOT on the management group: its DelegationRuleFilter demands Write for
         // every route, and the form banner (task 153) must answer callers who hold only Read. Each route carries the

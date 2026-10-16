@@ -334,6 +334,8 @@ public sealed class GrantAccessNotifier
     /// <remarks>
     /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
+    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
+    /// same external portal the email links to.
     /// </remarks>
     private static bool IsOnboardedWithEmail(ContactBindingRow contact)
     {

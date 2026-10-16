@@ -37,6 +37,16 @@ public enum IdentityPlaneMarker
 
     /// <summary>A workforce Entra object id — a Type-2 employee or a licensed systemuser.</summary>
     Workforce = 100000001,
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 044 schema, task 047 writer): an object id from a CUSTOMER'S home directory, written only by the
+    /// registration route (<c>POST /api/v1/external/registration</c>) together with <c>sprk_externaltenantid</c>. Read as a
+    /// readable binding everywhere (<see cref="ContactBindingDecision.ReadBinding"/>): the Spaarke-tenant and CIAM planes
+    /// treat it as a contact bound to someone else's oid, never as unbound; resolution by (tid, oid) is
+    /// <see cref="ContactBindingDecision.DecideHomeContact"/>'s alone. How each binding reader treats it:
+    /// <c>projects/spaarke-SPA-external-access-platform-r3/notes/task-047-notes.md</c>.
+    /// </summary>
+    WorkforceHome = 100000002,
 }
 
 /// <summary>
@@ -85,6 +95,16 @@ public enum IdentityCollisionReason
     /// holder so an operator can see it; the caller is denied <c>contact_key_conflict</c>.
     /// </summary>
     KeyMirrorConflict = 100000011,
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2; owner 2026-10-15 "Refuse, flag for admin"): no ACTIVE contact carries the
+    /// token email but an INACTIVE one does. The registration is refused (<c>registration_contact_conflict</c>), nothing is
+    /// created or bound, and the inactive contact is flagged so an operator sees it; reactivating it is the operator's
+    /// decision. Held while the flagged contact is still inactive and still carries an email
+    /// (<see cref="ContactBindingDecision.CollisionStillHolds"/>) — the one reason that survives the inactive-contact
+    /// shortcut, because the inactive state IS the collision.
+    /// </summary>
+    InactiveContactEmailMatch = 100000012,
 }
 
 /// <summary>Which caller plane a binding decision is being made for.</summary>
@@ -323,6 +343,65 @@ public enum HomeLinkOutcome
 
 /// <summary>The stored-link decision.</summary>
 public sealed record HomeLinkDecision(HomeLinkOutcome Outcome, Guid? SystemUserId = null, string? DenyCode = null);
+
+/// <summary>
+/// ADR-028 A9 (r3 task 047): one systemuser as the licensed-user email read returns it — <c>isdisabled</c> and the two
+/// directory-synced email columns the refusal compares (owner 2026-10-15: <c>internalemailaddress</c> OR <c>domainname</c>).
+/// </summary>
+public sealed record SystemUserEmailRow(Guid SystemUserId, bool? IsDisabled, string? InternalEmail, string? DomainName);
+
+/// <summary>The licensed-user email read: rows, or why there are none to trust.</summary>
+public sealed record SystemUserEmailLookup(LookupStatus Status, IReadOnlyList<SystemUserEmailRow> Rows)
+{
+    /// <summary>A read that could not be read.</summary>
+    public static SystemUserEmailLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<SystemUserEmailRow>());
+
+    /// <summary>A read that returned these rows.</summary>
+    public static SystemUserEmailLookup Of(params SystemUserEmailRow[] rows) => new(LookupStatus.Read, rows);
+}
+
+/// <summary>What the licensed-user email check (design §6 step 2) says.</summary>
+public enum LicensedUserEmailOutcome
+{
+    /// <summary>No ENABLED systemuser carries the email in either column.</summary>
+    NotLicensed,
+
+    /// <summary>An enabled systemuser carries it: refuse with <c>licensed_user_link_required</c> (a refusal, never a grant).</summary>
+    LicensedUser,
+
+    /// <summary>The read failed: it cannot be ruled out, so deny (never fall through to a create).</summary>
+    Unknown,
+}
+
+/// <summary>What the registration email step (design §4, §6 step 3) decided.</summary>
+public enum RegistrationEmailAction
+{
+    /// <summary>No active contact carries the email: create.</summary>
+    Create,
+
+    /// <summary>One active, unbound candidate: the systemusers linking it must be read first.</summary>
+    NeedReferenceLookup,
+
+    /// <summary>Exactly one bindable contact (active, unbound, not linked to a systemuser): bind it — only on confirmation.</summary>
+    BindExisting,
+
+    /// <summary>The one match is already bound to the caller's own oid (a concurrent registration): re-read, never write.</summary>
+    AlreadyBoundToCaller,
+
+    /// <summary>Several matches, or a match that is bound, unreadable or linked: refuse and flag; nothing bound or created.</summary>
+    Conflict,
+
+    /// <summary>A read failed: deny with <see cref="RegistrationEmailDecision.DenyCode"/>.</summary>
+    Deny,
+}
+
+/// <summary>The registration email step's answer.</summary>
+public sealed record RegistrationEmailDecision(
+    RegistrationEmailAction Action,
+    Guid? ContactId = null,
+    string? DenyCode = null,
+    IReadOnlyList<Guid>? FlagContactIds = null,
+    IdentityCollisionReason? FlagReason = null);
 
 /// <summary>A systemuser whose <c>sprk_primarycontact</c> points at a contact under consideration.</summary>
 public sealed record SystemUserReference(Guid SystemUserId, Guid? Oid, Guid LinkedContactId);
@@ -572,6 +651,12 @@ public static class ContactBindingDecision
     /// around (owner round 4 item 4, B2).
     /// </summary>
     public const string DenyContactKeyConflict = "sdap.access.deny.contact_key_conflict";
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2): the token email matches no active contact but an INACTIVE one. Refused and
+    /// flagged for an administrator; never created around and never bound to the inactive contact.
+    /// </summary>
+    public const string DenyContactInactiveEmailMatch = "sdap.access.deny.contact_inactive_email_match";
 
     /// <summary>
     /// CIAM plane, E11 (task 184, owner round 96; task 185, owner round 98): the email matches one unbound, active, unlinked
@@ -1030,7 +1115,9 @@ public static class ContactBindingDecision
                 IdentityCollisionReason.BindingUnreadable, new[] { row.ContactId });
         }
 
-        if (binding.Kind == BindingKind.Bound && binding.Plane == IdentityPlaneMarker.Workforce)
+        // A WorkforceHome binding (task 047) is a workforce contact's home-directory sign-in: refused exactly like the
+        // Workforce plane, never "AlreadyProvisioned" as if it were a CIAM account.
+        if (binding.Kind == BindingKind.Bound && IsWorkforcePlane(binding.Plane))
         {
             return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteWorkforceBoundContact,
                 IdentityCollisionReason.InviteMatchesWorkforceContact, new[] { row.ContactId });
@@ -1166,6 +1253,15 @@ public static class ContactBindingDecision
             return true;
         }
 
+        // A registration refused because the email belongs to a DEACTIVATED contact: the inactive state is the collision, so
+        // this is decided BEFORE the inactive shortcut below. It holds while the contact stays inactive and still carries an
+        // email; reactivating it (an operator decision) or removing its email clears the flag. (The party records no email,
+        // so a change to ANOTHER address cannot be told apart here.)
+        if (party.Reason == IdentityCollisionReason.InactiveContactEmailMatch)
+        {
+            return !flagged.IsActive && !string.IsNullOrWhiteSpace(flagged.Email);
+        }
+
         // An operator deactivated the contact: the person was removed, the collision is moot.
         if (!flagged.IsActive)
         {
@@ -1191,7 +1287,7 @@ public static class ContactBindingDecision
                     ? links.Count > 0
                     : links.Any(r => r.Oid != party.Oid),
             IdentityCollisionReason.InviteMatchesWorkforceContact
-                => (binding.Kind == BindingKind.Bound && binding.Plane == IdentityPlaneMarker.Workforce)
+                => (binding.Kind == BindingKind.Bound && IsWorkforcePlane(binding.Plane))
                    || links.Count > 0,
             // Re-decided per systemuser by the job's first pass. Reaching here means that systemuser was not
             // re-decided this run (disabled, removed, or out of scope) — the collision has no live party.
@@ -1218,6 +1314,7 @@ public static class ContactBindingDecision
         IdentityCollisionReason.GuestLinkUnverified => DenyGuestLinkUnverified,
         IdentityCollisionReason.InviteMatchesWorkforceContact => InviteWorkforceBoundContact,
         IdentityCollisionReason.KeyMirrorConflict => DenyContactKeyConflict,
+        IdentityCollisionReason.InactiveContactEmailMatch => DenyContactInactiveEmailMatch,
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Every collision reason needs its own code."),
     };
 
@@ -1345,11 +1442,10 @@ public static class ContactBindingDecision
 
     /// <summary>
     /// The <c>sprk_identityplane</c> option value WorkforceHome (task 044): a contact bound to an oid from a customer's
-    /// home directory. A raw value, not an <see cref="IdentityPlaneMarker"/> member, so <see cref="ReadBinding"/> and every
-    /// Spaarke-tenant and CIAM path keep reading it exactly as before (an unknown marker: Unreadable). Only
-    /// <see cref="DecideHomeContact"/> matches on it.
+    /// home directory. Task 047 made it the <see cref="IdentityPlaneMarker.WorkforceHome"/> member (046 matched it as a raw
+    /// value only); <see cref="DecideHomeContact"/> still matches on the raw value.
     /// </summary>
-    public const int WorkforceHomePlaneValue = 100000002;
+    public const int WorkforceHomePlaneValue = (int)IdentityPlaneMarker.WorkforceHome;
 
     /// <summary><c>contact.sprk_externaltenantid</c> — the home directory of a WorkforceHome contact. FIELD-SECURED (task 044).</summary>
     public const string ExternalTenantIdColumn = "sprk_externaltenantid";
@@ -1451,6 +1547,138 @@ public static class ContactBindingDecision
 
         return null;
     }
+
+    /// <summary>
+    /// Design §6 step 2 (owner 2026-10-15): is <paramref name="email"/> an ENABLED systemuser's <c>internalemailaddress</c> OR
+    /// <c>domainname</c>, compared case-insensitively? Pure. The store's filter bounds the volume; this re-checks every row,
+    /// so a disabled user, or a row the filter should not have returned, never counts. A failed read is
+    /// <see cref="LicensedUserEmailOutcome.Unknown"/> (deny): a licensed user must never be registered as a contact because a
+    /// read failed.
+    /// </summary>
+    public static LicensedUserEmailOutcome DecideLicensedUserEmail(SystemUserEmailLookup lookup, string email)
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+
+        if (lookup.Status != LookupStatus.Read)
+        {
+            return LicensedUserEmailOutcome.Unknown;
+        }
+
+        var wanted = email.Trim();
+        return lookup.Rows.Any(r => r.SystemUserId != Guid.Empty
+                                    && r.IsDisabled == false
+                                    && (SameEmail(r.InternalEmail, wanted) || SameEmail(r.DomainName, wanted)))
+            ? LicensedUserEmailOutcome.LicensedUser
+            : LicensedUserEmailOutcome.NotLicensed;
+    }
+
+    /// <summary>
+    /// Design §4 "Registering to an existing contact" / §6 step 3: what the token email's ACTIVE contacts allow. Pure.
+    /// <list type="bullet">
+    ///   <item>No match → <see cref="RegistrationEmailAction.Create"/>.</item>
+    ///   <item>Several matches → <see cref="RegistrationEmailAction.Conflict"/> over all of them, reason
+    ///   <see cref="IdentityCollisionReason.EmailAmbiguous"/>.</item>
+    ///   <item>One match bound to <paramref name="callerOid"/> → <see cref="RegistrationEmailAction.AlreadyBoundToCaller"/>
+    ///   (a concurrent registration bound or created it; the caller re-reads and never writes).</item>
+    ///   <item>One match that is bound to anyone else, on any plane (External included), or whose binding cannot be read →
+    ///   <see cref="RegistrationEmailAction.Conflict"/> by its cause: <see cref="IdentityCollisionReason.BoundToDifferentOid"/>
+    ///   or <see cref="IdentityCollisionReason.BindingUnreadable"/>.</item>
+    ///   <item>One unbound match → <see cref="RegistrationEmailAction.NeedReferenceLookup"/>, then
+    ///   <see cref="RegistrationEmailAction.Conflict"/> when ANY systemuser links it (E10: binding would merge two people),
+    ///   (<see cref="IdentityCollisionReason.LinkedToOtherUser"/>), else <see cref="RegistrationEmailAction.BindExisting"/>.</item>
+    ///   <item>A read that failed → <see cref="RegistrationEmailAction.Deny"/>.</item>
+    /// </list>
+    /// </summary>
+    public static RegistrationEmailDecision DecideRegistrationEmail(
+        ContactLookup emailLookup, Guid callerOid, ReferenceLookup? references = null)
+    {
+        ArgumentNullException.ThrowIfNull(emailLookup);
+
+        if (emailLookup.Status != LookupStatus.Read)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, DenyCode: LookupDenyCode(emailLookup.Status));
+        }
+
+        var rows = emailLookup.Rows.Where(r => r.IsActive && r.ContactId != Guid.Empty).ToList();
+        if (rows.Count == 0)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Create);
+        }
+
+        if (rows.Count > 1)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
+                FlagContactIds: rows.Select(r => r.ContactId).Distinct().ToList(),
+                FlagReason: IdentityCollisionReason.EmailAmbiguous);
+        }
+
+        var row = rows[0];
+        var binding = row.Binding;
+        if (binding.Kind == BindingKind.Bound && callerOid != Guid.Empty && binding.Oid == callerOid)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.AlreadyBoundToCaller, row.ContactId);
+        }
+
+        if (binding.Kind != BindingKind.Unbound)
+        {
+            // Flagged by CAUSE (not EmailAmbiguous): CollisionStillHolds keeps EmailAmbiguous only while 2+ active
+            // contacts carry the email, so a single match flagged EmailAmbiguous would be cleared by the next
+            // reconciliation run although nothing changed.
+            return new RegistrationEmailDecision(RegistrationEmailAction.Conflict, row.ContactId,
+                FlagContactIds: new[] { row.ContactId },
+                FlagReason: binding.Kind == BindingKind.Bound
+                    ? IdentityCollisionReason.BoundToDifferentOid
+                    : IdentityCollisionReason.BindingUnreadable);
+        }
+
+        if (references is null)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.NeedReferenceLookup, row.ContactId);
+        }
+
+        if (references.Status != LookupStatus.Read)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, row.ContactId,
+                DenyCode: LookupDenyCode(references.Status));
+        }
+
+        return references.References.Any(r => r.LinkedContactId == row.ContactId)
+            ? new RegistrationEmailDecision(RegistrationEmailAction.Conflict, row.ContactId,
+                FlagContactIds: new[] { row.ContactId }, FlagReason: IdentityCollisionReason.LinkedToOtherUser)
+            : new RegistrationEmailDecision(RegistrationEmailAction.BindExisting, row.ContactId);
+    }
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2; owner 2026-10-15 "Refuse, flag for admin"): consulted ONLY when
+    /// <see cref="DecideRegistrationEmail"/> found NO active match (<see cref="RegistrationEmailAction.Create"/>). An INACTIVE
+    /// contact carrying the email refuses the registration: <see cref="RegistrationEmailAction.Conflict"/> over every
+    /// inactive match, reason <see cref="IdentityCollisionReason.InactiveContactEmailMatch"/>. None → create as before.
+    /// A read that failed denies (a create is never reached when an inactive match cannot be ruled out). Pure.
+    /// </summary>
+    public static RegistrationEmailDecision DecideInactiveRegistrationEmail(ContactLookup inactiveLookup)
+    {
+        ArgumentNullException.ThrowIfNull(inactiveLookup);
+
+        if (inactiveLookup.Status != LookupStatus.Read)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, DenyCode: LookupDenyCode(inactiveLookup.Status));
+        }
+
+        var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
+        return rows.Count == 0
+            ? new RegistrationEmailDecision(RegistrationEmailAction.Create)
+            : new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
+                FlagContactIds: rows.Select(r => r.ContactId).Distinct().ToList(),
+                FlagReason: IdentityCollisionReason.InactiveContactEmailMatch);
+    }
+
+    /// <summary>The two workforce planes (Spaarke-tenant and customer home directory): an employee's sign-in, not a CIAM account.</summary>
+    private static bool IsWorkforcePlane(IdentityPlaneMarker? plane)
+        => plane is IdentityPlaneMarker.Workforce or IdentityPlaneMarker.WorkforceHome;
+
+    private static bool SameEmail(string? stored, string wanted)
+        => !string.IsNullOrWhiteSpace(stored) && string.Equals(stored.Trim(), wanted, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>True when <paramref name="raw"/> is a non-zero GUID equal to <paramref name="expected"/> (compared parsed, not as text).</summary>
     private static bool IsGuid(string? raw, Guid expected)
