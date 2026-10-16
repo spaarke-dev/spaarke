@@ -14,10 +14,14 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 using Xunit;
 
@@ -581,13 +585,271 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         Regex.Matches(stamp.Value, @"\[""").Should().HaveCount(1, "the stamp's payload has exactly one member");
 
         var outside = source.Remove(stamp.Index, stamp.Length);
-        foreach (Match call in Regex.Matches(outside, @"_user\.PatchAsync\(\s*([^,]+),"))
+        foreach (System.Text.RegularExpressions.Match call in Regex.Matches(outside, @"_user\.PatchAsync\(\s*([^,]+),"))
         {
             call.Groups[1].Value.Should().StartWith("$\"{PolicyEntitySet}(", "outside the stamp, only policy rows are patched");
         }
 
         Regex.Matches(outside, @"_user\.PatchAsync\(").Should().HaveCount(2, "the save's pointer and the publish's pointer");
         source.Should().NotContain("DeleteAsync(");
+    }
+
+    // ── Fix round 1: the dry run's privilege gate (F1-1) ─────────────────────────────────────────────────────────
+
+    private static string PrivilegeRequest(Guid caller) => $"GET systemusers({caller:D}){AuthoringWorld.PrivilegePathSuffix}";
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DryRun_AsAConsoleUser_WithoutTheAuthoringPrivilege_Is403_AndNothingIsReadOrEvaluated(bool existingPolicy)
+    {
+        // A dry run writes nothing, so Dataverse checks no role on it: without this gate any signed-in user could run any body through
+        // the evaluator, one bit of rows they cannot read per request.
+        var w = _fixture.World;
+        w.HoldsAuthoringPrivilege = false;
+        _fixture.Engine.Hits = [Hit(MatterA, "Alpha")];
+
+        var response = existingPolicy ? await DryRun(PolicyId) : await DryRun(null, lane: "Decide");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.forbidden");
+        _fixture.Engine.Evaluated.Should().BeEmpty("the evaluator is never called for a caller without the privilege");
+        w.Requests.Should().Equal(new[] { "GET WhoAmI()", PrivilegeRequest(w.Caller) },
+            "the privilege is asked as the caller, about the id WhoAmI returned, before anything else is read");
+        w.Writes.Should().BeEmpty();
+
+        // And no proof was recorded: the save that would follow is refused.
+        var save = await Save();
+        save.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(save)).Should().Be("ontology.admin.dry_run_required");
+        w.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(DataverseUserClientErrorCodes.ServiceError, HttpStatusCode.ServiceUnavailable, "ontology.admin.unavailable")]
+    [InlineData(DataverseUserClientErrorCodes.OboExchangeFailed, HttpStatusCode.Forbidden, "sdap.access.deny.caller_unresolved")]
+    [InlineData(DataverseUserClientErrorCodes.AccessDenied, HttpStatusCode.Forbidden, "ontology.admin.forbidden")]
+    public async Task DryRun_WhenThePrivilegeCannotBeRead_FailsClosed_AndNothingIsEvaluated(string error, HttpStatusCode expected, string reason)
+    {
+        _fixture.World.PrivilegeError = error;
+
+        var response = await DryRun(PolicyId);
+
+        response.StatusCode.Should().Be(expected);
+        (await ReasonOf(response)).Should().Be(reason);
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DryRun_AsksThePrivilegeFresh_OnEveryRequest()
+    {
+        var w = _fixture.World;
+
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        w.HoldsAuthoringPrivilege = false; // the role was removed between two requests
+        var third = await DryRun(PolicyId);
+
+        third.StatusCode.Should().Be(HttpStatusCode.Forbidden, "no earlier answer is reused");
+        w.Requests.Count(r => r == PrivilegeRequest(w.Caller)).Should().Be(3);
+        _fixture.Engine.Evaluated.Should().HaveCount(2);
+    }
+
+    // ── Fix round 1: the dry run refuses a subject the save would refuse (K5) ─────────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_budget")]
+    [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_memo")]
+    public async Task DryRun_ANewRuleAboutATableWithNoPolicySubjectType_Is400_AndIsNotEvaluated(string subject)
+    {
+        var body = """{"type":"Existence","subject":"@S","when":{"statecode":0},"all":[]}""".Replace("@S", subject, StringComparison.Ordinal);
+        _fixture.Services.GetRequiredService<PolicyVersionValidator>().ValidateForSave("Existence", body, Template).IsValid
+            .Should().BeTrue("the body itself compiles; only the policy subject type is missing");
+
+        var response = await DryRun(null, body, lane: "Decide");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await Json(response)).GetProperty("errors").GetProperty("ruleBody")[0].GetString().Should().Contain("no policy subject type");
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+    }
+
+    // ── Fix round 1: the proof (F3-5, K2) ───────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Publish_AnotherCallersDryRun_IsNotAProof_409()
+    {
+        var w = _fixture.World;
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK, "user A ran the exact body");
+
+        w.Caller = Guid.NewGuid(); // user B, same tenant, same body
+        using var userB = _fixture.ClientFor("oid-" + w.Caller.ToString("N"));
+        var response = await userB.PostAsJsonAsync($"{Root}/policies/{PolicyId:D}/versions", new { draft = Draft() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(response)).Should().Be("ontology.admin.dry_run_required");
+        w.Writes.Should().BeEmpty();
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Save_ADryRunInTheOtherLane_IsNotAProof_409()
+    {
+        (await DryRun(null, lane: "Do")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var response = await Save(lane: "Decide");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(response)).Should().Be("ontology.admin.dry_run_required");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ProofKey_BindsTheLane()
+    {
+        var caller = Guid.NewGuid();
+        OntologyAdminAuthoringService.ProofKey(caller, null, DecisionLane.Decide, "Existence", Body, Template)
+            .Should().NotBe(OntologyAdminAuthoringService.ProofKey(caller, null, DecisionLane.Do, "Existence", Body, Template));
+    }
+
+    [Fact]
+    public async Task DryRun_WhenTheProofCacheThrows_RecordedIsFalse_AndPublishIs409()
+    {
+        // Service level: the proof store is the only thing substituted (a cache that throws on every call).
+        var w = _fixture.World;
+        var cache = new Mock<ITenantCache>(MockBehavior.Strict);
+        cache.Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(),
+                It.IsAny<TimeSpan?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("redis is down"));
+        cache.Setup(c => c.GetAsync<DateTimeOffset?>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("redis is down"));
+        var service = new OntologyAdminAuthoringService(w, _fixture.Services.GetRequiredService<PolicyVersionValidator>(), _fixture.Engine,
+            cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("oid", "oid-" + w.Caller.ToString("N")), new Claim("tid", WorkspaceTestConstants.TestTenantId)], "test"));
+
+        var dryRun = await service.DryRunAsync(principal, new OntologyDryRunRequest(PolicyId, null, "Existence", Body, Template), CancellationToken.None);
+
+        dryRun.Outcome.Should().Be(OntologyAdminAuthoringOutcome.Ok);
+        dryRun.Value!.Recorded.Should().BeFalse("the proof could not be stored, and the dry run says so");
+
+        var publish = await service.PublishVersionAsync(principal, PolicyId,
+            new OntologyPublishRequest(new OntologyRuleDraft("Existence", Body, Template, "Needs a look", "Review the matter", DecidePlan)),
+            CancellationToken.None);
+
+        publish.Outcome.Should().Be(OntologyAdminAuthoringOutcome.Conflict);
+        publish.ReasonCode.Should().Be("ontology.admin.dry_run_required", "an unreadable proof is no proof (fail closed)");
+        w.Writes.Should().BeEmpty();
+    }
+
+    // ── Fix round 1: a publish whose answer is lost (F2-2, F2-3) ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Publish_WhenThePointerMoveTimesOut_AndDidNotLand_Compensates_And503()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.FailWrite = ("PATCH", $"sprk_policies({PolicyId:D})", false, true);
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var w = _fixture.World;
+        w.Policies[PolicyId].Current.Should().Be(V1, "the pointer never moved");
+        w.Versions[V1].InForceTo.Should().BeNull("our end stamp on the current version is undone (EventId 50309)");
+        w.Versions.Values.Single(v => v.Number == 2).InForceTo.Should().NotBeNull("the version that never became current is ended");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+        AssertVersionPatchesTouchOnlyInForceTo();
+    }
+
+    [Fact]
+    public async Task Publish_WhenThePointerMoveAnswers5xxButLanded_IsASuccess_AndNothingIsCompensated()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.FailWrite = ("PATCH", $"sprk_policies({PolicyId:D})", true, false);
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var newVersion = (await Json(response)).GetProperty("policyVersionId").GetGuid();
+        var w = _fixture.World;
+        w.Policies[PolicyId].Current.Should().Be(newVersion);
+        w.Versions[newVersion].InForceTo.Should().BeNull("the version that IS current is never stamped");
+        w.Versions[V1].InForceTo.Should().NotBeNull("the old version stays ended");
+        _fixture.Engine.ReevaluateCalls.Should().ContainSingle().Which.Should().Be((PolicyId, newVersion), "step 4 runs");
+        AssertVersionPatchesTouchOnlyInForceTo();
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheOldVersionsStampAnswers5xxButLanded_Continues_AndIs200()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.FailWrite = ("PATCH", $"sprk_policyversions({V1:D})", true, false);
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var newVersion = (await Json(response)).GetProperty("policyVersionId").GetGuid();
+        var w = _fixture.World;
+        w.Policies[PolicyId].Current.Should().Be(newVersion);
+        w.Versions[newVersion].InForceTo.Should().BeNull();
+        w.Versions[V1].InForceTo.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheOldVersionsStampAnswers5xxAndDidNotLand_Compensates_And503()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.FailWrite = ("PATCH", $"sprk_policyversions({V1:D})", false, false);
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var w = _fixture.World;
+        w.Policies[PolicyId].Current.Should().Be(V1);
+        w.Versions[V1].InForceTo.Should().BeNull();
+        w.Versions.Values.Single(v => v.Number == 2).InForceTo.Should().NotBeNull();
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheRequestIsAbandonedAfterTheVersionIsCreated_StillCompletes()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Engine.Result = new PolicyReevaluationResult(true, SupersededClosed: 1, Raised: 1, FailureSummary: string.Empty);
+        _fixture.World.AbortAfter = "POST sprk_policyversions";
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var w = _fixture.World;
+        w.Aborted.Should().BeTrue("the request's token was dead from step 2 on");
+        var created = w.Versions.Single(v => v.Value.Number == 2);
+        w.Policies[PolicyId].Current.Should().Be(created.Key, "steps 2 and 3 ran on CancellationToken.None");
+        w.Versions[V1].InForceTo.Should().NotBeNull();
+        created.Value.InForceTo.Should().BeNull();
+        _fixture.Engine.ReevaluateCalls.Should().ContainSingle("step 4 ran on CancellationToken.None");
+    }
+
+    // ── Fix round 1: a save whose pointer write fails names the orphaned policy (K6) ─────────────────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Save_WhenThePointerCannotBeSet_Is503_WithTheOrphanedPolicyId(bool @throw)
+    {
+        (await DryRun(null, lane: "Decide")).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.FailWrite = ("PATCH", "sprk_policies(", false, @throw);
+
+        var response = await Save();
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        var created = _fixture.World.Writes.Should().ContainSingle().Subject;
+        created.Kind.Should().Be("POST sprk_policies");
+        var orphan = Guid.Parse(created.Json.GetProperty("sprk_policyid").GetString()!);
+        (await Json(response)).GetProperty("policyId").GetGuid().Should().Be(orphan, "the client recovers by publishing a version of it");
+        _fixture.World.Policies[orphan].Current.Should().BeNull();
     }
 
     // ── Authorization (NFR-10, D-29) ──────────────────────────────────────────────────────────────────────────────
@@ -745,6 +1007,11 @@ public sealed class RecordingEngine : IOntologyAdminAuthoringSignalEngine
 
     public Task<PolicyReevaluationResult> ReevaluateAsync(Guid policyId, CancellationToken ct)
     {
+        if (World is { Aborted: true } && ct.CanBeCanceled)
+        {
+            throw new TaskCanceledException("The request was aborted.");
+        }
+
         ReevaluateCalls.Enqueue((policyId, World?.Policies.TryGetValue(policyId, out var p) == true ? p.Current : null));
         return Task.FromResult(Result);
     }
@@ -787,6 +1054,22 @@ public sealed class AuthoringWorld : IDataverseUserClient
     public string? WhoAmIError { get; set; }
     public bool RefuseWrites { get; set; }
 
+    /// <summary>Whether the caller holds prvCreatesprk_PolicyVersion (an Ontology Administrator) or not (a Console User).</summary>
+    public bool HoldsAuthoringPrivilege { get; set; } = true;
+
+    /// <summary>When set, the privilege function fails with this error code.</summary>
+    public string? PrivilegeError { get; set; }
+
+    /// <summary>A write that fails: <c>Land</c> applies it first (the answer is lost, not the write); <c>Throw</c> throws a
+    /// transport timeout (<see cref="TaskCanceledException"/>, which the production client does not catch) instead of a 500.</summary>
+    public (string Method, string PathPrefix, bool Land, bool Throw)? FailWrite { get; set; }
+
+    /// <summary>The request is abandoned right after this write ("POST sprk_policyversions"): from then on every call made with a
+    /// cancellable token throws, as the production client does once the request's token is cancelled.</summary>
+    public string? AbortAfter { get; set; }
+
+    public bool Aborted { get; private set; }
+
     /// <summary>A concurrent writer: bumps the row version of the named target just before this write lands (so it answers 412).</summary>
     public (string Method, string Path)? BumpBeforeWrite { get; set; }
 
@@ -802,6 +1085,11 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Caller = Guid.Empty;
         WhoAmIError = null;
         RefuseWrites = false;
+        HoldsAuthoringPrivilege = true;
+        PrivilegeError = null;
+        FailWrite = null;
+        AbortAfter = null;
+        Aborted = false;
         BumpBeforeWrite = null;
         Policies.Clear();
         Versions.Clear();
@@ -833,16 +1121,68 @@ public sealed class AuthoringWorld : IDataverseUserClient
     private static Task<DataverseUserResponse> Precondition() =>
         Task.FromResult(DataverseUserResponse.Fail(412, DataverseUserClientErrorCodes.BadRequest, "The version of the existing record doesn't match."));
 
+    public const string PrivilegePathSuffix =
+        "/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName(PrivilegeName='prvCreatesprk_PolicyVersion')";
+
+    private void ThrowIfAborted(CancellationToken cancellationToken)
+    {
+        if (Aborted && cancellationToken.CanBeCanceled)
+        {
+            throw new TaskCanceledException("The request was aborted.");
+        }
+    }
+
+    /// <summary>The configured failure for this write, if any: null to proceed, otherwise the answer (or a throw).</summary>
+    private bool TryFail(string kind, out (bool Land, bool Throw) failure)
+    {
+        failure = default;
+        if (FailWrite is { } f && kind.StartsWith(f.Method + " " + f.PathPrefix, StringComparison.Ordinal))
+        {
+            FailWrite = null;
+            failure = (f.Land, f.Throw);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static Task<DataverseUserResponse> FailedAnswer(bool @throw) =>
+        @throw
+            ? throw new TaskCanceledException("The request timed out.")
+            : Task.FromResult(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Generic SQL error."));
+
     public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
     {
         lock (this)
         {
+            ThrowIfAborted(cancellationToken);
             Requests.Add("GET " + relativePath);
             if (relativePath == "WhoAmI()")
             {
                 return WhoAmIError is { } error
                     ? Task.FromResult(DataverseUserResponse.Fail(500, error, error))
                     : Ok(new { UserId = Caller.ToString("D") });
+            }
+
+            if (relativePath.EndsWith(PrivilegePathSuffix, StringComparison.Ordinal))
+            {
+                if (relativePath != $"systemusers({Caller:D}){PrivilegePathSuffix}")
+                {
+                    throw new InvalidOperationException($"The privilege was asked about someone other than the caller: {relativePath}");
+                }
+
+                if (PrivilegeError is { } privilegeError)
+                {
+                    return Task.FromResult(DataverseUserResponse.Fail(
+                        privilegeError == DataverseUserClientErrorCodes.AccessDenied ? 403 : 500, privilegeError, privilegeError));
+                }
+
+                return Ok(new
+                {
+                    RolePrivileges = HoldsAuthoringPrivilege
+                        ? new object[] { new { Depth = "Global", PrivilegeId = Guid.NewGuid().ToString("D"), BusinessUnitId = Guid.NewGuid().ToString("D"), PrivilegeName = "prvCreatesprk_PolicyVersion" } }
+                        : Array.Empty<object>(),
+                });
             }
 
             if (relativePath.StartsWith("sprk_triagecategories?", StringComparison.Ordinal))
@@ -947,8 +1287,28 @@ public sealed class AuthoringWorld : IDataverseUserClient
     {
         lock (this)
         {
+            ThrowIfAborted(cancellationToken);
             Requests.Add("POST " + absoluteApiPath);
             if (RefuseWrites) return Refused();
+            var kind = "POST " + absoluteApiPath["/api/data/v9.2/".Length..];
+            if (TryFail(kind, out var failure) && !failure.Land)
+            {
+                return FailedAnswer(failure.Throw);
+            }
+
+            var answer = Create(absoluteApiPath, jsonBody);
+            if (AbortAfter == kind)
+            {
+                Aborted = true;
+            }
+
+            return failure.Land ? FailedAnswer(failure.Throw) : answer;
+        }
+    }
+
+    private Task<DataverseUserResponse> Create(string absoluteApiPath, string jsonBody)
+    {
+        {
             using var doc = JsonDocument.Parse(jsonBody);
             var json = doc.RootElement.Clone();
             switch (absoluteApiPath)
@@ -985,17 +1345,36 @@ public sealed class AuthoringWorld : IDataverseUserClient
         PostAsync(absoluteApiPath, jsonBody, cancellationToken);
 
     public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
-        Patch(relativePath, jsonBody, null);
+        Patch(relativePath, jsonBody, null, cancellationToken);
 
     public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
-        Patch(relativePath, jsonBody, expectedVersion);
+        Patch(relativePath, jsonBody, expectedVersion, cancellationToken);
 
-    private Task<DataverseUserResponse> Patch(string relativePath, string jsonBody, long? expected)
+    private Task<DataverseUserResponse> Patch(string relativePath, string jsonBody, long? expected, CancellationToken cancellationToken)
     {
         lock (this)
         {
+            ThrowIfAborted(cancellationToken);
             Requests.Add("PATCH " + relativePath);
             if (RefuseWrites) return Refused();
+            if (TryFail("PATCH " + relativePath, out var failure))
+            {
+                if (!failure.Land)
+                {
+                    return FailedAnswer(failure.Throw);
+                }
+
+                var landed = Update(relativePath, jsonBody, expected);
+                return landed.Result.IsSuccess ? FailedAnswer(failure.Throw) : landed;
+            }
+
+            return Update(relativePath, jsonBody, expected);
+        }
+    }
+
+    private Task<DataverseUserResponse> Update(string relativePath, string jsonBody, long? expected)
+    {
+        {
             using var doc = JsonDocument.Parse(jsonBody);
             var json = doc.RootElement.Clone();
             var id = Guid.Parse(Regex.Match(relativePath, "[0-9a-f-]{36}").Value);

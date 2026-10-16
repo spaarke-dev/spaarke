@@ -1835,28 +1835,32 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/ontology/admin/authoring/catalog", "GetCatalogAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.GetCatalogAsync" },
             "Ontology task 101: the handler's only I/O is OntologyAdminAuthoringService.GetCatalogAsync (OntologyAdminAuthoringEndpoints.cs:68), "
-            + "which resolves the caller with WhoAmI AS THE CALLER (OntologyAdminAuthoringService.cs:174, :1170; unresolved: the single 403) "
-            + "and reads the triage categories AS THE CALLER (:237). The rest of the catalog is the compiler's static lists; no id is taken."),
+            + "which resolves the caller with WhoAmI AS THE CALLER (OntologyAdminAuthoringService.cs:189, :1362; unresolved: the single 403) "
+            + "and reads the triage categories AS THE CALLER (:253). The rest of the catalog is the compiler's static lists; no id is taken. "
+            + "Not privilege-gated (fix round 1, F1-1): it evaluates nothing and shows only static lists and the caller's own read."),
         new HandlerDecision("POST /api/v1/ontology/admin/authoring/dry-run", "DryRunAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.DryRunAsync" },
             "Ontology task 101 (#39): the handler's only I/O is OntologyAdminAuthoringService.DryRunAsync (OntologyAdminAuthoringEndpoints.cs:72). "
-            + "WhoAmI as the caller first (:279); a body policyId is read AS THE CALLER through the Ontology domain allow-list (:302, :1191; "
-            + "absent, unreadable or non-Ontology: the uniform 404) before anything is evaluated. The draft is evaluated as the EVALUATOR (writes "
-            + "nothing, :331), then every hit's subject and core record are re-read AS THE CALLER (:449, :465) and a row is returned only when "
-            + "both come back; the policy's Signals are read AS THE CALLER (:516). Nothing the caller cannot read is returned or counted."),
+            + "WhoAmI as the caller first (:294); then, because a dry run writes nothing and so Dataverse checks no role on it, the caller's "
+            + "prvCreatesprk_PolicyVersion is asked FRESH, AS THE CALLER, on every request (:301, :1387; RetrieveUserPrivilegeByPrivilegeName "
+            + "bound to the WhoAmI id; not held: 403 ontology.admin.forbidden with nothing read or evaluated; fault: 503; never the capability "
+            + "probe's answer). A body policyId is read AS THE CALLER through the Ontology domain allow-list (:323, :1427; absent, unreadable or "
+            + "non-Ontology: the uniform 404) before anything is evaluated. The draft is evaluated as the EVALUATOR (writes nothing, :358), then "
+            + "every hit's subject and core record are re-read AS THE CALLER (:476, :493) and a row is returned only when both come back; the "
+            + "policy's Signals are read AS THE CALLER (:544). Nothing the caller cannot read is returned or counted."),
         new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies", "SavePolicyAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.SavePolicyAsync" },
             "Ontology task 101 (FR-10): the handler's only I/O is OntologyAdminAuthoringService.SavePolicyAsync (OntologyAdminAuthoringEndpoints.cs:77). "
-            + "WhoAmI as the caller first (:634); then validation and the dry-run proof, then the policy (Off, Ontology domain) and its first "
-            + "version are created AS THE CALLER in one deep insert (:744) and the pointer set AS THE CALLER (:757): Dataverse enforces the "
+            + "WhoAmI as the caller first (:661); then validation and the dry-run proof, then the policy (Off, Ontology domain) and its first "
+            + "version are created AS THE CALLER in one deep insert (:771) and the pointer set AS THE CALLER (:789): Dataverse enforces the "
             + "Spaarke Ontology Administrator role (refused: 403, nothing written). Takes no id."),
         new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies/{policyId:guid}/versions", "PublishVersionAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.PublishVersionAsync" },
             "Ontology task 101 (D-13, D-14): the handler's only I/O is OntologyAdminAuthoringService.PublishVersionAsync "
-            + "(OntologyAdminAuthoringEndpoints.cs:85). WhoAmI as the caller first (:790); the route's policyId is read AS THE CALLER through "
-            + "the Ontology domain allow-list (:808, :1191) before ANY write (absent, unreadable or non-Ontology: the uniform 404, zero writes). "
-            + "The version create (:861), the old version's sprk_inforceto stamp (:873, the only PATCH of a version, :947-948) and the pointer "
-            + "move (:884) all run AS THE CALLER, row-version conditional; only then is the job's single-policy pass run as the evaluator (:909)."),
+            + "(OntologyAdminAuthoringEndpoints.cs:85). WhoAmI as the caller first (:831); the route's policyId is read AS THE CALLER through "
+            + "the Ontology domain allow-list (:849, :1427) before ANY write (absent, unreadable or non-Ontology: the uniform 404, zero writes). "
+            + "The version create (:902), the old version's sprk_inforceto stamp (:987, the only PATCH of a version, :967-968) and the pointer "
+            + "move (:1008) all run AS THE CALLER, row-version conditional; only then is the job's single-policy pass run as the evaluator (:929)."),
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:59). It resolves the caller "

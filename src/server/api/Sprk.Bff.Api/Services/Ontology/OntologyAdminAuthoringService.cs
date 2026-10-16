@@ -29,14 +29,21 @@ namespace Sprk.Bff.Api.Services.Ontology;
 /// re-read as the caller (its subject and its core record) and dropped unless both come back, so the dry run never shows, names or
 /// counts a row the caller cannot read. The publish then hands only a policy id the caller's read admitted to the job's single-policy
 /// pass (task 033), which writes Signals as the writer identity (ADR-028 path A).</para>
+/// <para><b>The dry run's own gate (F1-1).</b> A dry run writes nothing, so Dataverse never checks the role on it; ungated, any
+/// signed-in user could make the evaluator run any body (a one-bit-per-request oracle over rows they cannot read). So the dry run
+/// first asks Dataverse, AS THE CALLER and fresh on every request, whether the caller holds <see cref="AuthoringPrivilegeName"/>
+/// (<see cref="CheckAuthoringPrivilegeAsync"/>): not held is 403 <see cref="ReasonForbidden"/> with nothing evaluated, an unresolved
+/// caller the single 403, a fault 503. This is its own check, never the capability probe's answer (task 104, D-22: display only).
+/// The catalog is not gated: it is the compiler's static lists plus the triage categories the caller's own read returns.</para>
 /// <para><b>Immutability (D-14).</b> No route updates a version's body, type, template or plan: the only write to an existing
 /// <c>sprk_policyversion</c> is <see cref="StampInForceToAsync"/>, whose JSON holds <c>sprk_inforceto</c> and nothing else.</para>
 /// <para><b>Publish order (task 033 contract).</b> Create the new version, stamp the OLD version's <c>sprk_inforceto</c>, move
 /// <c>sprk_currentversion</c>, then <see cref="SignalReevaluationJob.ReevaluatePolicyAsync"/> once and check its Success. The stamp and
 /// the pointer move are conditional on the row versions read first, so a concurrent publish or edit is refused (409), and a failed
 /// pointer move is compensated (the old stamp undone, the new version marked never in force) so no current version is left stamped.</para>
-/// <para><b>Dry run before publish (v4).</b> A dry run records, per caller and per policy, a SHA-256 of the exact rule type, body and
-/// template it ran; save and publish refuse a body without one (409). Any edit changes the hash.</para>
+/// <para><b>Dry run before publish (v4).</b> A dry run records, per caller and per policy, a SHA-256 of the exact lane, rule type, body
+/// and template it ran; save and publish refuse a body without one (409). Any edit changes the hash. The proof binds the BODY, not
+/// the data: it says this caller ran this exact rule, not that the data is unchanged since (K1).</para>
 /// <para><b>Domain (ebilling-r1 task 070, #1911).</b> Every read of <c>sprk_policy</c> carries the Ontology domain condition
 /// (<see cref="OntologyDomain"/>), checked before any write, so a Billing or Docketing policy is the uniform 404 with zero writes.</para>
 /// <para>§11: <i>Existing</i> — validation (<see cref="PolicyVersionValidator.ValidateForSave"/>), plan resolution
@@ -54,6 +61,14 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string ReasonPolicyRetired = "ontology.admin.policy_retired";
     internal const string ReasonPolicyChanged = "ontology.admin.policy_changed";
     internal const string ReasonUnavailable = "ontology.admin.unavailable";
+    internal const string ReasonForbidden = "ontology.admin.forbidden";
+
+    /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
+    /// what authoring a rule means (D-22).</summary>
+    internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
+
+    /// <summary>The 400 a rule about a table with no policy subject type gets, from the dry run and from the save alike.</summary>
+    private const string NoSubjectTypeMessage = "A rule about this table cannot be saved as a policy: it has no policy subject type.";
 
     internal const string PolicyEntitySet = "sprk_policies";
     internal const string VersionEntitySet = "sprk_policyversions";
@@ -282,6 +297,12 @@ public sealed partial class OntologyAdminAuthoringService
                 return Fail<OntologyDryRunResult>(failure);
             }
 
+            // F1-1: the privilege, asked as the caller on THIS request, before anything is read or evaluated.
+            if (await CheckAuthoringPrivilegeAsync(caller.UserId, ct).ConfigureAwait(false) is { } privilegeFailure)
+            {
+                return Fail<OntologyDryRunResult>(privilegeFailure);
+            }
+
             var proofScope = ProofScope(principal, caller.UserId);
             if (proofScope is null)
             {
@@ -314,6 +335,12 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             var ruleTypeName = ValidateRule(request.RuleType, request.RuleBody, request.MessageTemplate, errors);
+            if (errors.Count == 0 && policy is null && !TrySubjectType(request.RuleBody!, out _))
+            {
+                // K5: a new rule the save would refuse for its subject is refused here, before it is evaluated.
+                errors["ruleBody"] = [NoSubjectTypeMessage];
+            }
+
             if (errors.Count > 0)
             {
                 return Invalid<OntologyDryRunResult>(errors);
@@ -357,7 +384,7 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             var result = Classify(readable.Value!, signals, lane, evaluation.QuietWindowDays, evaluation.WindowAnchorUtc, _clock.GetUtcNow().UtcDateTime);
-            var recorded = await RecordProofAsync(proofScope.Value, policy?.Id, ruleTypeName!, request.RuleBody!, request.MessageTemplate, ct)
+            var recorded = await RecordProofAsync(proofScope.Value, policy?.Id, lane, ruleTypeName!, request.RuleBody!, request.MessageTemplate, ct)
                 .ConfigureAwait(false);
 
             return new(OntologyAdminAuthoringOutcome.Ok, result with { PolicyEnabled = policy is null ? null : policy.Enabled && policy.Active, Recorded = recorded });
@@ -691,7 +718,7 @@ public sealed partial class OntologyAdminAuthoringService
             var subjectType = 0;
             if (errors.Count == 0 && !TrySubjectType(draft!.RuleBody!, out subjectType))
             {
-                errors["ruleBody"] = ["A rule about this table cannot be saved as a policy: it has no policy subject type."];
+                errors["ruleBody"] = [NoSubjectTypeMessage];
             }
 
             if (errors.Count > 0)
@@ -699,7 +726,7 @@ public sealed partial class OntologyAdminAuthoringService
                 return Invalid<OntologyPolicySaved>(errors);
             }
 
-            if (!await HasProofAsync(proofScope.Value, null, ruleTypeName!, draft!.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
+            if (!await HasProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft!.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
             {
                 return Conflict<OntologyPolicySaved>(ReasonDryRunRequired);
             }
@@ -752,18 +779,32 @@ public sealed partial class OntologyAdminAuthoringService
                 return Fail<OntologyPolicySaved>(WriteFailure(created, "policy create"));
             }
 
-            // The pointer. The policy is Off, so nothing evaluates it while this is pending; a failure leaves an Off policy whose first
-            // version exists but is not yet current, and is reported (503) rather than hidden.
-            var pointer = await _user.PatchAsync(
-                $"{PolicyEntitySet}({policyId:D})", CurrentVersionJson(versionId), ct).ConfigureAwait(false);
+            // The pointer. The policy is Off, so nothing evaluates it while this is pending. The policy now exists, so this runs to the
+            // end even if the request is abandoned (CancellationToken.None), and a failure (an answer or a throw) leaves an Off policy
+            // whose first version exists but is not yet current: reported with that policy's id (K6), so the client can recover by
+            // publishing a version of it, rather than hidden.
+            DataverseUserResponse pointer;
+            try
+            {
+                pointer = await _user.PatchAsync(
+                    $"{PolicyEntitySet}({policyId:D})", CurrentVersionJson(versionId), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ontology authoring: policy {PolicyId} was created Off but setting its current version threw ({ExceptionType}).",
+                    policyId, ex.GetType().Name);
+                return Fail<OntologyPolicySaved>(Failure.Unavailable) with { PolicyId = policyId };
+            }
+
             if (!pointer.IsSuccess)
             {
                 _logger.LogError("Ontology authoring: policy {PolicyId} was created Off but its current version could not be set ({ErrorCode}).",
                     policyId, pointer.ErrorCode);
-                return Fail<OntologyPolicySaved>(WriteFailure(pointer, "current version"));
+                return Fail<OntologyPolicySaved>(WriteFailure(pointer, "current version")) with { PolicyId = policyId };
             }
 
-            await ForgetProofAsync(proofScope.Value, null, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false);
+            await ForgetProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, CancellationToken.None)
+                .ConfigureAwait(false);
             _logger.LogInformation("Ontology authoring: policy {PolicyId} ({PolicyCode}) saved Off with version 1 {VersionId}.", policyId, code, versionId);
             return new(OntologyAdminAuthoringOutcome.Created, new OntologyPolicySaved(policyId, versionId, 1, Enabled: false));
         }
@@ -831,7 +872,7 @@ public sealed partial class OntologyAdminAuthoringService
                 return Invalid<OntologyVersionPublished>(errors);
             }
 
-            if (!await HasProofAsync(proofScope.Value, policy.Id, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
+            if (!await HasProofAsync(proofScope.Value, policy.Id, policy.Lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
             {
                 return Conflict<OntologyVersionPublished>(ReasonDryRunRequired);
             }
@@ -857,7 +898,7 @@ public sealed partial class OntologyAdminAuthoringService
             var versionId = Guid.NewGuid();
             var now = NowForDataverse();
 
-            // (1) the new version
+            // (1) the new version. Nothing is written before this, so the request's token still applies.
             var created = await _user.PostAsync(
                 ApiRoot + VersionEntitySet,
                 JsonSerializer.Serialize(VersionPayload(versionId, policy.Id, policy.Code, number, ruleTypeName!, draft, caller.UserId, now)), ct)
@@ -867,36 +908,15 @@ public sealed partial class OntologyAdminAuthoringService
                 return Fail<OntologyVersionPublished>(WriteFailure(created, "version create"));
             }
 
-            // (2) the OLD version's sprk_inforceto, conditional on the row as read (a concurrent publish stamped it: refuse)
-            if (previous is not null)
+            // From here a write has landed: steps 2 to 4 and every compensation run to the end on CancellationToken.None, so a timeout or
+            // a client disconnect can never stop the publish half way (F2-2). (2) and (3) are in StampAndMoveAsync.
+            if (await StampAndMoveAsync(policy, previous, versionId, now).ConfigureAwait(false) is { } refused)
             {
-                var stamped = await StampInForceToAsync(previous.Id, now, previous.RowVersion, ct).ConfigureAwait(false);
-                if (!stamped.IsSuccess)
-                {
-                    await RetireUnpublishedAsync(versionId, now, ct).ConfigureAwait(false);
-                    return stamped.StatusCode == 412
-                        ? Conflict<OntologyVersionPublished>(ReasonPolicyChanged)
-                        : Fail<OntologyVersionPublished>(WriteFailure(stamped, "previous version end"));
-                }
+                return refused;
             }
 
-            // (3) the pointer, conditional on the policy as read (an On/Off, Retire or another publish meanwhile: refuse and undo)
-            var moved = await _user.PatchAsync(
-                $"{PolicyEntitySet}({policy.Id:D})", CurrentVersionJson(versionId), policy.RowVersion, ct).ConfigureAwait(false);
-            if (!moved.IsSuccess)
-            {
-                if (previous is not null)
-                {
-                    await RestorePreviousAsync(previous.Id, now, ct).ConfigureAwait(false);
-                }
-
-                await RetireUnpublishedAsync(versionId, now, ct).ConfigureAwait(false);
-                return moved.StatusCode == 412
-                    ? Conflict<OntologyVersionPublished>(ReasonPolicyChanged)
-                    : Fail<OntologyVersionPublished>(WriteFailure(moved, "current version"));
-            }
-
-            await ForgetProofAsync(proofScope.Value, policy.Id, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false);
+            await ForgetProofAsync(proofScope.Value, policy.Id, policy.Lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, CancellationToken.None)
+                .ConfigureAwait(false);
 
             // (4) supersede and re-raise, as the evaluator, once (task 033 contract). Only an enabled, active policy is evaluated; an Off
             // policy has no open Signals to supersede (the nightly run closes them PolicyRetired) and is evaluated when it is turned On.
@@ -906,7 +926,7 @@ public sealed partial class OntologyAdminAuthoringService
             {
                 try
                 {
-                    var pass = await _engine.ReevaluateAsync(policy.Id, ct).ConfigureAwait(false);
+                    var pass = await _engine.ReevaluateAsync(policy.Id, CancellationToken.None).ConfigureAwait(false);
                     superseded = pass.SupersededClosed;
                     raised = pass.Raised;
                     reevaluation = pass.Success ? ReevaluationCompleted : ReevaluationFailed;
@@ -916,7 +936,7 @@ public sealed partial class OntologyAdminAuthoringService
                             "did not complete ({Summary}); the nightly run retries.", versionId, policy.Id, pass.FailureSummary);
                     }
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                catch (Exception ex)
                 {
                     reevaluation = ReevaluationFailed;
                     _logger.LogError(ex, "Ontology authoring: version {VersionId} of policy {PolicyId} is published, but the supersede pass " +
@@ -948,31 +968,200 @@ public sealed partial class OntologyAdminAuthoringService
             : _user.PatchAsync(path, json, ct);
     }
 
-    /// <summary>Compensation: a created version that never became current is marked never in force (in force to = in force from).</summary>
-    private async Task RetireUnpublishedAsync(Guid versionId, string now, CancellationToken ct)
+    /// <summary>
+    /// Steps (2) and (3) of a publish, after the new version exists, all on <see cref="CancellationToken.None"/> (F2-2): stamp the old
+    /// version's <c>sprk_inforceto</c>, then move <c>sprk_currentversion</c>, each conditional on the row as read. Returns null when the
+    /// pointer names the new version (step 4 follows), otherwise the answer to return, after compensating.
+    /// </summary>
+    /// <remarks>An answer other than 412, or a throw (a transport timeout surfaces as <see cref="TaskCanceledException"/>, which the
+    /// caller's client does not catch), says nothing about whether the write landed, so the row is re-read as the caller first (F2-3):
+    /// a write that landed is a success, never compensated, and a compensation never stamps the version that is current.</remarks>
+    private async Task<OntologyAdminAuthoringResult<OntologyVersionPublished>?> StampAndMoveAsync(
+        PolicyRow policy, VersionRow? previous, Guid versionId, string now)
     {
-        var undone = await StampInForceToAsync(versionId, now, null, ct).ConfigureAwait(false);
-        if (!undone.IsSuccess)
+        try
         {
+            // (2) the OLD version's sprk_inforceto, conditional on the row as read (a concurrent publish stamped it: refuse)
+            if (previous is not null)
+            {
+                var stamped = await StampInForceToAsync(previous.Id, now, previous.RowVersion, CancellationToken.None).ConfigureAwait(false);
+                if (!stamped.IsSuccess)
+                {
+                    if (stamped.StatusCode == 412)
+                    {
+                        await RetireUnpublishedAsync(policy.Id, versionId, now).ConfigureAwait(false);
+                        return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
+                    }
+
+                    if (!await CarriesStampAsync(previous.Id, now).ConfigureAwait(false))
+                    {
+                        await CompensateAsync(policy.Id, previous, versionId, now).ConfigureAwait(false);
+                        return Fail<OntologyVersionPublished>(WriteFailure(stamped, "previous version end"));
+                    }
+
+                    _logger.LogWarning("Ontology authoring: the end stamp of version {VersionId} was answered {ErrorCode} but landed; continuing.",
+                        previous.Id, stamped.ErrorCode);
+                }
+            }
+
+            // (3) the pointer, conditional on the policy as read (an On/Off, Retire or another publish meanwhile: refuse and undo)
+            var moved = await _user.PatchAsync(
+                $"{PolicyEntitySet}({policy.Id:D})", CurrentVersionJson(versionId), policy.RowVersion, CancellationToken.None).ConfigureAwait(false);
+            if (moved.IsSuccess)
+            {
+                return null;
+            }
+
+            if (moved.StatusCode == 412)
+            {
+                await CompensateAsync(policy.Id, previous, versionId, now).ConfigureAwait(false);
+                return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
+            }
+
+            return await SettleUnknownPointerAsync(policy.Id, previous, versionId, now, WriteFailure(moved, "current version")).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ontology authoring: publishing version {VersionId} of policy {PolicyId} threw after the version was created " +
+                "({ExceptionType}); re-reading the pointer before compensating.", versionId, policy.Id, ex.GetType().Name);
+            return await SettleUnknownPointerAsync(policy.Id, previous, versionId, now, Failure.Unavailable).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>After a step whose outcome is unknown: the pointer names the new version (it landed: null, step 4 follows), names
+    /// another version (compensate, then <paramref name="failure"/>), or cannot be read (nothing is undone on a guess: 503, logged).</summary>
+    private async Task<OntologyAdminAuthoringResult<OntologyVersionPublished>?> SettleUnknownPointerAsync(
+        Guid policyId, VersionRow? previous, Guid versionId, string now, Failure failure)
+    {
+        switch (await PointerOfAsync(policyId, versionId).ConfigureAwait(false))
+        {
+            case Pointer.New:
+                _logger.LogWarning("Ontology authoring: the pointer move of policy {PolicyId} failed to answer but landed on version {VersionId}; continuing.",
+                    policyId, versionId);
+                return null;
+            case Pointer.Other:
+                await CompensateAsync(policyId, previous, versionId, now).ConfigureAwait(false);
+                return Fail<OntologyVersionPublished>(failure);
+            default:
+                _logger.LogError("Ontology authoring: whether policy {PolicyId} now names version {VersionId} is unknown (its pointer could not be " +
+                    "re-read); nothing was undone. The nightly run reports a current version with an end stamp (EventId 50309).", policyId, versionId);
+                return Fail<OntologyVersionPublished>(Failure.Unavailable);
+        }
+    }
+
+    /// <summary>Where a policy's <c>sprk_currentversion</c> points, re-read as the caller: at the new version, at another, or unknown.</summary>
+    private enum Pointer
+    {
+        New,
+        Other,
+        Unknown,
+    }
+
+    private async Task<Pointer> PointerOfAsync(Guid policyId, Guid newVersionId)
+    {
+        try
+        {
+            var response = await _user.GetAsync(
+                $"{PolicyEntitySet}?$select=sprk_policyid,_sprk_currentversion_value&$filter=sprk_policyid eq {policyId:D}", CancellationToken.None)
+                .ConfigureAwait(false);
+            if (response.IsSuccess
+                && Rows(response.Body).FirstOrDefault(r => TryGuid(r, "sprk_policyid", out var id) && id == policyId) is { ValueKind: JsonValueKind.Object } row)
+            {
+                return TryGuid(row, "_sprk_currentversion_value", out var current) && current == newVersionId ? Pointer.New : Pointer.Other;
+            }
+
+            _logger.LogWarning("Ontology authoring: the pointer of policy {PolicyId} could not be re-read ({ErrorCode}).", policyId, response.ErrorCode ?? "no-row");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Ontology authoring: re-reading the pointer of policy {PolicyId} threw ({ExceptionType}).", policyId, ex.GetType().Name);
+        }
+
+        return Pointer.Unknown;
+    }
+
+    /// <summary>Whether the old version carries exactly the end stamp this publish wrote (re-read as the caller; unreadable is "no").</summary>
+    private async Task<bool> CarriesStampAsync(Guid previousId, string stamp)
+    {
+        try
+        {
+            var reread = await _user.GetAsync($"{VersionEntitySet}({previousId:D})?$select=sprk_inforceto,versionnumber", CancellationToken.None)
+                .ConfigureAwait(false);
+            return reread.IsSuccess && reread.Body is { } row && ReadDate(row, "sprk_inforceto") is { } inForceTo && FormatForDataverse(inForceTo) == stamp;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Ontology authoring: re-reading version {VersionId} threw ({ExceptionType}).", previousId, ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>Compensation for a publish whose pointer did not move: the old version's stamp is undone (if it is ours) and the new
+    /// version is marked never in force (if it is not current).</summary>
+    private async Task CompensateAsync(Guid policyId, VersionRow? previous, Guid versionId, string now)
+    {
+        if (previous is not null)
+        {
+            await RestorePreviousAsync(previous.Id, now).ConfigureAwait(false);
+        }
+
+        await RetireUnpublishedAsync(policyId, versionId, now).ConfigureAwait(false);
+    }
+
+    /// <summary>Compensation: a created version that never became current is marked never in force (in force to = in force from). The
+    /// pointer is re-read first, and the version that is current is NEVER stamped (F2-3), nor one whose pointer cannot be read.</summary>
+    private async Task RetireUnpublishedAsync(Guid policyId, Guid versionId, string now)
+    {
+        var pointer = await PointerOfAsync(policyId, versionId).ConfigureAwait(false);
+        if (pointer != Pointer.Other)
+        {
+            _logger.LogError("Ontology authoring: version {VersionId} was not marked never in force: the pointer of policy {PolicyId} {State}.",
+                versionId, policyId, pointer == Pointer.New ? "names it" : "could not be read");
+            return;
+        }
+
+        try
+        {
+            var undone = await StampInForceToAsync(versionId, now, null, CancellationToken.None).ConfigureAwait(false);
+            if (undone.IsSuccess)
+            {
+                return;
+            }
+
             _logger.LogError("Ontology authoring: version {VersionId} was created but not published, and could not be marked never in force ({ErrorCode}).",
                 versionId, undone.ErrorCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ontology authoring: version {VersionId} was created but not published, and marking it never in force threw ({ExceptionType}).",
+                versionId, ex.GetType().Name);
         }
     }
 
     /// <summary>Compensation: the old version's stamp is undone, but only if it is still exactly the stamp this publish wrote.</summary>
-    private async Task RestorePreviousAsync(Guid previousId, string stamp, CancellationToken ct)
+    private async Task RestorePreviousAsync(Guid previousId, string stamp)
     {
-        var reread = await _user.GetAsync($"{VersionEntitySet}({previousId:D})?$select=sprk_inforceto,versionnumber", ct).ConfigureAwait(false);
-        if (reread.IsSuccess && reread.Body is { } row
-            && ReadDate(row, "sprk_inforceto") is { } inForceTo
-            && FormatForDataverse(inForceTo) == stamp
-            && ReadLong(row, "versionnumber") is { } rowVersion)
+        try
         {
-            var restored = await StampInForceToAsync(previousId, null, rowVersion, ct).ConfigureAwait(false);
-            if (restored.IsSuccess)
+            var reread = await _user.GetAsync($"{VersionEntitySet}({previousId:D})?$select=sprk_inforceto,versionnumber", CancellationToken.None)
+                .ConfigureAwait(false);
+            if (reread.IsSuccess && reread.Body is { } row)
             {
-                return;
+                if (ReadDate(row, "sprk_inforceto") is not { } inForceTo || FormatForDataverse(inForceTo) != stamp)
+                {
+                    return; // not this publish's stamp (it never landed, or another writer's): nothing of ours to undo
+                }
+
+                if (ReadLong(row, "versionnumber") is { } rowVersion
+                    && (await StampInForceToAsync(previousId, null, rowVersion, CancellationToken.None).ConfigureAwait(false)).IsSuccess)
+                {
+                    return;
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Ontology authoring: undoing the end stamp of version {VersionId} threw ({ExceptionType}).", previousId, ex.GetType().Name);
         }
 
         _logger.LogError("Ontology authoring: the previous version {VersionId} keeps the end stamp of a publish that did not complete; " +
@@ -1085,22 +1274,24 @@ public sealed partial class OntologyAdminAuthoringService
             ? new ProofOwner(tenant, callerId)
             : null;
 
-    /// <summary>The proof's key: the caller (the Dataverse user WhoAmI named), the policy (or "new"), and a SHA-256 of the exact rule
-    /// type, body and template, length-prefixed so no two drafts share a text.</summary>
-    internal static string ProofKey(Guid callerId, Guid? policyId, string ruleType, string ruleBody, string? messageTemplate)
+    /// <summary>The proof's key: the caller (the Dataverse user WhoAmI named), the policy (or "new"), and a SHA-256 of the exact lane
+    /// (K2: a new rule dry-run in one lane is not a proof for saving it in the other), rule type, body and template, length-prefixed so
+    /// no two drafts share a text. It binds the body, not the data (K1).</summary>
+    internal static string ProofKey(Guid callerId, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? messageTemplate)
     {
         var template = messageTemplate ?? string.Empty;
         var canonical = string.Create(CultureInfo.InvariantCulture,
-            $"v1\n{ruleType}\n{ruleBody.Length}:{ruleBody}\n{template.Length}:{template}");
+            $"v2\n{(int)lane}\n{ruleType}\n{ruleBody.Length}:{ruleBody}\n{template.Length}:{template}");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         return $"{callerId:N}:{(policyId is { } p ? p.ToString("N") : "new")}:{hash}";
     }
 
-    private async Task<bool> RecordProofAsync(ProofOwner owner, Guid? policyId, string ruleType, string ruleBody, string? template, CancellationToken ct)
+    private async Task<bool> RecordProofAsync(
+        ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, CancellationToken ct)
     {
         try
         {
-            await _cache.SetAsync(owner.TenantId, DryRunProofResource, ProofKey(owner.CallerId, policyId, ruleType, ruleBody, template),
+            await _cache.SetAsync(owner.TenantId, DryRunProofResource, ProofKey(owner.CallerId, policyId, lane, ruleType, ruleBody, template),
                 DryRunProofVersion, _clock.GetUtcNow(), DryRunProofTtl, ct: ct).ConfigureAwait(false);
             return true;
         }
@@ -1112,12 +1303,13 @@ public sealed partial class OntologyAdminAuthoringService
         }
     }
 
-    private async Task<bool> HasProofAsync(ProofOwner owner, Guid? policyId, string ruleType, string ruleBody, string? template, CancellationToken ct)
+    private async Task<bool> HasProofAsync(
+        ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, CancellationToken ct)
     {
         try
         {
             var at = await _cache.GetAsync<DateTimeOffset?>(owner.TenantId, DryRunProofResource,
-                ProofKey(owner.CallerId, policyId, ruleType, ruleBody, template), DryRunProofVersion, ct: ct).ConfigureAwait(false);
+                ProofKey(owner.CallerId, policyId, lane, ruleType, ruleBody, template), DryRunProofVersion, ct: ct).ConfigureAwait(false);
             return at is not null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1128,11 +1320,12 @@ public sealed partial class OntologyAdminAuthoringService
         }
     }
 
-    private async Task ForgetProofAsync(ProofOwner owner, Guid? policyId, string ruleType, string ruleBody, string? template, CancellationToken ct)
+    private async Task ForgetProofAsync(
+        ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, CancellationToken ct)
     {
         try
         {
-            await _cache.RemoveAsync(owner.TenantId, DryRunProofResource, ProofKey(owner.CallerId, policyId, ruleType, ruleBody, template),
+            await _cache.RemoveAsync(owner.TenantId, DryRunProofResource, ProofKey(owner.CallerId, policyId, lane, ruleType, ruleBody, template),
                 DryRunProofVersion, ct: ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1149,6 +1342,7 @@ public sealed partial class OntologyAdminAuthoringService
     {
         CallerUnresolved,
         Refused,
+        Forbidden,
         NotFound,
         Unavailable,
     }
@@ -1181,6 +1375,50 @@ public sealed partial class OntologyAdminAuthoringService
 
         _logger.LogWarning("Ontology authoring: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
         return new Caller(Guid.Empty, Failure.Unavailable);
+    }
+
+    /// <summary>
+    /// F1-1: whether the caller holds <see cref="AuthoringPrivilegeName"/>, asked FRESH on this request AS THE CALLER (never cached,
+    /// never the capability probe's answer: D-22 keeps that display only). The function is bound to the id <c>WhoAmI</c> returned,
+    /// never a request value, and counts privileges held through a team's roles. Null when held; otherwise
+    /// <see cref="Failure.Forbidden"/> (not held, or Dataverse refusing to answer for the caller: fail closed), the single 403 for an
+    /// unresolved caller, or <see cref="Failure.Unavailable"/> (a fault or an unreadable answer: 503, fail closed).
+    /// </summary>
+    private async Task<Failure?> CheckAuthoringPrivilegeAsync(Guid callerId, CancellationToken ct)
+    {
+        var response = await _user.GetAsync(
+            $"systemusers({callerId:D})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName(PrivilegeName='{AuthoringPrivilegeName}')", ct)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            if (IsCallerUnresolved(response.ErrorCode)) return Failure.CallerUnresolved;
+            if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                _logger.LogInformation("Ontology authoring: Dataverse refused the caller's privilege read; forbidden.");
+                return Failure.Forbidden;
+            }
+
+            _logger.LogWarning("Ontology authoring: {Privilege} could not be read for the caller ({ErrorCode}); unavailable.",
+                AuthoringPrivilegeName, response.ErrorCode);
+            return Failure.Unavailable;
+        }
+
+        if (response.Body is not { ValueKind: JsonValueKind.Object } body
+            || !body.TryGetProperty("RolePrivileges", out var rows)
+            || rows.ValueKind != JsonValueKind.Array)
+        {
+            // A body without the array is unparseable, never "not held".
+            _logger.LogWarning("Ontology authoring: the {Privilege} answer could not be read; unavailable.", AuthoringPrivilegeName);
+            return Failure.Unavailable;
+        }
+
+        var held = rows.EnumerateArray().Any(row => string.Equals(ReadString(row, "PrivilegeName"), AuthoringPrivilegeName, StringComparison.OrdinalIgnoreCase));
+        if (!held)
+        {
+            _logger.LogInformation("Ontology authoring: the caller does not hold {Privilege}; the dry run is forbidden.", AuthoringPrivilegeName);
+        }
+
+        return held ? null : Failure.Forbidden;
     }
 
     internal sealed record PolicyRow(Guid Id, string Code, DecisionLane Lane, bool Enabled, bool Active, Guid? CurrentVersionId, long RowVersion);
@@ -1318,6 +1556,7 @@ public sealed partial class OntologyAdminAuthoringService
         {
             Failure.CallerUnresolved => new(OntologyAdminAuthoringOutcome.CallerUnresolved, ReasonCode: ReasonCallerUnresolved),
             Failure.Refused => new(OntologyAdminAuthoringOutcome.Refused, ReasonCode: ReasonRefused),
+            Failure.Forbidden => new(OntologyAdminAuthoringOutcome.Forbidden, ReasonCode: ReasonForbidden),
             Failure.NotFound => new(OntologyAdminAuthoringOutcome.NotFound, ReasonCode: ReasonNotFound),
             _ => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonUnavailable),
         };

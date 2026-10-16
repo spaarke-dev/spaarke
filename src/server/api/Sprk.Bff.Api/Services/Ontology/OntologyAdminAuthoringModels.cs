@@ -21,6 +21,9 @@ public enum OntologyAdminAuthoringOutcome
     /// <summary>403: Dataverse refused the caller (no privilege for the read or write); nothing was written.</summary>
     Refused,
 
+    /// <summary>403: the caller does not hold the authoring privilege the dry run requires (F1-1); nothing was evaluated.</summary>
+    Forbidden,
+
     /// <summary>The uniform 404: the policy does not exist, the caller cannot read it, or it is not an Ontology policy.</summary>
     NotFound,
 
@@ -32,11 +35,14 @@ public enum OntologyAdminAuthoringOutcome
 }
 
 /// <summary>One authoring call's outcome, its value on success, and its field errors or reason code otherwise.</summary>
+/// <param name="PolicyId">On a failed save whose policy was created but whose current version could not be set (K6): that policy's
+/// id, returned in the problem body so the client can recover by publishing a version of it.</param>
 public sealed record OntologyAdminAuthoringResult<T>(
     OntologyAdminAuthoringOutcome Outcome,
     T? Value = null,
     IReadOnlyDictionary<string, string[]>? Errors = null,
-    string? ReasonCode = null)
+    string? ReasonCode = null,
+    Guid? PolicyId = null)
     where T : class;
 
 /// <summary>A rule version as the wizard authors it. Every member is validated server-side; nothing here is trusted.</summary>
