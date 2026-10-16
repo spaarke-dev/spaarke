@@ -297,6 +297,10 @@ public partial class RouteAuthorizationGuardTests
             "/api/finance/* — each route declares the id it authorizes (AddFinanceAuthorizationFilter, task 130)."),
         new GovernedFile("Api/Finance/FinanceRollupEndpoints.cs", Scope.RouteLevelGate,
             "matter/project rollup recalculation, Read on the parent as the caller (task 130)."),
+        new GovernedFile("Api/Finance/RateCardImportEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/ratecards/* (ebilling-r1 task 078, FR-29) -- rate card and timekeeper workbook template, import and publish. "
+            + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
+            + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -782,7 +786,12 @@ public partial class RouteAuthorizationGuardTests
     //
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
-    private const int ExpectedEndpointFileCount = 125;
+    //
+    // 125 -> 126 (2026-10-16, ebilling-r1 task 078, FR-29). Net +1: Api/Finance/RateCardImportEndpoints.cs ADDED -- GET
+    // /api/finance/ratecards/import-template, POST /api/finance/ratecards/import and POST /api/finance/ratecards/{rateCardId}/publish.
+    // Classified by GovernedFiles (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse
+    // table privilege, D-76); the kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 126;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1033,6 +1042,9 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("RequireWebhookSignature", "HMAC authenticity of a webhook body (WebhookSignatureFilter.cs) — the control an AnonymousByDesign waiver names."),
         new NotAuthorizationForm("AddOfficeAuthFilter", "IsAuthenticated + stash the oid (OfficeAuthFilter.cs:76-135); authentication only."),
         new NotAuthorizationForm("AddOfficeRateLimitFilter", "Office throughput limiter, explicitly fail-OPEN."),
+        new NotAuthorizationForm("RequireEbillingEnabled",
+            "ebilling-r1 task 078: the eBilling kill switch (EbillingEnabledFilter.cs) answers 503 ebilling.disabled when the feature flag is off. "
+            + "It is chained AFTER the route's AddFinanceAuthorizationFilter and decides nothing about who may act on what."),
         new NotAuthorizationForm("AddIdempotencyFilter", "Replays a cached response for a repeated client key."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentUrlIdentityFilter>", "Resolves a document URL to an id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),

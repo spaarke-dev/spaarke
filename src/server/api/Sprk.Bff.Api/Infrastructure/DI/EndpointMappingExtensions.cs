@@ -375,6 +375,7 @@ public static class EndpointMappingExtensions
 
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
+        app.MapRateCardImportEndpoints(); // ebilling-r1 task 078 (FR-29)
         app.MapCommunicationEndpoints();
 
         // Email composer "insert template" render surface (email-communication-solution-r5). Thin,

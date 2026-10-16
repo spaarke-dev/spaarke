@@ -65,6 +65,11 @@ public static class FinanceModule
         // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
 
+        // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
+        // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
+        // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<RateCardImportService>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
