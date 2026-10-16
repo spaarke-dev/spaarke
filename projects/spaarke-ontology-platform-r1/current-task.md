@@ -11,9 +11,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 055 prep. 155 merged (#1990); docs→master PR for it open. #1989 already on master. R3 redeploying the dev BFF from `eb5ba4011` (R3 + master `7315b3e85`). |
-| **Blocker** | 055 BFF deploy: dev runs R3's `c20bff283`, NOT an ancestor of master (89 R3-only commits). A master-only BFF deploy would remove R3's work. Asked R3 (twice) for a plan; preferred (a) R3 merges master and redeploys the dev BFF from R3, ontology deploys only the Console + grid config. |
-| **Next Action** | (1) Merge the docs→master PR (155). (2) R3's answer, then 055: before any deploy run `git merge-base --is-ancestor <live sha> <deploy sha>`; Console solution from master; `Apply-WorklistGridConfiguration.ps1` (-WhatIf, -Verify, apply, -Verify -RequireRow); notices before/after to word-add-in, R3, uac-r2. (3) D-146: once R3 confirms the BFF live, PATCH `sprk_enabled=true` on the five policies, trigger `POST /api/admin/jobs/signal-reevaluation/trigger` (token: `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`), read history; then the 144/148 report-only pass, then uac-r2, then the writes. 049 (D-17/D-62/D-147) after 055. |
+| **Task** | 055 prep. Master `44b6a72c1` has all ontology work through 155 (#1989, #1996). Console built from master in worktree `C:\wts-055` (detached at `44b6a72c1`). |
+| **Blocker** | Waiting for R3 to confirm the dev BFF is live on `eb5ba4011` (R3 + master `7315b3e85`; owner-approved plan (a); live `e276357a7` is its ancestor). Ontology does not touch the BFF. |
+| **Next Action** | After R3 confirms (version + healthz): (1) notify word-add-in + uac-r2 (before); (2) D-146: PATCH `sprk_enabled=true` on policies 6101-6104 + `4d204810…`, trigger `POST /api/admin/jobs/signal-reevaluation/trigger` (token `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`), read history; (3) grid config from `C:\wts-055`: `-Verify` showed DRIFT, `-WhatIf` = one UPDATE of row `…5010`; apply, then `-Verify -RequireRow`; (4) `pwsh scripts/Deploy-SpaarkeAi.ps1` from `C:\wts-055` (publishes only `sprk_spaarkeai`, D-83 ok); (5) 055 real-data checks (owner in the browser) + notify after; (6) 144/148 report-only pass → uac-r2 → writes; then 049. |
 
 ## Lanes in flight
 
