@@ -53,6 +53,9 @@ public static class OntologyAdminEndpoints
 
         // Extension point: tasks 100 (Rules) and 101 (authoring) map their routes on this group. Each authorizes itself as the
         // caller; none may consult the capability answer above (rule A of OntologyAdminCallerBoundaryGuardTests enforces it).
+
+        // Task 103: the Classification area declares its own group under the same URL prefix (its routes are in their own file).
+        app.MapOntologyAdminClassificationEndpoints();
         group.MapOntologyAdminRulesEndpoints(); // task 100: the Rules list, rule page, On/Off and Retire
     }
 
