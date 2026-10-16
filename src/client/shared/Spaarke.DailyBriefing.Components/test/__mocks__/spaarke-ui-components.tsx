@@ -24,7 +24,7 @@ import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/u
 import type { DataGridConfiguration } from '../../../Spaarke.UI.Components/src/types/DataGridConfiguration';
 import type { SavedQueryResult } from '../../../Spaarke.UI.Components/src/services/IDataverseClient';
 
-// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet and HighPrioritySection render their row menu through the
+// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet renders its row menu through the
 // shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
 // a stub would hide the menu behaviour these suites assert.
 export { RowActionMenu } from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';
@@ -64,7 +64,11 @@ export interface ISendEmailDialogMockProps {
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
 // `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
-export const describeSendFailure: (...args: unknown[]) => { title: string; message: string; reference?: string } = () => ({
+export const describeSendFailure: (...args: unknown[]) => {
+  title: string;
+  message: string;
+  reference?: string;
+} = () => ({
   title: 'Email not sent',
   message: '',
 });
@@ -202,7 +206,10 @@ export const WorklistWidget: React.FC<any> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createWorklistService: (...args: any[]) => any = () => ({});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({ opened: false, reason: 'no-host' });
+export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({
+  opened: false,
+  reason: 'no-host',
+});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —

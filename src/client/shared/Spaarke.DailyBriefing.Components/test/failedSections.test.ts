@@ -1,6 +1,6 @@
 /**
  * unified-access-control-r2 task 152 — a briefing section whose read AS THE CALLER failed is "could not be loaded",
- * never "nothing to report". The BFF names failed sections in `failedChannels` / `highPriorityFailedEntityTypes`;
+ * never "nothing to report". The BFF names failed sections in `failedChannels`;
  * the widget must (a) stay out of the "all caught up" empty state and (b) name the failed sections.
  */
 
@@ -10,10 +10,9 @@ import type { NarrateResponse } from '../src/services/briefingService';
 
 function emptyResponse(overrides: Partial<NarrateResponse> = {}): NarrateResponse {
   return {
-    tldr: { summary: '', keyTakeaways: [], topAction: '', categoryCount: 0, priorityItemCount: 0 },
+    tldr: { summary: '', keyTakeaways: [], categoryCount: 0, priorityItemCount: 0 },
     channelNarratives: [],
     generatedAtUtc: new Date().toISOString(),
-    highPriorityItems: [],
     ...overrides,
   };
 }
@@ -23,23 +22,23 @@ describe('failed briefing sections (task 152)', () => {
     expect(isEmptyResponse(emptyResponse({ failedChannels: ['matters'] }))).toBe(false);
   });
 
-  it('an otherwise-empty response with a failed High Priority entity is NOT empty', () => {
-    expect(isEmptyResponse(emptyResponse({ highPriorityFailedEntityTypes: ['sprk_invoice'] }))).toBe(false);
+  it('an otherwise-empty response whose monitored-records read failed is NOT empty (task 062)', () => {
+    expect(isEmptyResponse(emptyResponse({ failedChannels: ['monitored'] }))).toBe(false);
   });
 
   it('no failures and no data is still empty', () => {
-    expect(isEmptyResponse(emptyResponse({ failedChannels: [], highPriorityFailedEntityTypes: [] }))).toBe(true);
+    expect(isEmptyResponse(emptyResponse({ failedChannels: [] }))).toBe(true);
   });
 
-  it('names failed channels and High Priority entities in reader terms', () => {
-    expect(describeFailedSections(['matters', 'to-dos'], ['sprk_invoice', 'sprk_event'])).toEqual([
+  it('names failed channels in reader terms, including the monitored-records subscription', () => {
+    expect(describeFailedSections(['matters', 'to-dos', 'monitored'])).toEqual([
       'Matters',
       'To dos',
-      'High priority (invoices, tasks)',
+      'Monitored records',
     ]);
   });
 
   it('an unknown code falls through verbatim rather than disappearing', () => {
-    expect(describeFailedSections(['future-channel'], [])).toEqual(['future-channel']);
+    expect(describeFailedSections(['future-channel'])).toEqual(['future-channel']);
   });
 });

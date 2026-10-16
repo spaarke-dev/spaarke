@@ -9,23 +9,10 @@ const FAILED_CHANNEL_LABELS: Record<string, string> = {
   matters: 'Matters',
   projects: 'Projects',
   'to-dos': 'To dos',
+  // Task 062: the monitored-records subscription count (sprk_monitor); its flagged-entity read failed.
+  monitored: 'Monitored records',
 };
 
-const FAILED_ENTITY_LABELS: Record<string, string> = {
-  sprk_matter: 'matters',
-  sprk_project: 'projects',
-  sprk_invoice: 'invoices',
-  sprk_document: 'documents',
-  sprk_workassignment: 'work assignments',
-  sprk_event: 'tasks',
-  sprk_todo: 'to dos',
-};
-
-export function describeFailedSections(failedChannels: string[], highPriorityFailedEntityTypes: string[]): string[] {
-  const labels = failedChannels.map(code => FAILED_CHANNEL_LABELS[code] ?? code);
-  if (highPriorityFailedEntityTypes.length > 0) {
-    const kinds = highPriorityFailedEntityTypes.map(e => FAILED_ENTITY_LABELS[e] ?? e);
-    labels.push(`High priority (${kinds.join(', ')})`);
-  }
-  return labels;
+export function describeFailedSections(failedChannels: string[]): string[] {
+  return failedChannels.map(code => FAILED_CHANNEL_LABELS[code] ?? code);
 }
