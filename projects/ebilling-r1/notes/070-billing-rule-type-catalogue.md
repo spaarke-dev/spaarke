@@ -173,3 +173,10 @@ DecisionRecordWriter, neither touched here), and paste their answer here. Questi
 - A privileged user can change `sprk_domain` directly in Dataverse (019 notes addition (c)); the readers then follow the new value.
 - An adversarial-reviewer pass was not run: the session's concurrent-subagent cap (4) was full. A self-review covered the
   same checklist (see Verification).
+
+## Main-session resolution (2026-10-16): Entity.xml
+
+Option (a) taken. The 11 billing options (100000003 ApprovedTimekeeper … 100000013 AiObservation) were added to
+`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_PolicyVersion/Entity.xml` (`sprk_policyversion_sprk_ruletype`),
+with labels copied from a live metadata read of dev, so solution source matches dev. Source-only; it ships with the next
+release import (no import, no version bump here).

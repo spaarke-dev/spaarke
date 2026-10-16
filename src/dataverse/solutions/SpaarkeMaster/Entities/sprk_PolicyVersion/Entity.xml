@@ -1153,6 +1153,61 @@
                   <label description="Existence" languagecode="1033" />
                 </labels>
               </option>
+              <option value="100000003" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ApprovedTimekeeper" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000004" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ApprovedRate" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000005" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="TimeIncrement" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000006" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="DailyHoursCap" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000007" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="NonBillableActivity" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000008" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ExpenseRule" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000009" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="InvoiceAge" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000010" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="CoreRecordWindow" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000011" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Duplicate" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000012" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="RequiredData" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000013" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="AiObservation" languagecode="1033" />
+                </labels>
+              </option>
             </options>
           </optionset>
           <displaynames>
