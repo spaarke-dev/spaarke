@@ -1,8 +1,8 @@
 # sprk_ratecard and sprk_ratecardrate (rate cards); timekeeper roster additions
 
 > **Project**: ebilling-r1, task 017 (FR-08)
-> **Last Updated**: 2026-10-15 (classification and stub-lookup decisions applied)
-> **Script**: `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (idempotent; `-WhatIf`; `-RemoveStubInvoiceLookup` for the owner-approved delete)
+> **Last Updated**: 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
+> **Script**: `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (idempotent; `-WhatIf`; `-RemoveStubInvoiceLookup` for the owner-approved delete); D-84 follow-up: `scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`
 > **Notes**: `projects/ebilling-r1/notes/017-timekeeper-ratecard-schema.md`
 
 A **rate card** carries the provenance (source document) and effective period for many **rates**. A rate is the approved hourly rate (and the firm rack rate) for one timekeeper or one classification within an effective period. The ApprovedTimekeeper and ApprovedRate rules (task 071) and roster resolution (task 046) read these tables; the rate import (task 078) writes them and enforces the overlap rule. No plugin, business rule or calculated column (ADR-002). Both tables were created additively in dev on 2026-10-15 and are in the unmanaged `SpaarkeMaster` solution; forms, views and security-role privileges arrive with task 029.
@@ -65,7 +65,7 @@ Obsolete stub lookups: `sprk_invoice` was **deleted** on 2026-10-15 with the own
 
 ## Classification: the LEDES list (owner decision 2026-10-15)
 
-`sprk_classification` (on `sprk_timekeeper` and `sprk_ratecardrate`) is a Choice bound to the **global choice `sprk_timekeeperrole`**, the shared role list that `sprk_billingevent.sprk_timekeeperrole`, `sprk_contactorganization.sprk_role` and `sprk_userprofile.sprk_primaryrole` already use. The owner decided to reuse that list and revise and extend it so it matches the LEDES classifications, without interpretation. The script therefore makes the list hold the 20 law-firm classifications of the LOC Revised Timekeeper Classification Codes (ledes.org, revised 6/2023): **label = LEDES name, ExternalValue = LEDES code**. Existing integer values never change. An existing option is matched to a LEDES classification only where it is the same thing by name (Partner, Associate, Paralegal, Other); every other LEDES classification is a new option.
+`sprk_classification` (on `sprk_timekeeper` and `sprk_ratecardrate`) is a Choice bound to the **global choice `sprk_timekeeperrole`**, the role list that `sprk_billingevent.sprk_timekeeperrole` and `sprk_contactorganization.sprk_role` also use. Since D-84 (2026-10-15) these four columns are the only ones bound to it; `sprk_userprofile.sprk_primaryrole` has its own choice (see "User-profile role" below). The owner decided to reuse that list and revise and extend it so it matches the LEDES classifications, without interpretation. The script therefore makes the list hold the 20 law-firm classifications of the LOC Revised Timekeeper Classification Codes (ledes.org, revised 6/2023): **label = LEDES name, ExternalValue = LEDES code**. Existing integer values never change. An existing option is matched to a LEDES classification only where it is the same thing by name (Partner, Associate, Paralegal, Other); every other LEDES classification is a new option.
 
 | LEDES code | Label | Value | Origin |
 |---|---|---|---|
@@ -90,6 +90,14 @@ Obsolete stub lookups: `sprk_invoice` was **deleted** on 2026-10-15 with the own
 | TEMPAT | Contract Attorney | 100000028 | new |
 | TEMPOS | Contract Other Staff | 100000029 | new |
 
-Options that stay in the list although they are **not** LEDES classifications (nothing was deleted; deleting them needs the owner's OK): Senior Partner 100000000, Senior Associate 100000002, Specialist 100000005, Practice Support 100000007, Administrator 100000008, Legal Operations 100000009, Senior Counsel 100000010, General Counsel 100000011, Counsel 100000012, Associate General Counsel 100000013. Dev usage when this was applied: Senior Partner on 1 `sprk_contactorganization` row, Legal Operations on 1 `sprk_userprofile` row, every other option on none; `sprk_billingevent.sprk_timekeeperrole` holds no value on any row. A rate or timekeeper classification should use a LEDES option; the non-LEDES options remain for the contact-organization and user-profile pickers and for existing data.
+The 10 options that were **not** LEDES classifications (Senior Partner 100000000, Senior Associate 100000002, Specialist 100000005, Practice Support 100000007, Administrator 100000008, Legal Operations 100000009, Senior Counsel 100000010, General Counsel 100000011, Counsel 100000012, Associate General Counsel 100000013) were **deleted on 2026-10-15** (decisions D-83 / D-84, owner-approved) by `scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`, after checking that no row in any of the four bound columns held one (`sprk_contactorganization`'s one Senior Partner row had been remapped to Partner earlier). `sprk_timekeeperrole` now holds exactly the 20 LEDES options above, each with its ExternalValue code.
+
+## User-profile role: `sprk_userprofile.sprk_primaryrole` (D-84)
+
+| Column | Type | Notes |
+|---|---|---|
+| `sprk_userprofile.sprk_primaryrole` (schema `sprk_PrimaryRole`, display "Primary Role", required level None) | Choice, bound to the new global choice **`sprk_userprofilerole`** ("User Profile Role") | The Console user's own role (in-house, e.g. General Counsel, Legal Operations). 14 options, the values and labels the column always had: 100000000 Senior Partner, 100000001 Partner, 100000002 Senior Associate, 100000003 Associate, 100000004 Paralegal, 100000005 Specialist, 100000006 Other, 100000007 Practice Support, 100000008 Administrator, 100000009 Legal Operations, 100000010 Senior Counsel, 100000011 General Counsel, 100000012 Counsel, 100000013 Associate General Counsel. |
+
+The Console picker (`src/solutions/SpaarkeAi/src/components/assistant/userProfileService.ts`, `PRIMARY_ROLE_OPTIONS`) and `StatedProfileReader.cs` hard-code exactly these 14 values and labels, so neither changed. Reading the list from Dataverse instead of code stays open as GitHub #1954 (Console scope). The column was dropped and recreated on 2026-10-15 because a column cannot be re-bound to another choice in place; its one stored value (Legal Operations, 100000009) was saved to `projects/ebilling-r1/notes/d84-userprofile-primaryrole-predrop.json` and restored, and the column was put back on the User Profile main form at the same position.
 
 The LEDES eDiscovery, external-provider, client-side and adjustment/flat-fee codes (DSCATT ... TPADMN, ADJSMT, FLTFEE) are not in the list: they are not law-firm timekeeper classifications for an invoice reviewed here (reference: `projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md` section 2).

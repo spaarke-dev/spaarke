@@ -36,17 +36,19 @@
 
 **Resolution (technical, per DATAVERSE-WRITE-PATH-ARCHITECTURE.md L1-L4)**: task 029 hides the OOB Activate / Deactivate commands on sprk_invoice, so the product's only status writer is the service; non-product writes are the architecture's accepted L4 gap (statuscode is audited). A report-only reconciliation job is not planned for R1.
 
-### ISS-008 — Console user-profile role reads the timekeeper list and hard-codes its options (D-83)
+### ISS-008 — Console user-profile role reads the timekeeper list and hard-codes its options (D-83, D-84)
 
 | Field | Value |
 |---|---|
-| **Status** | Open - Console scope |
-| **Urgency** | blocks deleting the 10 non-LEDES options of sprk_timekeeperrole |
+| **Status** | Resolved for ebilling (D-84, 2026-10-15). #1954 stays open for the Console improvement only |
+| **Urgency** | none for ebilling; low for the Console |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 017 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1954 |
 
-**Description**: `sprk_userprofile.sprk_primaryrole` is bound to `sprk_timekeeperrole`; `userProfileService.ts` (`PRIMARY_ROLE_OPTIONS`) and `StatedProfileReader.cs` hard-code its 14 original options. Per D-83 it moves to a lookup on `sprk_contacttype_ref` read from Dataverse; then ebilling deletes the 10 non-LEDES options (only Legal Operations, on 1 user profile, holds data).
+**Description**: `sprk_userprofile.sprk_primaryrole` was bound to `sprk_timekeeperrole`, and `userProfileService.ts` (`PRIMARY_ROLE_OPTIONS`) and `StatedProfileReader.cs` hard-code its 14 original options. D-83 planned to move it to a lookup on `sprk_contacttype_ref` first and delete the 10 non-LEDES options afterwards.
+
+**Outcome (D-84, 2026-10-15)**: ebilling did not wait for the Console. `Deploy-EbillingUserProfileRoleChoice.ps1` created the global choice `sprk_userprofilerole` with the same 14 values and labels, recreated `sprk_userprofile.sprk_primaryrole` (same logical and schema name) on it with the one stored value (Legal Operations) restored and the User Profile main form position kept, then **deleted the 10 non-LEDES options**: `sprk_timekeeperrole` now holds exactly the 20 LEDES classifications. The Console code is unchanged and still correct. #1954 remains open only for reading the role list from Dataverse (a choice or `sprk_contacttype_ref`) instead of the hard-coded constants; nothing in ebilling waits on it.
 
 ### DEF-013 — Customer environments need the Procedure Library and E-Billing Output Files containers (hand-off to customer-provisioning-orchestration-r1)
 

@@ -178,7 +178,7 @@ For full entity metadata dumps, see the individual `sprk_*.md` files in this dir
 | `sprk_quantity` | Quantity | Decimal | Precision: 2 |
 | `sprk_rate` | Rate | Currency | Precision: 2 |
 | `sprk_timekeeper` | Timekeeper | Text | 100 |
-| `sprk_timekeeperrole` | Timekeeper Role | Choice | 100000000: Senior Partner, 100000001: Partner, 100000002: Senior Associate, 100000003: Associate, 100000004: Paralegal, 100000005: Specialist, 100000006: Other |
+| `sprk_timekeeperrole` | Timekeeper Role | Choice | Global choice `sprk_timekeeperrole`: the 20 LEDES classifications (label = LEDES name, ExternalValue = LEDES code; list in `sprk_ratecard.md`). The original 7 options were extended, and the 10 non-LEDES options deleted, by eBilling D-83 / D-84 |
 | `sprk_roleclass` | Role Class | Text | 100 |
 | `sprk_eventdate` | Event Date | DateTime | DateOnly |
 | `sprk_costtype` | Cost Type | Choice | 100000000: Fee, 100000001: Expense |
