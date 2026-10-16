@@ -112,7 +112,17 @@ ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed:
 - **Client.** `fetchExistingGrants` calls the route through the control's existing BFF client (the one `/can-manage-access` uses) instead of `context.webAPI`.
   - On non-200, show the amendment-2 error state.
   - Remove the host-context read of `sprk_externalrecordaccess` from the control.
-- **Rejected alternative: stamp `ownerid` on grant create.** Grant visibility would then follow BU depth rather than the record's delegation rule. A Write-holder from a sibling BU (Write via a share) would still see nothing. It would also widen direct table reads of external-grant data, and it needs a data migration of the existing 61 rows. The BFF read needs no migration.
+- **Ownership: implement D-11, which is BINDING** (owner 2026-09-22; `notes/owner-decision-brief-2026-09-18.md` §D-11; project CLAUDE.md §2 "Ownership is team ownership"). Grant rows are created with no `ownerid`, which leaves them owned by the BFF identity in the root BU. They must instead be created team-owned, record-first:
+  1. the granted record's BU default Owner team (`isdefault = true` AND `teamtype = 0`);
+  2. failing that, the acting user's BU default team;
+  3. a secure record's grants go to the "Secure Record Owners" team.
+  - Reuse the existing ownership resolver the other app-written rows use (`IRecordOwnershipResolver` / `RecordOwnershipResolver`); do not write a second team lookup. Set it in the grant create payload on every grant route (/grant, /invite, /invite-and-grant, /contact-grants, org grants).
+  - Backfill the existing rows (61 on dev at 2026-10-16) by re-owning them through the same resolver: an idempotent script with -WhatIf, -Apply and -Verify, or an existing reconciler if one already covers re-owning ordinary rows. Report the counts before and after.
+  - Cost of not doing it: D-11 is violated on every grant, and task 101's estate-wide "External shares by expiration" views, which read through Dataverse depth, show nothing to users outside the root BU.
+- **Why D-11 alone does not fix the dialog, so the BFF read above is still required:**
+  - Grants on a secure record are owned in the Secure Record BU, which the Write-holders who manage them are not in.
+  - A user who holds Write on a record through a share, from another BU, can't read rows owned in the record's BU at Deep depth.
+  - The dialog's audience is the delegation rule, not BU depth. Do both changes, in one task.
 - **§11 answers.**
   - Existing: `/can-manage-access` (the gate only, no data) and `/contact-grants` (by contact, not by record).
   - Extension: the gate's `DelegationRuleFilter` case and `ExternalGrantLifecycle`'s row read are reused. The gate route stays a pure yes/no answer (its remarks, task 138/139).
@@ -121,6 +131,8 @@ ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed:
   - A seeded test user in a child BU with Spaarke Core User, holding Write and Share on a record with a root-owned grant, sees that grant in Current Access. Verify live on dev.
   - Negative: a caller without Write gets 403 from the route.
   - Negative: an injected read fault gives 503, and the dialog shows the error state, not "no grants".
+  - A new grant on a record in a child BU is owned by that BU's default Owner team. A new grant on a secure record is owned by Secure Record Owners. Neither is ever owned by the BFF identity. Assert the create payload per route, and check live on dev.
+  - After the backfill, -Verify shows 0 active grants owned by an application user.
 - **Rigor and model:** this now touches the BFF and an authorization path. Run it on **opus**, effort high. Two adversarial passes (auth). §10 publish-size delta. Owner sign-off before merge (CLAUDE.md §6). On completion, close #1010 with the merge SHA.
     </amendment>
   </amendments>
