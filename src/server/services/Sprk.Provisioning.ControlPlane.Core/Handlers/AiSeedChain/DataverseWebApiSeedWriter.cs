@@ -81,6 +81,16 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
     private static readonly IReadOnlySet<string> DirectlySeededArtifactIds =
         new HashSet<string>(StringComparer.Ordinal) { "type-lookups", "knowledge", "skills", "output-types" };
 
+    /// <summary>type-lookups.json table logical name → Web API entity set (as Deploy-TypeLookups.ps1; T186 L53).</summary>
+    internal static readonly IReadOnlyDictionary<string, string> TypeLookupEntitySets =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["sprk_analysisactiontype"] = "sprk_analysisactiontypes",
+            ["sprk_aiskilltype"] = "sprk_aiskilltypes",
+            ["sprk_aiknowledgetype"] = "sprk_aiknowledgetypes",
+            ["sprk_aitooltype"] = "sprk_aitooltypes",
+        };
+
     private readonly HttpClient _httpClient;
     private readonly AiSeedChainOptions _options;
     private readonly ILogger<DataverseWebApiSeedWriter> _logger;
@@ -230,19 +240,22 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
     {
         using var doc = JsonDocument.Parse(ReadEmbeddedJson("type-lookups.json"));
         var count = 0;
-        foreach (var entitySetProperty in doc.RootElement.EnumerateObject())
+        foreach (var tableProperty in doc.RootElement.EnumerateObject())
         {
-            // Top-level keys ARE the Dataverse entity set names for this file
-            // (sprk_analysisactiontype / sprk_aiskilltype / sprk_aiknowledgetype
-            // / sprk_aitooltype); description/created/notes are plain strings
-            // — skip anything that isn't an array.
-            if (entitySetProperty.Value.ValueKind != JsonValueKind.Array)
+            // Top-level keys are table LOGICAL names (sprk_analysisactiontype …); description/created/notes are plain
+            // strings — skip anything that isn't an array. The Web API addresses the ENTITY SET (plural): T186 L53 —
+            // using the key as the URL segment 404'd ("Resource not found for the segment") on the first live stamp.
+            // Deploy-TypeLookups.ps1 maps the same four names.
+            if (tableProperty.Value.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
 
-            var entitySet = entitySetProperty.Name;
-            foreach (var row in entitySetProperty.Value.EnumerateArray())
+            var entitySet = TypeLookupEntitySets.TryGetValue(tableProperty.Name, out var mapped)
+                ? mapped
+                : throw new InvalidOperationException(
+                    $"type-lookups.json: table '{tableProperty.Name}' has no entity set in {nameof(TypeLookupEntitySets)}.");
+            foreach (var row in tableProperty.Value.EnumerateArray())
             {
                 var name = row.GetProperty("sprk_name").GetString()
                     ?? throw new InvalidOperationException($"type-lookups.json: entry under '{entitySet}' missing sprk_name.");
@@ -263,6 +276,9 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
         using var doc = JsonDocument.Parse(ReadEmbeddedJson("knowledge.json"));
         var typeLookup = ReadStringGuidDictionary(doc.RootElement, "knowledgeTypes");
         const string entitySet = "sprk_analysisknowledges";
+        // T186 L53: the GUIDs in knowledgeTypes are the SOURCE environment's; type-lookups creates the rows with new ids,
+        // so the bind uses the id this environment gave the type of that name.
+        var typeIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
 
         var count = 0;
         foreach (var record in doc.RootElement.GetProperty("knowledge").EnumerateArray())
@@ -275,12 +291,14 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
             }
 
             var typeKey = record.GetProperty("knowledgeType").GetString() ?? string.Empty;
-            if (!typeLookup.TryGetValue(typeKey, out var typeId))
+            if (!typeLookup.ContainsKey(typeKey))
             {
                 throw new InvalidOperationException(
                     $"knowledge.json: entry '{name}' references knowledgeType '{typeKey}' not present in the " +
                     "manifest's knowledgeTypes lookup.");
             }
+            var typeId = await ResolveIdByNameAsync(envUri, token, "sprk_aiknowledgetypes", "sprk_aiknowledgetypeid",
+                typeKey, typeIds, ct).ConfigureAwait(false);
 
             var payload = new Dictionary<string, object?>
             {
@@ -314,6 +332,7 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
         using var doc = JsonDocument.Parse(ReadEmbeddedJson("skills.json"));
         var typeLookup = ReadStringGuidDictionary(doc.RootElement, "skillTypes");
         const string entitySet = "sprk_analysisskills";
+        var typeIds = new Dictionary<string, Guid>(StringComparer.Ordinal);   // T186 L53 — see SeedKnowledgeAsync
 
         var count = 0;
         foreach (var record in doc.RootElement.GetProperty("skills").EnumerateArray())
@@ -326,12 +345,14 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
             }
 
             var typeKey = record.GetProperty("skillType").GetString() ?? string.Empty;
-            if (!typeLookup.TryGetValue(typeKey, out var typeId))
+            if (!typeLookup.ContainsKey(typeKey))
             {
                 throw new InvalidOperationException(
                     $"skills.json: entry '{name}' references skillType '{typeKey}' not present in the manifest's " +
                     "skillTypes lookup.");
             }
+            var typeId = await ResolveIdByNameAsync(envUri, token, "sprk_aiskilltypes", "sprk_aiskilltypeid",
+                typeKey, typeIds, ct).ConfigureAwait(false);
 
             var payload = new Dictionary<string, object?>
             {
@@ -399,6 +420,43 @@ public sealed class DataverseWebApiSeedWriter : ISeedManifestRunner
         }
         using var body = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
         return body.RootElement.TryGetProperty("value", out var values) && values.GetArrayLength() > 0;
+    }
+
+    /// <summary>
+    /// T186 L53: the id THIS environment gave the row named <paramref name="name"/> (cached per artifact). type-lookups
+    /// runs first (manifest dependsOn), so a missing row is a seed-order or content defect, not a transient.
+    /// </summary>
+    private async Task<Guid> ResolveIdByNameAsync(
+        Uri envUri, AccessToken token, string entitySet, string idColumn, string name, Dictionary<string, Guid> cache,
+        CancellationToken ct)
+    {
+        if (cache.TryGetValue(name, out var cached))
+        {
+            return cached;
+        }
+
+        var encodedName = Uri.EscapeDataString(name);
+        var uri = new Uri(envUri, $"/api/data/v9.2/{entitySet}?$filter=sprk_name eq '{encodedName}'&$select={idColumn}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        ApplyCommonHeaders(request, token);
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"GET {uri.PathAndQuery} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
+        }
+        using var body = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
+        if (!body.RootElement.TryGetProperty("value", out var values) || values.GetArrayLength() == 0
+            || !values[0].TryGetProperty(idColumn, out var idEl) || !Guid.TryParse(idEl.GetString(), out var id))
+        {
+            throw new InvalidOperationException(
+                $"{entitySet} has no row named '{name}' (or it has no {idColumn}) — type-lookups seeds it before this artifact.");
+        }
+
+        cache[name] = id;
+        return id;
     }
 
     private async Task CreateAsync(Uri envUri, AccessToken token, string entitySet, Dictionary<string, object?> payload, CancellationToken ct)
