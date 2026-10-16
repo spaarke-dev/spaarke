@@ -168,6 +168,12 @@ describe('createLegalWorkspaceSectionRegistry (R2 Option D)', () => {
     expect(SECTION_REGISTRY.map(r => r.id)).toContain('worklist');
   });
 
+  test('registry includes the `decisionRecords` section (ontology task 045), once', () => {
+    const ids = createLegalWorkspaceSectionRegistry().map(r => r.id);
+    expect(ids.filter(id => id === 'decisionRecords')).toHaveLength(1);
+    expect(SECTION_REGISTRY.map(r => r.id)).toContain('decisionRecords');
+  });
+
   test('legacy setLegalWorkspaceDailyBriefingNotificationLoader API is removed', () => {
     // Read the LegalWorkspace barrel source text. The R2 task 002 band-aid
     // setter MUST NOT be re-exported. This locks in the Option D migration:

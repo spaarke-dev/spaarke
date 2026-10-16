@@ -4,8 +4,9 @@
  * wizard never reads `sprk_signal` either (D-15) and never asks the user to wait for a second query.
  *
  * What the route does NOT return is shown as missing rather than invented: a Signal that stores no rule sentence passes `null`
- * (task 154 returns the stored sentence), and a closed item carries its closing type and time but no Decision Record (record number,
- * who decided, the values sent). See notes/059-worklist-widget.md.
+ * (task 154 returns the stored sentence), and a closed item whose Decision Record the caller cannot read (or that the system closed)
+ * carries its closing type and time but no record (task 045 returns the readable record: number, who decided, the steps). See
+ * notes/059-worklist-widget.md.
  *
  * Task: spaarke-ontology-platform-r1, task 059.
  */
@@ -17,7 +18,7 @@ import type {
 } from '../DecisionWizard/decisionWizardTypes';
 import { CONSOLE_STATE_BADGES, resolveConsoleState } from '../ConsoleKit';
 import type { EvidenceTier } from '../ConsoleKit';
-import type { WorklistSetName, WorklistGroupData, WorklistRouteItem } from './worklistService';
+import type { WorklistRouteSetName, WorklistSetName, WorklistGroupData, WorklistRouteItem } from './worklistService';
 
 const TIERS: ReadonlySet<string> = new Set(['Fact', 'Interpretation', 'Observation', 'Missing']);
 
@@ -90,10 +91,15 @@ export function closedLineText(item: WorklistRouteItem, set: WorklistSetName, to
 
 /**
  * The wizard's view of a closed or suppressed item. It is read-only whenever a `resolution` is present. The route returns how the
- * item closed and when, not the Decision Record, so the record number, the person and the values sent are left out (the wizard
- * shows what it has and does not replay steps it has no values for).
+ * item closed and when and, for a closed item whose Decision Record the caller can read (task 045), the record: its number, who
+ * decided, the note and the steps, which the wizard replays. An item without a readable record is opened with what the route has and
+ * no replay (the wizard does not replay steps it has no values for).
  */
-export function resolutionFor(item: WorklistRouteItem, set: WorklistSetName, today: Date): DecisionResolution | null {
+export function resolutionFor(
+  item: WorklistRouteItem,
+  set: WorklistRouteSetName,
+  today: Date
+): DecisionResolution | null {
   if (set === 'lanes') return null;
   if (set === 'suppressed') {
     const until = formatShortDate(item.suppressedUntil, today);
@@ -106,14 +112,37 @@ export function resolutionFor(item: WorklistRouteItem, set: WorklistSetName, tod
   if (!item.resolutionType) {
     return { resolutionType: 'ConditionCleared', leftOpen: true, note: 'Closed - how it closed was not recorded' };
   }
-  return { resolutionType: item.resolutionType, decidedOn: item.resolvedOn ?? null };
+  const decision = item.decision;
+  if (!decision) return { resolutionType: item.resolutionType, decidedOn: item.resolvedOn ?? null };
+  // Task 045 (#1959 item 2): the Decision Record the route returned (read as the caller), so the wizard replays the steps. `steps`
+  // stays undefined when the stored envelope was unreadable: the wizard then shows no replay (`hasRecordedDecision`).
+  return {
+    resolutionType: item.resolutionType,
+    recordClass: decision.recordClass,
+    recordNumber: decision.number,
+    decidedByName: decision.decidedByName,
+    decidedOn: decision.decidedOn ?? item.resolvedOn ?? null,
+    reason: decision.reason,
+    outcome: decision.outcome,
+    ...(decision.steps
+      ? {
+          steps: decision.steps.map(s => ({
+            code: s.code,
+            taken: s.taken,
+            values: s.values,
+            status: s.status,
+          })),
+        }
+      : {}),
+    followOns: decision.followOns.map(f => ({ code: f.code, entity: f.entity, id: f.id })),
+  };
 }
 
 export interface BuildWizardItemArgs {
   item: WorklistRouteItem;
   /** The group the item came from (its core record and its sibling items). */
   group: WorklistGroupData;
-  set: WorklistSetName;
+  set: WorklistRouteSetName;
   today?: Date;
 }
 

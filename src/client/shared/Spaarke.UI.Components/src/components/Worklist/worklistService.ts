@@ -13,11 +13,49 @@
 
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { isApiError, problemOf } from '../../utils/thrownFetchError';
-import type { ResolutionType } from '../ConsoleKit';
+import type { DecisionOutcome, RecordClass, ResolutionType } from '../ConsoleKit';
 import type { PastDueWording, WorkType, WorklistCore, WorklistItem, WorklistLane } from './types';
 
-/** The route's `set` values: the two lanes, or one of the three secondary sets. */
+/** The worklist's `set` values: the two lanes, or one of the three secondary sets. */
 export type WorklistSetName = 'lanes' | 'closedToday' | 'suppressed' | 'closedEarlier';
+
+/** Every `set` the route answers: the worklist's, and `decided` (the Decision Record tab, task 045; not a worklist set). */
+export type WorklistRouteSetName = WorklistSetName | 'decided';
+
+/** One offered action of a Decision Record and what became of it (`values` is what was sent; null for a skipped step). */
+export interface WorklistDecisionStep {
+  code: string;
+  taken: boolean;
+  values: Record<string, unknown> | null;
+  status: string | null;
+}
+
+/** A Next step the decision created. */
+export interface WorklistDecisionFollowOn {
+  code: string;
+  entity: string | null;
+  id: string | null;
+}
+
+/**
+ * The Decision Record that closed an item, as the route returns it (task 045, #1959 item 2): present only when the caller's own read
+ * returned the record (a record the caller cannot read is omitted, never withheld by name). `steps` is null when the stored envelope
+ * was unreadable: the wizard then opens the item read-only with no replay.
+ */
+export interface WorklistDecision {
+  recordId: string;
+  /** The autonumber, for example `DR-00042`. */
+  number: string | null;
+  recordClass: RecordClass | null;
+  outcome: DecisionOutcome | null;
+  /** ISO 8601. */
+  decidedOn: string | null;
+  /** From the record's own confirming-user field, never the owner (D-129). */
+  decidedByName: string | null;
+  reason: string | null;
+  steps: WorklistDecisionStep[] | null;
+  followOns: WorklistDecisionFollowOn[];
+}
 
 /** One Signal as the route returns it: the row's display columns plus the columns the wizard and the disclosures read. */
 export interface WorklistRouteItem extends WorklistItem {
@@ -38,6 +76,8 @@ export interface WorklistRouteItem extends WorklistItem {
   subjectRecordType?: string | null;
   /** Do lane rows only (task 154): the subject's id, with `subjectRecordType`. Null on a Decide row. */
   subjectRecordId?: string | null;
+  /** Closed today, Closed earlier and Decided sets (task 045): the Decision Record the caller can read; null when there is none to show. */
+  decision?: WorklistDecision | null;
 }
 
 /** One core record's items (or the "Not filed" items when `core` is null), in the route's order. */
@@ -48,7 +88,7 @@ export interface WorklistGroupData {
 
 /** An answer: both lanes, each a list of groups in the route's order. */
 export interface WorklistData {
-  set: WorklistSetName;
+  set: WorklistRouteSetName;
   Decide: WorklistGroupData[];
   Do: WorklistGroupData[];
 }
@@ -81,7 +121,7 @@ export interface RecordDispositionResult {
 }
 
 export interface WorklistService {
-  read(set: WorklistSetName): Promise<WorklistData>;
+  read(set: WorklistRouteSetName): Promise<WorklistData>;
   /**
    * The inquiry an inquiry-outcome To Do (D-111) records the outcome of, and its replies; `null` when the route answers 404 (the
    * To Do is not readable, or no open outbound inquiry matches it: there is no picker). Any other failure throws `InquiryRequestError`.
@@ -144,6 +184,46 @@ const RESOLUTION_TYPES: Readonly<Record<number, ResolutionType>> = {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
+const RECORD_CLASSES: ReadonlySet<string> = new Set<RecordClass>(['Judgement', 'Routine', 'Dismissal']);
+const DECISION_OUTCOMES: ReadonlySet<string> = new Set<DecisionOutcome>(['Authorized', 'Denied', 'Dismissed']);
+
+function parseDecisionSteps(raw: unknown): WorklistDecisionStep[] | null {
+  if (!Array.isArray(raw)) return null;
+  const steps: WorklistDecisionStep[] = [];
+  for (const s of raw) {
+    if (!isObject(s)) continue;
+    const code = text(s.code);
+    if (!code) continue;
+    steps.push({ code, taken: s.taken === true, values: isObject(s.values) ? s.values : null, status: text(s.status) });
+  }
+  return steps;
+}
+
+/** A Decision Record that cannot be read is no record (null): the item then opens read-only without a replay, never with a made-up one. */
+function parseDecision(raw: unknown): WorklistDecision | null {
+  if (!isObject(raw)) return null;
+  const recordId = text(raw.recordId);
+  if (!recordId) return null;
+  const recordClass = text(raw.recordClass);
+  const outcome = text(raw.outcome);
+  return {
+    recordId,
+    number: text(raw.number),
+    recordClass: recordClass && RECORD_CLASSES.has(recordClass) ? (recordClass as RecordClass) : null,
+    outcome: outcome && DECISION_OUTCOMES.has(outcome) ? (outcome as DecisionOutcome) : null,
+    decidedOn: text(raw.decidedOn),
+    decidedByName: text(raw.decidedByName),
+    reason: text(raw.reason),
+    steps: parseDecisionSteps(raw.steps),
+    followOns: Array.isArray(raw.followOns)
+      ? raw.followOns.filter(isObject).flatMap(f => {
+          const code = text(f.code);
+          return code ? [{ code, entity: text(f.entity), id: text(f.id) }] : [];
+        })
+      : [],
+  };
+}
+
 function parseItem(raw: unknown, lane: WorklistLane): WorklistRouteItem | null {
   if (!isObject(raw)) return null;
   const signalId = text(raw.signalId);
@@ -169,6 +249,7 @@ function parseItem(raw: unknown, lane: WorklistLane): WorklistRouteItem | null {
     sentence: text(raw.sentence),
     subjectRecordType: text(raw.subjectRecordType),
     subjectRecordId: text(raw.subjectRecordId),
+    decision: parseDecision(raw.decision),
   };
 }
 
@@ -206,7 +287,7 @@ function parseGroups(raw: unknown, lane: WorklistLane): WorklistGroupData[] {
  */
 export function parseWorklistResponse(
   body: unknown,
-  set: WorklistSetName,
+  set: WorklistRouteSetName,
   httpStatus: number | null = null
 ): WorklistData {
   const unreadable = () => new WorklistRequestError('The worklist answer could not be read.', httpStatus);
@@ -281,7 +362,7 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
   }
 
   return {
-    async read(set: WorklistSetName): Promise<WorklistData> {
+    async read(set: WorklistRouteSetName): Promise<WorklistData> {
       const address = `${root}${ROUTE}?set=${encodeURIComponent(set)}`;
       let response: Response;
       try {
