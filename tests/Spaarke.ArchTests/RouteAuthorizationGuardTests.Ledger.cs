@@ -290,6 +290,14 @@ public partial class RouteAuthorizationGuardTests
             + "RetrieveUserPrivilegeByPrivilegeName on the id WhoAmI returned). It decides only whether the Console shows the tab; it is "
             + "never the security boundary. RequireAuthorization on the group; takes no id (Permanent CallerScopedOnly below). Tasks 100 "
             + "and 101 add their admin routes to this group, each authorized as the caller."),
+        new GovernedFile("Api/Ontology/OntologyAdminClassificationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/v1/ontology/admin/classification (ontology platform R1 task 103, D-22, FR-59, D-49) -- the Classification area: GET /categories "
+            + "(the triage categories with guidance, On/Off, the policy versions that read each, 30-day volume and stored recall), POST /categories "
+            + "(a new category, always saved Off), PATCH /categories/{categoryId} (name and guidance; a rename is refused while any policy version "
+            + "reads the category) and PUT /categories/{categoryId}/enabled (On/Off). The file declares its own group (RequireAuthorization) and "
+            + "every read and write runs AS THE CALLER through IDataverseUserClient, so Dataverse enforces the Spaarke Ontology Administrator role "
+            + "(a Console User's write is refused 403) and the audit names the human; an unresolved caller is the single 403. Nothing reads the "
+            + "task 104 capability answer (OntologyAdminCallerBoundaryGuardTests)."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -794,7 +802,12 @@ public partial class RouteAuthorizationGuardTests
     // 125 -> 126 (2026-10-16, spaarke-ontology-platform-r1 task 104). Net +1: Api/Ontology/OntologyAdminEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
     // The main session reconciles the count with the other ontology routes at integration.
-    private const int ExpectedEndpointFileCount = 126;
+    //
+    // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 103). Net +1: Api/Ontology/OntologyAdminClassificationEndpoints.cs ADDED --
+    // GET/POST /api/v1/ontology/admin/classification/categories, PATCH /categories/{categoryId:guid} and PUT /categories/{categoryId:guid}/enabled.
+    // Classified by GovernedFiles (RouteLevelGate, its own group) and one HandlerDecision per route below. The main session reconciles
+    // the count with the other ontology routes (tasks 100/101) at integration.
+    private const int ExpectedEndpointFileCount = 127;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1825,6 +1838,28 @@ public partial class RouteAuthorizationGuardTests
             + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:726). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
             + "D-123); a fault is 503 (SignalReadEndpoints.cs:72), never a shorter list."),
+        new HandlerDecision("GET /api/v1/ontology/admin/classification/categories", "ListCategoriesAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.ListAsync" },
+            "Ontology task 103: the handler's only I/O is OntologyAdminClassificationService.ListAsync (OntologyAdminClassificationEndpoints.cs:105), "
+            + "every read of which (the categories :69, the policies and their versions :78, the 30-day aggregate :79) goes through the caller's own "
+            + "IDataverseUserClient, so Dataverse trims to what the caller may read. An unresolved caller is the single 403 "
+            + "(OntologyAdminClassificationEndpoints.cs:154); a fault reading the categories is 503."),
+        new HandlerDecision("POST /api/v1/ontology/admin/classification/categories", "CreateCategoryAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.CreateAsync" },
+            "Ontology task 103: CreateAsync (OntologyAdminClassificationEndpoints.cs:116) reads the names and then POSTs the row AS THE CALLER "
+            + "through IDataverseUserClient (OntologyAdminClassificationService.cs:155), so Dataverse enforces prvCreatesprk_TriageCategory "
+            + "(a Console User gets 403 not_permitted). The row is written with sprk_enabled = false (:148); the request has no enabled member."),
+        new HandlerDecision("PATCH /api/v1/ontology/admin/classification/categories/{categoryId:guid}", "UpdateCategoryAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.UpdateAsync" },
+            "Ontology task 103: UpdateAsync (OntologyAdminClassificationEndpoints.cs:128) reads the row (:467; a row the caller cannot read is the "
+            + "uniform 404), refuses a rename while any policy version reads the category or when that cannot be checked (:210), then PATCHes "
+            + "AS THE CALLER through IDataverseUserClient, version-conditional (OntologyAdminClassificationService.cs:483), so Dataverse "
+            + "enforces prvWritesprk_TriageCategory."),
+        new HandlerDecision("PUT /api/v1/ontology/admin/classification/categories/{categoryId:guid}/enabled", "SetCategoryEnabledAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.SetEnabledAsync" },
+            "Ontology task 103: SetEnabledAsync (OntologyAdminClassificationEndpoints.cs:140) reads the row (OntologyAdminClassificationService.cs:467), "
+            + "then PATCHes sprk_enabled AS THE CALLER through IDataverseUserClient, version-conditional (:483, from :262), so Dataverse "
+            + "enforces prvWritesprk_TriageCategory."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

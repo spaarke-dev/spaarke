@@ -4,3 +4,5 @@ export { OntologyAdminTab, ONTOLOGY_ADMIN_AREAS } from './OntologyAdminTab';
 export type { OntologyAdminAreaId, OntologyAdminTabProps } from './OntologyAdminTab';
 export { fetchOntologyAdminCapability, ONTOLOGY_ADMIN_CAPABILITIES_ROUTE } from './ontologyAdminCapability';
 export type { OntologyAdminCapabilityOptions } from './ontologyAdminCapability';
+// Task 103: the Classification area (triage categories) and the BFF service it reads and writes through.
+export * from './Classification';
