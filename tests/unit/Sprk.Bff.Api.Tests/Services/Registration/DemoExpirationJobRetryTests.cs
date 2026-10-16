@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Abstractions.Store;
@@ -184,6 +185,60 @@ public class DemoExpirationJobRetryTests
         ExpiredNotices().Should().Be(1);
     }
 
+    /// <summary>MUTATION: treating Graph's 404 for a deleted account as a failed disable blocks the expiry for good —
+    /// the step fails every night and the request never leaves Provisioned.</summary>
+    [Fact(DisplayName = "#1363: a DELETED Entra account counts as disabled; the request expires")]
+    public async Task DeletedEntraAccount_CountsAsDisabled_AndTheRequestExpires()
+    {
+        _dataverse.Expiring();
+        _graph.Deleted = true;
+
+        var result = await Run();
+
+        result.Success.Should().BeTrue();
+        _graph.UserPatches.Should().Be(0, "there is no account to patch");
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains(RequestId.ToString()) && e.Message.Contains("no longer exists"));
+    }
+
+    /// <summary>MUTATION: reading a group answer with no collection as "not a member" skips the removal and expires the
+    /// request with the user possibly still in the demo group.</summary>
+    [Fact(DisplayName = "#1363: a group membership read with no collection fails the step; the request stays Provisioned")]
+    public async Task GroupMembershipWithNoCollection_FailsTheStep()
+    {
+        _dataverse.Expiring();
+        _graph.NoMembershipCollection = true;
+
+        await Run();
+
+        _graph.GroupRemovals.Should().Be(0);
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned);
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("remove from security group"));
+    }
+
+    /// <summary>MUTATION: keeping the retry line at Warning however long a request is overdue (K3) — a fault that never
+    /// clears then never reaches alerting.</summary>
+    [Fact(DisplayName = "#1363: a request still not expired more than 7 days after its date is logged at Error")]
+    public async Task OverdueByMoreThanSevenDays_IsLoggedAtError()
+    {
+        _dataverse.ExpiredOn(Today.AddDays(-8));
+        _container.ReadFault = new HttpRequestException("Graph unavailable");
+
+        await Run();
+
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error
+            && e.Message.Contains(RequestId.ToString()) && e.Message.Contains("NOT expired") && e.Message.Contains("OVERDUE"));
+
+        _dataverse.ExpiredOn(Today.AddDays(-6));
+        _log.Entries.Clear();
+        await Run();
+
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("NOT expired"));
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Error && e.Message.Contains("NOT expired"),
+            "within 7 days the retry line stays a Warning");
+    }
+
     [Fact(DisplayName = "#1363: a failed Entra disable keeps the request Provisioned too")]
     public async Task FailedDisable_KeepsTheRequestProvisioned()
     {
@@ -304,8 +359,12 @@ public class DemoExpirationJobRetryTests
 
     private static DataverseEnvironmentRecord ZetaDemo => new()
     {
-        Id = EnvironmentId, Name = "Zeta Demo", DataverseUrl = TargetDataverse, IsActive = true,
-        TeamName = "Zeta Team", SpeContainerId = Container,
+        Id = EnvironmentId,
+        Name = "Zeta Demo",
+        DataverseUrl = TargetDataverse,
+        IsActive = true,
+        TeamName = "Zeta Team",
+        SpeContainerId = Container,
     };
 
     /// <summary>The environment registry at its virtual read: the request's target environment (or none, or a fault).</summary>
@@ -329,6 +388,8 @@ public class DemoExpirationJobRetryTests
         public bool FailRequestReads { get; set; }
 
         public void Expiring() => _expires = Today.AddDays(-1);
+
+        public void ExpiredOn(DateTimeOffset expires) => _expires = expires;
 
         public void Warned(DateTimeOffset expires) => _expires = expires;
 
@@ -406,6 +467,12 @@ public class DemoExpirationJobRetryTests
         public int GroupRemovals { get; private set; }
         public bool FailUserReads { get; set; }
 
+        /// <summary>The account was deleted: Graph answers 404 for it.</summary>
+        public bool Deleted { get; set; }
+
+        /// <summary>The group-members read answers with no collection.</summary>
+        public bool NoMembershipCollection { get; set; }
+
         public ISerializationWriterFactory SerializationWriterFactory { get; } = new JsonSerializationWriterFactory();
 
         public string? BaseUrl { get; set; } = "https://graph.microsoft.com/v1.0";
@@ -422,6 +489,8 @@ public class DemoExpirationJobRetryTests
             {
                 if (FailUserReads)
                     throw new HttpRequestException("Graph unavailable");
+                if (Deleted)
+                    throw new ODataError { ResponseStatusCode = 404 };
                 if (requestInfo.HttpMethod == Method.PATCH)
                 {
                     Disabled = true;
@@ -435,7 +504,7 @@ public class DemoExpirationJobRetryTests
             {
                 var members = new DirectoryObjectCollectionResponse
                 {
-                    Value = InGroup ? [new DirectoryObject { Id = ObjectId.ToString() }] : [],
+                    Value = NoMembershipCollection ? null : InGroup ? [new DirectoryObject { Id = ObjectId.ToString() }] : [],
                 };
                 return Task.FromResult((ModelType?)(object)members);
             }

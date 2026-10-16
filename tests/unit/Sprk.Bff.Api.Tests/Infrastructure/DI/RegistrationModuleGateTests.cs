@@ -91,7 +91,7 @@ public class RegistrationModuleGateTests
     [Fact]
     public void WithoutTheSettings_TheExpiryJobsOptionsCannotBeRead_WhichIsWhyAStampMustNotRegisterIt()
     {
-        // Pins finding F1: DemoExpirationJob (a hosted service) reads IOptions<DemoProvisioningOptions>.Value in its
+        // Pins finding F1: DemoExpirationJob (a scheduled job) reads IOptions<DemoProvisioningOptions>.Value in its
         // constructor. With no DemoProvisioning:* settings — every stamp — that read throws, so the host failed to start.
         var services = new ServiceCollection();
         services.AddRegistrationModule(Config());

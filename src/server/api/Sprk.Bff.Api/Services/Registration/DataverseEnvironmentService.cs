@@ -22,10 +22,23 @@ public class DataverseEnvironmentService : IDisposable
 
     private const string EntitySetName = "sprk_dataverseenvironments";
 
+    /// <summary>The Dataverse error code for "the record does not exist" — the only 404 that means absent (#1363).</summary>
+    internal const string RecordNotFoundErrorCode = "0x80040217";
+
     public DataverseEnvironmentService(
         IConfiguration configuration,
         TokenCredential credential,
         ILogger<DataverseEnvironmentService> logger)
+        : this(configuration, credential, logger, handler: null)
+    {
+    }
+
+    /// <summary>Test seam: the same service over a supplied HTTP handler (the admin Dataverse double).</summary>
+    internal DataverseEnvironmentService(
+        IConfiguration configuration,
+        TokenCredential credential,
+        ILogger<DataverseEnvironmentService> logger,
+        HttpMessageHandler? handler)
     {
         _logger = logger;
         _credential = credential;
@@ -38,10 +51,8 @@ public class DataverseEnvironmentService : IDisposable
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger.LogInformation("DataverseEnvironmentService targeting Dataverse at {ApiUrl}", _apiUrl);
 
-        _httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/")
-        };
+        _httpClient = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        _httpClient.BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/");
     }
 
     #region Token Management
@@ -90,7 +101,9 @@ public class DataverseEnvironmentService : IDisposable
 
     /// <summary>
     /// Retrieves a single environment record by ID.
-    /// Returns null if not found.
+    /// Returns null only when Dataverse answers that the record does not exist (404 with error code
+    /// <see cref="RecordNotFoundErrorCode"/>); any other 404 (a missing entity set, a routing fault) and every other
+    /// failure throws, so a caller never reads a fault as absence (#1363).
     /// NFR-01: Fresh read from Dataverse (no caching).
     /// </summary>
     /// <remarks>
@@ -108,11 +121,41 @@ public class DataverseEnvironmentService : IDisposable
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return null;
+        {
+            var errorCode = await ReadErrorCodeAsync(response, ct);
+            if (string.Equals(errorCode, RecordNotFoundErrorCode, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            throw new HttpRequestException(
+                $"Reading environment {environmentId} returned 404 with error code '{errorCode ?? "(none)"}', not "
+                + $"{RecordNotFoundErrorCode} (record not found); the environment's existence is unknown.",
+                inner: null,
+                System.Net.HttpStatusCode.NotFound);
+        }
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
         return DataverseEnvironmentRecord.MapFromJson(json);
+    }
+
+    /// <summary>The <c>error.code</c> of a Dataverse error body, or null when the body is not one.</summary>
+    private static async Task<string?> ReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            return body.ValueKind == JsonValueKind.Object
+                   && body.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

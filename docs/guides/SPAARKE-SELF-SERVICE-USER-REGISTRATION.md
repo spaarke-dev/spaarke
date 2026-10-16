@@ -530,7 +530,10 @@ To modify a template:
 
 - If the Provisioned list cannot be read, the run fails and the scheduler retries it (nothing was done or sent)
 - If a cleanup step fails for a record, the record stays `Provisioned`; a Warning naming the request and the failed step(s) is logged each run, and the next daily run repeats every step (each is idempotent: an account already disabled, a user no longer in the team or group, a grant already removed change nothing)
-- Target environment: if the request names none, or the registry read succeeds and finds no such `sprk_dataverseenvironment` row, there is nothing in that environment to clean — the team removal and SPE revoke are done, a Warning names the request (and the environment id), and the request expires once the Entra disable and group removal succeed. If the registry read itself fails (error, timeout, throttle, auth), that is transient: the request stays `Provisioned` and the next run retries it
+- Target environment: if the request names none, or the registry read succeeds and finds no such `sprk_dataverseenvironment` row, there is nothing in that environment to clean — the team removal and SPE revoke are done, a Warning names the request (and the environment id), and the request expires once the Entra disable and group removal succeed. If the registry read itself fails (error, timeout, throttle, auth), that is transient: the request stays `Provisioned` and the next run retries it. Only Dataverse's "record not found" (`0x80040217`) counts as no such row; any other 404 is a failed read
+- An Entra account that no longer exists (Graph 404) counts as disabled, so a deleted demo user does not block expiry
+- A request still not expired more than 7 days after its expiration date logs its retry line at **Error** instead of Warning, so a permanent fault (a lost team name or Dataverse URL, a renamed team, a persistent 5xx) reaches alerting. It never becomes `Expired` with access possibly standing
+- Known limit: the warning's once-per-day marker fails open on a Redis fault, so a manual trigger after a Redis outage may resend that day's warning (the scheduled run cannot double-send)
 - Cancellation (app shutdown) is honoured; the host drains the run
 
 ---

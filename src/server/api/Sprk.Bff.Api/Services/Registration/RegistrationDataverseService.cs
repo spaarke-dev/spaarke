@@ -293,7 +293,8 @@ public class RegistrationDataverseService : IDisposable
     }
 
     /// <summary>
-    /// Queries registration requests filtered by status.
+    /// Queries registration requests filtered by status, following <c>@odata.nextLink</c> until every page is read
+    /// (or <paramref name="top"/> rows are), so a status holding more than one page (5,000 rows) is read whole (#1363).
     /// </summary>
     public async Task<List<RegistrationRequestRecord>> GetRequestsByStatusAsync(
         RegistrationStatus status, int? top = null, CancellationToken ct = default)
@@ -313,12 +314,35 @@ public class RegistrationDataverseService : IDisposable
 
         _logger.LogDebug("GET registration requests by status {Status}", status);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        var records = new List<RegistrationRequestRecord>();
+        string? next = url;
+        while (next is not null)
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, next, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-        return result?.Value?.Select(MapToRecord).ToList() ?? new List<RegistrationRequestRecord>();
+            var page = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (page?.Value is not null)
+                records.AddRange(page.Value.Select(MapToRecord));
+
+            if (top.HasValue && records.Count >= top.Value)
+                return records.Take(top.Value).ToList();
+
+            next = page?.NextLink;
+            if (next is not null)
+            {
+                // The next page must come from the same Dataverse: the bearer token is never sent anywhere else.
+                if (!Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
+                    || !string.Equals(nextUri.Host, _httpClient.BaseAddress!.Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse returned a next page link outside {_httpClient.BaseAddress!.Host}; the {status} list was not read whole.");
+                }
+            }
+        }
+
+        return records;
     }
 
     /// <summary>

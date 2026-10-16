@@ -61,7 +61,8 @@ public class DemoSpeGrantLifecycleTests
         _bffDataverse.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) => new EntityCollection(q.EntityName == "businessunit"
                 ? [new Entity("businessunit", BffUnit) { ["sprk_containerid"] = DemoContainer }]
-                : []) { MoreRecords = false });
+                : [])
+            { MoreRecords = false });
         _bffDataverse.Setup(d => d.RetrieveAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Entity>(null!)); // not a user of this Dataverse
     }
@@ -107,7 +108,7 @@ public class DemoSpeGrantLifecycleTests
         whileProvisioned.Failed.Should().Be(0);
         _container.Roles.Should().ContainSingle("the standing pass leaves the demo grant alone while the demo runs");
 
-        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         _container.Roles.Should().BeEmpty("expiry removes the grant");
         _container.Markers.Should().BeEmpty("expiry clears the marker with the grant — none is orphaned");
@@ -135,7 +136,7 @@ public class DemoSpeGrantLifecycleTests
         _container.Roles.Add(new("perm-other", ["writer"], "other@contoso.example", Guid.NewGuid().ToString()));
         _container.Markers[otherKey] = "perm-other";
 
-        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         _container.Removals.Should().Equal(legacyKey);
         _container.Markers.Keys.Should().Equal(new[] { otherKey }, "another user's standing grant is untouched");
@@ -149,7 +150,7 @@ public class DemoSpeGrantLifecycleTests
         _container.Markers[DemoKey] = "perm-unseen";
         _container.RolesComplete = false;
 
-        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         _container.Markers.Should().ContainKey(DemoKey, "the grant stays recorded, never orphaned");
@@ -162,7 +163,7 @@ public class DemoSpeGrantLifecycleTests
         _container.Markers[DemoKey] = "perm-demo";
         _container.ReadFault = new HttpRequestException("Graph unavailable");
 
-        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>();
         _container.Markers.Should().ContainKey(DemoKey);
@@ -176,7 +177,7 @@ public class DemoSpeGrantLifecycleTests
     {
         _container.RolesComplete = false;
 
-        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        var act = () => Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -184,7 +185,7 @@ public class DemoSpeGrantLifecycleTests
     [Fact(DisplayName = "#1363: no marker and no role in a COMPLETE role list is a benign absence")]
     public async Task Expire_NoMarkerAndNoRole_InACompleteList_DoesNothing()
     {
-        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         _container.Removals.Should().BeEmpty();
         _graph.Deletes.Should().BeEmpty();
@@ -199,7 +200,7 @@ public class DemoSpeGrantLifecycleTests
     {
         _container.Roles.Add(new("perm-pre171", ["writer"], DemoUpn, EntraObjectId.ToString()));
 
-        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         var delete = _graph.Deletes.Should().ContainSingle().Subject;
         delete.Url.Should().EndWith("/permissions/perm-pre171");
@@ -207,12 +208,40 @@ public class DemoSpeGrantLifecycleTests
         _container.Removals.Should().BeEmpty("there is no marker to clear");
     }
 
+    /// <summary>
+    /// MUTATION: matching the role by object id only (<c>IsFor(upn: null, oid)</c>). Graph keys a container grant by UPN
+    /// and may return one with no object id; such a task-171-era grant would stay standing, with its marker, forever.
+    /// </summary>
+    [Fact(DisplayName = "#1363: a task-171 STANDING-marked grant that carries only the UPN (no object id) is still removed")]
+    public async Task Expire_Task171StandingGrant_KeyedByUpnOnly_IsRemoved()
+    {
+        var legacyKey = Membership.MarkerKey(Membership.StandingWriterMarkerPrefix, Guid.Parse("13630000-0000-4000-8000-0000000000d6"));
+        _container.Roles.Add(new("perm-171-upn", ["writer"], DemoUpn, null));
+        _container.Markers[legacyKey] = "perm-171-upn";
+
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
+
+        _container.Removals.Should().Equal(legacyKey);
+        _container.Markers.Should().BeEmpty();
+    }
+
+    /// <summary>MUTATION: as above, for an unmarked pre-task-171 plain writer that carries only the UPN.</summary>
+    [Fact(DisplayName = "#1363: an UNMARKED pre-171 plain writer that carries only the UPN (no object id) is still deleted")]
+    public async Task Expire_UnmarkedPlainWriter_KeyedByUpnOnly_IsDeleted()
+    {
+        _container.Roles.Add(new("perm-pre171-upn", ["writer"], DemoUpn.ToUpperInvariant(), null));
+
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
+
+        _graph.Deletes.Should().ContainSingle().Which.Url.Should().EndWith("/permissions/perm-pre171-upn");
+    }
+
     [Fact(DisplayName = "#1363: an unmarked role that is not a plain writer (never made by Step 8) is left in place")]
     public async Task Expire_UnmarkedOwnerRole_IsLeftInPlace()
     {
         _container.Roles.Add(new("perm-owner", ["owner"], DemoUpn, EntraObjectId.ToString()));
 
-        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), CancellationToken.None);
+        await Expiration().RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
 
         _graph.Deletes.Should().BeEmpty();
         _container.Removals.Should().BeEmpty();

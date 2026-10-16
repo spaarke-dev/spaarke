@@ -27,6 +27,19 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// so Steps 2 and 4 are done and the request expires once Steps 1 and 3 succeed. UNREADABLE (the registry read
 /// faulted): transient, so Steps 2 and 4 count as failed and the next run retries. Absence is never inferred from an
 /// exception.</para>
+/// <para><b>Known limits.</b></para>
+/// <list type="bullet">
+/// <item>(K1) "Not owned" is wider than a foreign container: <see cref="SpeContainerOwnershipGuard"/> also answers it
+/// for a blank id, a container without the stamp's ownership marker, and a 400/403/404 from Graph while reading that
+/// marker. Expiry treats every such answer as "nothing of this stamp's to revoke" (a Warning naming the container and
+/// the request), since it repeats on every run.</item>
+/// <item>(K2) The warning's once-per-day marker fails open on a Redis fault, so a manual trigger after a Redis blip may
+/// resend that day's warning. The scheduled tick cannot double-send: the host's lease runs each occurrence once.</item>
+/// <item>(K3) A permanent configuration fault (a lost TeamName or DataverseUrl, a renamed team, a persistent 5xx)
+/// retries daily with a Warning and has no end state. That fails closed: the request is never marked Expired with
+/// access possibly standing. Once a request is more than <see cref="OverdueEscalation"/> past its expiration date the
+/// line is logged at Error, so it reaches alerting.</item>
+/// </list>
 /// <para><b>Each email once.</b> The expired notice is sent AFTER the status write, so a request is notified only once it
 /// has left the Provisioned set the run reads (a status write that fails sends nothing; the next run repeats). A notice
 /// that then fails to send is logged and not retried. The warning is sent at most once per request per UTC day — its
@@ -121,6 +134,9 @@ public sealed class DemoExpirationJob : IScheduledJob
         "Daily at midnight UTC, expires demo accounts past their expiration date (disables the Entra account, removes the " +
         "team and group memberships and the SPE container grant, then marks the request Expired and sends the notice) and " +
         "warns accounts expiring within three days. A request whose cleanup failed stays Provisioned and is retried next run.";
+
+    /// <summary>How long past its expiration date a request may stay unexpired before its retry line is logged at Error (K3).</summary>
+    internal static readonly TimeSpan OverdueEscalation = TimeSpan.FromDays(7);
 
     /// <summary>What one pass did.</summary>
     internal sealed record PassCounts(
@@ -228,6 +244,13 @@ public sealed class DemoExpirationJob : IScheduledJob
                 await _graphUserService.DisableUserAsync(aadObjectId, ct);
                 _logger.LogInformation("[Expire] Disabled Entra account {AadObjectId}", aadObjectId);
             }
+            catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+            {
+                // The account no longer exists (deleted): at least as closed as disabled, so the step is done.
+                _logger.LogInformation(
+                    "[Expire] Entra account {AadObjectId} of request {RequestId} no longer exists; nothing to disable",
+                    aadObjectId, request.Id);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 failedSteps.Add("disable Entra account");
@@ -323,7 +346,8 @@ public sealed class DemoExpirationJob : IScheduledJob
                         _logger.LogInformation(
                             "[Expire] Revoking SPE container access for user {AadObjectId} on container {ContainerId}",
                             aadObjectId, environment.SpeContainerId);
-                        await RevokeSpeContainerAccessAsync(environment.SpeContainerId, aadObjectId, ct);
+                        await RevokeSpeContainerAccessAsync(
+                            environment.SpeContainerId, aadObjectId, request.DemoUsername, ct);
                         _logger.LogInformation("[Expire] Revoked SPE container access");
                     }
                 }
@@ -348,10 +372,16 @@ public sealed class DemoExpirationJob : IScheduledJob
 
         if (failedSteps.Count > 0)
         {
-            _logger.LogWarning(
+            // K3: a fault that never clears retries daily; past OverdueEscalation the same line goes out at Error.
+            var overdue = request.ExpirationDate is { } expires
+                          && _timeProvider.GetUtcNow() - expires > OverdueEscalation;
+            _logger.Log(
+                overdue ? LogLevel.Error : LogLevel.Warning,
                 "[Expire] Request {RequestId} was NOT expired this run: {FailedSteps} failed. It stays Provisioned and the next "
-                + "run repeats every step; no expired notice is sent until it completes.",
-                request.Id, string.Join("; ", failedSteps));
+                + "run repeats every step; no expired notice is sent until it completes. Expired on {ExpirationDate:u}"
+                + "{Overdue}.",
+                request.Id, string.Join("; ", failedSteps), request.ExpirationDate,
+                overdue ? $"; OVERDUE by more than {OverdueEscalation.TotalDays:0} days" : string.Empty);
             return false;
         }
 
@@ -460,10 +490,12 @@ public sealed class DemoExpirationJob : IScheduledJob
     /// primitive reports as failed THROW, so the caller logs the error naming the request; the marker stays on the
     /// container, so the grant remains recorded and removable — never orphaned. A container this stamp does not own is
     /// refused before Graph is called (task 227d).</para>
+    /// <para>The user's role is matched by UPN or Entra object id (<c>IsFor(upn, objectId)</c>, as every other caller):
+    /// Graph keys a container grant by UPN and may return one with no object id.</para>
     /// <para><b>Internal</b> so the test assembly (InternalsVisibleTo) drives it directly.</para>
     /// </remarks>
     internal async Task RevokeSpeContainerAccessAsync(
-        string containerId, string userId, CancellationToken ct)
+        string containerId, string userId, string? upn, CancellationToken ct)
     {
         if (!Guid.TryParse(userId, out var objectId) || objectId == Guid.Empty)
         {
@@ -479,7 +511,7 @@ public sealed class DemoExpirationJob : IScheduledJob
             return;
         }
 
-        var role = access.Roles.FirstOrDefault(r => r.IsFor(upn: null, objectId));
+        var role = access.Roles.FirstOrDefault(r => r.IsFor(upn, objectId));
 
         string? markerKey = null;
         string? permissionId = null;

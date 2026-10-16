@@ -173,7 +173,8 @@ public class DemoExpirationJobTargetEnvironmentTests
 
         AssertSteps2And4Skipped(registry, expiredStatusWrites: 0, "an unreadable environment is retried on the next run (#1363)");
         ErrorsNaming(RequestId).Should().Contain(m => m.Contains("Failed to read target environment"));
-        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("NOT expired") && m.Contains("read target environment"));
+        // The fixture's request is 15 days overdue, so the retry line is at Error (K3); within 7 days it is a Warning.
+        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("NOT expired") && m.Contains("read target environment"));
     }
 
     /// <summary>An environment deactivated after the demo was provisioned still holds the user's access; expiry removes it.</summary>
