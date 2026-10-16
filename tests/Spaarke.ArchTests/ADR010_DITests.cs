@@ -362,13 +362,13 @@ public class ADR010_DITests
         // Measured: master + the earlier eBilling tasks = 163 (after 046), this task adds exactly these two.
         // ───────── Ceiling raised 165 → 166, 2026-10-16 (ebilling-r1 task 045) ─────────
         // ITrackingNumberAllocator -> TrackingNumberAllocator. SEAM JUSTIFICATION: it is the single server-side owner of a submission's
-        // {firm invoice number}.{n} (FR-10, D-37, ADR-002) and the module boundary of three later callers: the submission operation (044,
-        // number typed at intake), the submission job (049, number read from the PDF) and resubmission after Return to Firm (104). Each of
-        // their tests must prove what the caller does with every outcome (Allocated, AlreadyAllocated, Refused with ebilling.tracking.unavailable)
+        // {firm invoice number}.{n} (FR-10, D-37, D-87, ADR-002) and the only creator of sprk_invoicesubmission rows: the module boundary of the
+        // submission operation (044, which creates every submission through it, D-87; a resubmission is a new submission through the same
+        // route). Its tests must prove what the caller does with every outcome (Created, AlreadyCreated, Refused with ebilling.tracking.unavailable)
         // by feeding it that TrackingNumberResult through a Moq double; without the interface each would stand up the Dataverse
         // highest-sequence read, the alternate-key retry and its faults behind a concrete. One implementation, so a 1:1 mapping, accepted on
-        // the same grounds as IInvoiceLifecycleService above. Falsifiable: if neither 044 nor 049 fakes it by 049, register the concrete and
-        // drop this back to 162.
+        // the same grounds as IInvoiceLifecycleService above. Falsifiable: if 044's tests do not fake it by 044's completion, register the
+        // concrete and drop this back to 165.
         const int knownOneToOneCeiling = 166;
 
         Assert.True(

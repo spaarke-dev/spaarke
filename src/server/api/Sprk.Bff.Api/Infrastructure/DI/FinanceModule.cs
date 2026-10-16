@@ -89,9 +89,10 @@ public static class FinanceModule
         services.AddScoped<ICodeSetSuggestionProvider, NoCodeSetSuggestionProvider>();
         services.AddScoped<CodeSetResolver>();
         services.AddScoped<ILineCodingService, LineCodingService>();
-        // Tracking numbers (ebilling-r1 task 045, FR-10, D-37, ADR-002): the single server-side owner of a submission's
-        // {firm invoice number}.{n} and sprk_submissionsequence, made unique by the (firm, tracking number) alternate key with a
-        // bounded retry. Scoped (takes the scoped IGenericEntityService), unconditional (flag rule above). Callers: 044, 049, 104.
+        // Tracking numbers (ebilling-r1 task 045, FR-10, D-37, D-87, ADR-002): the single server-side owner of a submission's
+        // {firm invoice number}.{n} and sprk_submissionsequence, and the creator of the submission row that carries them; made unique
+        // by the (firm, tracking number) alternate key with a bounded retry. Scoped (takes the scoped IGenericEntityService),
+        // unconditional (flag rule above). Caller: 044 (a resubmission, D-37, is a new submission through the same route).
         services.AddScoped<ITrackingNumberAllocator, TrackingNumberAllocator>();
 
         // ============================================================================

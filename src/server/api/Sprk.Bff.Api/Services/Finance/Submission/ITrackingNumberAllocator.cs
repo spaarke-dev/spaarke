@@ -1,32 +1,32 @@
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
-/// <summary>What an allocation call did.</summary>
+/// <summary>What a create call did.</summary>
 public enum TrackingNumberOutcome
 {
-    /// <summary>The submission was given the next number for its firm and firm invoice number; the row was written.</summary>
-    Allocated,
+    /// <summary>The submission row was created holding the next number for its firm and firm invoice number.</summary>
+    Created,
 
     /// <summary>
-    /// The submission already held a number for that firm invoice number; nothing was written and the existing number is returned.
-    /// A job redelivery, or a retry after a timeout that had in fact written the row, ends here.
+    /// A submission with that id already exists and holds a number for that firm invoice number; nothing was written and the existing number is
+    /// returned. A redelivered request, or a retry after a timeout that had in fact created the row, ends here.
     /// </summary>
-    AlreadyAllocated,
+    AlreadyCreated,
 
     /// <summary>Nothing was written; <see cref="TrackingNumberResult.Reason"/> is a stable code from <see cref="TrackingNumberReasons"/>.</summary>
     Refused,
 }
 
-/// <summary>Stable reason codes of a refused allocation. Callers map them to their own responses; the strings are a contract.</summary>
+/// <summary>Stable reason codes of a refused create. Callers map them to their own responses; the strings are a contract.</summary>
 public static class TrackingNumberReasons
 {
     /// <summary>
-    /// Every attempt lost the race for the next number (or the number is held by a row the sequence cannot see), so none was written.
+    /// Every attempt lost the race for the next number (or the number is held by a row the sequence cannot see), so no row was created.
     /// The caller may try again later.
     /// </summary>
     public const string Unavailable = "ebilling.tracking.unavailable";
 }
 
-/// <summary>The result of <see cref="ITrackingNumberAllocator.AllocateAsync"/>.</summary>
+/// <summary>The result of <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/>.</summary>
 /// <param name="Outcome">What happened.</param>
 /// <param name="TrackingNumber">The submission's <c>{firm invoice number}.{n}</c>; null when refused.</param>
 /// <param name="Sequence">The <c>n</c> of <paramref name="TrackingNumber"/>; null when refused.</param>
@@ -37,43 +37,59 @@ public sealed record TrackingNumberResult(
     int? Sequence,
     string? Reason)
 {
-    /// <summary>True for <see cref="TrackingNumberOutcome.Allocated"/> and <see cref="TrackingNumberOutcome.AlreadyAllocated"/>.</summary>
+    /// <summary>True for <see cref="TrackingNumberOutcome.Created"/> and <see cref="TrackingNumberOutcome.AlreadyCreated"/>.</summary>
     public bool Succeeded => Outcome != TrackingNumberOutcome.Refused;
 
-    internal static TrackingNumberResult Allocated(string trackingNumber, int sequence) =>
-        new(TrackingNumberOutcome.Allocated, trackingNumber, sequence, null);
+    internal static TrackingNumberResult Created(string trackingNumber, int sequence) =>
+        new(TrackingNumberOutcome.Created, trackingNumber, sequence, null);
 
-    internal static TrackingNumberResult AlreadyAllocated(string trackingNumber, int sequence) =>
-        new(TrackingNumberOutcome.AlreadyAllocated, trackingNumber, sequence, null);
+    internal static TrackingNumberResult AlreadyCreated(string trackingNumber, int sequence) =>
+        new(TrackingNumberOutcome.AlreadyCreated, trackingNumber, sequence, null);
 
     internal static TrackingNumberResult Refused(string reason) =>
         new(TrackingNumberOutcome.Refused, null, null, reason);
 }
 
 /// <summary>
-/// The single server-side owner of a submission's tracking number (ebilling-r1 FR-10, D-37, ADR-002): the only code that writes
-/// <c>sprk_invoicesubmission.sprk_trackingnumber</c> and <c>sprk_submissionsequence</c> to a real number. Callers (the submission operation,
-/// task 044, when the firm invoice number is typed; the submission job, task 049, when it is only read from the PDF) own which firm invoice
-/// number to use; this service owns only the numbering.
+/// The single server-side owner of a submission's tracking number (ebilling-r1 FR-10, D-37, D-87, ADR-002) and the only creator of
+/// <c>sprk_invoicesubmission</c> rows: a submission is created with its <c>{firm invoice number}.{n}</c> already set, so the number is never
+/// blank. The submission operation (task 044) calls it with the firm invoice number the submitter typed; the submission job (task 049) never
+/// allocates.
 /// </summary>
 public interface ITrackingNumberAllocator
 {
     /// <summary>
-    /// Gives the existing submission <paramref name="submissionId"/> the next tracking number <c>{firm invoice number}.{n}</c> for
-    /// <paramref name="firmId"/>: n is 1 for the first submission of that firm invoice number, then 2, 3 and so on, per firm and never across firms.
-    /// Writes <c>sprk_firminvoicenumber</c>, <c>sprk_submissionsequence</c> and <c>sprk_trackingnumber</c> in one update.
+    /// Creates the submission <paramref name="submissionId"/> for <paramref name="firmId"/> holding the next tracking number
+    /// <c>{firm invoice number}.{n}</c>: n is 1 for the first submission of that firm invoice number, then 2, 3 and so on, per firm and never across
+    /// firms. The row is created in one write that carries the number, <paramref name="fields"/> and the firm.
     /// </summary>
+    /// <param name="submissionId">
+    /// The new row's id, chosen by the caller (a new Guid per submission, also the job's idempotency key). It is the idempotency key of this
+    /// call: if a row with this id already exists, that row's number is returned and nothing is written, so a redelivered create never mints
+    /// a second number. A second submission of the same firm invoice number is a new submission with a new id (D-37).
+    /// </param>
+    /// <param name="fields">
+    /// Every other column of the new row (name, status, channel, document, core-record fields, owner...); null for none. It must not contain
+    /// the columns this service owns (the id, <c>sprk_vendororg</c>, <c>sprk_firminvoicenumber</c>, <c>sprk_submissionsequence</c>,
+    /// <c>sprk_trackingnumber</c>). On an <see cref="TrackingNumberOutcome.AlreadyCreated"/> result the existing row stands; these values are not applied.
+    /// </param>
     /// <remarks>
     /// Uniqueness comes from the Dataverse alternate key on (<c>sprk_vendororg</c>, <c>sprk_trackingnumber</c>), not from the read that picks n:
-    /// two parallel callers can pick the same n, one write wins, the other is refused whole by the key and re-reads. At most
+    /// two parallel callers can pick the same n, one create wins, the other is refused whole by the key and recomputes. At most
     /// <see cref="TrackingNumberAllocator.MaxAttempts"/> attempts, then <see cref="TrackingNumberOutcome.Refused"/> with
-    /// <see cref="TrackingNumberReasons.Unavailable"/> and nothing written. Any other fault propagates on the first attempt.
-    /// A submission that already holds a number for the same firm invoice number is returned unchanged
-    /// (<see cref="TrackingNumberOutcome.AlreadyAllocated"/>), so the call is safe to repeat.
+    /// <see cref="TrackingNumberReasons.Unavailable"/> and no row created. Any other fault propagates on the first attempt.
+    /// The allocator never refuses because the firm invoice number was seen before: a repeated number is a Duplicate-rule finding with a
+    /// configured consequence (D-88), and each arrival gets its own n.
     /// </remarks>
-    /// <exception cref="ArgumentException">An id is empty, or <paramref name="firmInvoiceNumber"/> is blank or longer than
-    /// <see cref="TrackingNumberAllocator.MaxFirmInvoiceNumberLength"/> after trimming. Nothing was written.</exception>
-    /// <exception cref="InvalidOperationException">The submission belongs to a different firm than <paramref name="firmId"/> (or to none), or
-    /// already holds a number for a different firm invoice number. A caller bug; nothing was written.</exception>
-    Task<TrackingNumberResult> AllocateAsync(Guid submissionId, Guid firmId, string firmInvoiceNumber, CancellationToken ct = default);
+    /// <exception cref="ArgumentException">An id is empty, <paramref name="firmInvoiceNumber"/> is blank or longer than
+    /// <see cref="TrackingNumberAllocator.MaxFirmInvoiceNumberLength"/> after trimming, or <paramref name="fields"/> names a column this service
+    /// owns. Nothing was written.</exception>
+    /// <exception cref="InvalidOperationException">A row with <paramref name="submissionId"/> already exists but belongs to a different firm,
+    /// holds a different firm invoice number, or was not numbered by this service. A caller bug; nothing was written.</exception>
+    Task<TrackingNumberResult> CreateSubmissionAsync(
+        Guid submissionId,
+        Guid firmId,
+        string firmInvoiceNumber,
+        IReadOnlyDictionary<string, object>? fields = null,
+        CancellationToken ct = default);
 }
