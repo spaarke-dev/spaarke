@@ -385,8 +385,9 @@ public class SpeContainerMembershipSync
     }
 
     /// <summary>
-    /// Keep, remove, or "could not tell". Remove ONLY on a positive answer: the holder is disabled; the record is
-    /// Restricted and the holder is flagged external (round 67); or Dataverse answers that the holder lacks Write.
+    /// Keep, remove, or "could not tell". Remove ONLY on a positive answer: the holder is disabled (or its row carries no
+    /// <c>isdisabled</c> value, which is not proof of an active holder — issue #1576); the record is Restricted and the holder
+    /// is flagged external (round 67); or Dataverse answers that the holder lacks Write.
     /// </summary>
     private async Task<Verdict> JitVerdictAsync(
         Guid systemUserId, string entitySet, Guid recordId, bool? restricted, CancellationToken ct)
@@ -404,7 +405,9 @@ public class SpeContainerMembershipSync
 
         if (user is null)
             return Verdict.Unknown;
-        if (user.GetAttributeValue<bool?>("isdisabled") == true)
+        // Issue #1576 (fail closed): only an explicit isdisabled = false is an active holder. A row that comes back without the
+        // value is not proof the holder is active, so the grant is removed rather than kept.
+        if (user.GetAttributeValue<bool?>("isdisabled") != false)
             return Verdict.Remove;
         if (restricted == true && user.GetAttributeValue<bool?>("sprk_isexternal") == true)
             return Verdict.Remove;
