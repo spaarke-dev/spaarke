@@ -409,6 +409,8 @@ Give the class a `[Collection]` with `DisableParallelization = true`, and make i
 **Blockers**: none.
 **Related**: task 045 (the scheme and these tests), task 046.
 
+**Update 2026-10-16 (cause captured):** the same six failed in the full run on `a6d30891a`, and the TRX kept the message this time. Each host's `Failures` held `System.ObjectDisposedException: Cannot access a disposed object. Object name: 'EventLogInternal'` from `Microsoft.Extensions.Logging.EventLog.WindowsEventLog.WriteEntry`. So the immediate cause is the Windows EventLog logger provider writing through an EventLog another host already disposed; the failure is captured as an authentication failure and the assertion on the expected exception type fails. The AadIssuerValidator cache is not the cause. Alone: 37/37 pass. Suggested fix: clear the logging providers in the test host (`builder.Logging.ClearProviders()`, or the EventLog provider only) and/or filter `host.Failures` to authentication exceptions.
+
 ---
 
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
