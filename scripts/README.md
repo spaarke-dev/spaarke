@@ -1890,6 +1890,15 @@ pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1
 ```
 
+### `ebilling/Remove-EbillingInvoiceLineItem.ps1`
+
+Retires the superseded invoice-line-item table (`ebilling-r1` task 011, D-18: `sprk_billingevent` is the Invoice Line). **Read-only by default**: prints the usage and dependency inventory (rows, forms, views, relationships, app modules, AI skill configs, `RetrieveDependenciesForDelete`) and a READY / BLOCKED verdict. **`-Delete -OwnerApproval '<date and who>'` is destructive** and needs the owner's explicit OK (project `CLAUDE.md` section 5). It refuses with exit 2, changing nothing, if the table holds any row (`-DeleteRows` lifts that only for the four known test rows, after a JSON backup) or any dependency is not an expected one. It then removes the form subgrids and navigation entries, the `sprk_timekeeper` lookup, the AI skill configs and the app module registrations, re-checks that no dependency is left, and deletes the table. Verifies that the entity reads 404 and the `sprk_billingevent`, `sprk_invoice` and `sprk_timekeeper` forms load.
+
+```powershell
+pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1
+pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -OwnerApproval '<date and who>' -WhatIf
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.

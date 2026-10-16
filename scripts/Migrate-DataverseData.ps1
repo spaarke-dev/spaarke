@@ -113,7 +113,7 @@ $Tier2_Core = @(
 
 $Tier3_Dependent = @(
     'sprk_eventset', 'sprk_eventtodo', 'sprk_workassignment',
-    'sprk_budget', 'sprk_budgetbucket', 'sprk_invoicelineitem',
+    'sprk_budget', 'sprk_budgetbucket',
     'sprk_billingevent', 'sprk_spendsnapshot', 'sprk_spendsignal',
     'sprk_kpiassessment', 'sprk_reportcard', 'sprk_timekeeper',
     'sprk_memo', 'sprk_fieldmappingrule',

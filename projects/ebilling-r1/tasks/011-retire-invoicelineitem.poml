@@ -96,7 +96,7 @@
     <criterion testable="true">Task notes contain the solution-source file list 029 must drop; no file under src/dataverse/solutions/SpaarkeMaster/ changed in this task.</criterion>
   </acceptance-criteria>
 
-  <notes>RecordOwnerAssignmentCensusTests is a uac-r2 guard: mention the edit in the PR and ask uac-r2 to review. Shared append point: docs/data-model/sprk_financial-related-entities.md (edit only the invoice-line-item rows).</notes>
+  <notes>STATUS 2026-10-16: IN PROGRESS, dev delete NOT run. Escalation trigger 1 fired: sprk_invoicelineitem holds 4 rows in dev (test data on test invoices; evidence and ids in notes/011-retire-invoicelineitem.md section 2); no owner OK yet (trigger 3). Done: repo/doc references removed or redirected to sprk_billingevent (steps 1 and 3; ArchTests 1052 passed before and after); dependency and usage inventory (step 2); guarded script scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 (read-only by default, -Delete refuses with exit 2 on any row or unexpected dependency; tested read-only and with -WhatIf); solution-source list for 029 (notes section 6). After the owner decides on the 4 rows and gives the explicit OK, run: pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -DeleteRows -OwnerApproval '&lt;date&gt; &lt;who&gt;' (drop -DeleteRows if the rows were already removed), quote the OK and the output in the notes, then set the status to completed. Steps 5 and 6 are pending. RecordOwnerAssignmentCensusTests is a uac-r2 guard: mention the edit in the PR and ask uac-r2 to review. Shared append point: docs/data-model/sprk_financial-related-entities.md (edit only the invoice-line-item rows).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

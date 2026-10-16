@@ -41,7 +41,9 @@ public class RecordOwnerAssignmentCensusTests
     /// </summary>
     /// <remarks>Task 182 (ontology child-record contract C7, audit F4): the ontology's three secure children —
     /// <c>sprk_signal</c>, <c>sprk_decisionrecord</c>, <c>sprk_budgetrevision</c> — joined the list. Internal so
-    /// <see cref="SecureFamilyConsistencyTests"/> can tie it to the lineage and the codified role set.</remarks>
+    /// <see cref="SecureFamilyConsistencyTests"/> can tie it to the lineage and the codified role set.
+    /// ebilling-r1 task 011: the retired invoice-line-item table left the list (D-18: <c>sprk_billingevent</c>,
+    /// already listed, is the Invoice Line). Nothing in src ever created it, so no census entry changed.</remarks>
     internal static readonly string[] ChildTables =
     {
         "sprk_agreement", "sprk_analysis", "sprk_billingevent", "sprk_budget", "sprk_communication",
@@ -49,7 +51,7 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_reportcard", "sprk_spendsignal", "sprk_spendsnapshot", "sprk_todo", "sprk_workassignment",
         "sprk_servicerequest", "sprk_analysisoutput", "sprk_communicationattachment", "sprk_communicationparticipant",
         "sprk_emailreviewlog", "sprk_communicationchannelref", "sprk_fileversion", "sprk_emailartifact",
-        "sprk_attachmentartifact", "sprk_eventlog", "sprk_invoicelineitem", "sprk_budgetbucket", "sprk_processingjob",
+        "sprk_attachmentartifact", "sprk_eventlog", "sprk_budgetbucket", "sprk_processingjob",
         "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
         // ebilling-r1 task 013: the invoice family's new secure children (no server create exists yet).
         "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",

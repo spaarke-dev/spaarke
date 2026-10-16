@@ -61,7 +61,7 @@ Money columns carry the platform's `transactioncurrencyid`, `exchangerate` and `
 
 `sprk_name` stays the name. Status (`statuscode`): 1 = **Approved** (statecode 0; relabelled from "Active"; dev had 0 timekeeper rows, so no row changed meaning), 659490000 = **Pending** (statecode 0), 2 = **Inactive** (statecode 1). A new row that does not name a status defaults to value 1 (Approved), so writers set Pending explicitly.
 
-Obsolete stub lookups: `sprk_invoice` was **deleted** on 2026-10-15 with the owner's OK (0 timekeeper rows, 0 readers, no form or view referenced it; the relationship `sprk_Invoice_Timekeeper_1n` and the hidden navigation entry on the Invoice main form went with it). `sprk_invoicelineitem` is still present and goes with its table in task 011; no code reads it. Invoice lines point to a timekeeper through `sprk_billingevent.sprk_resolvedtimekeeper` (task 010).
+Obsolete stub lookups: `sprk_invoice` was **deleted** on 2026-10-15 with the owner's OK (0 timekeeper rows, 0 readers, no form or view referenced it; the relationship `sprk_Invoice_Timekeeper_1n` and the hidden navigation entry on the Invoice main form went with it). The stub lookup to the superseded invoice-line-item table is still present in dev and goes with that table in task 011 (the delete needs the owner's OK: the table still holds four test rows); no code reads it. Invoice lines point to a timekeeper through `sprk_billingevent.sprk_resolvedtimekeeper` (task 010).
 
 ## Classification: the LEDES list (owner decision 2026-10-15)
 
