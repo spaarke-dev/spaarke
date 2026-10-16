@@ -138,6 +138,12 @@ Finding things stays exactly as now: F/K classes, and every finding recorded. Wh
 > - **Another project's area:** an issue for that project (a coordination point, §5.3).
 > - **Close (pilot addition, for existing issues):** already fixed, obsolete or a duplicate. Give the evidence.
 
+> **How it gets fixed: the right fix, not the quick one.** This applies to every decision above, and to the cost in question 4.
+> - **Fix the root cause.** A fix that silences a symptom, a test, a warning or a reviewer leaves the cause in place.
+> - **Do it the technically correct, best-practice way.** Follow our ADRs, standards and the nearest good existing pattern. Never take the easiest or quickest route because it is easy or quick.
+> - **Use the least code that is correct.** Prefer extending what exists (§11). Add no layer, abstraction, option, flag or special case unless it does something concrete for the solution. Complexity that adds no value is itself a defect.
+> - **Cost means the cost of the correct fix.** A finding is "Small" only when the correct fix is small. When only a shortcut would be small, the finding is Medium or Large, and it goes to the owner rather than becoming a shortcut.
+
 "Fix now, telling the owner" encodes the owner's usual answer to reasonable, small work. Scope only grows on items the owner actually approved, plus F1.
 
 #### 5.6.2 Issues that come back to the work
