@@ -160,25 +160,25 @@ while ($listener.IsListening) {
         if ($route -eq 'POST /apply-mailbox-access') {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /apply-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; scopeGroupId = $body.scopeGroupId; assignmentCount = @($body.assignments).Count }
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Invoke-MailboxAccessApply -Request $body } }
-            catch { $result = @{ outcome = 'Failure'; createdCount = 0; assignments = @(); conflicts = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            catch { $result = @{ outcome = 'Failure'; createdCount = 0; assignments = @(); conflicts = @(); diagnostic = "Exchange call failed: $(Format-ExchangeError $_)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /apply-mailbox-access' -Fields @{ outcome = $result.outcome; createdCount = $result.createdCount }
         }
         elseif ($route -eq 'POST /ensure-customer-mailbox') {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /ensure-customer-mailbox' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; scopeGroupId = $body.scopeGroupId; name = $body.name }
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Invoke-CustomerMailboxEnsure -Request $body } }
-            catch { $result = @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            catch { $result = @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @(); diagnostic = "Exchange call failed: $(Format-ExchangeError $_)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /ensure-customer-mailbox' -Fields @{ outcome = $result.outcome; created = $result.created; verified = $result.verified }
         }
         elseif ($route -eq 'POST /read-customer-mailbox') {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /read-customer-mailbox' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; name = $body.name }
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Get-CustomerMailboxState -Request $body } }
-            catch { $result = @{ outcome = 'Failure'; exists = $false; conflicts = @(); authorization = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            catch { $result = @{ outcome = 'Failure'; exists = $false; conflicts = @(); authorization = @(); diagnostic = "Exchange call failed: $(Format-ExchangeError $_)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /read-customer-mailbox' -Fields @{ outcome = $result.outcome; exists = $result.exists }
         }
         else {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /read-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId }
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Get-MailboxAccessState -AppId ([string]$body.appId) -ScopeGroupId ([string]$body.scopeGroupId) } }
-            catch { $result = @{ outcome = 'Failure'; servicePrincipalRegistered = $false; assignments = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
+            catch { $result = @{ outcome = 'Failure'; servicePrincipalRegistered = $false; assignments = @(); diagnostic = "Exchange call failed: $(Format-ExchangeError $_)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /read-mailbox-access' -Fields @{ outcome = $result.outcome; assignmentCount = @($result.assignments).Count }
         }
         Write-JsonResponse $response 200 -CorrelationId $correlationId $result

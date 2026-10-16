@@ -141,7 +141,7 @@ param copilotAgentClientAppId = '3a36eac4-10c5-4b90-9a83-913138a466af'
 // POST /ensure-customer-mailbox; H14m failed against it with HTTP 404. To roll the sidecar forward, set the newest
 // tag from `az acr repository show-tags -n sprkcontrolplanedevacr --repository provisioning-sidecar --orderby time_desc`
 // (a master merge that touches the sidecar publishes one). Guarded by SidecarImagePinTests.
-param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:2026.10.16-34'
+param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:2026.10.16-36'
 
 // Task 251 (owner D24, 2026-10-04): 'Spaarke Exchange Admin' -- the Worker signs in as it through
 // the federated credential trusting sprk-controlplane-dev-uami (no certificate, no secret). Its

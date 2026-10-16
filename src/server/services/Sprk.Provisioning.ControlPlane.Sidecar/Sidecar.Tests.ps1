@@ -408,3 +408,37 @@ Describe 'Customer mailbox request validation' {
         $errors | Should -BeLike '*not one the sidecar knows*'
     }
 }
+
+# T186 L61: an Exchange failure names the command that threw, the error id and the inner exception — Exchange's
+# "A server side error has occurred" message alone named neither the cmdlet nor the cause.
+Describe 'Exchange failure diagnostic (T186 L61)' {
+    It 'names the command, the message, the error id, the category and the inner exception' {
+        function global:New-Mailbox { [CmdletBinding()] param() throw [InvalidOperationException]::new('A server side error has occurred.', [System.Net.WebException]::new('BadRequest: proxy address in use')) }
+        $record = $null
+        try { New-Mailbox } catch { $record = $_ }
+
+        $text = Format-ExchangeError $record
+
+        $text | Should -BeLike 'New-Mailbox: A server side error has occurred.*'
+        $text | Should -BeLike '*id: *'
+        $text | Should -BeLike '*category: *'
+        $text | Should -BeLike '*at: New-Mailbox <*'
+        $text | Should -BeLike '*inner WebException: BadRequest: proxy address in use*'
+    }
+
+    It 'stays one bounded line' {
+        $record = $null
+        try { throw ("line one`nline two " + ('x' * 3000)) } catch { $record = $_ }
+
+        $text = Format-ExchangeError $record
+
+        $text | Should -Not -Match "`n"
+        $text.Length | Should -BeLessOrEqual 1501
+    }
+
+    It 'every route reports Exchange failures through it' {
+        $listener = Get-Content (Join-Path $PSScriptRoot 'Listener.ps1') -Raw
+        ([regex]::Matches($listener, 'Exchange call failed: \$\(Format-ExchangeError \$_\)')).Count | Should -Be 4
+        $listener | Should -Not -BeLike '*Exchange call failed: $($_.Exception.Message)*'
+    }
+}
