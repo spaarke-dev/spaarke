@@ -122,6 +122,13 @@ public sealed partial class OntologyAdminAuthoringService
     internal const int DryRunProofVersion = 1;
     internal static readonly TimeSpan DryRunProofTtl = TimeSpan.FromHours(1);
 
+    /// <summary>
+    /// How long an end stamp on the current version is taken to mean "another publish is in flight" (round 3, F2). A concurrent publish
+    /// holds its stamp for seconds, so a stamp this old on the version the pointer still names is a leftover of a failed publish (K2: the
+    /// pointer move failed and so did the restore). Such a publish proceeds, restamps and moves the pointer, which heals the policy.
+    /// </summary>
+    internal static readonly TimeSpan ConcurrentPublishWindow = TimeSpan.FromMinutes(2);
+
     /// <summary>The policy code an in-memory dry run of a NEW rule carries (it is never written anywhere).</summary>
     internal const string DryRunPolicyCode = "DRY-RUN";
 
@@ -895,12 +902,13 @@ public sealed partial class OntologyAdminAuthoringService
                     return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
                 }
 
-                if (previous.Ended)
+                if (previous.Ended && IsFreshStamp(previous.EndedAt))
                 {
-                    // The current version already carries an end stamp: a concurrent publish is between its stamp and its pointer move
-                    // (or one left it so). Refused before any write (review pass 2, F1-a): stamping it again and then undoing "our" stamp
-                    // would wipe the end of a version that has really ended.
-                    _logger.LogInformation("Ontology authoring: the current version {VersionId} of policy {PolicyId} already carries an end stamp; refusing.",
+                    // The current version carries a FRESH end stamp: a concurrent publish is between its stamp and its pointer move.
+                    // Refused before any write (review pass 2, F1-a): stamping it again and then undoing "our" stamp would wipe the end of
+                    // a version that has really ended. A stamp older than ConcurrentPublishWindow is a leftover of a failed publish
+                    // (K2 double failure) and falls through: this publish restamps it and moves the pointer, which heals it (round 3).
+                    _logger.LogInformation("Ontology authoring: the current version {VersionId} of policy {PolicyId} carries a fresh end stamp; refusing.",
                         previous.Id, policy.Id);
                     return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
                 }
@@ -1487,8 +1495,9 @@ public sealed partial class OntologyAdminAuthoringService
             rowVersion));
     }
 
-    /// <summary>A version of the policy as the caller reads it. <paramref name="Ended"/>: it carries an <c>sprk_inforceto</c>.</summary>
-    internal sealed record VersionRow(Guid Id, int Number, long? RowVersion, bool Ended);
+    /// <summary>A version of the policy as the caller reads it. <paramref name="Ended"/>: it carries an <c>sprk_inforceto</c>.
+    /// <paramref name="EndedAt"/>: that stamp as a UTC instant; null when it is absent or cannot be parsed.</summary>
+    internal sealed record VersionRow(Guid Id, int Number, long? RowVersion, bool Ended, DateTime? EndedAt);
 
     private async Task<Read<IReadOnlyList<VersionRow>>> ReadVersionsAsync(Guid policyId, CancellationToken ct)
     {
@@ -1511,7 +1520,7 @@ public sealed partial class OntologyAdminAuthoringService
             {
                 TryGuid(r, "sprk_policyversionid", out var id);
                 return new VersionRow(id, ReadInt(r, "sprk_versionnumber") ?? 0, ReadLong(r, "versionnumber"),
-                    Ended: ReadString(r, "sprk_inforceto") is { Length: > 0 });
+                    Ended: ReadString(r, "sprk_inforceto") is { Length: > 0 }, EndedAt: ReadDate(r, "sprk_inforceto"));
             })
             .ToList();
         return Read<IReadOnlyList<VersionRow>>.Of(versions);
@@ -1548,6 +1557,15 @@ public sealed partial class OntologyAdminAuthoringService
 
     private static string CurrentVersionJson(Guid versionId) =>
         JsonSerializer.Serialize(new Dictionary<string, string> { ["sprk_CurrentVersion@odata.bind"] = $"/{VersionEntitySet}({versionId:D})" });
+
+    /// <summary>
+    /// Whether an end stamp on the CURRENT version is recent enough to belong to a publish still in flight. A concurrent publish sits
+    /// between its stamp and its pointer move for seconds. Older than <see cref="ConcurrentPublishWindow"/> is a leftover of a failed
+    /// publish. An unparseable stamp (<paramref name="endedAt"/> null) or one in the future counts as fresh: the request is refused (fails closed).
+    /// Uses the same clock the stamp is written with (<see cref="NowForDataverse"/>).
+    /// </summary>
+    private bool IsFreshStamp(DateTime? endedAt) =>
+        endedAt is not { } at || _clock.GetUtcNow().UtcDateTime - at < ConcurrentPublishWindow;
 
     private string NowForDataverse() => FormatForDataverse(_clock.GetUtcNow().UtcDateTime);
 

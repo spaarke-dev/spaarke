@@ -219,8 +219,8 @@ old service and endpoint: 5 failed, then passed):
 
 | Finding | Fix | Evidence |
 |---|---|---|
-| F1-a a concurrent publish wipes the end stamp of a version that has really ended | `ReadVersionsAsync` selects `sprk_inforceto` (`VersionRow.Ended`); a publish whose current version already carries an end stamp is refused 409 `policy_changed` before step 1, with no write (`OntologyAdminAuthoringService.cs:898`). `RestorePreviousAsync` (`:1157`) undoes the stamp only while `PointerOfAsync`, as the caller, still names the previous version; another version: the stamp stands; unreadable: left and logged as an Error (the unknown-pointer pattern) | `Publish_WhenAConcurrentPublishStampedTheCurrentVersion_ButHasNotMovedThePointer_Is409_AndTheEndStampStands` (the A/B interleaving), `Publish_WhenTheOldStampLanded_ButThePointerNoLongerNamesTheOldVersion_TheCompensationLeavesItsEndStamp`, `Publish_WhenThePointerMoveIs412_AndThePointerCannotBeReRead_TheOldStampIsLeft_NotUndoneOnAGuess` |
-| F1-b (uac-r2 F1) a refused or unresolved pointer PATCH after the save's creates read "Nothing was written" or a policy-less 403 | every pointer-write failure after the creates is `Failure.Unavailable` with `PolicyId` (`:805`), the "saved Off, publish a version to finish" 503. The endpoint's Refused problem no longer carries a policy id | `Save_WhenThePointerWriteIsRefusedOrTheCallerUnresolved_IsTheSavedOff503_WithThePolicyId` (AccessDenied, OboExchangeFailed) |
+| F1-a a concurrent publish wipes the end stamp of a version that has really ended | `ReadVersionsAsync` selects `sprk_inforceto` (`VersionRow.Ended`); a publish whose current version already carries an end stamp is refused 409 `policy_changed` before step 1, with no write (`OntologyAdminAuthoringService.cs:905`; narrowed to a FRESH stamp in round 3, §10.3). `RestorePreviousAsync` (`:1165`) undoes the stamp only while `PointerOfAsync`, as the caller, still names the previous version; another version: the stamp stands; unreadable: left and logged as an Error (the unknown-pointer pattern) | `Publish_WhenAConcurrentPublishStampedTheCurrentVersion_ButHasNotMovedThePointer_Is409_AndTheEndStampStands` (the A/B interleaving), `Publish_WhenTheOldStampLanded_ButThePointerNoLongerNamesTheOldVersion_TheCompensationLeavesItsEndStamp`, `Publish_WhenThePointerMoveIs412_AndThePointerCannotBeReRead_TheOldStampIsLeft_NotUndoneOnAGuess` |
+| F1-b (uac-r2 F1) a refused or unresolved pointer PATCH after the save's creates read "Nothing was written" or a policy-less 403 | every pointer-write failure after the creates is `Failure.Unavailable` with `PolicyId` (`:803`, `:812`), the "saved Off, publish a version to finish" 503. The endpoint's Refused problem no longer carries a policy id | `Save_WhenThePointerWriteIsRefusedOrTheCallerUnresolved_IsTheSavedOff503_WithThePolicyId` (AccessDenied, OboExchangeFailed) |
 | F3-a two claimed behaviours untested | tests only (mutation-checked: compensating in the default branch, or dropping the Retire guard, fails them) | `Publish_WhenThePointerMoveThrows_AndThePointerCannotBeReRead_Is503_AndNothingIsUndone`, `Publish_WhenTheOldStampIs412_RetireUnpublished_NeverStampsAVersionThePointerNamesOrMayName` (New, Unknown) |
 | F3-b WhoAmI 401/403 not pinned | tests only; the mapping is unchanged | `AWhoAmIDataverseRefuses_401Or403_IsTheSameSingle403_OnEveryRoute` (x4), `tests/unit/domain/Dataverse/DataverseUserClientErrorMappingTests.cs` (401, 403, 404, 400, 412, 429, 5xx) |
 | uac-r2 F3 privilege-read mapping coverage | tests only (mutation-checked) | `DryRun_EveryOtherPrivilegeAnswer_FailsClosed_AndNothingIsEvaluated`: 200 without `RolePrivileges` 503, a throw 503, 404 503, 400 503, a row naming another privilege 403 forbidden; the evaluator is never called |
@@ -250,8 +250,9 @@ no doc table was changed (`notes/security-roles.md` records applied changes; it 
 - **K-101-6 (K6, save side).** The save's deep insert runs on the request token. A cancel after Dataverse commits leaves an Off
   policy and no `policyId` is returned. Harmless: the policy is Off and never evaluates, and the next save creates a new one.
 - **K2.** Two consecutive Dataverse failures (an unknown pointer plus a failed re-read, or a failed restore PATCH) can leave the
-  current version stamped. The job then refuses that policy (EventId 50309) until it is fixed by hand. It is logged as an Error
-  and the request returns 503 (or 409).
+  current version stamped. The double failure now heals on the next publish after `ConcurrentPublishWindow` (2 minutes, §10.3):
+  that publish restamps the version and moves the pointer. Until then the nightly job refuses the policy (EventId 50309). It is
+  logged as an Error and the request returns 503 (or 409). Within the window a retry still gets 409 `policy_changed`.
 - **K3.** `CancellationToken.None` is bounded per call by HttpClient's 100 s default but not in total: about 7 calls, roughly 12
   minutes worst case. `ReevaluateAsync(None)` has no overall deadline and cannot be amplified.
 - **K4.** The gate accepts any depth of `prvCreatesprk_PolicyVersion`. That is correct for "may author": Dataverse still
@@ -260,11 +261,20 @@ no doc table was changed (`notes/security-roles.md` records applied changes; it 
   It fails closed and lasts at most the proof's 1 h lifetime.
 - **uac-r2 K3.** A step-3 PATCH can time out on the client but commit after the pointer re-read saw "Other". The current version
   then stays stamped, and EventId 50309 reports it nightly.
-- **uac-r2 K4.** Stamps are compared at one-second resolution (`CarriesStampAsync` `:1103`, `RestorePreviousAsync` `:1178`).
+- **uac-r2 K4.** Stamps are compared at one-second resolution (`CarriesStampAsync` `:1111`, `RestorePreviousAsync` `:1186`).
   This predates review pass 2.
 - **Live tests:** written, opt-in; the main session runs them. Not run here.
 
-### 10.3 Merge of the docs branch
+### 10.3 Round 3 (PR #2039: one F2 finding)
+
+| Finding | Fix | Evidence |
+|---|---|---|
+| F2 the pre-write 409 added in round 2 fired on ANY end stamp, so a K2 double failure (pointer move failed, restore failed, pointer still names the stamped version) refused every retry for good; before round 2 a retry healed it | the 409 now fires only when the stamp is FRESH: `IsFreshStamp` (`OntologyAdminAuthoringService.cs:1567`) against `ConcurrentPublishWindow = 2 minutes` (`:130`), read from the injected `TimeProvider`, the clock that writes the stamp. A concurrent publish holds its stamp for seconds; an older stamp is the leftover of a failed publish, so the publish proceeds, restamps and moves the pointer. A stamp that cannot be parsed, or one in the future, counts as fresh (refused: fails closed). `VersionRow` gains `EndedAt`. `RestorePreviousAsync` is unchanged: it still undoes a stamp only while the pointer, re-read as the caller, names the previous version | `Publish_WhenTheCurrentVersionCarriesAStaleEndStamp_FromAFailedPublish_Heals_AndIs200`, `Publish_WhenTheCurrentVersionCarriesAFreshEndStamp_Is409_AndMakesNoWrite`, `Publish_WhenTheCurrentVersionsEndStampCannotBeParsed_Is409_AndMakesNoWrite`; the round 2 interleaving test now seeds a 5-second-old stamp |
+
+Seeding: window set to `TimeSpan.Zero` fails the fresh-stamp test and the round 2 interleaving test; the old rule (any end stamp
+refuses) fails the stale-stamp test; treating an unparseable stamp as stale fails the unparseable test. All three restored.
+
+### 10.4 Merge of the docs branch
 
 `origin/docs/ontology-platform-design` (task 100, #2037) merged into this branch. Conflicts resolved keeping both lanes:
 `OntologyAdminEndpoints.cs` maps the Rules (100) and authoring (101) routes; the route ledger keeps both GovernedFiles and one

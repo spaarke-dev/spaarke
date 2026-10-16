@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -922,7 +923,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         // sprk_inforceto back to null: a version that had really ended, left with no end.
         (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
         var w = _fixture.World;
-        const string aStamp = "2026-10-16T09:00:00Z";
+        var aStamp = StampAgo(TimeSpan.FromSeconds(5)); // A's stamp is seconds old: inside the concurrent-publish window
         w.Versions[V1].InForceTo = aStamp;
         w.Versions[V1].RowVersion = 201;
         var va = Guid.NewGuid();
@@ -948,6 +949,64 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
         w.Requests.Should().Contain(r => r.StartsWith("GET sprk_policyversions?$select=", StringComparison.Ordinal) && r.Contains("sprk_inforceto",
             StringComparison.Ordinal), "the versions read selects sprk_inforceto");
+    }
+
+    private static string StampAgo(TimeSpan age) =>
+        (DateTime.UtcNow - age).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task Publish_WhenTheCurrentVersionCarriesAStaleEndStamp_FromAFailedPublish_Heals_AndIs200()
+    {
+        // Round 3, F2: the K2 double failure (the pointer move failed AND the restore failed) leaves the pointer naming a stamped version.
+        // Refusing every retry made that permanent; a stamp older than the window is a leftover, so the next publish restamps and moves.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        var staleStamp = StampAgo(OntologyAdminAuthoringService.ConcurrentPublishWindow + TimeSpan.FromMinutes(8));
+        w.Versions[V1].InForceTo = staleStamp;
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var newVersion = (await Json(response)).GetProperty("policyVersionId").GetGuid();
+        w.Policies[PolicyId].Current.Should().Be(newVersion, "the pointer moves to the new version");
+        w.Versions[V1].InForceTo.Should().NotBeNull().And.NotBe(staleStamp, "the previous version is restamped by this publish");
+        w.Versions[newVersion].InForceTo.Should().BeNull("the new version is in force");
+        AssertVersionPatchesTouchOnlyInForceTo();
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheCurrentVersionCarriesAFreshEndStamp_Is409_AndMakesNoWrite()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        var freshStamp = StampAgo(TimeSpan.FromSeconds(60)); // inside the 2 minute window
+        w.Versions[V1].InForceTo = freshStamp;
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        w.Writes.Should().BeEmpty("a publish that may be in flight is refused before any write");
+        w.Versions[V1].InForceTo.Should().Be(freshStamp);
+        w.Policies[PolicyId].Current.Should().Be(V1);
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheCurrentVersionsEndStampCannotBeParsed_Is409_AndMakesNoWrite()
+    {
+        // Fails closed: an end stamp that cannot be dated is treated as fresh.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        w.Versions[V1].InForceTo = "not-a-date";
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        w.Writes.Should().BeEmpty();
+        w.Versions[V1].InForceTo.Should().Be("not-a-date");
+        w.Policies[PolicyId].Current.Should().Be(V1);
     }
 
     [Fact]
