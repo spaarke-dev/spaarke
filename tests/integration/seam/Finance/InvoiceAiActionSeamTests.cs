@@ -287,6 +287,25 @@ public sealed class InvoiceAiActionSeamTests
         result.Hints.Currency.Should().Be("USD");
     }
 
+    // Regression (task 047 review): one observation with a blank or missing quote used to fail the whole chunk as output_invalid,
+    // and with it the coding of every line on the invoice. It now parses as "", the line keeps its codes, and LineCodingGuard drops
+    // the evidence-free observation.
+    [Theory]
+    [InlineData("\"quotedText\":\"\"")]
+    [InlineData("\"quotedText\":\"   \"")]
+    [InlineData("\"quotedText\":null")]
+    public async Task CodeLinesAsync_WhenAnObservationQuoteIsBlank_ParsesTheLineAndPassesTheQuoteAsEmpty(string quote)
+    {
+        var h = new Harness("{\"lines\":[{\"lineKey\":\"L1\",\"taskCode\":\"L110\",\"activityCode\":\"A101\",\"expenseCode\":null,\"confidence\":0.81," +
+                            "\"observations\":[{\"type\":\"VagueDescription\",\"confidence\":0.2," + quote + "}]}]}");
+
+        var result = await h.Sut.CodeLinesAsync(CodeLinesRequest());
+
+        var line = result.Lines.Should().ContainSingle().Subject;
+        line.TaskCode.Should().Be("L110");
+        line.Observations.Should().ContainSingle().Which.QuotedText.Should().BeEmpty();
+    }
+
     // The AI kill switch keeps its own 503 contract (ADR-032): a disabled resolver is not relabelled as a
     // capability failure.
     [Fact]

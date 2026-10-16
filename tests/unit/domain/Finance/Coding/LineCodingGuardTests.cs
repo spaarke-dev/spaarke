@@ -273,9 +273,8 @@ public class LineCodingGuardTests
         result.Observations.Should().ContainSingle();
     }
 
-    // Defence in depth: today InvoiceAi.ParseCodeLines (task 041) rejects a blank quotedText first and fails the chunk as
-    // output_invalid, so this input never reaches the guard from production. The guard still must not store an observation that has no
-    // evidence, whatever the facade contract becomes.
+    // InvoiceAi.ParseCodeLines passes a blank quotedText through as "" (one placeholder observation must not fail the whole chunk),
+    // so this guard is where an evidence-free observation is dropped and counted.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

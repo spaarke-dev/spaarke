@@ -472,7 +472,9 @@ internal static class InvoiceAiOutputParser
                 {
                     Type = RequireEnum<InvoiceLineObservationType>(obs, "type", obsPath),
                     Confidence = RequireConfidence(obs, "confidence", obsPath),
-                    QuotedText = RequireString(obs, "quotedText", obsPath),
+                    // A blank quote is evidence-free, not malformed: pass it through as "" so LineCodingGuard drops and counts it,
+                    // instead of failing the whole chunk (and with it the invoice's coding) over one placeholder observation.
+                    QuotedText = OptionalString(obs, "quotedText", obsPath) ?? string.Empty,
                 });
             }
 
