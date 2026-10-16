@@ -192,6 +192,14 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
+        // "finance.submit_invoice" — Read AND AppendTo on the CORE record (sprk_matters / sprk_projects /
+        // sprk_workassignments) named by the route of POST /api/finance/{core}/{id}/invoice-submissions (ebilling-r1
+        // task 044, FR-17 internal channel, D-24). The application then writes a new sprk_document and
+        // sprk_invoicesubmission whose lookups point AT the core record, so AppendTo is the "finance.attach_invoice"
+        // reasoning; Read because the receipt and the status route surface the record's submission to its submitter
+        // (the "analysis.attach" reasoning). A separate key so deny logs name the operation.
+        ["finance.submit_invoice"] = AccessRights.Read | AccessRights.AppendTo,
+
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
         // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /

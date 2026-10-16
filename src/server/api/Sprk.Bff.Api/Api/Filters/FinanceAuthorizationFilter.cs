@@ -234,6 +234,15 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     public const string InvoiceEntitySet = "sprk_invoices";
 
     /// <summary>
+    /// <c>sprk_workassignment</c>'s set name (ebilling-r1 task 044; the same value <c>DecisionActionExecutors.WorkAssignmentSet</c>,
+    /// <c>RegardingNameFields</c> and <c>ImpersonatedRootSetSource</c> use).
+    /// </summary>
+    public const string WorkAssignmentEntitySet = "sprk_workassignments";
+
+    /// <summary><c>sprk_invoicesubmission</c>'s set name (ebilling-r1 task 044; the value <c>SecureChildLineage</c> uses).</summary>
+    public const string InvoiceSubmissionEntitySet = "sprk_invoicesubmissions";
+
+    /// <summary>
     /// The Create privilege on <c>sprk_invoice</c>, by its live name (spaarkedev1 <c>privileges</c>, 2026-10-01 —
     /// the table's schema name is <c>sprk_Invoice</c>, so the privilege is NOT all lower case). A misspelt name
     /// answers "not held" for every caller and denies every confirm, which is why it is pinned by a test.
