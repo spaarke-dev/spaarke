@@ -9,14 +9,14 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
-namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
+namespace Sprk.Bff.Api.Tests.DataMutation.FinanceSubmission;
 
 /// <summary>
 /// <see cref="TrackingNumberAllocator"/> (ebilling-r1 task 045, FR-10, D-37): the only writer of a submission's tracking number and sequence.
 /// </summary>
 /// <remarks>
-/// Maintain-class (ADR-038): this decides whether two firms' (or one firm's two parallel) submissions can share a number, and whether a
-/// lost race double-writes or loses a row. The Dataverse boundary is a Moq double of <see cref="IGenericEntityService"/> backed by a small
+/// Maintain-class (ADR-038, data-mutation KEEP path: optimistic concurrency): this decides whether two firms' (or one firm's two parallel)
+/// submissions can share a number, and whether a lost race double-writes or loses a row. The Dataverse boundary is a Moq double of <see cref="IGenericEntityService"/> backed by a small
 /// in-memory table that evaluates the allocator's own query (so a dropped firm filter or an added state filter changes the outcome, not just
 /// a call count) and enforces the (firm, tracking number) alternate key the way Dataverse does: case-insensitively, refusing the write whole
 /// with the wrapped <c>0x80060892</c> fault the SDK client raises. The same property against the real key is proven live in
