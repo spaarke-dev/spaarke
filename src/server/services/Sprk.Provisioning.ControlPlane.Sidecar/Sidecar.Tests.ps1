@@ -197,7 +197,8 @@ Describe 'Customer shared mailbox (H14m)' {
             if (@($global:T263MemberOf | Where-Object { $Filter -like "*'$($_.DistinguishedName)'*" }).Count -gt 0) { $global:T263Mailboxes }
         }
         Mock -ModuleName SidecarCore Get-Group { T263Grp $global:T263GroupName }
-        Mock -ModuleName SidecarCore Test-CustomerMailboxWritePermission { @() }
+        # Test-CustomerMailboxWritePermission is NOT mocked: it reads the stubs above, which carry -Shared and
+        # -BypassSecurityGroupManagerCheck, so every test here runs the real PRQ-E-16 probe (T186 L60).
         Mock -ModuleName SidecarCore New-Mailbox { $m = T263Mbx $Name; $global:T263Mailboxes = @($m); $m }
         Mock -ModuleName SidecarCore Add-DistributionGroupMember { $global:T263MemberOf = @(T263Grp $global:T263GroupName) }
         Mock -ModuleName SidecarCore Test-ServicePrincipalAuthorization {
@@ -324,7 +325,26 @@ Describe 'Customer shared mailbox (H14m)' {
         $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
 
         $r.outcome | Should -Be 'Failure'
-        $r.diagnostic | Should -BeLike '*PRQ-E-16*'
+        $r.diagnostic | Should -BeLike '*cannot run Add-DistributionGroupMember -BypassSecurityGroupManagerCheck — prerequisite PRQ-E-16*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'the PRQ-E-16 probe finds nothing missing when both write parameters are loaded (T186 L60)' {
+        InModuleScope SidecarCore { @(Test-CustomerMailboxWritePermission).Count | Should -Be 0 }
+    }
+
+    It 'the PRQ-E-16 probe names exactly what the session lacks (T186 L60 must-fire)' {
+        # Exchange Online loads a cmdlet without the parameters the caller's roles do not grant.
+        Mock -ModuleName SidecarCore Get-Command -ParameterFilter { $Name -eq 'New-Mailbox' } {
+            [pscustomobject]@{ Parameters = @{ Name = $null } }
+        }
+        Mock -ModuleName SidecarCore Get-Command -ParameterFilter { $Name -eq 'Add-DistributionGroupMember' } { $null }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.diagnostic | Should -BeLike '*cannot run New-Mailbox -Shared / Add-DistributionGroupMember -BypassSecurityGroupManagerCheck — *'
+        $r.diagnostic | Should -Not -BeLike '*System.Object*'
         Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
     }
 

@@ -459,13 +459,14 @@ function Test-CustomerMailboxWritePermission {
     .SYNOPSIS
         Exchange Online loads only the cmdlets and parameters the caller's roles allow. Returns the missing ones (empty =
         both writes are possible), so an ensure without PRQ-E-16 fails BEFORE creating a mailbox it could not join.
+        Writes the names to the pipeline; the caller collects them with @(). T186 L60: `return , $missing` here, under
+        that @(), made a one-element array holding the array, so the count was always 1 and every ensure was refused
+        with "cannot run System.Object[]" even with PRQ-E-16 applied.
     #>
-    $missing = @()
     $create = Get-Command New-Mailbox -ErrorAction SilentlyContinue
-    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { $missing += 'New-Mailbox -Shared' }
+    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { 'New-Mailbox -Shared' }
     $join = Get-Command Add-DistributionGroupMember -ErrorAction SilentlyContinue
-    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { $missing += 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
-    return , $missing
+    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
 }
 
 function Invoke-CustomerMailboxEnsure {
