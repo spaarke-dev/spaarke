@@ -287,3 +287,13 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Setting added** 13:46:55Z (D-138 035 deploy approval; word-add-in, R3 and uac-r2 notified before and after); healthz 200 at 13:47:38Z; code unchanged (master `f292ad119`).
 - **Positive run** 13:48:04Z → outcome `succeeded`, policiesEvaluated 1, hits 1, written 1, refused 0. First proof of the writer's managed-identity token path on dev.
 - The test policy and its rows are cleaned up by task 146 (zz-146 prefix).
+
+
+## 2026-10-16 — task 055 (dev, spaarkedev1): Console + grid configuration from master; policies on (D-146)
+
+- **BFF:** not deployed by ontology. R3 deployed `1.0.0+eb5ba4011` (R3 + master `7315b3e85`, ancestor check passed, hash-verified, healthz 200) at 01:55Z under the owner-approved plan (a).
+- **Policies (D-146):** `sprk_enabled=true` on 6101–6104 and `4d204810…` at 01:56:00Z; manual `signal-reevaluation` run `dd1ebeec`: 5 policies, 87 written, 0 refused.
+- **Grid configuration:** `Apply-WorklistGridConfiguration.ps1` from master `44b6a72c1` (worktree `C:\wts-055`): `-Verify` DRIFT → `-WhatIf` one UPDATE → applied 01:56:17Z (read-back OK) → `-Verify -RequireRow` IN SYNC.
+- **Console:** `npm run build` in `src/solutions/SpaarkeAi` at master `44b6a72c1` (#1989 + #1996); `Deploy-SpaarkeAi.ps1` updated `sprk_spaarkeai` (`5206a442-…`), PublishXml for that web resource only (D-83). Live 01:56:32Z; live content SHA-256 = local build `0470e7f11752cdffb9a0aaa42c507ba5574e89527db1cec18584eddc40db23f2`.
+- **Peer notices:** word-add-in, uac-r2, R3 before and after.
+- **Pending (criteria 1–4, 6, 7):** owner checks in the browser (worklist renders real items; one full review with two actions + one Next step; network log; console errors; Daily Briefing).
