@@ -2,20 +2,21 @@
 // ArmSlotStickyAppSettingWriterTests.cs
 //
 // L2 CONTROL-PLANE unit tests for ArmSlotStickyAppSettingWriter — the ARM
-// write behind H9's ADR-036 A1 rule 2 scheduled-jobs slot guard (GitHub #987).
-// ADR-038 path #1.
+// write behind H9's ADR-036 A1 rule 2 scheduled-jobs slot guard (GitHub #987)
+// and its production-settings mirror (T186 L46). ADR-038 path #1.
 //
 // TWO LAYERS:
-//   1. The MERGE is tested as pure functions (MergeAppSetting /
-//      MergeStickyAppSettingNames): every existing setting and sticky name
-//      survives, the guard is added, and a re-run reports no change.
+//   1. The BUILD RULES are tested as pure functions (BuildStagingSettings /
+//      MergeStickyAppSettingNames): the slot carries production's non-sticky
+//      settings, keeps its own sticky ones, gets the guard, and a re-run
+//      reports no change.
 //   2. The SDK PATH runs the real Azure.ResourceManager.AppService client
 //      against the project's hand-rolled FakeArmHttpMessageHandler (the same
 //      fake transport ArmSlotSwapperTests uses — NOT Mock<HttpMessageHandler>,
 //      which .claude/constraints/testing.md bans). It proves what only the
-//      wire can: the two whole-object PUTs carry everything that was read (so
+//      wire can: the two whole-object PUTs carry everything they must (so
 //      nothing is wiped), the sticky name is written BEFORE the value, and an
-//      already-guarded slot gets no write at all. slotConfigNames goes as raw
+//      already-prepared slot gets no write at all. slotConfigNames goes as raw
 //      JSON over the same pipeline (T186 L43); the fake also answers with the
 //      live new-site shape ("id": null, null name lists) that broke the typed GET.
 // -----------------------------------------------------------------------------
@@ -40,58 +41,70 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     private const string GuardValue = "false";
     private const string KeyVaultRef = "@Microsoft.KeyVault(SecretUri=https://kv-acme.vault.azure.net/secrets/Redis/)";
 
-    // ---------- pure merge: slot app settings ----------
+    // ---------- pure build: the staging slot's settings (T186 L46) ----------
 
     [Fact]
-    public void MergeAppSetting_GuardAbsent_AddsIt_AndKeepsEveryOtherSetting()
+    public void BuildStagingSettings_CarriesProductionNonSticky_KeepsSlotSticky_DropsSlotOnly_AddsGuard()
     {
-        var current = new Dictionary<string, string>
+        var production = new Dictionary<string, string>
+        {
+            ["ASPNETCORE_ENVIRONMENT"] = "Production",
+            ["Redis__Enabled"] = "true",
+            ["Redis__ConnectionString"] = KeyVaultRef,
+        };
+        var slot = new Dictionary<string, string>
         {
             ["ASPNETCORE_ENVIRONMENT"] = "Staging",
             ["Redis__ConnectionString"] = KeyVaultRef,
+            ["LeftoverOnSlotOnly"] = "x",
         };
 
-        var (settings, changed) = ArmSlotStickyAppSettingWriter.MergeAppSetting(current, GuardName, GuardValue);
+        var (settings, changed) = ArmSlotStickyAppSettingWriter.BuildStagingSettings(
+            production, slot, new[] { "ASPNETCORE_ENVIRONMENT", GuardName }, GuardName, GuardValue);
 
-        changed.Should().BeTrue();
         settings.Should().BeEquivalentTo(new Dictionary<string, string>
         {
             ["ASPNETCORE_ENVIRONMENT"] = "Staging",
+            ["Redis__Enabled"] = "true",
             ["Redis__ConnectionString"] = KeyVaultRef,
             [GuardName] = GuardValue,
-        });
+        }, "a swap carries the slot's non-sticky settings into production, so they must be production's own");
+        changed.Should().Equal(new[] { "LeftoverOnSlotOnly", "Redis__Enabled", GuardName }.OrderBy(n => n, StringComparer.Ordinal));
     }
 
     [Fact]
-    public void MergeAppSetting_GuardHoldsAnotherValue_OverwritesOnlyThatSetting()
+    public void BuildStagingSettings_ProductionStickySetting_IsNeverCopied()
     {
-        var current = new Dictionary<string, string>
-        {
-            ["ASPNETCORE_ENVIRONMENT"] = "Staging",
-            [GuardName] = "true",
-        };
+        var production = new Dictionary<string, string> { ["APPLICATIONINSIGHTS_CONNECTION_STRING"] = "prod-ai" };
 
-        var (settings, changed) = ArmSlotStickyAppSettingWriter.MergeAppSetting(current, GuardName, GuardValue);
+        var (settings, _) = ArmSlotStickyAppSettingWriter.BuildStagingSettings(
+            production, new Dictionary<string, string>(),
+            new[] { "APPLICATIONINSIGHTS_CONNECTION_STRING", GuardName }, GuardName, GuardValue);
 
-        changed.Should().BeTrue();
-        settings.Should().HaveCount(2);
+        settings.Should().NotContainKey("APPLICATIONINSIGHTS_CONNECTION_STRING");
+    }
+
+    [Fact]
+    public void BuildStagingSettings_SlotAlreadyPrepared_ReportsNoChange()
+    {
+        var production = new Dictionary<string, string> { ["Redis__Enabled"] = "true" };
+        var slot = new Dictionary<string, string> { ["Redis__Enabled"] = "true", [GuardName] = GuardValue };
+
+        var (_, changed) = ArmSlotStickyAppSettingWriter.BuildStagingSettings(
+            production, slot, new[] { GuardName }, GuardName, GuardValue);
+
+        changed.Should().BeEmpty("a re-run must write nothing (and so not restart the slot)");
+    }
+
+    [Fact]
+    public void BuildStagingSettings_GuardHoldsAnotherValue_IsCorrected()
+    {
+        var (settings, changed) = ArmSlotStickyAppSettingWriter.BuildStagingSettings(
+            new Dictionary<string, string>(), new Dictionary<string, string> { [GuardName] = "true" },
+            new[] { GuardName }, GuardName, GuardValue);
+
         settings[GuardName].Should().Be(GuardValue);
-        settings["ASPNETCORE_ENVIRONMENT"].Should().Be("Staging");
-    }
-
-    [Fact]
-    public void MergeAppSetting_GuardAlreadySet_ReportsNoChange()
-    {
-        var current = new Dictionary<string, string>
-        {
-            ["ASPNETCORE_ENVIRONMENT"] = "Staging",
-            [GuardName] = GuardValue,
-        };
-
-        var (settings, changed) = ArmSlotStickyAppSettingWriter.MergeAppSetting(current, GuardName, GuardValue);
-
-        changed.Should().BeFalse("a re-run must write nothing (and so not restart the slot)");
-        settings.Should().BeEquivalentTo(current);
+        changed.Should().Equal(GuardName);
     }
 
     // ---------- pure merge: the site's sticky app-setting names ----------
@@ -121,11 +134,17 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     // ---------- SDK path over the fake ARM transport ----------
 
     [Fact]
-    public async Task EnsureAsync_FirstRun_MakesNameStickyThenWritesSetting_PreservingEverythingElse()
+    public async Task EnsureAsync_FirstRun_MakesNameStickyThenWritesSlotSettings_FromProduction()
     {
         var arm = new FakeAppServiceArm(
             stickyAppSettingNames: new[] { "ASPNETCORE_ENVIRONMENT", "WEBSITE_SWAP_WARMUP_PING_PATH" },
             stickyConnectionStringNames: new[] { "SqlDb" },
+            productionSettings: new Dictionary<string, string>
+            {
+                ["ASPNETCORE_ENVIRONMENT"] = "Production",
+                ["Redis__ConnectionString"] = KeyVaultRef,
+                ["Redis__Enabled"] = "true",
+            },
             slotSettings: new Dictionary<string, string>
             {
                 ["ASPNETCORE_ENVIRONMENT"] = "Staging",
@@ -152,20 +171,23 @@ public sealed class ArmSlotStickyAppSettingWriterTests
             {
                 ["ASPNETCORE_ENVIRONMENT"] = "Staging",
                 ["Redis__ConnectionString"] = KeyVaultRef,
+                ["Redis__Enabled"] = "true",
                 [GuardName] = GuardValue,
-            }, "the PUT replaces the whole dictionary — every existing setting must be in it");
+            }, "the PUT replaces the whole dictionary: production's non-sticky settings, the slot's sticky ones, the guard");
     }
 
     [Fact]
-    public async Task EnsureAsync_NewSite_ArmAnswersNullIdAndNullNames_StillGuards()
+    public async Task EnsureAsync_NewSite_ArmAnswersNullIdAndNullNames_StillGuards_AndMirrorsProduction()
     {
-        // T186 L43 — the exact live answer for sprk-acme-prod-api, a site that has
-        // never had a sticky name: "id": null and every name list null. The typed
-        // SlotConfigNamesResource GET threw ArgumentNullException('resourceId') on it.
+        // T186 L43 — the exact live answer for sprk-acme-prod-api, a site that has never had a sticky name:
+        // "id": null and every name list null. The typed SlotConfigNamesResource GET threw
+        // ArgumentNullException('resourceId') on it. T186 L46 — production held Redis__Enabled (written by
+        // customer.bicep to the production site only); the slot did not, and the BFF aborted there at startup.
         var arm = new FakeAppServiceArm(
             stickyAppSettingNames: null,
             stickyConnectionStringNames: null,
-            slotSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Staging" },
+            productionSettings: new Dictionary<string, string> { ["Redis__Enabled"] = "true" },
+            slotSettings: new Dictionary<string, string>(),
             liveNewSiteShape: true);
 
         var result = await NewWriter(arm).EnsureAsync(NewRequest(), CancellationToken.None);
@@ -175,7 +197,8 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         StringArray(arm.Writes[0].Properties, "appSettingNames").Should().Equal(GuardName);
         arm.Writes[0].Properties.GetProperty("connectionStringNames").ValueKind.Should().Be(JsonValueKind.Null,
             "a property ARM returned is written back as read");
-        arm.Writes[1].Path.Should().EndWithEquivalentOf($"/slots/{SlotName}/config/appsettings");
+        arm.Writes[1].Properties.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString())
+            .Should().BeEquivalentTo(new Dictionary<string, string?> { ["Redis__Enabled"] = "true", [GuardName] = GuardValue });
     }
 
     [Fact]
@@ -184,6 +207,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         var arm = new FakeAppServiceArm(
             stickyAppSettingNames: Array.Empty<string>(),
             stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string>(),
             slotSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Staging" },
             rejectNamesWrite: true);
 
@@ -195,14 +219,16 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     }
 
     [Fact]
-    public async Task EnsureAsync_AlreadyGuarded_MakesNoWrite()
+    public async Task EnsureAsync_AlreadyPrepared_MakesNoWrite()
     {
         var arm = new FakeAppServiceArm(
             stickyAppSettingNames: new[] { "ASPNETCORE_ENVIRONMENT", GuardName },
             stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Production", ["Redis__Enabled"] = "true" },
             slotSettings: new Dictionary<string, string>
             {
                 ["ASPNETCORE_ENVIRONMENT"] = "Staging",
+                ["Redis__Enabled"] = "true",
                 [GuardName] = GuardValue,
             });
 
@@ -210,7 +236,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
 
         result.Should().Be(new SlotStickyAppSettingResult.Success(StickyNameAdded: false, SettingWritten: false));
         arm.Writes.Should().BeEmpty("a re-run changes nothing — no PUT, so no slot restart");
-        arm.Reads.Should().HaveCount(3, "sticky names, the slot, and its app settings are still read to decide that");
+        arm.Reads.Should().HaveCount(4, "sticky names, production's settings, the slot, and its settings are read to decide that");
     }
 
     [Fact]
@@ -219,6 +245,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         var arm = new FakeAppServiceArm(
             stickyAppSettingNames: new[] { GuardName },
             stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Production" },
             slotSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Staging" },
             rejectSettingsWrite: true);
 
@@ -227,7 +254,8 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         var failure = result.Should().BeOfType<SlotStickyAppSettingResult.Failure>().Subject;
         failure.Diagnostic.Should().Contain("AuthorizationFailed");
         failure.Diagnostic.Should().Contain(SlotName);
-        failure.Diagnostic.Should().NotContain("Staging", "app-setting values never reach a diagnostic");
+        failure.Diagnostic.Should().NotContain("Staging", "app-setting values never reach a diagnostic")
+            .And.NotContain("Production");
     }
 
     // ---------- helpers ----------
@@ -249,7 +277,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         => properties.GetProperty(name).EnumerateArray().Select(e => e.GetString()).ToList();
 
     /// <summary>
-    /// Canned ARM for one site + slot: answers the four calls the writer makes
+    /// Canned ARM for one site + slot: answers the five calls the writer makes
     /// and records every write's path + <c>properties</c> body, in order.
     /// Anything else gets a 404 so an unexpected call surfaces as a failure.
     /// </summary>
@@ -257,6 +285,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     {
         private readonly string[]? _stickyAppSettingNames;
         private readonly string[]? _stickyConnectionStringNames;
+        private readonly Dictionary<string, string> _productionSettings;
         private readonly Dictionary<string, string> _slotSettings;
         private readonly bool _rejectSettingsWrite;
         private readonly bool _rejectNamesWrite;
@@ -265,6 +294,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         public FakeAppServiceArm(
             string[]? stickyAppSettingNames,
             string[]? stickyConnectionStringNames,
+            Dictionary<string, string> productionSettings,
             Dictionary<string, string> slotSettings,
             bool rejectSettingsWrite = false,
             bool rejectNamesWrite = false,
@@ -272,6 +302,7 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         {
             _stickyAppSettingNames = stickyAppSettingNames;
             _stickyConnectionStringNames = stickyConnectionStringNames;
+            _productionSettings = productionSettings;
             _slotSettings = slotSettings;
             _rejectSettingsWrite = rejectSettingsWrite;
             _rejectNamesWrite = rejectNamesWrite;
@@ -348,6 +379,19 @@ public sealed class ArmSlotStickyAppSettingWriterTests
                     name = "appsettings",
                     type = "Microsoft.Web/sites/slots/config",
                     properties = _slotSettings,
+                });
+            }
+
+            if (path.EndsWith($"/sites/{AppServiceName}/config/appsettings/list", StringComparison.OrdinalIgnoreCase)
+                && request.Method == HttpMethod.Post)
+            {
+                Reads.Add(path);
+                return Json(HttpStatusCode.OK, new
+                {
+                    id = $"{SiteId}/config/appsettings",
+                    name = "appsettings",
+                    type = "Microsoft.Web/sites/config",
+                    properties = _productionSettings,
                 });
             }
 

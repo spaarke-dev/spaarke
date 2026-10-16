@@ -478,7 +478,9 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         //     BEFORE the zip-deploy, so the new build never boots on the
         //     staging slot with scheduled dispatch on. Sets
         //     Scheduling__RunScheduledJobs=false on the slot and makes it
-        //     slot-sticky on the site (merge, never replace; idempotent) — the
+        //     slot-sticky on the site, and gives the slot production's
+        //     non-sticky settings (T186 L46 — what a swap carries; settings only
+        //     customer.bicep writes reach production alone) (idempotent) — the
         //     ARM equivalent of the `az webapp config appsettings set
         //     --slot-settings` step Deploy-BffApi.ps1 -UseSlotDeploy and
         //     deploy-bff-api.yml run before their own staging deploys.

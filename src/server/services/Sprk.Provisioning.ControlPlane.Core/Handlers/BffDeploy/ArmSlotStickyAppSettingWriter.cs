@@ -45,9 +45,9 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 
 /// <summary>
-/// Sets one app setting on a deployment slot and marks it slot-sticky on the
-/// parent site via Azure.ResourceManager.AppService — merge, never replace;
-/// sticky name first; no write when already in place.
+/// Prepares a deployment slot's app settings for a deploy + swap via Azure.ResourceManager.AppService: marks
+/// one setting slot-sticky on the parent site (sticky name first), then makes the slot carry production's
+/// non-sticky settings plus its own sticky ones and that setting (T186 L46); no write when already in place.
 /// </summary>
 /// <remarks>
 /// <b>Component justification (CLAUDE.md §11).</b>
@@ -62,7 +62,10 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 /// the same per-call ceiling (<see cref="BffDeployOptions.SlotSwapTimeout"/>). <i>Cost of doing nothing:</i>
 /// after an H9 deploy the staging slot runs the BFF's scheduled jobs against the customer's production data —
 /// competing for the scheduler lease when it shares production's Redis, running every tick twice when it does
-/// not (ADR-036 A1 rule 2, GitHub #987).
+/// not (ADR-036 A1 rule 2, GitHub #987). The production-settings mirror (T186 L46) extends the same
+/// read-merge-write of the same slot rather than adding a collaborator: without it, settings only customer.bicep
+/// writes (production site only — Redis, the UAMI pin, AI endpoints) are absent on staging, the BFF there aborts at
+/// startup, and a swap would strip them from production. H4b's own staging write covers only H4b's settings.
 /// </remarks>
 public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
 {
@@ -107,6 +110,7 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
 
         bool stickyNameAdded;
         bool settingWritten;
+        IReadOnlyList<string> mirroredNames = [];
         try
         {
             // (1) STICKY FIRST (see ISlotStickyAppSettingWriter): make the name
@@ -143,7 +147,11 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
                     timeout, cancellationToken).ConfigureAwait(false);
             }
 
-            // (2) The value on the slot — read, merge, write back whole.
+            // (2) The slot's settings: production's non-sticky settings (what a swap carries into production),
+            //     the slot's own sticky settings, and the guard — read both, build, write back whole (T186 L46).
+            var productionSettings = await WithTimeoutAsync(
+                ct => siteResource.GetApplicationSettingsAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
+
             var slotResponse = await WithTimeoutAsync(
                 ct => siteResource.GetWebSiteSlotAsync(request.SlotName, ct), timeout, cancellationToken).ConfigureAwait(false);
             var slotResource = slotResponse.Value;
@@ -151,12 +159,15 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
             var settingsResponse = await WithTimeoutAsync(
                 ct => slotResource.GetApplicationSettingsSlotAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
 
-            var mergedSettings = MergeAppSetting(settingsResponse.Value.Properties, request.SettingName, request.SettingValue);
-            settingWritten = mergedSettings.Changed;
+            var staged = BuildStagingSettings(
+                productionSettings.Value.Properties, settingsResponse.Value.Properties,
+                mergedNames.Names, request.SettingName, request.SettingValue);
+            settingWritten = staged.ChangedNames.Count > 0;
+            mirroredNames = staged.ChangedNames;
             if (settingWritten)
             {
                 var update = new AppServiceConfigurationDictionary();
-                foreach (var (key, value) in mergedSettings.Settings)
+                foreach (var (key, value) in staged.Settings)
                 {
                     update.Properties[key] = value;
                 }
@@ -178,8 +189,9 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
         // Setting names + flags only — app-setting VALUES are never logged (they include Key Vault references).
         _logger.LogInformation(
             "H9 slot-sticky app setting in place: appService={AppService} slot={Slot} setting={SettingName} " +
-            "stickyNameAdded={StickyNameAdded} settingWritten={SettingWritten}",
-            request.AppServiceName, request.SlotName, request.SettingName, stickyNameAdded, settingWritten);
+            "stickyNameAdded={StickyNameAdded} settingWritten={SettingWritten} changedSettingNames={ChangedSettingNames}",
+            request.AppServiceName, request.SlotName, request.SettingName, stickyNameAdded, settingWritten,
+            string.Join(",", mirroredNames));
 
         return new SlotStickyAppSettingResult.Success(stickyNameAdded, settingWritten);
     }
@@ -206,24 +218,56 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
     }
 
     /// <summary>
-    /// Pure merge of a slot's app settings: every existing setting is kept;
-    /// <paramref name="settingName"/> is set to <paramref name="settingValue"/>.
-    /// <c>Changed</c> is <c>false</c> when it already held exactly that value
-    /// (ordinal), so a re-run writes nothing. The one merge rule is
-    /// <see cref="BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings"/> (H4b's, task 253).
+    /// Pure build of the staging slot's app settings before a deploy + swap (T186 L46): every NON-sticky
+    /// production setting with production's value (a swap carries the slot's non-sticky settings into
+    /// production, so anything else changes production's config — live, settings only Bicep wrote reached
+    /// production alone, and the BFF on staging refused to start without <c>Redis__Enabled</c>); every sticky
+    /// setting the slot already holds, kept; and <paramref name="settingName"/> = <paramref name="settingValue"/>.
+    /// A non-sticky setting only the slot holds is dropped. <c>ChangedNames</c> (added, changed or removed;
+    /// ordinal) is empty when the slot already matches, so a re-run writes nothing.
     /// </summary>
-    internal static (IReadOnlyDictionary<string, string> Settings, bool Changed) MergeAppSetting(
-        IEnumerable<KeyValuePair<string, string>>? currentSettings,
+    internal static (IReadOnlyDictionary<string, string> Settings, IReadOnlyList<string> ChangedNames) BuildStagingSettings(
+        IEnumerable<KeyValuePair<string, string>>? productionSettings,
+        IEnumerable<KeyValuePair<string, string>>? slotSettings,
+        IReadOnlyCollection<string> stickyNames,
         string settingName,
         string settingValue)
     {
+        ArgumentNullException.ThrowIfNull(stickyNames);
         ArgumentException.ThrowIfNullOrWhiteSpace(settingName);
         ArgumentNullException.ThrowIfNull(settingValue);
 
-        var (settings, changedNames) = BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings(
-            currentSettings,
-            new Dictionary<string, string>(StringComparer.Ordinal) { [settingName] = settingValue });
-        return (settings, changedNames.Count > 0);
+        var sticky = new HashSet<string>(stickyNames, StringComparer.Ordinal);
+        var current = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in slotSettings ?? [])
+        {
+            current[key] = value;
+        }
+
+        var target = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in productionSettings ?? [])
+        {
+            if (!sticky.Contains(key))
+            {
+                target[key] = value;
+            }
+        }
+        foreach (var (key, value) in current)
+        {
+            if (sticky.Contains(key))
+            {
+                target[key] = value;
+            }
+        }
+        target[settingName] = settingValue;
+
+        var changed = target
+            .Where(t => !current.TryGetValue(t.Key, out var existing) || !string.Equals(existing, t.Value, StringComparison.Ordinal))
+            .Select(t => t.Key)
+            .Concat(current.Keys.Where(k => !target.ContainsKey(k)))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+        return (target, changed);
     }
 
     /// <summary>
