@@ -9,7 +9,8 @@
 
     Items (tasks/018-utbms-code-sets.poml, spec FR-08):
       1  Table sprk_billingcodeset (organization-owned): primary name sprk_name, sprk_body (text, e.g. ABA / LOC),
-         sprk_version, sprk_sourceurl (URL). Status is the standard statecode / statuscode (Active / Inactive).
+         sprk_version, sprk_sourceurl (URL), and (task 054, D-93) the matching tuning text sprk_description and
+         sprk_matchhints (multiline; read by code-set matching). Status is the standard statecode / statuscode (Active / Inactive).
       2  Table sprk_billingcode (organization-owned): primary name sprk_code, sprk_codeset (lookup -> sprk_billingcodeset,
          delete restricted), sprk_codetype local choice Task / Activity / Expense, sprk_phase, sprk_description,
          sprk_guidancetext (multiline; read by the coding Action). Status is statecode / statuscode.
@@ -103,6 +104,9 @@ try {
     Add-Column 'sprk_body' (New-StringDef 'sprk_Body' 'Body' 'Standards body that publishes the set, e.g. ABA or LOC.' 100) 'String'
     Add-Column 'sprk_version' (New-StringDef 'sprk_Version' 'Version' 'Published version of the set, e.g. 1997 or 2023-04.' 50) 'String'
     Add-Column 'sprk_sourceurl' (New-StringDef 'sprk_SourceURL' 'Source URL' 'Where the set was downloaded from (utbms.com).' 500 'Url') 'String'
+    # Task 054 (D-93): code-set matching tuning text, read by CodeSetProposalService and sent to the invoice-codeset-match Action.
+    Add-Column 'sprk_description' (New-MemoDef 'sprk_Description' 'Description' 'The work this set''s task codes cover. Sent to the code-set matching Action and embedded with the set. An administrator edit is never overwritten by the seed.' 4000) 'Memo'
+    Add-Column 'sprk_matchhints' (New-MemoDef 'sprk_MatchHints' 'Match Hints' 'Matter types and practice areas this set fits, synonyms, and what it is not for. Sent to the code-set matching Action. An administrator edit is never overwritten by the seed.' 4000) 'Memo'
 
     # --- 2. sprk_billingcode ------------------------------------------------------------------------------------
     Write-Host "2. Table $CodeTable" -ForegroundColor Cyan

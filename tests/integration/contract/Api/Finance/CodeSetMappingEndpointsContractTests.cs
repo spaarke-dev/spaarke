@@ -311,6 +311,67 @@ public sealed class CodeSetMappingEndpointsContractTests
         (await Json(response))["proposals"]!.AsArray().Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Proposals_ReportCoveragePerTable_AndANoneFitsRowCarriesNoConfirmableSet()
+    {
+        await using var host = await Host.StartAsync();
+        host.Data.AddMatterType(host.Litigation, "Mapped already");
+        var litigationType = host.Data.AddMatterType(null, "Litigation");
+        var appellate = host.Data.AddPracticeArea(null, "Appellate");
+        host.Ai.Setup(a => a.MatchCodeSetAsync(It.Is<InvoiceCodeSetMatchRequest>(r => r.ReferenceName == "Appellate"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceCodeSetMatchResult { CodeSetId = "none", Confidence = 0.8m, Reason = "No candidate covers it." });
+
+        var response = await host.Client.SendAsync(Req("GET", Proposals));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await Json(response);
+        var coverage = body["coverage"]!;
+        Count(coverage["matterTypes"]!).Should().Be((2, 1, 1, 0, 0));
+        Count(coverage["practiceAreas"]!).Should().Be((1, 0, 0, 1, 0));
+
+        var proposals = body["proposals"]!.AsArray();
+        var reviewed = proposals.Single(p => p!["referenceId"]!.GetValue<Guid>() == litigationType)!;
+        reviewed["outcome"]!.GetValue<string>().Should().Be("Proposed");
+        reviewed["reviewed"]!.GetValue<bool>().Should().BeTrue();
+        reviewed["confidence"]!.GetValue<decimal>().Should().Be(0.9m);
+
+        var noneFits = proposals.Single(p => p!["referenceId"]!.GetValue<Guid>() == appellate)!;
+        noneFits["outcome"]!.GetValue<string>().Should().Be("NoneFits", "the outcome is a stable string, not an enum number");
+        noneFits["proposed"].Should().BeNull("a none-fits row has nothing an admin could confirm by mistake");
+        noneFits["runnerUp"].Should().BeNull();
+        noneFits["closest"]!["codeSetId"]!.GetValue<Guid>().Should().Be(host.Litigation);
+        noneFits["rationale"]!.GetValue<string>().Should().Contain("by hand");
+        host.Data.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Proposals_WhenTheReviewStepFails_StillListEveryRow_MarkedUnreviewed()
+    {
+        await using var host = await Host.StartAsync();
+        host.Data.AddMatterType(null, "Litigation");
+        host.Data.AddPracticeArea(null, "Appellate");
+        host.Ai.Setup(a => a.MatchCodeSetAsync(It.IsAny<InvoiceCodeSetMatchRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceAiException(InvoiceAiException.CompletionFailed, ConsumerTypes.InvoiceCodeSetMatch, "model down"));
+
+        var response = await host.Client.SendAsync(Req("GET", Proposals));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the review step never fails the list");
+        var body = await Json(response);
+        var proposals = body["proposals"]!.AsArray();
+        proposals.Should().HaveCount(2);
+        proposals.Should().OnlyContain(p => p!["reviewed"]!.GetValue<bool>() == false && p["outcome"]!.GetValue<string>() == "Proposed");
+        proposals.Should().OnlyContain(p => p!["confidence"] == null);
+        proposals.Select(p => p!["proposed"]!["codeSetId"]!.GetValue<Guid>()).Should().Equal(host.Litigation, host.Litigation);
+        Count(body["coverage"]!["matterTypes"]!).Should().Be((1, 0, 1, 0, 1));
+    }
+
+    private static (int Active, int Mapped, int Proposed, int NoneFits, int Unreviewed) Count(JsonNode node) => (
+        node["active"]!.GetValue<int>(),
+        node["mapped"]!.GetValue<int>(),
+        node["proposed"]!.GetValue<int>(),
+        node["noneFits"]!.GetValue<int>(),
+        node["unreviewed"]!.GetValue<int>());
+
     // ═══════════════════════════════════════════════════════════════════════════
     // POST confirm
     // ═══════════════════════════════════════════════════════════════════════════

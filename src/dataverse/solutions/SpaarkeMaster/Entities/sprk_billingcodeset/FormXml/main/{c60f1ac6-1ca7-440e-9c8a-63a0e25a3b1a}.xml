@@ -49,6 +49,29 @@
                     </row>
                   </rows>
                 </section>
+                <section name="section_matching" id="{3B0E5D2A-54C1-4F0B-9D3E-0540C0DE5E71}" IsUserDefined="1" showlabel="true" showbar="false" columns="1" celllabelposition="Top" layout="varwidth">
+                  <labels>
+                    <label description="Matching" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{6C1F0B8E-54A2-4C8B-8E0F-0540C0DE5E72}">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_description" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9A4D2C7F-54B3-4D9C-9F1A-0540C0DE5E73}">
+                        <labels>
+                          <label description="Match Hints" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matchhints" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_matchhints" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
                 <section name="section_sub_codes" id="{5F946DF4-BAB9-2C18-E485-1B179BBB6E46}" IsUserDefined="1" showlabel="true" showbar="false" columns="1" celllabelposition="Top" layout="varwidth">
                   <labels>
                     <label description="Codes" languagecode="1033" />

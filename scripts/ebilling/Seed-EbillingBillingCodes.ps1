@@ -19,6 +19,13 @@
       * Existing rows whose description / phase / code type / guidance differ from the CSV are only REPORTED (drift),
         so an operator can see what a re-seed deliberately left alone.
 
+    Code-set matching tuning text (task 054, D-93): scripts/seed-data/ebilling/utbms-codeset-tuning.json holds a
+    description and match hints for the task code sets. A new set row is created with them. On an EXISTING set row the
+    script fills sprk_description / sprk_matchhints ONLY WHEN THE COLUMN IS EMPTY (the one exception to "never updated":
+    an empty column cannot be an admin's wording), with If-Match on the row's ETag so a concurrent admin edit is never
+    overwritten. A filled column equal to the file counts as unchanged; one that differs is an admin edit and is only
+    REPORTED (tuning drift). A tuning entry naming a set no CSV defines stops the script before any write.
+
     Validation runs over every CSV BEFORE any write. Duplicate codes within a set, a missing required column, an
     unknown code type, or two files naming the same set STOP the script with exit code 2 and the offending rows.
 
@@ -30,6 +37,9 @@
 
 .PARAMETER CsvDirectory
     Folder holding the utbms-*.csv files. Defaults to scripts/seed-data/ebilling next to this script's repo root.
+
+.PARAMETER TuningFile
+    The code-set matching tuning file (task 054). Defaults to utbms-codeset-tuning.json in CsvDirectory.
 
 .EXAMPLE
     pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -WhatIf
@@ -43,8 +53,10 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
-    [string]$CsvDirectory = (Join-Path $PSScriptRoot '..\seed-data\ebilling')
+    [string]$CsvDirectory = (Join-Path $PSScriptRoot '..\seed-data\ebilling'),
+    [string]$TuningFile = ''
 )
+if (-not $TuningFile) { $TuningFile = Join-Path $CsvDirectory 'utbms-codeset-tuning.json' }
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
@@ -200,6 +212,32 @@ function Read-SeedFiles {
     return $sets
 }
 
+# The tuning text by set name (task 054). Every entry must name a CSV set and carry both texts; checked before any write.
+function Read-TuningFile($sets) {
+    $tuning = @{}
+    if (-not (Test-Path $TuningFile)) { throw [SeedValidationException]::new("Tuning file $TuningFile not found.") }
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $doc = Get-Content -Path $TuningFile -Raw -Encoding utf8 | ConvertFrom-Json
+    $names = @($sets | ForEach-Object { $_.Name })
+    foreach ($t in @($doc.sets)) {
+        $name = [string]$t.name
+        if ([string]::IsNullOrWhiteSpace($name)) { $problems.Add('an entry has no name'); continue }
+        $name = $name.Trim()
+        if ($name -notin $names) { $problems.Add("'$name' is not a set any utbms-*.csv defines") }
+        if ($tuning.ContainsKey($name)) { $problems.Add("'$name' appears twice") }
+        foreach ($field in 'description', 'matchHints') {
+            $v = [string]$t.$field
+            if ([string]::IsNullOrWhiteSpace($v)) { $problems.Add("'$name': $field is empty") }
+            elseif ($v.Length -gt 4000) { $problems.Add("'$name': $field is longer than 4000 characters") }
+        }
+        $tuning[$name] = [pscustomobject]@{ Description = ([string]$t.description).Trim(); MatchHints = ([string]$t.matchHints).Trim() }
+    }
+    if ($problems.Count -gt 0) {
+        throw [SeedValidationException]::new("The tuning file failed validation; nothing was written:`n  - " + ($problems -join "`n  - "))
+    }
+    return $tuning
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------------------------------------------
@@ -213,6 +251,12 @@ $summary = [System.Collections.Generic.List[object]]::new()
 try {
     $sets = Read-SeedFiles
     Write-Host "Validated $($sets.Count) files, $((($sets | ForEach-Object { $_.Codes.Count } | Measure-Object -Sum).Sum)) codes, no duplicates." -ForegroundColor Green
+    $tuning = Read-TuningFile $sets
+    Write-Host "Validated tuning text for $($tuning.Count) sets ($(Split-Path $TuningFile -Leaf))." -ForegroundColor Green
+    foreach ($col in 'sprk_description', 'sprk_matchhints') {
+        try { Invoke-Dv "EntityDefinitions(LogicalName='$CodeSetTable')/Attributes(LogicalName='$col')?`$select=LogicalName" | Out-Null }
+        catch { throw "$CodeSetTable.$col not found; run Deploy-EbillingBillingCodeSchema.ps1 first. ($($_.Exception.Message))" }
+    }
 
     # Table and column metadata the writes depend on (never hard-code a navigation property or option value).
     $setMeta = Invoke-Dv "EntityDefinitions(LogicalName='$CodeSetTable')?`$select=EntitySetName"
@@ -227,11 +271,12 @@ try {
 
     foreach ($set in $sets) {
         Write-Host "$($set.Name)  ($($set.File), $($set.Codes.Count) codes, $($set.Body) $($set.Version))" -ForegroundColor Cyan
-        $row = [ordered]@{ Set = $set.Name; Csv = $set.Codes.Count; SetCreated = 0; Created = 0; Updated = 0; Unchanged = 0; Drift = 0; GuidanceEdited = 0; SetId = '' }
+        $row = [ordered]@{ Set = $set.Name; Csv = $set.Codes.Count; SetCreated = 0; Created = 0; Updated = 0; Unchanged = 0; Drift = 0; GuidanceEdited = 0; TuningFilled = 0; TuningUnchanged = 0; TuningDrift = 0; SetId = '' }
+        $tune = $tuning[$set.Name]
 
         # --- the set row ---------------------------------------------------------------------------------------
         $nameFilter = [uri]::EscapeDataString("sprk_name eq '" + $set.Name.Replace("'", "''") + "'")
-        $found = @((Invoke-Dv "$($setMeta.EntitySetName)?`$select=sprk_billingcodesetid,sprk_name,sprk_version,sprk_body,sprk_sourceurl&`$filter=$nameFilter").value)
+        $found = @((Invoke-Dv "$($setMeta.EntitySetName)?`$select=sprk_billingcodesetid,sprk_name,sprk_version,sprk_body,sprk_sourceurl,sprk_description,sprk_matchhints&`$filter=$nameFilter").value)
         if ($found.Count -gt 1) { throw [SeedValidationException]::new("$($found.Count) code set rows are named '$($set.Name)'; the match is ambiguous. Resolve the duplicates in Dataverse first.") }
         $setId = $null
         if ($found.Count -eq 1) {
@@ -240,12 +285,34 @@ try {
                 $row.Drift++; Write-Host "  drift (left alone): set row has version '$($found[0].sprk_version)' / body '$($found[0].sprk_body)' / source '$($found[0].sprk_sourceurl)'" -ForegroundColor DarkYellow
             }
             Write-Host "  set exists ($setId)" -ForegroundColor Yellow
-        } elseif ($DryRun) {
-            $row.SetCreated++; Write-Host "  WOULD CREATE set row" -ForegroundColor Cyan
-        } else {
-            $created = Invoke-Dv -Path $setMeta.EntitySetName -Method POST -ExtraHeaders @{ Prefer = 'return=representation' } -Body @{
-                sprk_name = $set.Name; sprk_body = $set.Body; sprk_version = $set.Version; sprk_sourceurl = $set.SourceUrl
+
+            # Tuning text (task 054): fill an EMPTY column only; an admin's wording is reported, never replaced.
+            if ($tune) {
+                $fill = @{}
+                foreach ($pair in @(@('sprk_description', $tune.Description), @('sprk_matchhints', $tune.MatchHints))) {
+                    $current = [string]$found[0].($pair[0])
+                    if ([string]::IsNullOrWhiteSpace($current)) { $fill[$pair[0]] = $pair[1] }
+                    elseif ($current.Trim() -eq $pair[1]) { $row.TuningUnchanged++ }
+                    else { $row.TuningDrift++; Write-Host "  tuning drift (left alone, admin wording kept): $($pair[0]) differs from the tuning file" -ForegroundColor DarkYellow }
+                }
+                if ($fill.Count -gt 0 -and $DryRun) {
+                    $row.TuningFilled += $fill.Count; Write-Host "  WOULD FILL empty tuning column(s): $(@($fill.Keys | Sort-Object) -join ', ')" -ForegroundColor Cyan
+                } elseif ($fill.Count -gt 0) {
+                    try {
+                        Invoke-Dv -Path "$($setMeta.EntitySetName)($setId)" -Method PATCH -Body $fill -ExtraHeaders @{ 'If-Match' = $found[0].'@odata.etag' } | Out-Null
+                        $row.TuningFilled += $fill.Count; Write-Host "  FILLED empty tuning column(s): $(@($fill.Keys | Sort-Object) -join ', ')" -ForegroundColor Green
+                    } catch {
+                        if ($_.Exception.Data['Status'] -ne 412) { throw }
+                        $row.TuningDrift += $fill.Count; Write-Host "  set row changed since it was read (HTTP 412); tuning left alone - re-run to fill" -ForegroundColor DarkYellow
+                    }
+                }
             }
+        } elseif ($DryRun) {
+            $row.SetCreated++; Write-Host "  WOULD CREATE set row$(if ($tune) { ' with tuning text' })" -ForegroundColor Cyan
+        } else {
+            $setBody = @{ sprk_name = $set.Name; sprk_body = $set.Body; sprk_version = $set.Version; sprk_sourceurl = $set.SourceUrl }
+            if ($tune) { $setBody.sprk_description = $tune.Description; $setBody.sprk_matchhints = $tune.MatchHints }
+            $created = Invoke-Dv -Path $setMeta.EntitySetName -Method POST -ExtraHeaders @{ Prefer = 'return=representation' } -Body $setBody
             $setId = $created.sprk_billingcodesetid
             $row.SetCreated++; Write-Host "  CREATED set row ($setId)" -ForegroundColor Green
         }
@@ -302,9 +369,12 @@ catch {
 
 Write-Host ""
 Write-Host "================ Summary ================" -ForegroundColor Cyan
-$summary | Format-Table Set, Csv, SetCreated, Created, Updated, Unchanged, Drift, GuidanceEdited -AutoSize | Out-String | Write-Host
-$totalCreated = ($summary | Measure-Object Created -Sum).Sum + ($summary | Measure-Object SetCreated -Sum).Sum
-Write-Host ("sets created: {0}   codes created: {1}   updated: 0 (existing rows are never updated)   unchanged: {2}" -f ($summary | Measure-Object SetCreated -Sum).Sum, ($summary | Measure-Object Created -Sum).Sum, ($summary | Measure-Object Unchanged -Sum).Sum)
+$summary | Format-Table Set, Csv, SetCreated, Created, Updated, Unchanged, Drift, GuidanceEdited, TuningFilled, TuningUnchanged, TuningDrift -AutoSize | Out-String | Write-Host
+# Writes = rows created + set rows whose empty tuning columns were filled (one PATCH per set row).
+$tuningWrites = @($summary | Where-Object { $_.TuningFilled -gt 0 }).Count
+$totalCreated = ($summary | Measure-Object Created -Sum).Sum + ($summary | Measure-Object SetCreated -Sum).Sum + $tuningWrites
+Write-Host ("sets created: {0}   codes created: {1}   codes updated: 0 (existing codes are never updated)   unchanged: {2}" -f ($summary | Measure-Object SetCreated -Sum).Sum, ($summary | Measure-Object Created -Sum).Sum, ($summary | Measure-Object Unchanged -Sum).Sum)
+Write-Host ("tuning columns filled (were empty): {0}   unchanged: {1}   admin wording kept (drift): {2}" -f ($summary | Measure-Object TuningFilled -Sum).Sum, ($summary | Measure-Object TuningUnchanged -Sum).Sum, ($summary | Measure-Object TuningDrift -Sum).Sum)
 Write-Host ("writes this run: {0}" -f $(if ($DryRun) { "0 (WhatIf; $totalCreated would be made)" } else { $totalCreated }))
 Write-Host "Set ids:"
 $summary | ForEach-Object { Write-Host ("  {0}  {1}" -f $_.SetId, $_.Set) }
