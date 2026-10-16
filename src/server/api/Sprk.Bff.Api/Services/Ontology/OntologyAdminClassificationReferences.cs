@@ -17,6 +17,9 @@ namespace Sprk.Bff.Api.Services.Ontology;
 /// elsewhere is still caught.</para>
 /// <para><b>An unreadable body fails closed.</b> A body that is not valid JSON is scanned as text for any GUID (hyphenated or not), so a
 /// damaged body still blocks the rename of a category it appears to name.</para>
+/// <para><b>A category named by its NAME also counts (K3, task 103 fix round).</b> A JSON string VALUE equal to a category's current name
+/// (trimmed, case-insensitive) is a reference, alongside the id scan. Property names are not values and are not matched. An unreadable
+/// body is scanned as text for the name (case-insensitive substring), which over-reads, in the safe direction.</para>
 /// </remarks>
 internal static class OntologyAdminClassificationReferences
 {
@@ -50,6 +53,88 @@ internal static class OntologyAdminClassificationReferences
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// The categories (by id) that <paramref name="ruleBody"/> names, either by id (<see cref="GuidsIn"/>) or by a string value equal to the
+    /// category's current name. <paramref name="categories"/> maps each category id to its current name.
+    /// </summary>
+    internal static IReadOnlySet<Guid> CategoriesNamedIn(string? ruleBody, IReadOnlyDictionary<Guid, string> categories)
+    {
+        var found = new HashSet<Guid>();
+        if (string.IsNullOrWhiteSpace(ruleBody))
+        {
+            return found;
+        }
+
+        foreach (var id in GuidsIn(ruleBody))
+        {
+            if (categories.ContainsKey(id))
+            {
+                found.Add(id);
+            }
+        }
+
+        HashSet<string>? values = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(ruleBody);
+            values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectStrings(doc.RootElement, values);
+        }
+        catch (JsonException)
+        {
+            values = null;
+        }
+
+        foreach (var (id, name) in categories)
+        {
+            var wanted = name.Trim();
+            if (wanted.Length == 0)
+            {
+                continue;
+            }
+
+            var named = values is not null
+                ? values.Contains(wanted)
+                : ruleBody.Contains(wanted, StringComparison.OrdinalIgnoreCase);
+            if (named)
+            {
+                found.Add(id);
+            }
+        }
+
+        return found;
+    }
+
+    private static void CollectStrings(JsonElement element, HashSet<string> values)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                if (element.GetString()?.Trim() is { Length: > 0 } text)
+                {
+                    values.Add(text);
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectStrings(item, values);
+                }
+
+                break;
+
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    CollectStrings(property.Value, values);
+                }
+
+                break;
+        }
     }
 
     private static void Walk(JsonElement element, HashSet<Guid> found)

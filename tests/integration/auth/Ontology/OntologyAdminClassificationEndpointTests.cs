@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 using Xunit;
@@ -25,8 +26,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
 /// <c>/api/v1/ontology/admin/classification</c> through the REAL pipeline (authentication, rate limiting, the production handlers and
 /// service). Only the caller-identity Dataverse client is substituted, by a small Dataverse that holds the triage categories, the
 /// policies and their versions, answers the volume aggregate, records every write with WHO made it and the row version it was
-/// conditional on, and refuses a Console User's write the way Dataverse does (403). The live read-only leg is
-/// <c>tests/integration/Sprk.Bff.Api.IntegrationTests/Ontology/OntologyAdminClassificationLiveTests.cs</c>.
+/// conditional on, and refuses a Console User's write the way Dataverse does (403).
 /// </summary>
 /// <remarks>Placement: <c>tests/integration/auth/**</c> (the security-auth KEEP path).</remarks>
 public class OntologyAdminClassificationEndpointTests : IClassFixture<ClassificationTestFixture>
@@ -365,6 +365,308 @@ public class OntologyAdminClassificationEndpointTests : IClassFixture<Classifica
         _f.Writes.Should().BeEmpty();
     }
 
+    // ── F2: the rename check must not fail open for a caller whose read does not cover every business unit ──────────
+
+    private static readonly string[] CoverageProbes = ["WhoAmI()", "RetrieveUserPrivilegeByPrivilegeName", "businessunits("];
+
+    [Theory]
+    [InlineData("Global", true)]    // Global depth covers every business unit
+    [InlineData("Deep", true)]      // Deep AT THE ROOT business unit covers every business unit under it
+    public async Task ARename_RunsTheReferenceCheck_WhenTheCallersReadCoversEveryBusinessUnit(string depth, bool atRoot)
+    {
+        _f.PolicyDepth = depth;
+        _f.VersionDepth = depth;
+        _f.CallerIsInRootBusinessUnit = atRoot;
+
+        var (blocked, blockedBody) = await Send(HttpMethod.Patch, $"{Root}/{Fee:D}", new { name = "Fee change" });
+        var (renamed, _) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        blocked.StatusCode.Should().Be(HttpStatusCode.Conflict, blockedBody.ToString());
+        Reason(blockedBody).Should().Be("ontology.admin.classification.rename_blocked", "the reference check ran");
+        renamed.StatusCode.Should().Be(HttpStatusCode.OK);
+        _f.Writes.Should().ContainSingle(w => w.Method == "PATCH");
+        _f.Requests.Should().Contain(r => r.Contains("sprk_policyversions?", StringComparison.Ordinal));
+        _f.Requests.Should().Contain(r => r == "GET WhoAmI()");
+    }
+
+    [Fact]
+    public async Task ARename_ByAGlobalCaller_DoesNotReadTheirBusinessUnit()
+    {
+        await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        _f.Requests.Should().NotContain(r => r.Contains("businessunits(", StringComparison.Ordinal), "Global needs no business-unit check");
+    }
+
+    [Fact]
+    public async Task ARename_ByADeepCallerInAChildBusinessUnit_IsRefused409_AndNothingIsReadOrWritten()
+    {
+        // Deep depth on both tables, but the caller sits in a child business unit: policies owned higher up are invisible to them,
+        // so "no rule reads this category" cannot be established from what they see.
+        _f.PolicyDepth = "Deep";
+        _f.VersionDepth = "Deep";
+        _f.CallerIsInRootBusinessUnit = false;
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_unverifiable");
+        body.GetProperty("detail").GetString().Should().Contain("business unit");
+        _f.Writes.Should().BeEmpty();
+        _f.Categories[Marketing].Name.Should().Be("Marketing / Noise");
+        _f.Requests.Should().NotContain(r => r.StartsWith("GET sprk_polic", StringComparison.Ordinal), "the unverifiable reference read is never made, let alone trusted");
+    }
+
+    [Theory]
+    [InlineData("Basic", "Global")]
+    [InlineData("Local", "Global")]
+    [InlineData("Global", "Basic")]
+    [InlineData("Global", "Local")]
+    [InlineData("Global", "Deep")]    // one table short of complete is short: Deep in a child unit
+    [InlineData("Deep", "Global")]
+    [InlineData(null, "Global")]      // the privilege is not held at all: the function returns no row
+    [InlineData("Global", null)]
+    public async Task ARename_IsRefused409_WhenEitherReadIsBelowGlobal_AndTheCallerIsNotAtTheRoot(string? policyDepth, string? versionDepth)
+    {
+        _f.PolicyDepth = policyDepth;
+        _f.VersionDepth = versionDepth;
+        _f.CallerIsInRootBusinessUnit = false;
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_unverifiable");
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Basic")]
+    [InlineData("Local")]
+    public async Task ARename_IsRefused409_ForABasicOrLocalReadEvenAtTheRootBusinessUnit(string depth)
+    {
+        _f.PolicyDepth = depth;
+        _f.VersionDepth = depth;
+        _f.CallerIsInRootBusinessUnit = true;
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_unverifiable");
+        _f.Writes.Should().BeEmpty();
+        _f.Requests.Should().NotContain(r => r.Contains("businessunits(", StringComparison.Ordinal), "only Deep depends on the business unit");
+    }
+
+    [Fact]
+    public async Task ARename_UsesTheHighestDepthAcrossTheCallersRoles()
+    {
+        // Two roles grant the read: Basic and Global. The effective depth is Global.
+        _f.PolicyDepths = ["Basic", "Global"];
+        _f.VersionDepths = ["Local", "Global"];
+        _f.CallerIsInRootBusinessUnit = false;
+
+        var (response, _) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("whoami")]
+    [InlineData("privilege")]
+    [InlineData("businessunit")]
+    public async Task ARename_IsRefusedAsAFault503_WhenTheCoverageCannotBeRead_NeverAllowedUnchecked(string failing)
+    {
+        _f.PolicyDepth = "Deep";
+        _f.VersionDepth = "Deep";
+        _f.CallerIsInRootBusinessUnit = true;
+        _f.Faults.Add(failing);
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.unavailable");
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("""{"RolePrivileges":"not an array"}""")]
+    [InlineData("""{}""")]
+    public async Task ARename_IsAFault503_WhenThePrivilegeAnswerIsNotTheExpectedShape(string answer)
+    {
+        _f.PrivilegeAnswerOverride = answer;
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body.ToString());
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AGuidanceEdit_AndOnOff_AreUnaffected_ByAShallowReadDepth_AndNeverProbeTheCoverage()
+    {
+        _f.PolicyDepth = "Basic";
+        _f.VersionDepth = "Basic";
+        _f.CallerIsInRootBusinessUnit = false;
+
+        var (guidance, _) = await Send(HttpMethod.Patch, $"{Root}/{Invoice:D}", new { guidance = "Bills." });
+        var (onOff, _) = await Send(HttpMethod.Put, $"{Root}/{Invoice:D}/enabled", new { enabled = true });
+
+        guidance.StatusCode.Should().Be(HttpStatusCode.OK);
+        onOff.StatusCode.Should().Be(HttpStatusCode.OK);
+        _f.Requests.Should().NotContain(r => CoverageProbes.Any(p => r.Contains(p, StringComparison.Ordinal)));
+    }
+
+    // ── K2: the routing configuration is keyed by category name ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ARenameOfARoutedCategory_IsRefused409_NamingTheGlobalRoutingEntry()
+    {
+        _f.Routing.CategoryToTeam["marketing / noise"] = "Marketing team";   // keys are case-insensitive
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_routed");
+        body.GetProperty("detail").GetString().Should().Contain("Communication:CategoryRouting:CategoryToTeam");
+        _f.Writes.Should().BeEmpty();
+        _f.Requests.Should().NotContain(r => r.Contains("WhoAmI", StringComparison.Ordinal), "the in-process check runs before any Dataverse coverage read");
+    }
+
+    [Fact]
+    public async Task ARenameOfARoutedCategory_IsRefused409_WhenOnlyAPerTenantEntryNamesIt_EvenWithRoutingSwitchedOff()
+    {
+        _f.Routing.Enabled = false;
+        _f.Routing.Tenants["tenant-b"] = new CategoryRoutingTenantOverride
+        {
+            CategoryToTeam = new Dictionary<string, string> { ["Marketing / Noise"] = "Team B" },
+        };
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_routed");
+        body.GetProperty("detail").GetString().Should().Contain("Tenants:tenant-b:CategoryToTeam");
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARoutingEntryForAnotherCategory_DoesNotBlockARename_AndGuidanceEditsAreNeverBlockedByRouting()
+    {
+        _f.Routing.CategoryToTeam["Fee / rate change"] = "Billing team";
+
+        var (renamed, _) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+        var (guidance, _) = await Send(HttpMethod.Patch, $"{Root}/{Fee:D}", new { guidance = "Rates and fees." });
+
+        renamed.StatusCode.Should().Be(HttpStatusCode.OK);
+        guidance.StatusCode.Should().Be(HttpStatusCode.OK, "only a rename depends on the name");
+    }
+
+    // ── K2: two active categories with one name ───────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TurningACategoryOn_IsRefused409_WhenAnotherActiveCategoryHasTheSameName_AndWritesNothing()
+    {
+        // Made outside this area (an alternate key on sprk_name would prevent it; that is a schema change, filed for the owner).
+        _f.Categories[Marketing].Enabled = false;
+        _f.Categories[Guid.Parse("10300000-0000-4000-8000-0000000000aa")] = new()
+        {
+            Id = Guid.Parse("10300000-0000-4000-8000-0000000000aa"),
+            Name = "  marketing / NOISE ",
+            Enabled = true,
+        };
+
+        var (response, body) = await Send(HttpMethod.Put, $"{Root}/{Marketing:D}/enabled", new { enabled = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.name_taken");
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TurningACategoryOff_NeverChecksTheName()
+    {
+        _f.Categories[Guid.Parse("10300000-0000-4000-8000-0000000000aa")] = new()
+        {
+            Id = Guid.Parse("10300000-0000-4000-8000-0000000000aa"),
+            Name = "Marketing / Noise",
+        };
+
+        var (response, _) = await Send(HttpMethod.Put, $"{Root}/{Marketing:D}/enabled", new { enabled = false });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "switching Off removes the name from the enum; it can never add a duplicate");
+        _f.Writes.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TurningACategoryOn_IsAFault503_WhenTheNamesCannotBeRead()
+    {
+        _f.Categories[Marketing].Enabled = false;
+        _f.Faults.Add("categories-list");
+
+        var (response, body) = await Send(HttpMethod.Put, $"{Root}/{Marketing:D}/enabled", new { enabled = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body.ToString());
+        _f.Writes.Should().BeEmpty();
+    }
+
+    // ── K3: a rule body that names a category by its NAME ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("Marketing / Noise")]
+    [InlineData("marketing / NOISE")]
+    public async Task ARenameIsRefused_WhenARuleBodyNamesTheCategoryByItsName(string written)
+    {
+        _f.Policies[Guid.Parse("10300000-0000-4000-8000-000000000104")] = new("POL-BY-NAME", null, Enabled: true, CurrentVersion: null);
+        _f.Versions[Guid.Parse("10300000-0000-4000-8000-000000000204")] = new(
+            Guid.Parse("10300000-0000-4000-8000-000000000104"), 1, Named($"[\"{written}\"]"), InforceTo: null);
+
+        var (response, body) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body.ToString());
+        Reason(body).Should().Be("ontology.admin.classification.rename_blocked");
+        body.GetProperty("detail").GetString().Should().Contain("POL-BY-NAME");
+        _f.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheList_ShowsARuleThatNamesTheCategoryByName_AsAReader()
+    {
+        _f.Policies[Guid.Parse("10300000-0000-4000-8000-000000000104")] = new("POL-BY-NAME", null, Enabled: true, CurrentVersion: null);
+        _f.Versions[Guid.Parse("10300000-0000-4000-8000-000000000204")] = new(
+            Guid.Parse("10300000-0000-4000-8000-000000000104"), 1, Named("\"Marketing / Noise\""), InforceTo: null);
+
+        var (_, list) = await Send(HttpMethod.Get, Root);
+
+        CategoryIn(list, Marketing).GetProperty("readBy").EnumerateArray().Select(r => r.GetProperty("policyCode").GetString())
+            .Should().Equal("POL-BY-NAME");
+        CategoryIn(list, Invoice).GetProperty("readBy").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ARuleBody_ThatOnlyUsesTheNameAsAPropertyKey_DoesNotBlockARename()
+    {
+        _f.Policies[Guid.Parse("10300000-0000-4000-8000-000000000105")] = new("POL-KEY", null, Enabled: true, CurrentVersion: null);
+        _f.Versions[Guid.Parse("10300000-0000-4000-8000-000000000205")] = new(
+            Guid.Parse("10300000-0000-4000-8000-000000000105"), 1, "{\"Marketing / Noise\":{\"sprk_x\":1}}", InforceTo: null);
+
+        var (response, _) = await Send(HttpMethod.Patch, $"{Root}/{Marketing:D}", new { name = "Noise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a property name is not a value");
+    }
+
+    // ── K3: a recall measured before the category's last edit ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheList_MarksARecallMeasuredBeforeTheLastEdit_AndOnlyThen()
+    {
+        _f.Categories[Fee].ModifiedOn = "2026-10-12T09:30:00Z";     // edited two days after the 2026-10-10 measurement
+        _f.Categories[Scope].ModifiedOn = "2026-10-10T18:00:00Z";   // the measurement day itself: the measurement writes the row too
+
+        var (_, list) = await Send(HttpMethod.Get, Root);
+
+        CategoryIn(list, Fee).GetProperty("recall").GetProperty("measuredBeforeLastEdit").GetBoolean().Should().BeTrue();
+        CategoryIn(list, Scope).GetProperty("recall").GetProperty("measuredBeforeLastEdit").GetBoolean().Should().BeFalse();
+        CategoryIn(list, Invoice).GetProperty("recall").GetProperty("measuredBeforeLastEdit").GetBoolean().Should().BeFalse("never measured");
+    }
+
     // ── Concurrency ───────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -533,6 +835,7 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
         public string? Guidance { get; set; }
         public bool Enabled { get; set; } = true;
         public long Version { get; set; } = 1000;
+        public string? ModifiedOn { get; set; } = "2026-10-01T09:00:00Z";
         public decimal? Recall { get; init; }
         public int? SetSize { get; init; }
         public string? MeasuredOn { get; init; }
@@ -552,8 +855,30 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
 
     public Dictionary<Guid, VersionRow> Versions { get; } = new();
 
-    /// <summary>"categories", "policies", "versions", "volume" (reads) or "write": the call answers a Dataverse 500.</summary>
+    /// <summary>
+    /// "categories", "policies", "versions", "volume" (reads), "write", "whoami", "privilege" or "businessunit": the call answers a Dataverse 500.
+    /// "categories-list" fails only the id-and-name read the On/Off and rename name checks make.
+    /// </summary>
     public HashSet<string> Faults { get; } = new();
+
+    /// <summary>The depth of the caller's single role for the read of sprk_policy and of sprk_policyversion (Basic, Local, Deep, Global); null: the privilege is not held.</summary>
+    public string? PolicyDepth { get; set; } = "Global";
+
+    public string? VersionDepth { get; set; } = "Global";
+
+    /// <summary>When set, one privilege row per role at these depths replaces <see cref="PolicyDepth"/> / <see cref="VersionDepth"/>.</summary>
+    public string[]? PolicyDepths { get; set; }
+
+    public string[]? VersionDepths { get; set; }
+
+    /// <summary>False: the caller's business unit has a parent business unit.</summary>
+    public bool CallerIsInRootBusinessUnit { get; set; } = true;
+
+    /// <summary>A raw JSON answer to the privilege function, in place of the one built from the depths.</summary>
+    public string? PrivilegeAnswerOverride { get; set; }
+
+    /// <summary>The routing configuration the BFF reads through <c>IOptionsMonitor</c>.</summary>
+    public CategoryRoutingOptions Routing { get; private set; } = new();
 
     /// <summary>Every call answers this (error code, HTTP status): the caller cannot be named to Dataverse.</summary>
     public (string Error, int Status)? EveryCallFails { get; set; }
@@ -571,6 +896,13 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
     {
         Caller = Who.Admin;
         Faults.Clear();
+        PolicyDepth = "Global";
+        VersionDepth = "Global";
+        PolicyDepths = null;
+        VersionDepths = null;
+        CallerIsInRootBusinessUnit = true;
+        PrivilegeAnswerOverride = null;
+        Routing = new CategoryRoutingOptions();
         EveryCallFails = null;
         BeforeWrite = null;
         Requests.Clear();
@@ -606,6 +938,8 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
         {
             services.RemoveAll<IDataverseUserClient>();
             services.AddScoped<IDataverseUserClient>(_ => new World(this));
+            services.RemoveAll<IOptionsMonitor<CategoryRoutingOptions>>();
+            services.AddSingleton<IOptionsMonitor<CategoryRoutingOptions>>(_ => new RoutingMonitor(this));
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, CallerTokenHandler>(CallerTokenHandler.SchemeName, _ => { });
@@ -615,6 +949,15 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
                 o.DefaultChallengeScheme = CallerTokenHandler.SchemeName;
             });
         });
+    }
+
+    private sealed class RoutingMonitor(ClassificationTestFixture f) : IOptionsMonitor<CategoryRoutingOptions>
+    {
+        public CategoryRoutingOptions CurrentValue => f.Routing;
+
+        public CategoryRoutingOptions Get(string? name) => f.Routing;
+
+        public IDisposable? OnChange(Action<CategoryRoutingOptions, string?> listener) => null;
     }
 
     private sealed class CallerTokenHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
@@ -639,6 +982,9 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
     /// <summary>A Dataverse that holds the tables the Classification routes touch and enforces the write privilege per caller.</summary>
     private sealed class World(ClassificationTestFixture f) : IDataverseUserClient
     {
+        private static readonly Guid CallerUserId = Guid.Parse("10300000-0000-4000-8000-0000000000c1");
+        private static readonly Guid CallerBusinessUnitId = Guid.Parse("10300000-0000-4000-8000-0000000000b1");
+
         private static DataverseUserResponse Fail(int status, string code) => DataverseUserResponse.Fail(status, code, code);
 
         private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
@@ -662,6 +1008,7 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
             ["sprk_enabled"] = c.Enabled,
             ["versionnumber"] = c.Version,
             ["statecode"] = 0,
+            ["modifiedon"] = c.ModifiedOn,
             ["sprk_measuredrecall"] = c.Recall,
             ["sprk_labelledsetsize"] = c.SetSize,
             ["sprk_recallmeasuredon"] = c.MeasuredOn,
@@ -674,8 +1021,69 @@ public sealed class ClassificationTestFixture : WorkspaceTestFixture
                 return Task.FromResult(failed);
             }
 
+            if (relativePath == "WhoAmI()")
+            {
+                return Task.FromResult(f.Faults.Contains("whoami")
+                    ? Fail(500, DataverseUserClientErrorCodes.ServiceError)
+                    : DataverseUserResponse.Ok(200, Json(new Dictionary<string, object?>
+                    {
+                        ["UserId"] = CallerUserId.ToString("D"),
+                        ["BusinessUnitId"] = CallerBusinessUnitId.ToString("D"),
+                        ["OrganizationId"] = Guid.Empty.ToString("D"),
+                    })));
+            }
+
+            const string privilegeFunction = "/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName(PrivilegeName='";
+            if (relativePath.StartsWith($"systemusers({CallerUserId:D}){privilegeFunction}", StringComparison.Ordinal))
+            {
+                if (f.Faults.Contains("privilege"))
+                {
+                    return Task.FromResult(Fail(500, DataverseUserClientErrorCodes.ServiceError));
+                }
+
+                if (f.PrivilegeAnswerOverride is { } raw)
+                {
+                    return Task.FromResult(DataverseUserResponse.Ok(200, JsonDocument.Parse(raw).RootElement.Clone()));
+                }
+
+                var privilege = relativePath[(relativePath.IndexOf(privilegeFunction, StringComparison.Ordinal) + privilegeFunction.Length)..].TrimEnd(')', '\'');
+                var depths = privilege switch
+                {
+                    "prvReadsprk_Policy" => f.PolicyDepths ?? (f.PolicyDepth is null ? [] : [f.PolicyDepth]),
+                    "prvReadsprk_PolicyVersion" => f.VersionDepths ?? (f.VersionDepth is null ? [] : [f.VersionDepth]),
+                    _ => throw new InvalidOperationException($"The rename check asked about an unexpected privilege: {privilege}"),
+                };
+                return Task.FromResult(DataverseUserResponse.Ok(200, Json(new
+                {
+                    RolePrivileges = depths.Select(d => new Dictionary<string, object?>
+                    {
+                        ["Depth"] = d,
+                        ["PrivilegeId"] = Guid.NewGuid().ToString("D"),
+                        ["BusinessUnitId"] = CallerBusinessUnitId.ToString("D"),
+                        ["PrivilegeName"] = privilege,
+                    }),
+                })));
+            }
+
+            if (relativePath.StartsWith($"businessunits({CallerBusinessUnitId:D})?", StringComparison.Ordinal))
+            {
+                relativePath.Should().Contain("_parentbusinessunitid_value");
+                return Task.FromResult(f.Faults.Contains("businessunit")
+                    ? Fail(500, DataverseUserClientErrorCodes.ServiceError)
+                    : DataverseUserResponse.Ok(200, Json(new Dictionary<string, object?>
+                    {
+                        ["_parentbusinessunitid_value"] = f.CallerIsInRootBusinessUnit ? null : Guid.NewGuid().ToString("D"),
+                        ["businessunitid"] = CallerBusinessUnitId.ToString("D"),
+                    })));
+            }
+
             if (relativePath.StartsWith("sprk_triagecategories?", StringComparison.Ordinal))
             {
+                if (f.Faults.Contains("categories-list") && relativePath.StartsWith("sprk_triagecategories?$select=sprk_triagecategoryid,sprk_name&", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(Fail(500, DataverseUserClientErrorCodes.ServiceError));
+                }
+
                 return Task.FromResult(f.Faults.Contains("categories")
                     ? Fail(500, DataverseUserClientErrorCodes.ServiceError)
                     : DataverseUserResponse.Ok(200, Json(new { value = f.Categories.Values.OrderBy(c => c.Name, StringComparer.Ordinal).Select(Row) })));

@@ -30,6 +30,8 @@ export interface ClassificationRecall {
   labelledSetSize: number | null;
   /** `yyyy-MM-dd`. */
   measuredOn: string | null;
+  /** True when the category was edited on a later day than the measurement: the figure may describe the category as it was before. */
+  measuredBeforeLastEdit: boolean;
 }
 
 /** One policy version whose rule body names the category. */
@@ -156,16 +158,17 @@ function parseReference(raw: unknown): ClassificationRuleReference | null {
 
 function parseRecall(raw: unknown): ClassificationRecall {
   // A recall that cannot be read is "not measured", never a made-up figure.
-  if (!isObject(raw)) return { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null };
+  if (!isObject(raw)) return { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: false };
   const status = text(raw.status);
   if (!status || !RECALL_STATUSES.has(status)) {
-    return { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null };
+    return { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: false };
   }
   return {
     status: status as ClassificationRecallStatus,
     recall: num(raw.recall),
     labelledSetSize: num(raw.labelledSetSize),
     measuredOn: text(raw.measuredOn),
+    measuredBeforeLastEdit: raw.measuredBeforeLastEdit === true,
   };
 }
 

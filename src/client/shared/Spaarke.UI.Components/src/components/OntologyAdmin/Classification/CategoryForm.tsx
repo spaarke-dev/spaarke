@@ -29,6 +29,11 @@ import { groupRuleReads } from './classificationView';
 
 /** The classifier prompt guidance column holds at most this many characters (BFF `MaxGuidanceLength`). */
 export const MAX_GUIDANCE_LENGTH = 2000;
+/** The 409s that refuse a rename without a list of rules: the caller's read cannot show every rule, or the routing configuration names the category. */
+const RENAME_REFUSALS: ReadonlySet<string> = new Set([
+  'ontology.admin.classification.rename_unverifiable',
+  'ontology.admin.classification.rename_routed',
+]);
 /** The longest category name the BFF accepts. */
 export const MAX_NAME_LENGTH = 100;
 
@@ -102,6 +107,7 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
   const nameErrors = error?.fieldErrors.name;
   const guidanceErrors = error?.fieldErrors.guidance;
   const renameBlocked = error?.reasonCode === 'ontology.admin.classification.rename_blocked';
+  const renameRefused = renameBlocked || RENAME_REFUSALS.has(error?.reasonCode ?? '');
 
   return (
     <form className={styles.form} onSubmit={submit} data-testid="classification-form" aria-label={category ? `Edit ${category.name}` : 'New category'}>
@@ -117,9 +123,9 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
       )}
 
       {error && !nameErrors && !guidanceErrors && (
-        <MessageBar intent={renameBlocked || error.httpStatus === 409 ? 'warning' : 'error'} data-testid="classification-form-error">
+        <MessageBar intent={renameRefused || error.httpStatus === 409 ? 'warning' : 'error'} data-testid="classification-form-error">
           <MessageBarBody>
-            <MessageBarTitle>{renameBlocked ? 'Rename refused' : 'Not saved'}</MessageBarTitle>
+            <MessageBarTitle>{renameRefused ? 'Rename refused' : 'Not saved'}</MessageBarTitle>
             {error.message}
             {renameBlocked && error.blockedBy.length > 0 && (
               <ul className={styles.blockers} data-testid="classification-form-blockers">

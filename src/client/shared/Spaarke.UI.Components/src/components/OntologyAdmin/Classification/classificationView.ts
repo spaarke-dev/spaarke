@@ -15,6 +15,8 @@ export interface RecallView {
   tone: StatusBadgeTone;
   /** The figures behind the badge; null when not measured. */
   detail: string | null;
+  /** Set when the category was edited after the measurement, so the figure may be out of date; null otherwise. */
+  staleNote: string | null;
 }
 
 const RECALL_BADGE: Record<ClassificationRecall['status'], { label: string; tone: StatusBadgeTone }> = {
@@ -24,17 +26,20 @@ const RECALL_BADGE: Record<ClassificationRecall['status'], { label: string; tone
   SetTooSmall: { label: 'Set too small', tone: 'warning' },
 };
 
+export const MEASURED_BEFORE_LAST_EDIT = 'Measured before the last edit';
+
 /** "88.9% on 92 items, measured 2026-10-10 (floor 80% on 50 items)", with the badge that judges it. */
 export function describeRecall(recall: ClassificationRecall, floor: { percent: number; minItems: number }): RecallView {
   const badge = RECALL_BADGE[recall.status];
   if (recall.status === 'NotMeasured' || recall.recall === null) {
-    return { ...RECALL_BADGE.NotMeasured, detail: null };
+    return { ...RECALL_BADGE.NotMeasured, detail: null, staleNote: null };
   }
   const size = recall.labelledSetSize === null ? 'an unknown number of items' : `${recall.labelledSetSize} items`;
   const when = recall.measuredOn === null ? '' : `, measured ${recall.measuredOn}`;
   return {
     ...badge,
     detail: `${recall.recall.toFixed(1)}% on ${size}${when} (floor ${floor.percent}% on ${floor.minItems} items)`,
+    staleNote: recall.measuredBeforeLastEdit ? MEASURED_BEFORE_LAST_EDIT : null,
   };
 }
 

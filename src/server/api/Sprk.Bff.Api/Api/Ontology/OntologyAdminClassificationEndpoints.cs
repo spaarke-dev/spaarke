@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ontology;
@@ -39,6 +41,8 @@ public static class OntologyAdminClassificationEndpoints
     internal const string InvalidReasonCode = "ontology.admin.classification.invalid";
     internal const string NameTakenReasonCode = "ontology.admin.classification.name_taken";
     internal const string RenameBlockedReasonCode = "ontology.admin.classification.rename_blocked";
+    internal const string RenameUnverifiableReasonCode = "ontology.admin.classification.rename_unverifiable";
+    internal const string RenameRoutedReasonCode = "ontology.admin.classification.rename_routed";
     internal const string StaleReasonCode = "ontology.admin.classification.stale";
     internal const string UnavailableReasonCode = "ontology.admin.classification.unavailable";
 
@@ -77,8 +81,10 @@ public static class OntologyAdminClassificationEndpoints
             .WithName("UpdateOntologyAdminTriageCategory")
             .WithSummary("Edit a triage category's name and/or guidance")
             .WithDescription("Writes as the caller, conditional on the row version. A rename is refused (409) while any policy version reads "
-                + "the category, naming the rule; if the rules cannot be read the rename is refused (503). 409 also for a taken name or a "
-                + "row that changed since the form loaded it.")
+                + "the category (by id or by name), naming the rule; 409 rename_unverifiable when the caller's read of the policies does not "
+                + "cover every business unit (Global depth, or Deep at the root business unit); 409 rename_routed while the routing "
+                + "configuration is keyed by the name; if the rules cannot be read the rename is refused (503). 409 also for a taken name or "
+                + "a row that changed since the form loaded it.")
             .Produces<ClassificationRow>(200)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -90,7 +96,7 @@ public static class OntologyAdminClassificationEndpoints
             .WithName("SetOntologyAdminTriageCategoryEnabled")
             .WithSummary("Turn a triage category On or Off")
             .WithDescription("Writes as the caller, conditional on the row version. On: the classifier may choose the category on the next "
-                + "enrichment. Off: it is no longer offered.")
+                + "enrichment (409 name_taken when another active category has the same name). Off: it is no longer offered.")
             .Produces<ClassificationRow>(200)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -122,10 +128,11 @@ public static class OntologyAdminClassificationEndpoints
         HttpContext httpContext,
         UpdateClassificationCategoryRequest? request,
         IDataverseUserClient user,
+        IOptionsMonitor<CategoryRoutingOptions> routing,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
-        var result = await OntologyAdminClassificationService.UpdateAsync(user, categoryId, request, LoggerFor(loggerFactory), ct).ConfigureAwait(false);
+        var result = await OntologyAdminClassificationService.UpdateAsync(user, categoryId, request, routing, LoggerFor(loggerFactory), ct).ConfigureAwait(false);
         return ToResult(httpContext, result, row => Results.Ok(row));
     }
 
@@ -178,6 +185,14 @@ public static class OntologyAdminClassificationEndpoints
             case ClassificationOutcome.RenameBlocked:
                 return Problem(httpContext, StatusCodes.Status409Conflict, "Conflict", result.Detail ?? "A rule reads this category.",
                     RenameBlockedReasonCode, new Dictionary<string, object?> { ["blockedBy"] = result.Blockers });
+
+            case ClassificationOutcome.RenameUnverifiable:
+                return Problem(httpContext, StatusCodes.Status409Conflict, "Conflict", result.Detail ?? "The rename cannot be checked from your business unit.",
+                    RenameUnverifiableReasonCode);
+
+            case ClassificationOutcome.RenameRouted:
+                return Problem(httpContext, StatusCodes.Status409Conflict, "Conflict", result.Detail ?? "The routing configuration names this category.",
+                    RenameRoutedReasonCode);
 
             case ClassificationOutcome.Stale:
                 return Problem(httpContext, StatusCodes.Status409Conflict, "Conflict", result.Detail ?? "The category changed.", StaleReasonCode);

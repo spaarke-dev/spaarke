@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ontology;
 using Xunit;
 
@@ -88,6 +89,91 @@ public class OntologyAdminClassificationPureTests
     [InlineData("""{"f":"8b62dd84-1fbc-f111-aaaf"}""")]  // a truncated id is not an id
     public void ABodyThatNamesNoId_FindsNothing(string? body) =>
         OntologyAdminClassificationReferences.GuidsIn(body).Should().BeEmpty();
+
+    // ── K3: a rule body that names a category by its NAME ─────────────────────────────────────────────────────────────
+
+    private static readonly Dictionary<Guid, string> Categories = new()
+    {
+        [Fee] = "Fee / rate change",
+        [Scope] = "Scope / budget change",
+    };
+
+    [Theory]
+    [InlineData("""{"all":[{"filter":{"sprk_triagecategory":"Fee / rate change"}}]}""")]
+    [InlineData("""{"all":[{"filter":{"sprk_triagecategory":["x","FEE / RATE CHANGE"]}}]}""")]   // case-insensitive, inside an array
+    [InlineData("""{"all":[{"filter":{"sprk_triagecategory":{"=":"  Fee / rate change "}}}]}""")] // trimmed, inside an operator object
+    [InlineData("{\"all\":[{\"filter\":{\"sprk_triagecategory\":\"Fee / rate change\"")]  // damaged JSON: scanned as text, fail closed
+    public void ARuleBody_NamingACategoryByItsName_IsAReference(string body) =>
+        OntologyAdminClassificationReferences.CategoriesNamedIn(body, Categories).Should().BeEquivalentTo(new[] { Fee });
+
+    [Theory]
+    [InlineData("""{"Fee / rate change":{"sprk_receiveddate":{">=":"now-30d"}}}""")]   // a property NAME is not a value
+    [InlineData("""{"f":"Fee / rate change and more"}""")]                          // only a whole string value equals the name
+    [InlineData("""{"f":"Fee"}""")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void ARuleBody_ThatDoesNotNameACategoryByName_IsNotAReference(string? body) =>
+        OntologyAdminClassificationReferences.CategoriesNamedIn(body, Categories).Should().BeEmpty();
+
+    [Fact]
+    public void AnIdAndANameInOneBody_AreBothFound_AndEachCategoryOnce()
+    {
+        const string body = """{"a":"8b62dd84-1fbc-f111-aaaf-3833c5e9614d","b":"Scope / budget change","c":"Fee / rate change"}""";
+
+        OntologyAdminClassificationReferences.CategoriesNamedIn(body, Categories).Should().BeEquivalentTo(new[] { Fee, Scope });
+    }
+
+    // ── K3: a recall measured before the category's last edit ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("2026-10-11T08:00:00Z", "2026-10-10", true)]     // edited on a later day
+    [InlineData("2026-10-10T23:59:59Z", "2026-10-10", false)]    // the measurement writes the row too: a same-day edit is not told apart
+    [InlineData("2026-10-09T08:00:00Z", "2026-10-10", false)]    // edited before the measurement
+    [InlineData("2026-10-11T08:00:00+00:00", "2026-10-10T00:00:00Z", true)]
+    [InlineData(null, "2026-10-10", false)]                      // a date that cannot be read is never a claim
+    [InlineData("2026-10-11T08:00:00Z", null, false)]
+    [InlineData("not a date", "2026-10-10", false)]
+    [InlineData("2026-10-11T08:00:00Z", "not a date", false)]
+    public void ARecall_IsMarkedMeasuredBeforeTheLastEdit_OnlyWhenTheRowWasEditedOnALaterDay(string? modifiedOn, string? measuredOn, bool expected)
+    {
+        OntologyAdminClassificationService.EditedAfter(modifiedOn, measuredOn).Should().Be(expected);
+        OntologyAdminClassificationService.BuildRecall(88.89m, 92, measuredOn, modifiedOn).MeasuredBeforeLastEdit.Should().Be(expected && measuredOn is not null);
+    }
+
+    [Fact]
+    public void ACategoryNeverMeasured_IsNeverMarkedStale_HoweverRecentlyItWasEdited() =>
+        OntologyAdminClassificationService.BuildRecall(null, null, null, "2026-10-12T00:00:00Z").MeasuredBeforeLastEdit.Should().BeFalse();
+
+    // ── K2: the routing configuration is keyed by category NAME ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void RoutingEntryNaming_FindsTheGlobalEntry_IgnoringCaseAndSpaces_WhateverTheSwitchSays()
+    {
+        var options = new CategoryRoutingOptions { Enabled = false };
+        options.CategoryToTeam["  fee / RATE change "] = "Billing team";
+
+        OntologyAdminClassificationService.RoutingEntryNaming(options, "Fee / rate change")
+            .Should().Be("Communication:CategoryRouting:CategoryToTeam");
+        OntologyAdminClassificationService.RoutingEntryNaming(options, "Scope / budget change").Should().BeNull();
+    }
+
+    [Fact]
+    public void RoutingEntryNaming_FindsAPerTenantEntry_AndNamesTheTenant()
+    {
+        var options = new CategoryRoutingOptions();
+        options.Tenants["tenant-a"] = new CategoryRoutingTenantOverride { Enabled = null, CategoryToTeam = null };
+        options.Tenants["tenant-b"] = new CategoryRoutingTenantOverride
+        {
+            CategoryToTeam = new Dictionary<string, string> { ["Fee / rate change"] = "Team B" },
+        };
+
+        OntologyAdminClassificationService.RoutingEntryNaming(options, "Fee / rate change")
+            .Should().Be("Communication:CategoryRouting:Tenants:tenant-b:CategoryToTeam");
+    }
+
+    [Fact]
+    public void RoutingEntryNaming_IsNullForAnEmptyConfiguration() =>
+        OntologyAdminClassificationService.RoutingEntryNaming(new CategoryRoutingOptions(), "Fee / rate change").Should().BeNull();
 
     // ── Validation ────────────────────────────────────────────────────────────────────────────────────────────────
 

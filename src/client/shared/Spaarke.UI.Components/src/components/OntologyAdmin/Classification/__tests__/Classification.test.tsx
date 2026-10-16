@@ -39,7 +39,7 @@ const fee = (over: Partial<ClassificationCategory> = {}): ClassificationCategory
   enabled: true,
   version: 27482664,
   volume30Days: 1,
-  recall: { status: 'MeetsFloor', recall: 88.89, labelledSetSize: 92, measuredOn: '2026-10-10' },
+  recall: { status: 'MeetsFloor', recall: 88.89, labelledSetSize: 92, measuredOn: '2026-10-10', measuredBeforeLastEdit: false },
   readBy: [
     {
       policyId: 'p1',
@@ -70,7 +70,7 @@ const invoice = (over: Partial<ClassificationCategory> = {}): ClassificationCate
   enabled: false,
   version: 26666194,
   volume30Days: 0,
-  recall: { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null },
+  recall: { status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: false },
   readBy: [],
   ...over,
 });
@@ -115,6 +115,21 @@ describe('ClassificationArea list', () => {
     expect(recall).toHaveTextContent('Meets floor');
     expect(recall).toHaveTextContent('88.9% on 92 items, measured 2026-10-10 (floor 80% on 50 items)');
     expect(screen.getByText(/Recall floor: 80% on at least 50 labelled items/)).toBeInTheDocument();
+  });
+
+  it('shows "Measured before the last edit" on the recall of a category edited after its measurement, and not on the others', async () => {
+    renderArea(
+      fakeService({
+        ...list(),
+        categories: [
+          fee({ recall: { status: 'MeetsFloor', recall: 88.89, labelledSetSize: 92, measuredOn: '2026-10-10', measuredBeforeLastEdit: true } }),
+          invoice(),
+        ],
+      })
+    );
+
+    expect(await screen.findByTestId(`classification-recall-stale-${FEE}`)).toHaveTextContent('Measured before the last edit');
+    expect(screen.queryByTestId(`classification-recall-stale-${INVOICE}`)).not.toBeInTheDocument();
   });
 
   it('shows Not measured, with no figure, for a category never measured, and No rule / No guidance when there are none', async () => {
@@ -252,6 +267,26 @@ describe('ClassificationArea edit', () => {
     expect(service.list).toHaveBeenCalledTimes(1); // nothing was saved, so nothing reloaded
   });
 
+  it.each([
+    ['ontology.admin.classification.rename_unverifiable', 'Whether a rule reads this category cannot be checked from your business unit, so it cannot be renamed here.'],
+    ['ontology.admin.classification.rename_routed', 'This category cannot be renamed while the routing configuration names it (Communication:CategoryRouting:CategoryToTeam).'],
+  ])('shows the server refusal %s as a refused rename and keeps what was typed', async (reasonCode, message) => {
+    const service = fakeService();
+    service.update.mockRejectedValueOnce(new ClassificationRequestError(message, 409, reasonCode));
+    renderArea(service);
+    await userEvent.click(await screen.findByTestId(`classification-edit-${INVOICE}`));
+    const name = screen.getByTestId('classification-form-name');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Billing');
+    await userEvent.click(screen.getByTestId('classification-form-save'));
+
+    const error = await screen.findByTestId('classification-form-error');
+    expect(error).toHaveTextContent('Rename refused');
+    expect(error).toHaveTextContent(message);
+    expect(screen.getByTestId('classification-form-name')).toHaveValue('Billing');
+    expect(screen.queryByTestId('classification-form-blockers')).not.toBeInTheDocument();
+  });
+
   it('shows the field message for a bad value', async () => {
     const service = fakeService();
     service.update.mockRejectedValueOnce(
@@ -290,12 +325,90 @@ describe('ClassificationArea On/Off', () => {
     expect(service.list).toHaveBeenCalledTimes(2);
   });
 
-  it('warns when a category a rule reads is turned Off', async () => {
-    renderArea(fakeService());
+  it('asks for confirmation BEFORE turning Off a category a rule reads, and writes nothing until the administrator confirms', async () => {
+    const service = fakeService();
+    renderArea(service);
 
     await userEvent.click(await screen.findByRole('switch', { name: 'Fee / rate change is On' }));
 
-    expect(await screen.findByTestId('classification-notice')).toHaveTextContent('POL-COMMIT-BUDGET read it, so they cannot match until it is On again');
+    const confirm = await screen.findByTestId('classification-confirm-off');
+    expect(confirm).toHaveTextContent('Turn Fee / rate change Off?');
+    // new emails stop being classified as X; the rule still matches emails ALREADY classified as X (it does not "stop matching")
+    expect(confirm).toHaveTextContent('New emails will no longer be classified as Fee / rate change.');
+    expect(confirm).toHaveTextContent('POL-COMMIT-BUDGET still matches emails already classified as Fee / rate change.');
+    expect(confirm).not.toHaveTextContent('cannot match');
+    expect(service.setEnabled).not.toHaveBeenCalled();
+    expect(screen.getByRole('switch', { name: 'Fee / rate change is On' })).toBeChecked();
+  });
+
+  it('turns the category Off once confirmed, with its version, and says what Off does and does not do', async () => {
+    const service = fakeService();
+    renderArea(service);
+    await userEvent.click(await screen.findByRole('switch', { name: 'Fee / rate change is On' }));
+
+    await userEvent.click(await screen.findByTestId('classification-confirm-off-yes'));
+
+    await waitFor(() => expect(service.setEnabled).toHaveBeenCalledWith(FEE, false, 27482664));
+    const notice = await screen.findByTestId('classification-notice');
+    expect(notice).toHaveTextContent('Fee / rate change is Off. New emails will no longer be classified as Fee / rate change.');
+    expect(notice).toHaveTextContent('POL-COMMIT-BUDGET still matches emails already classified as Fee / rate change.');
+    expect(notice).not.toHaveTextContent('cannot match');
+    expect(screen.queryByTestId('classification-confirm-off')).not.toBeInTheDocument();
+  });
+
+  it('leaves the category On, and writes nothing, when the administrator keeps it', async () => {
+    const service = fakeService();
+    renderArea(service);
+    await userEvent.click(await screen.findByRole('switch', { name: 'Fee / rate change is On' }));
+
+    await userEvent.click(await screen.findByTestId('classification-confirm-off-no'));
+
+    expect(screen.queryByTestId('classification-confirm-off')).not.toBeInTheDocument();
+    expect(service.setEnabled).not.toHaveBeenCalled();
+    expect(screen.getByRole('switch', { name: 'Fee / rate change is On' })).toBeChecked();
+  });
+
+  it('turns Off at once, with no confirmation, a category no rule reads', async () => {
+    const service = fakeService({
+      ...list(),
+      categories: [fee({ readBy: [] }), invoice()],
+    });
+    renderArea(service);
+
+    await userEvent.click(await screen.findByRole('switch', { name: 'Fee / rate change is On' }));
+
+    await waitFor(() => expect(service.setEnabled).toHaveBeenCalledWith(FEE, false, 27482664));
+    expect(screen.queryByTestId('classification-confirm-off')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('classification-notice')).toHaveTextContent('Fee / rate change is Off.');
+  });
+
+  it('turns On at once, with no confirmation, even for a category a rule reads', async () => {
+    const service = fakeService({
+      ...list(),
+      categories: [fee({ enabled: false }), invoice()],
+    });
+    renderArea(service);
+
+    await userEvent.click(await screen.findByRole('switch', { name: 'Fee / rate change is Off' }));
+
+    await waitFor(() => expect(service.setEnabled).toHaveBeenCalledWith(FEE, true, 27482664));
+    expect(screen.queryByTestId('classification-confirm-off')).not.toBeInTheDocument();
+  });
+
+  it('disables the switch of a row while its edit form is open, so a reload cannot remount the form and lose what was typed', async () => {
+    const service = fakeService();
+    renderArea(service);
+    await userEvent.click(await screen.findByTestId(`classification-edit-${INVOICE}`));
+    await userEvent.type(screen.getByTestId('classification-form-guidance'), 'Half-typed guidance');
+
+    expect(screen.getByRole('switch', { name: 'Invoice / Billing is Off' })).toBeDisabled();
+    // another row's switch is untouched
+    expect(screen.getByRole('switch', { name: 'Fee / rate change is On' })).toBeEnabled();
+    expect(service.list).toHaveBeenCalledTimes(1); // nothing reloaded behind the open form
+    expect(screen.getByTestId('classification-form-guidance')).toHaveValue('Half-typed guidance');
+
+    await userEvent.click(screen.getByTestId('classification-form-cancel'));
+    expect(screen.getByRole('switch', { name: 'Invoice / Billing is Off' })).toBeEnabled();
   });
 
   it('shows the server message when Dataverse refuses the change (a Console User)', async () => {
@@ -314,22 +427,35 @@ describe('ClassificationArea On/Off', () => {
 describe('classificationView', () => {
   it('judges recall against the floor and never shows a figure for an unmeasured category', () => {
     const floor = { percent: 80, minItems: 50 };
-    expect(describeRecall({ status: 'BelowFloor', recall: 70, labelledSetSize: 92, measuredOn: '2026-10-10' }, floor)).toMatchObject({
+    expect(describeRecall({ status: 'BelowFloor', recall: 70, labelledSetSize: 92, measuredOn: '2026-10-10', measuredBeforeLastEdit: false }, floor)).toMatchObject({
       label: 'Below floor',
       tone: 'critical',
     });
-    expect(describeRecall({ status: 'SetTooSmall', recall: 95, labelledSetSize: 30, measuredOn: null }, floor)).toMatchObject({
+    expect(describeRecall({ status: 'SetTooSmall', recall: 95, labelledSetSize: 30, measuredOn: null, measuredBeforeLastEdit: false }, floor)).toMatchObject({
       label: 'Set too small',
       tone: 'warning',
       detail: '95.0% on 30 items (floor 80% on 50 items)',
     });
-    expect(describeRecall({ status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null }, floor)).toEqual({
+    expect(describeRecall({ status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: false }, floor)).toEqual({
       label: 'Not measured',
       tone: 'neutral',
       detail: null,
+      staleNote: null,
     });
     // a status that claims a measurement but carries no figure is not shown as one
-    expect(describeRecall({ status: 'MeetsFloor', recall: null, labelledSetSize: 92, measuredOn: null }, floor).label).toBe('Not measured');
+    expect(describeRecall({ status: 'MeetsFloor', recall: null, labelledSetSize: 92, measuredOn: null, measuredBeforeLastEdit: false }, floor).label).toBe('Not measured');
+  });
+
+  it('marks a recall measured before the category was last edited, and only then', () => {
+    const floor = { percent: 80, minItems: 50 };
+    const measured = { status: 'MeetsFloor' as const, recall: 88.89, labelledSetSize: 92, measuredOn: '2026-10-10' };
+
+    expect(describeRecall({ ...measured, measuredBeforeLastEdit: true }, floor).staleNote).toBe('Measured before the last edit');
+    expect(describeRecall({ ...measured, measuredBeforeLastEdit: false }, floor).staleNote).toBeNull();
+    // a category never measured has no figure to be stale, whatever the flag says
+    expect(
+      describeRecall({ status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: true }, floor).staleNote
+    ).toBeNull();
   });
 
   it('groups version references by rule, newest version first', () => {
@@ -414,6 +540,24 @@ describe('createClassificationService', () => {
     }
   });
 
+  it('reads the measuredBeforeLastEdit flag of a recall, and treats anything but true as false', () => {
+    const body = (flag: unknown) => ({
+      categories: [
+        {
+          id: FEE,
+          name: 'Fee / rate change',
+          version: 1,
+          recall: { status: 'MeetsFloor', recall: 90, labelledSetSize: 60, measuredOn: '2026-10-10', measuredBeforeLastEdit: flag },
+        },
+      ],
+    });
+
+    expect(parseClassificationList(body(true)).categories[0].recall.measuredBeforeLastEdit).toBe(true);
+    expect(parseClassificationList(body(false)).categories[0].recall.measuredBeforeLastEdit).toBe(false);
+    expect(parseClassificationList(body('yes')).categories[0].recall.measuredBeforeLastEdit).toBe(false);
+    expect(parseClassificationList(body(undefined)).categories[0].recall.measuredBeforeLastEdit).toBe(false);
+  });
+
   it('carries the field errors of a 400', async () => {
     const service = createClassificationService({
       fetch: jest.fn(async () => refused(400, { errors: { name: ['Name is required.'] }, reasonCode: 'ontology.admin.classification.invalid' })),
@@ -438,7 +582,7 @@ describe('createClassificationService', () => {
       categories: [{ id: FEE, name: 'Fee', version: 1, recall: { status: 'Surprising', recall: 99 }, readBy: [{ junk: true }] }],
     });
 
-    expect(parsed.categories[0].recall).toEqual({ status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null });
+    expect(parsed.categories[0].recall).toEqual({ status: 'NotMeasured', recall: null, labelledSetSize: null, measuredOn: null, measuredBeforeLastEdit: false });
     expect(parsed.categories[0].readBy).toEqual([]);
   });
 

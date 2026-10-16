@@ -98,12 +98,13 @@ text, so damaged JSON still blocks.
    administrator role reads them at Deep depth, so a policy owned outside the caller's business-unit tree is not
    visible and neither is a communication in volume. This is the same boundary every as-the-caller admin read has.
    The list says when the references or the volume could not be read at all (`referencesAvailable` /
-   `volumeAvailable`), but it cannot say a row was hidden by depth.
+   `volumeAvailable`), but it cannot say a row was hidden by depth. **For a rename this is no longer a silent gap:**
+   section 9.1 refuses the rename unless the caller's read provably covers every business unit. The list and the
+   volume still show only what the caller can read.
 2. **TOCTOU.** A rule authored between the rename check and the PATCH can name the old category. The window is one
    round trip and the rule would hold the GUID, which survives a rename (evaluation does not break; only the
    constrained-decoding enum name changes, NFR-09).
-3. **Routing configuration keyed by category name is not scanned.** `CategoryRoutingOptions` (appsettings, keyed by
-   name) is not a policy, so a rename is not blocked by it. Filed as out of scope below.
+3. ~~**Routing configuration keyed by category name is not scanned.**~~ Closed in fix round 1 (section 9.4).
 
 ## 7. Evidence
 
@@ -111,6 +112,94 @@ See the PR body for the criteria-to-evidence table, the test counts, the seeding
 
 ## 8. Out of scope, noticed
 
-- `CategoryRoutingOptions` keyed by category name: a rename silently orphans an entry (limit 3 above).
+- `CategoryRoutingOptions` keyed by category name: closed in fix round 1 (section 9.4).
 - Base branch lacks `58e810405`, so `InboundBodyDtoMappingGuardTests` fails on `OntologyAdminCapabilities.CanAuthorPolicies`
   on this base. Not touched here; it is fixed on the docs branch.
+
+## 9. Fix round 1 (PR #2038 review; head before the round `2f5c0ce96`)
+
+### 9.1 F2: the rename check no longer fails open for a caller who cannot see every policy version
+
+The reference read runs as the caller. Live, the Spaarke Ontology Administrator role holds Read on `sprk_policy` and
+`sprk_policyversion` at **Deep**, so an administrator in a child business unit does not see versions owned higher up, and the
+old check let a rename through unchecked. No role change: `CheckRenameAsync` now verifies coverage first
+(`OntologyAdminClassificationService.CheckReadCoverageAsync`), all AS THE CALLER:
+
+1. `WhoAmI()` gives the caller's user id and business unit.
+2. `systemusers({id})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName` for `prvReadsprk_Policy` and for
+   `prvReadsprk_PolicyVersion`. The depth is the highest across the rows returned (one row per role; no row means the
+   privilege is not held). The shape was read live on spaarkedev1: `"Depth":"Global"` (a string), and the root business
+   unit has `_parentbusinessunitid_value: null`.
+3. Complete coverage is **Global on both**, or **Deep on both and the caller's business unit has no parent** (Deep at the root
+   reaches every business unit). Only Deep needs the business-unit read.
+
+Incomplete coverage is **409 `ontology.admin.classification.rename_unverifiable`** ("cannot be checked from your business
+unit"), and the reference read is not even made. A fault in any of the three reads, or an answer that is not the expected
+shape, is **503**; a caller Dataverse cannot name is the single 403. Guidance edits and On/Off never run this check. The code
+is its own (it does not use the capability probe's members; 104 guard rule A bans them in Ontology files).
+
+The cost is two or three small reads per rename; a rename is rare.
+
+### 9.2 F1: the Off warning
+
+Turning a category Off stops **new** emails being classified as it. A rule that reads it still matches emails **already**
+classified as it, so the old wording ("they cannot match until it is On again") was wrong. When a rule reads the category the
+area now asks for confirmation BEFORE writing ("Turn X Off? New emails will no longer be classified as X. POL-... still
+matches emails already classified as X."), and the notice after the write says the same. A category no rule reads turns Off at
+once. The rules are named by policy code, as in the list.
+
+### 9.3 F3
+
+Removed the sentence in `OntologyAdminClassificationEndpointTests.cs` that cited `OntologyAdminClassificationLiveTests.cs`,
+which does not exist. The live test was not added.
+
+### 9.4 K2: routing configuration keyed by category name
+
+`UpdateAsync` takes `IOptionsMonitor<CategoryRoutingOptions>` (in process, no app identity) and refuses a rename with
+**409 `ontology.admin.classification.rename_routed`**, naming the entry (`Communication:CategoryRouting:CategoryToTeam`, or
+`...:Tenants:{tenant}:CategoryToTeam`). It checks the global map and every per-tenant map, matching keys trimmed and
+case-insensitively (a superset of what `CategoryRoutingGate` matches), and **whatever the `Enabled` switch says**: a dormant
+entry would break the day routing is switched on. It runs before any Dataverse read.
+
+### 9.5 K2: duplicate names
+
+- Turning a category **On** re-runs the name-in-use check among ACTIVE rows (excluding itself): a conflict is 409
+  `name_taken`. Turning Off never checks.
+- `LookupChoicesResolver.ResolveLookupAsync` removes duplicate names (`Distinct(OrdinalIgnoreCase)`, first spelling kept, order
+  kept) from the choice list, so a duplicate never reaches the constrained-decoding enum. The resolver is shared by every
+  `lookup:` reference; its tests and the enrichment and scope-resolver tests were run (section 10).
+- **Awaiting the owner:** the full fix is an alternate key on `sprk_triagecategory.sprk_name`. That is a Dataverse schema
+  change, not made here. Until then two creates racing, or a row made outside this area, can still produce two rows with one
+  name; this round only stops the second one being turned On and keeps the enum clean.
+
+### 9.6 K3: rule bodies that name a category by name
+
+`OntologyAdminClassificationReferences.CategoriesNamedIn` counts a JSON string **value** equal to the category's current name
+(trimmed, case-insensitive) as a reference, alongside the id scan. A property name is not a value. A body that is not valid
+JSON is scanned as text for the name (substring, case-insensitive), which over-reads in the safe direction. The list's "Read
+by" uses the same scan, so it shows these rules too.
+
+### 9.7 K3: stale recall
+
+`modifiedon` is now read. `ClassificationRecall.MeasuredBeforeLastEdit` is true when the row was modified (UTC) on a **later
+day** than `sprk_recallmeasuredon`; the area shows "Measured before the last edit" under the figure. **Limit:** day
+granularity on purpose. Task 074 writes the recall columns onto the same row, which moves `modifiedon` on the measuring day,
+so an edit made later the same day cannot be told from the measurement. A toggle also moves `modifiedon`, so a category turned
+On/Off after its measurement is marked too (the brief says "last edit").
+
+### 9.8 K4: typed text lost on toggle
+
+Chosen: **the switch of a row is disabled while that row's edit form is open** (not "keep the typed text"). Keeping the text
+while the form's `version` moves on would let a save overwrite another administrator's concurrent change without the stale
+check noticing. The form key still includes the version, which now only changes after a save (the form closes) or a reload
+with the form closed.
+
+### 9.9 Ledger
+
+The PATCH and PUT HandlerDecisions in `RouteAuthorizationGuardTests.Ledger.cs` now describe the coverage check, the routing
+check, the by-name scan and the On-time name check, with refreshed line references; the List and Create ones have refreshed
+line references only. No route was added; `ExpectedEndpointFileCount` is unchanged (127).
+
+## 10. Fix round 1 evidence
+
+See the PR body (test counts, the seeding result, lint).

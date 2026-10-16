@@ -18,6 +18,7 @@ import * as React from 'react';
 import {
   Button,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   Spinner,
   Switch,
@@ -50,6 +51,14 @@ type LoadState =
 
 type FormState = { mode: 'create' } | { mode: 'edit'; id: string } | null;
 
+/** What turning a category Off does, in the words the administrator needs: it stops NEW classification only (K1). */
+function offEffect(name: string, ruleCodes: ReadonlyArray<string>): string {
+  const base = `New emails will no longer be classified as ${name}.`;
+  return ruleCodes.length === 0
+    ? base
+    : `${base} ${ruleCodes.join(', ')} still ${ruleCodes.length === 1 ? 'matches' : 'match'} emails already classified as ${name}.`;
+}
+
 interface Notice {
   intent: 'success' | 'warning' | 'error';
   text: string;
@@ -81,6 +90,8 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
   const [form, setForm] = React.useState<FormState>(null);
   const [notice, setNotice] = React.useState<Notice | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  /** The category the administrator asked to turn Off while a rule reads it: nothing is written until they confirm. */
+  const [confirmOffId, setConfirmOffId] = React.useState<string | null>(null);
   const requests = React.useRef(0);
   const alive = React.useRef(true);
 
@@ -116,10 +127,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
         const readers = groupRuleReads(category.readBy);
         setNotice(
           !enabled && readers.length > 0
-            ? {
-                intent: 'warning',
-                text: `${category.name} is Off. ${readers.map(r => r.policyCode).join(', ')} read it, so they cannot match until it is On again.`,
-              }
+            ? { intent: 'warning', text: `${category.name} is Off. ${offEffect(category.name, readers.map(r => r.policyCode))}` }
             : { intent: 'success', text: `${category.name} is ${enabled ? 'On' : 'Off'}.` }
         );
       } catch (err) {
@@ -130,6 +138,20 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
       await load();
     },
     [service, load]
+  );
+
+  /** On writes at once. Off asks first when a rule reads the category, because the rule keeps matching what was classified before. */
+  const requestToggle = React.useCallback(
+    (category: ClassificationCategory, enabled: boolean) => {
+      if (!enabled && groupRuleReads(category.readBy).length > 0) {
+        setNotice(null);
+        setConfirmOffId(category.id);
+        return;
+      }
+      setConfirmOffId(null);
+      void toggle(category, enabled);
+    },
+    [toggle]
   );
 
   const submit = React.useCallback(
@@ -175,6 +197,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
 
   const { data } = state;
   const editing = form?.mode === 'edit' ? data.categories.find(c => c.id === form.id) : undefined;
+  const confirmOff = confirmOffId === null ? undefined : data.categories.find(c => c.id === confirmOffId && c.enabled);
 
   return (
     <div className={styles.root} data-testid="classification-area">
@@ -205,6 +228,33 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
       {notice && (
         <MessageBar intent={notice.intent} data-testid="classification-notice">
           <MessageBarBody>{notice.text}</MessageBarBody>
+        </MessageBar>
+      )}
+      {confirmOff && (
+        <MessageBar intent="warning" data-testid="classification-confirm-off">
+          <MessageBarBody>
+            Turn {confirmOff.name} Off?{' '}
+            {offEffect(
+              confirmOff.name,
+              groupRuleReads(confirmOff.readBy).map(r => r.policyCode)
+            )}
+          </MessageBarBody>
+          <MessageBarActions>
+            <Button
+              size="small"
+              appearance="primary"
+              onClick={() => {
+                setConfirmOffId(null);
+                void toggle(confirmOff, false);
+              }}
+              data-testid="classification-confirm-off-yes"
+            >
+              Turn Off
+            </Button>
+            <Button size="small" onClick={() => setConfirmOffId(null)} data-testid="classification-confirm-off-no">
+              Keep On
+            </Button>
+          </MessageBarActions>
         </MessageBar>
       )}
       {!data.referencesAvailable && (
@@ -257,7 +307,8 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
                 category={category}
                 floor={data.recallFloor}
                 busy={busyId === category.id}
-                onToggle={enabled => void toggle(category, enabled)}
+                formOpen={editing?.id === category.id}
+                onToggle={enabled => requestToggle(category, enabled)}
                 onEdit={() => {
                   setNotice(null);
                   setForm({ mode: 'edit', id: category.id });
@@ -277,11 +328,13 @@ interface CategoryRowProps {
   category: ClassificationCategory;
   floor: ClassificationList['recallFloor'];
   busy: boolean;
+  /** This row's edit form is open: the switch is disabled so a reload cannot remount the form and lose what was typed (K4). */
+  formOpen: boolean;
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;
 }
 
-const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, onToggle, onEdit }) => {
+const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOpen, onToggle, onEdit }) => {
   const styles = useStyles();
   const recall = describeRecall(category.recall, floor);
   const readers = groupRuleReads(category.readBy);
@@ -296,7 +349,7 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, onTogg
       <TableCell>
         <Switch
           checked={category.enabled}
-          disabled={busy}
+          disabled={busy || formOpen}
           label={category.enabled ? 'On' : 'Off'}
           aria-label={`${category.name} is ${category.enabled ? 'On' : 'Off'}`}
           onChange={(_e, data) => onToggle(data.checked)}
@@ -337,6 +390,11 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, onTogg
             <StatusBadge label={recall.label} tone={recall.tone} />
           </div>
           {recall.detail !== null && <Text className={styles.muted}>{recall.detail}</Text>}
+          {recall.staleNote !== null && (
+            <Text className={styles.muted} data-testid={`classification-recall-stale-${category.id}`}>
+              {recall.staleNote}
+            </Text>
+          )}
         </div>
       </TableCell>
       <TableCell>

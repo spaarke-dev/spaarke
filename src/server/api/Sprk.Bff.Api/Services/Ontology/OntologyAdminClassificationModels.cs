@@ -30,7 +30,10 @@ public static class ClassificationRecallStatus
 /// <param name="Recall">Percent, 0 to 100 (<c>sprk_measuredrecall</c>); null when not measured.</param>
 /// <param name="LabelledSetSize">Items in the labelled set (<c>sprk_labelledsetsize</c>); null when unknown.</param>
 /// <param name="MeasuredOn">The date the measurement was taken, <c>yyyy-MM-dd</c> (<c>sprk_recallmeasuredon</c>); null when unknown.</param>
-public sealed record ClassificationRecall(string Status, decimal? Recall, int? LabelledSetSize, string? MeasuredOn);
+/// <param name="MeasuredBeforeLastEdit">True when the category row was modified on a later day than <paramref name="MeasuredOn"/>: the figure may describe the category as it was
+/// before its last edit (K3, task 103 fix round). False when not measured, when either date is unknown, or when the edit and the measurement share a day (a measurement
+/// writes the row too, so a same-day edit cannot be told apart from it).</param>
+public sealed record ClassificationRecall(string Status, decimal? Recall, int? LabelledSetSize, string? MeasuredOn, bool MeasuredBeforeLastEdit = false);
 
 /// <summary>Where a policy version stands: the policy's current version, a version not yet published, or a superseded one.</summary>
 public static class ClassificationVersionState
@@ -131,6 +134,15 @@ internal enum ClassificationOutcome
 
     /// <summary>The rename was refused because a policy version reads the category; see the blockers.</summary>
     RenameBlocked,
+
+    /// <summary>
+    /// The rename was refused because the caller's read of the policies does not cover every business unit (their depth is below Global, or
+    /// Deep outside the root business unit), so "no rule reads this category" cannot be established from what they can see.
+    /// </summary>
+    RenameUnverifiable,
+
+    /// <summary>The rename was refused because the routing configuration (<c>Communication:CategoryRouting</c>) is keyed by the category's name; see the detail.</summary>
+    RenameRouted,
 
     /// <summary>The row changed since the form loaded it (or since the BFF read it): nothing was written.</summary>
     Stale,

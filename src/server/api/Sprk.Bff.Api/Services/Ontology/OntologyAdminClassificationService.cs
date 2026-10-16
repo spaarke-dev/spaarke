@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ontology;
@@ -21,8 +23,12 @@ namespace Sprk.Bff.Api.Services.Ontology;
 /// <item><b>A rename is refused while any policy version reads the category.</b> A rule body names a category by id, so a rename does not
 /// break an evaluation; it does change the name the classifier is held to (the constrained-decoding enum, NFR-09) and the words the rule
 /// is read back in. The check scans EVERY policy version's body (current, draft and superseded) of EVERY policy the caller can read, with
-/// no domain filter: a billing-domain policy that reads a category blocks the rename like any other (the owner's rule, 2026-10-16). When
-/// the versions cannot be read the rename is refused too (503): an unchecked rename is never allowed.</item>
+/// no domain filter: a billing-domain policy that reads a category blocks the rename like any other (the owner's rule, 2026-10-16). A rule
+/// reads a category by its id or by a string value equal to its name. When the versions cannot be read the rename is refused too (503):
+/// an unchecked rename is never allowed. The check is also refused (409 <c>rename_unverifiable</c>) unless the caller's read of the
+/// policies and their versions covers every business unit (Global depth, or Deep at the root business unit): a caller who cannot see a
+/// version cannot be told no rule reads the category. A rename is also refused (409 <c>rename_routed</c>) while the routing
+/// configuration (<c>Communication:CategoryRouting</c>, keyed by category name) names the category.</item>
 /// <item><b>An edit is checked against the row it was made from.</b> The write is conditional on the row's <c>versionnumber</c> (the
 /// version the BFF just read, and the version the form loaded when it sent one), so a concurrent edit is a 409 and nothing is written.</item>
 /// </list>
@@ -55,7 +61,7 @@ internal static class OntologyAdminClassificationService
 
     private const int MaxPages = 20;
     private const string RowColumns =
-        "sprk_triagecategoryid,sprk_name,sprk_classifierguidance,sprk_enabled,versionnumber,statecode,"
+        "sprk_triagecategoryid,sprk_name,sprk_classifierguidance,sprk_enabled,versionnumber,statecode,modifiedon,"
         + "sprk_measuredrecall,sprk_labelledsetsize,sprk_recallmeasuredon";
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -75,7 +81,7 @@ internal static class OntologyAdminClassificationService
 
         var rows = categories.Rows.Select(ParseRow).Where(r => r is not null).Select(r => r!).ToList();
 
-        var references = await LoadReferencesAsync(user, rows.Select(r => r.Id).ToHashSet(), logger, ct).ConfigureAwait(false);
+        var references = await LoadReferencesAsync(user, NamesById(rows), logger, ct).ConfigureAwait(false);
         var volume = await LoadVolumeAsync(user, logger, ct).ConfigureAwait(false);
 
         var list = rows
@@ -86,7 +92,7 @@ internal static class OntologyAdminClassificationService
                 r.Enabled,
                 r.Version,
                 volume is null ? null : volume.GetValueOrDefault(r.Id),
-                BuildRecall(r.Recall, r.SetSize, r.MeasuredOn),
+                BuildRecall(r.Recall, r.SetSize, r.MeasuredOn, r.ModifiedOn),
                 references is not null && references.TryGetValue(r.Id, out var readBy) ? readBy : []))
             .ToList();
 
@@ -100,7 +106,7 @@ internal static class OntologyAdminClassificationService
     /// never shown as zero. Recall below the floor percent is <c>BelowFloor</c>; at or above it, the figure counts only when the labelled
     /// set is at least the floor size (otherwise <c>SetTooSmall</c>).
     /// </summary>
-    internal static ClassificationRecall BuildRecall(decimal? recall, int? labelledSetSize, string? measuredOn)
+    internal static ClassificationRecall BuildRecall(decimal? recall, int? labelledSetSize, string? measuredOn, string? modifiedOn = null)
     {
         if (recall is null)
         {
@@ -110,7 +116,36 @@ internal static class OntologyAdminClassificationService
         var status = recall.Value < RecallFloor.Percent
             ? ClassificationRecallStatus.BelowFloor
             : (labelledSetSize ?? 0) >= RecallFloor.MinItems ? ClassificationRecallStatus.MeetsFloor : ClassificationRecallStatus.SetTooSmall;
-        return new ClassificationRecall(status, recall, labelledSetSize, measuredOn);
+        return new ClassificationRecall(status, recall, labelledSetSize, measuredOn, EditedAfter(modifiedOn, measuredOn));
+    }
+
+    /// <summary>
+    /// True when the row was modified (UTC) on a later DAY than the recall was measured. Day granularity on purpose: the measurement
+    /// writes the recall columns onto the same row, which moves <c>modifiedon</c> on the measuring day, so a same-day edit cannot be told
+    /// from the measurement itself. False when either date cannot be read.
+    /// </summary>
+    internal static bool EditedAfter(string? modifiedOn, string? measuredOn)
+    {
+        if (string.IsNullOrWhiteSpace(modifiedOn)
+            || string.IsNullOrWhiteSpace(measuredOn)
+            || !DateOnly.TryParseExact(measuredOn.Length >= 10 ? measuredOn[..10] : measuredOn, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var measured)
+            || !DateTimeOffset.TryParse(modifiedOn, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var modified))
+        {
+            return false;
+        }
+
+        return DateOnly.FromDateTime(modified.UtcDateTime) > measured;
+    }
+
+    private static Dictionary<Guid, string> NamesById(IEnumerable<CategoryRow> rows)
+    {
+        var names = new Dictionary<Guid, string>();
+        foreach (var row in rows)
+        {
+            names[row.Id] = row.Name;
+        }
+
+        return names;
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -177,7 +212,12 @@ internal static class OntologyAdminClassificationService
 
     /// <summary>Edits a category's name and/or guidance. A rename is refused while a policy version reads the category.</summary>
     internal static async Task<ClassificationOperationResult<ClassificationRow>> UpdateAsync(
-        IDataverseUserClient user, Guid id, UpdateClassificationCategoryRequest? request, ILogger logger, CancellationToken ct)
+        IDataverseUserClient user,
+        Guid id,
+        UpdateClassificationCategoryRequest? request,
+        IOptionsMonitor<CategoryRoutingOptions> routing,
+        ILogger logger,
+        CancellationToken ct)
     {
         var loaded = await LoadRowAsync(user, id, logger, ct).ConfigureAwait(false);
         if (loaded.Failure is not null)
@@ -207,7 +247,7 @@ internal static class OntologyAdminClassificationService
 
         if (renamed)
         {
-            var blocked = await CheckRenameAsync(user, current, name!, logger, ct).ConfigureAwait(false);
+            var blocked = await CheckRenameAsync(user, current, name!, routing, logger, ct).ConfigureAwait(false);
             if (blocked is not null)
             {
                 return blocked;
@@ -259,6 +299,24 @@ internal static class OntologyAdminClassificationService
             return new ClassificationOperationResult<ClassificationRow>(ClassificationOutcome.Ok, ToWriteRow(current));
         }
 
+        if (enabled)
+        {
+            // Turning a category On offers its name to the classifier. Two active rows with one name (made outside this area, or by two
+            // creates racing) would put a duplicate in the constrained-decoding enum, so the name-in-use check runs again here (K2).
+            var names = await ReadAllAsync(user, $"{CategorySet}?$select=sprk_triagecategoryid,sprk_name&$filter=statecode eq 0", logger, ct)
+                .ConfigureAwait(false);
+            if (names.Failure is not null)
+            {
+                return Fail<ClassificationRow>(names.Failure, write: true);
+            }
+
+            if (NameInUse(names.Rows, current.Name.Trim(), except: current.Id))
+            {
+                return new ClassificationOperationResult<ClassificationRow>(
+                    ClassificationOutcome.NameTaken, Detail: "Another triage category already has this name, so this one cannot be turned On.");
+            }
+        }
+
         return await PatchAsync(user, id, new Dictionary<string, object?> { ["sprk_enabled"] = enabled }, current, logger, ct).ConfigureAwait(false);
     }
 
@@ -267,13 +325,36 @@ internal static class OntologyAdminClassificationService
     // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Null when the rename may proceed. Otherwise the refusal: the name is taken, a policy version reads the category (the blockers are
-    /// named), or the versions could not be read (503, because an unchecked rename is never allowed).
+    /// Null when the rename may proceed. Otherwise the refusal: the routing configuration is keyed by the name, the caller's read cannot
+    /// show every policy version (409 unverifiable), the name is taken, a policy version reads the category (the blockers are named), or
+    /// the versions could not be read (503, because an unchecked rename is never allowed).
     /// </summary>
     private static async Task<ClassificationOperationResult<ClassificationRow>?> CheckRenameAsync(
-        IDataverseUserClient user, CategoryRow current, string newName, ILogger logger, CancellationToken ct)
+        IDataverseUserClient user,
+        CategoryRow current,
+        string newName,
+        IOptionsMonitor<CategoryRoutingOptions> routing,
+        ILogger logger,
+        CancellationToken ct)
     {
-        var references = await LoadReferencesAsync(user, new HashSet<Guid> { current.Id }, logger, ct).ConfigureAwait(false);
+        // In process and free, so it runs first: the routing configuration is keyed by category NAME (CategoryRoutingOptions), and a rename
+        // would silently orphan the entry.
+        if (RoutingEntryNaming(routing.CurrentValue, current.Name) is { } entry)
+        {
+            return new ClassificationOperationResult<ClassificationRow>(
+                ClassificationOutcome.RenameRouted,
+                Detail: $"This category cannot be renamed while the routing configuration names it ({entry}). Change that entry first.");
+        }
+
+        // The reference read below runs as the caller, and Dataverse trims it to what the caller can read. Unless that covers EVERY policy
+        // version, "no rule reads this category" is not an answer, so the rename is refused rather than waved through (F2).
+        var refusal = await CheckReadCoverageAsync(user, logger, ct).ConfigureAwait(false);
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        var references = await LoadReferencesAsync(user, new Dictionary<Guid, string> { [current.Id] = current.Name }, logger, ct).ConfigureAwait(false);
         if (references is null)
         {
             return new ClassificationOperationResult<ClassificationRow>(
@@ -302,6 +383,202 @@ internal static class OntologyAdminClassificationService
             : null;
     }
 
+    // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Routing configuration (keyed by category name)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Where the routing configuration names <paramref name="categoryName"/>, or null. Looks at the global map and at every per-tenant map
+    /// (the consumer, <c>CategoryRoutingGate</c>, uses one or the other per tenant), whatever the on/off switch says: a dormant entry
+    /// would break the moment routing is switched on. Keys are matched trimmed and case-insensitively, a superset of the gate's lookup.
+    /// </summary>
+    internal static string? RoutingEntryNaming(CategoryRoutingOptions options, string categoryName)
+    {
+        var wanted = categoryName.Trim();
+        if (Names(options.CategoryToTeam, wanted))
+        {
+            return $"{CategoryRoutingOptions.SectionName}:CategoryToTeam";
+        }
+
+        foreach (var (tenant, overrideEntry) in options.Tenants)
+        {
+            if (Names(overrideEntry?.CategoryToTeam, wanted))
+            {
+                return $"{CategoryRoutingOptions.SectionName}:Tenants:{tenant}:CategoryToTeam";
+            }
+        }
+
+        return null;
+
+        static bool Names(Dictionary<string, string>? map, string wanted) =>
+            map is not null && map.Keys.Any(k => string.Equals(k?.Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Read coverage: can the caller's own read show every policy version?
+    // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string PolicyReadPrivilegeName = "prvReadsprk_Policy";
+    private const string VersionReadPrivilegeName = "prvReadsprk_PolicyVersion";
+
+    /// <summary>The depth a privilege is held at, lowest to highest. <c>None</c> means no row came back (the privilege is not held).</summary>
+    private enum ReadReach
+    {
+        None = 0,
+        Basic = 1,
+        Local = 2,
+        Deep = 3,
+        Global = 4,
+    }
+
+    /// <summary>
+    /// Null when the caller's read of the policies AND of their versions covers every business unit: Global depth on both, or Deep on both
+    /// while the caller sits in the root business unit (Deep at the root reaches every business unit under it). Otherwise the refusal:
+    /// 409 <c>rename_unverifiable</c> when the coverage is incomplete, 503 when it could not be established, and the single 403 when the
+    /// caller cannot be named. Reads as the caller: <c>WhoAmI()</c>, the privilege function once per privilege and, only when the depth
+    /// is Deep, the caller's business unit.
+    /// </summary>
+    private static async Task<ClassificationOperationResult<ClassificationRow>?> CheckReadCoverageAsync(
+        IDataverseUserClient user, ILogger logger, CancellationToken ct)
+    {
+        var who = await CallAsync(() => user.GetAsync("WhoAmI()", ct), logger, ct).ConfigureAwait(false);
+        if (!who.IsSuccess
+            || who.Body is not { ValueKind: JsonValueKind.Object } whoBody
+            || ReadGuid(whoBody, "UserId") is not { } userId
+            || ReadGuid(whoBody, "BusinessUnitId") is not { } businessUnitId)
+        {
+            return CoverageFault(who, "the caller could not be identified", logger);
+        }
+
+        var policies = await ReadReachAsync(user, userId, PolicyReadPrivilegeName, logger, ct).ConfigureAwait(false);
+        if (policies.Failure is not null)
+        {
+            return policies.Failure;
+        }
+
+        var versions = await ReadReachAsync(user, userId, VersionReadPrivilegeName, logger, ct).ConfigureAwait(false);
+        if (versions.Failure is not null)
+        {
+            return versions.Failure;
+        }
+
+        var lowest = policies.Reach < versions.Reach ? policies.Reach : versions.Reach;
+        if (lowest == ReadReach.Global)
+        {
+            return null;
+        }
+
+        if (lowest == ReadReach.Deep)
+        {
+            var unit = await CallAsync(
+                () => user.GetAsync($"businessunits({businessUnitId:D})?$select=_parentbusinessunitid_value", ct), logger, ct).ConfigureAwait(false);
+            if (!unit.IsSuccess
+                || unit.Body is not { ValueKind: JsonValueKind.Object } unitBody
+                || !unitBody.TryGetProperty("_parentbusinessunitid_value", out var parent)
+                || parent.ValueKind is not (JsonValueKind.Null or JsonValueKind.String))
+            {
+                return CoverageFault(unit, "the caller's business unit could not be read", logger);
+            }
+
+            if (parent.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+        }
+
+        return new ClassificationOperationResult<ClassificationRow>(
+            ClassificationOutcome.RenameUnverifiable,
+            Detail: "Whether a rule reads this category cannot be checked from your business unit, so it cannot be renamed here. "
+                + "Ask an administrator whose access covers every business unit to rename it.");
+    }
+
+    private sealed record ReachRead(ReadReach Reach, ClassificationOperationResult<ClassificationRow>? Failure);
+
+    /// <summary>The caller's highest depth for one privilege (the function lists one row per role that grants it).</summary>
+    private static async Task<ReachRead> ReadReachAsync(
+        IDataverseUserClient user, Guid userId, string privilegeName, ILogger logger, CancellationToken ct)
+    {
+        var response = await CallAsync(
+            () => user.GetAsync($"systemusers({userId:D})/Microsoft.Dynamics.CRM.RetrieveUserPrivilegeByPrivilegeName(PrivilegeName='{privilegeName}')", ct),
+            logger,
+            ct).ConfigureAwait(false);
+        if (!response.IsSuccess
+            || response.Body is not { ValueKind: JsonValueKind.Object } body
+            || !body.TryGetProperty("RolePrivileges", out var rows)
+            || rows.ValueKind != JsonValueKind.Array)
+        {
+            return new ReachRead(ReadReach.None, CoverageFault(response, "the caller's read depth could not be read", logger));
+        }
+
+        var reach = ReadReach.None;
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object
+                || !string.Equals(ReadString(row, "PrivilegeName"), privilegeName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // A depth that cannot be read counts as the lowest: it can only make the check stricter.
+            var depth = row.TryGetProperty("Depth", out var d) ? ParseDepth(d) : ReadReach.Basic;
+            if (depth > reach)
+            {
+                reach = depth;
+            }
+        }
+
+        return new ReachRead(reach, null);
+    }
+
+    /// <summary>Dataverse names the depth ("Basic", "Local", "Deep", "Global"); the numeric form (0 to 3) is read too. Anything else is Basic.</summary>
+    private static ReadReach ParseDepth(JsonElement depth)
+    {
+        if (depth.ValueKind == JsonValueKind.String)
+        {
+            return depth.GetString()?.Trim().ToUpperInvariant() switch
+            {
+                "GLOBAL" => ReadReach.Global,
+                "DEEP" => ReadReach.Deep,
+                "LOCAL" => ReadReach.Local,
+                _ => ReadReach.Basic,
+            };
+        }
+
+        if (depth.ValueKind == JsonValueKind.Number && depth.TryGetInt32(out var n))
+        {
+            return n switch
+            {
+                3 => ReadReach.Global,
+                2 => ReadReach.Deep,
+                1 => ReadReach.Local,
+                _ => ReadReach.Basic,
+            };
+        }
+
+        return ReadReach.Basic;
+    }
+
+    /// <summary>
+    /// A coverage read that did not give an answer: the single 403 for a caller Dataverse cannot name, otherwise a 503 (the rename is
+    /// refused, never allowed unchecked). A 200 whose body is not the expected shape is a 503 too. Logs a code, never a value (ADR-015).
+    /// </summary>
+    private static ClassificationOperationResult<ClassificationRow> CoverageFault(DataverseUserResponse response, string what, ILogger logger)
+    {
+        if (!response.IsSuccess
+            && (response.StatusCode == 401
+                || response.ErrorCode is DataverseUserClientErrorCodes.UserContextRequired
+                    or DataverseUserClientErrorCodes.OboExchangeFailed
+                    or DataverseUserClientErrorCodes.OboNotConfigured))
+        {
+            return new ClassificationOperationResult<ClassificationRow>(ClassificationOutcome.CallerUnresolved);
+        }
+
+        logger.LogWarning("Ontology admin classification: {What} ({ErrorCode}); a rename is refused as unavailable.", what, response.ErrorCode ?? "unparseable-body");
+        return new ClassificationOperationResult<ClassificationRow>(
+            ClassificationOutcome.Unavailable,
+            Detail: "Which rules read this category could not be checked, so it cannot be renamed now. Try again.");
+    }
+
     /// <summary>"POL-COMMIT-BUDGET (version 2, in force), POL-X (version 1, earlier)": every distinct rule and version, in a stable order.</summary>
     internal static string DescribeBlockers(IReadOnlyList<ClassificationRuleReference> blockers) =>
         string.Join(
@@ -323,11 +600,12 @@ internal static class OntologyAdminClassificationService
     // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// For each of <paramref name="categoryIds"/>, the policy versions whose rule body names it; null when the policies or versions could
-    /// not be read. Scans EVERY version of EVERY policy the caller can read, whatever its state, enabled flag or domain.
+    /// For each category in <paramref name="categories"/> (id to current name), the policy versions whose rule body names it by id or by
+    /// name; null when the policies or versions could not be read. Scans EVERY version of EVERY policy the caller can read, whatever its
+    /// state, enabled flag or domain.
     /// </summary>
     private static async Task<Dictionary<Guid, List<ClassificationRuleReference>>?> LoadReferencesAsync(
-        IDataverseUserClient user, HashSet<Guid> categoryIds, ILogger logger, CancellationToken ct)
+        IDataverseUserClient user, IReadOnlyDictionary<Guid, string> categories, ILogger logger, CancellationToken ct)
     {
         var policies = await ReadAllAsync(
             user, $"{PolicySet}?$select=sprk_policyid,sprk_policycode,sprk_name,sprk_enabled,_sprk_currentversion_value", logger, ct).ConfigureAwait(false);
@@ -369,8 +647,8 @@ internal static class OntologyAdminClassificationService
                 continue;
             }
 
-            var named = OntologyAdminClassificationReferences.GuidsIn(ReadString(row, "sprk_rulebody"));
-            if (!named.Overlaps(categoryIds))
+            var named = OntologyAdminClassificationReferences.CategoriesNamedIn(ReadString(row, "sprk_rulebody"), categories);
+            if (named.Count == 0)
             {
                 continue;
             }
@@ -390,7 +668,7 @@ internal static class OntologyAdminClassificationService
                 ReadInt(row, "sprk_versionnumber"),
                 state);
 
-            foreach (var categoryId in named.Where(categoryIds.Contains))
+            foreach (var categoryId in named)
             {
                 if (!result.TryGetValue(categoryId, out var list))
                 {
@@ -456,7 +734,7 @@ internal static class OntologyAdminClassificationService
     // ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record CategoryRow(
-        Guid Id, string Name, string? Guidance, bool Enabled, long Version, decimal? Recall, int? SetSize, string? MeasuredOn);
+        Guid Id, string Name, string? Guidance, bool Enabled, long Version, decimal? Recall, int? SetSize, string? MeasuredOn, string? ModifiedOn);
 
     private sealed record LoadedRow(CategoryRow? Row, ClassificationOperationResult<ClassificationRow>? Failure);
 
@@ -673,7 +951,8 @@ internal static class OntologyAdminClassificationService
             row.TryGetProperty("versionnumber", out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var version) ? version : 0,
             recall,
             ReadInt(row, "sprk_labelledsetsize"),
-            measuredOn is { Length: >= 10 } ? measuredOn[..10] : measuredOn);
+            measuredOn is { Length: >= 10 } ? measuredOn[..10] : measuredOn,
+            ReadString(row, "modifiedon"));
     }
 
     private static string? ReadString(JsonElement row, string name) =>
