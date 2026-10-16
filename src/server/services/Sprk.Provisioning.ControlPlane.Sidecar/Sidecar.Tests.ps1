@@ -270,6 +270,29 @@ Describe 'Customer shared mailbox (H14m)' {
         Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
     }
 
+    It 'accepts the scope group when Exchange appended its 14-digit creation time to the Name (T186 L59)' {
+        # Live: a group created in the admin center 2026-10-14 19:48:47 UTC is named 'Spaarke-AppAccess-acme20261014194847'.
+        $global:T263GroupName = 'Spaarke-AppAccess-acme20261014194847'
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme20261014194847' }
+    }
+
+    It 'still refuses a group whose Name only resembles this customer''s (T186 L59 must-fire)' {
+        foreach ($other in 'Spaarke-AppAccess-acme2', 'Spaarke-AppAccess-acme2026101419484', 'Spaarke-AppAccess-acme202610141948471', 'Spaarke-AppAccess-acme2x0261014194847') {
+            InModuleScope SidecarCore -Parameters @{ Other = $other } {
+                param($Other)
+                Test-ScopeGroupName -Actual $Other -Expected 'Spaarke-AppAccess-acme' | Should -BeFalse -Because $Other
+            }
+        }
+        InModuleScope SidecarCore {
+            Test-ScopeGroupName -Actual 'spaarke-appaccess-ACME' -Expected 'Spaarke-AppAccess-acme' | Should -BeTrue
+            Test-ScopeGroupName -Actual '' -Expected 'Spaarke-AppAccess-acme' | Should -BeFalse
+        }
+    }
+
     It 'retries the join while a new mailbox replicates, then succeeds' {
         InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
         $global:T263JoinFailures = 2
