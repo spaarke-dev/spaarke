@@ -38,6 +38,10 @@ public partial class RouteAuthorizationGuardTests
             "externalGroup /api/v1/external + RequireAuthorization(ExternalCollaboration) + CallerPrincipal (:54-57) and "
             + "adminGroup /api/v1/external-access + RequireAuthorization + AddDelegationRuleFilter (:123-126), bound into "
             + "the external data-plane and management files; it also registers three routes of its own."),
+        new Aggregator("Api/Ontology/OntologyAdminEndpoints.cs",
+            "/api/v1/ontology/admin + RequireRateLimiting(dataverse-query) + RequireAuthorization (OntologyAdminEndpoints.cs:44-47), bound "
+            + "into Api/Ontology/OntologyAdminAuthoringEndpoints.cs (ontology task 101) by OntologyAdminAuthoringEndpoints."
+            + "MapOntologyAdminAuthoringEndpoints(group); it also registers GET /capabilities itself (task 104)."),
     };
 
     // =============================================================================================
@@ -290,6 +294,13 @@ public partial class RouteAuthorizationGuardTests
             + "RetrieveUserPrivilegeByPrivilegeName on the id WhoAmI returned). It decides only whether the Console shows the tab; it is "
             + "never the security boundary. RequireAuthorization on the group; takes no id (Permanent CallerScopedOnly below). Tasks 100 "
             + "and 101 add their admin routes to this group, each authorized as the caller."),
+        new GovernedFile("Api/Ontology/OntologyAdminAuthoringEndpoints.cs", Scope.GroupGated,
+            "/api/v1/ontology/admin/authoring/* (ontology platform R1 task 101, D-22 slice b, FR-58) -- the rule wizard's BFF: GET /catalog, "
+            + "POST /dry-run, POST /policies and POST /policies/{policyId}/versions, on the group OntologyAdminEndpoints.cs passes in. Every "
+            + "handler's only I/O is one OntologyAdminAuthoringService call whose every read the caller acts on and every write runs AS THE "
+            + "CALLER through IDataverseUserClient (WhoAmI first: unresolved is the single 403); a policy id is read as the caller through the "
+            + "Ontology domain allow-list before any write (absent, unreadable or non-Ontology: the uniform 404). The dry run evaluates as the "
+            + "evaluator (#39) and returns only rows whose subject AND core record the caller's own read returns. HandlerDecisions below."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -794,7 +805,12 @@ public partial class RouteAuthorizationGuardTests
     // 125 -> 126 (2026-10-16, spaarke-ontology-platform-r1 task 104). Net +1: Api/Ontology/OntologyAdminEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
     // The main session reconciles the count with the other ontology routes at integration.
-    private const int ExpectedEndpointFileCount = 126;
+    //
+    // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 101). Net +1: Api/Ontology/OntologyAdminAuthoringEndpoints.cs ADDED --
+    // the four rule-authoring routes on the Ontology admin group (GroupGated; OntologyAdminEndpoints.cs becomes a pinned Aggregator).
+    // Classified by GovernedFiles and four HandlerDecisions (IDataverseUserClient). Lanes 100/103 add files in parallel: the main
+    // session reconciles this count at integration.
+    private const int ExpectedEndpointFileCount = 127;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1816,6 +1832,31 @@ public partial class RouteAuthorizationGuardTests
             + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
             + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
             + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
+        new HandlerDecision("GET /api/v1/ontology/admin/authoring/catalog", "GetCatalogAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.GetCatalogAsync" },
+            "Ontology task 101: the handler's only I/O is OntologyAdminAuthoringService.GetCatalogAsync (OntologyAdminAuthoringEndpoints.cs:68), "
+            + "which resolves the caller with WhoAmI AS THE CALLER (OntologyAdminAuthoringService.cs:174, :1170; unresolved: the single 403) "
+            + "and reads the triage categories AS THE CALLER (:237). The rest of the catalog is the compiler's static lists; no id is taken."),
+        new HandlerDecision("POST /api/v1/ontology/admin/authoring/dry-run", "DryRunAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.DryRunAsync" },
+            "Ontology task 101 (#39): the handler's only I/O is OntologyAdminAuthoringService.DryRunAsync (OntologyAdminAuthoringEndpoints.cs:72). "
+            + "WhoAmI as the caller first (:279); a body policyId is read AS THE CALLER through the Ontology domain allow-list (:302, :1191; "
+            + "absent, unreadable or non-Ontology: the uniform 404) before anything is evaluated. The draft is evaluated as the EVALUATOR (writes "
+            + "nothing, :331), then every hit's subject and core record are re-read AS THE CALLER (:449, :465) and a row is returned only when "
+            + "both come back; the policy's Signals are read AS THE CALLER (:516). Nothing the caller cannot read is returned or counted."),
+        new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies", "SavePolicyAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.SavePolicyAsync" },
+            "Ontology task 101 (FR-10): the handler's only I/O is OntologyAdminAuthoringService.SavePolicyAsync (OntologyAdminAuthoringEndpoints.cs:77). "
+            + "WhoAmI as the caller first (:634); then validation and the dry-run proof, then the policy (Off, Ontology domain) and its first "
+            + "version are created AS THE CALLER in one deep insert (:744) and the pointer set AS THE CALLER (:757): Dataverse enforces the "
+            + "Spaarke Ontology Administrator role (refused: 403, nothing written). Takes no id."),
+        new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies/{policyId:guid}/versions", "PublishVersionAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.PublishVersionAsync" },
+            "Ontology task 101 (D-13, D-14): the handler's only I/O is OntologyAdminAuthoringService.PublishVersionAsync "
+            + "(OntologyAdminAuthoringEndpoints.cs:85). WhoAmI as the caller first (:790); the route's policyId is read AS THE CALLER through "
+            + "the Ontology domain allow-list (:808, :1191) before ANY write (absent, unreadable or non-Ontology: the uniform 404, zero writes). "
+            + "The version create (:861), the old version's sprk_inforceto stamp (:873, the only PATCH of a version, :947-948) and the pointer "
+            + "move (:884) all run AS THE CALLER, row-version conditional; only then is the job's single-policy pass run as the evaluator (:909)."),
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:59). It resolves the caller "

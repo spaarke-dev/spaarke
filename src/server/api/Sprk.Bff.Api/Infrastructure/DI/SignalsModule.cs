@@ -2,6 +2,7 @@ using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -121,6 +122,12 @@ public static class SignalsModule
         services.AddSingleton<SignalClosureService>();
         services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
         services.AddSingleton<SignalEvaluatorHealthCheck>();
+
+        // Task 101 (D-22 slice b): the Ontology admin rule-authoring service (scoped: every read and write is the request caller's
+        // through the caller-identity client) and its one seam onto the evaluator and the job above (singleton, as they are).
+        // Unconditional, like the routes that use them (bff-extensions.md F.1).
+        services.AddSingleton<IOntologyAdminAuthoringSignalEngine, OntologyAdminAuthoringSignalEngine>();
+        services.AddScoped<OntologyAdminAuthoringService>();
 
         // Task 148 (D-135 item 2, follow the assignee): every 5 minutes (recently changed To Dos) and nightly (all), a personal
         // To Do's Signals and Decision Records are re-owned to its current Assigned To's team, only through uac-r2's
