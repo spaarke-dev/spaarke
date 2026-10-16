@@ -58,8 +58,8 @@ public sealed class EntityNameScrubber : IEntityNameScrubber
 
     // Proper-Noun span detector. Matches sequences of Title-Case tokens, tolerating
     // short connector words ("of", "and", "&"), and "v." case-citation markers.
-    // The word connectors end in  so a capitalised word followed by one that merely STARTS with a connector
-    // ("Decide lane", "Do office") is not read as "Decide la" / "Do of". "v." is excluded from the  (it ends in a dot).
+    // The word connectors end in \b so a capitalised word followed by one that merely STARTS with a connector
+    // ("Decide lane", "Do office") is not read as "Decide la" / "Do of". "v." is excluded from the \b (it ends in a dot).
     private static readonly Regex ProperNounSpan = new(
         @"\b[A-Z][A-Za-z0-9'’]*(?:\s+(?:[A-Z][A-Za-z0-9'’]*|&|(?:of|and|the|von|de|del|la|le)\b|v\.))*",
         RegexOptions.Compiled);
