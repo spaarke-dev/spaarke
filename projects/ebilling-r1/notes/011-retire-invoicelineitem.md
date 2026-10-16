@@ -126,3 +126,14 @@ Not done: the 4 rows and the table still exist. One dependency remains. The app 
 To finish:
 1. In make.powerapps.com, open the Spaarke Platform app in the designer, remove the Invoice Line Item table, then Save and Publish.
 2. Re-run the script with `-Delete -DeleteRows -OwnerApproval '2026-10-15 owner (Ralph Schroeder) via Claude session'`. Steps 0-4 are idempotent.
+
+**Completed 2026-10-16.** The owner removed the table in the maker portal. The table delete took the 4 rows with it; their backup is kept in `notes/011-invoicelineitem-rows-backup.json`.
+
+Verified against dev:
+- `EntityDefinitions(LogicalName='sprk_invoicelineitem')` returns 404.
+- The `sprk_timekeeper.sprk_invoicelineitem` lookup returns 404.
+- No 1:N relationship from billing event, invoice or timekeeper points to it.
+- No system form, view or sitemap mentions it.
+- The Spaarke Platform app is republished with 96 components, the table is not among them, and ValidateApp reports 0 errors.
+
+Six `appmodulecomponent` rows still name the deleted table's id. All six belong to app versions that no longer exist, so they are platform leftovers and are not cleaned up.
