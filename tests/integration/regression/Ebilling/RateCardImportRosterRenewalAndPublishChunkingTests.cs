@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Tests.Services.Finance;
@@ -282,6 +283,28 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
             .Select(i => i.Method.Name == "BulkUpdateAsync" ? "bulk" : i.Method.Name == "UpdateAsync" ? "card" : null)
             .Where(x => x is not null).ToList();
         order.Should().Equal(Enumerable.Repeat("bulk", expectedChunks.Length).Append("card"), "the card is set Published after every chunk");
+    }
+
+    // Each In value becomes a SQL parameter and SQL Server refuses more than ~2,100, so a 2,500-timekeeper card would fail on the read
+    // before any approval if the ids went in one condition.
+    [Fact]
+    public async Task Publish_ReadsTheCardsTimekeepersInBatchesOfAtMost500InValues()
+    {
+        var h = new RateCardImportServiceTests.Harness();
+        var (cardId, pending) = SeedCardWithPending(h, 2500);
+
+        var outcome = await h.Service().PublishAsync(cardId, default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
+        outcome.Value!.TimekeepersApproved.Should().Be(2500);
+        var inSizes = h.Entities.Invocations
+            .Where(i => i.Method.Name == "RetrieveMultipleAsync")
+            .SelectMany(i => i.Arguments.OfType<QueryExpression>())
+            .SelectMany(q => q.Criteria.Conditions)
+            .Where(c => c.Operator == ConditionOperator.In && c.AttributeName == "sprk_timekeeperid")
+            .Select(c => c.Values.Count)
+            .ToList();
+        inSizes.Should().Equal(500, 500, 500, 500, 500);
     }
 
     [Fact]

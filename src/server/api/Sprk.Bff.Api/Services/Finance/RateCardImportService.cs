@@ -110,6 +110,10 @@ public class RateCardImportService
     /// <summary>Rows per <see cref="IGenericEntityService.BulkUpdateAsync"/> call: one ExecuteTransaction, capped by Dataverse at 1,000 requests.</summary>
     internal const int MaxApprovalsPerTransaction = 1000;
 
+    // Values per ConditionOperator.In. Dataverse turns each value into a SQL parameter (SQL Server refuses more than ~2,100), and an
+    // import may name up to 5,000 timekeepers or contact emails, so every In read runs in batches of this size.
+    internal const int MaxInValues = 500;
+
     private readonly IGenericEntityService _entities;
     private readonly IDocumentDataverseService _documents;
     private readonly SpeFileStore _spe;
@@ -457,20 +461,20 @@ public class RateCardImportService
         var approvals = new List<(Guid id, Dictionary<string, object> fields)>();
         if (timekeeperIds.Length > 0 && firmId is not null)
         {
-            var timekeepers = await _entities.RetrieveMultipleAsync(new QueryExpression(TimekeeperEntity)
+            var timekeepers = await RetrieveInBatchesAsync(timekeeperIds, batch => new QueryExpression(TimekeeperEntity)
             {
                 ColumnSet = new ColumnSet("statuscode", "sprk_firm"),
                 Criteria =
                 {
                     Conditions =
                     {
-                        new ConditionExpression("sprk_timekeeperid", ConditionOperator.In, timekeeperIds),
+                        new ConditionExpression("sprk_timekeeperid", ConditionOperator.In, batch),
                         new ConditionExpression("sprk_firm", ConditionOperator.Equal, firmId.Value),
                     },
                 },
             }, ct);
 
-            approvals = timekeepers.Entities
+            approvals = timekeepers
                 .Where(t => t.GetAttributeValue<OptionSetValue>("statuscode")?.Value == TimekeeperPending)
                 .Select(t => (t.Id, new Dictionary<string, object>
                 {
@@ -1003,6 +1007,17 @@ public class RateCardImportService
         e.GetAttributeValue<DateTime?>("sprk_effectiveto") is { } to ? DateOnly.FromDateTime(to) : null,
         e.GetAttributeValue<EntityReference>("sprk_contact")?.Id);
 
+    private async Task<List<Entity>> RetrieveInBatchesAsync(object[] values, Func<object[], QueryExpression> query, CancellationToken ct)
+    {
+        var all = new List<Entity>();
+        foreach (var batch in values.Chunk(MaxInValues))
+        {
+            all.AddRange((await _entities.RetrieveMultipleAsync(query(batch), ct)).Entities);
+        }
+
+        return all;
+    }
+
     private async Task<(ImportLookups Lookups, bool RosterTruncated)> LoadLookupsAsync(Guid firmId, WorkbookRead read, CancellationToken ct)
     {
         var roster = await _entities.RetrieveMultipleAsync(new QueryExpression(TimekeeperEntity)
@@ -1034,20 +1049,20 @@ public class RateCardImportService
         var ambiguousEmails = new HashSet<string>(StringComparer.Ordinal);
         if (emails.Length > 0)
         {
-            var contacts = await _entities.RetrieveMultipleAsync(new QueryExpression("contact")
+            var contacts = await RetrieveInBatchesAsync(emails.Cast<object>().ToArray(), batch => new QueryExpression("contact")
             {
                 ColumnSet = new ColumnSet("emailaddress1"),
                 Criteria =
                 {
                     Conditions =
                     {
-                        new ConditionExpression("emailaddress1", ConditionOperator.In, emails.Cast<object>().ToArray()),
+                        new ConditionExpression("emailaddress1", ConditionOperator.In, batch),
                         new ConditionExpression("statecode", ConditionOperator.Equal, 0),
                     },
                 },
             }, ct);
 
-            foreach (var group in contacts.Entities.GroupBy(e => e.GetAttributeValue<string>("emailaddress1").ToLowerInvariant()))
+            foreach (var group in contacts.GroupBy(e => e.GetAttributeValue<string>("emailaddress1").ToLowerInvariant()))
             {
                 if (group.Count() == 1)
                 {

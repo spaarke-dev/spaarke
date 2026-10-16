@@ -75,4 +75,8 @@ Three confirmed F1 findings and two K1 items, fixed in `RateCardImportService.cs
 - **K1, `ReadFormAsync`** in the import endpoint catches `InvalidDataException` and `BadHttpRequestException` and answers 400 `ratecard.import_invalid` ("The request body is not valid multipart/form-data."), as `ChatDocumentEndpoints` does; the parser's message is not returned.
 - **Not changed, to check:** the publish read of the card's timekeepers uses one `In` condition over every timekeeper id the rates name (up to 5,000); whether Dataverse accepts that many `In` values in one query was not verified here.
 
-rework: none task 078
+rework: fix-round-1 task 078
+
+**In-list batching (main session, 2026-10-16).** The publish read of a card's timekeepers and the import read of contacts by email each put every value in one `ConditionOperator.In`. That is up to 5,000 SQL parameters, and SQL Server refuses more than about 2,100. Both reads now run in batches of `MaxInValues` = 500.
+
+Regression test: `Publish_ReadsTheCardsTimekeepersInBatchesOfAtMost500InValues`. It fails with batching disabled and passes with it on.

@@ -104,7 +104,7 @@
 
   <notes>Spec FR-23, D-47, Processing Pipeline step 2. Shared append point: FinanceModule.cs. Weights and caps seeded by 025 are provisional and calibrated by 161. Firm and core record come from the submission context (044), not from extracted text.
     Completed 2026-10-16: see projects/ebilling-r1/notes/046-resolution-combined-confidence.md (assumptions A1-A15, embedding experiment, cap = ceiling confirmed, owner question on the ApprovedTimekeeper reject path, publish-size delta +42,813 B, ADR-010 ceiling 162 -> 163). TASK-INDEX.md is updated by the main session.
-    rework: none task 046</notes>
+    rework: fix-round-1 task 046</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
