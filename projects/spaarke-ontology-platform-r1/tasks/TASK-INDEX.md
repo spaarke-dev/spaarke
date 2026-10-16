@@ -334,7 +334,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 104 | [Capability probe + role-gated "Ontology admin" tab](104-ontology-admin-capability-probe-and-tab.poml) | FULL | **opus**/high | 008, 059 | — | Probe as the caller; never the security boundary · **[uac]** |
+| ✅ [done] 104 | [Capability probe + role-gated "Ontology admin" tab](104-ontology-admin-capability-probe-and-tab.poml) | FULL | **opus**/high | 008, 059 | — | Probe as the caller; never the security boundary · **[uac]** · **Done** 2026-10-16: [#2019](https://github.com/spaarke-dev/spaarke/pull/2019) merged `b187253a` (2 Opus passes, 2 fix rounds, re-check, uac-r2 OK) |
 | 🔲 [open] 100 | [Slice (a): Rules read-only + On/Off + Retire](100-ontology-admin-rules-readonly-on-off-retire.poml) | FULL | sonnet/high | 104, 033, 034, 057, 026 | — | Writes as the caller; Retire closes at once |
 | 🔲 [open] 101 | [Slice (b) BFF: catalog from the compiler, dry run, save, publish](101-ontology-admin-authoring-bff.poml) | FULL | **opus**/high | 104, 031, 033, 022, 036, 024 | — | `ValidateForSave`; catalog from verified joins (#46); dry run as the evaluator, filtered by caller (#39); publish stamps `sprk_inforceto` (**D-14**) · **[uac]** |
 | 🔲 [open] 102 | [Slice (b) UI: the rule-authoring wizard](102-ontology-admin-rule-wizard-ui.poml) | FULL | sonnet/**xhigh** | 056, 101, 057, 058 | — | Test gates Publish; no free-text JSON |
