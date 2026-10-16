@@ -40,6 +40,7 @@
   </context>
 
   <constraints>
+    <constraint source="DEF-015 (owner, 2026-10-15)">Do not create Procedure Library sprk_document rows linked to a matter, project or work assignment: how procedure files are stored (dedicated Procedures table vs unlinked Documents) is an open design discussion with the owner. If this task needs a decision, STOP and report.</constraint>
     <constraint source="NFR-12">No new NuGet package: parse .xlsx with the already-referenced DocumentFormat.OpenXml. Generate the template from code (one source for the column set) rather than committing a binary file.</constraint>
     <constraint source="spec FR-29">Import is all or nothing: any invalid row returns 400 ProblemDetails with an errors extension (sheet, row number, column, message) and writes nothing. Valid imports create Draft cards and Pending timekeepers only.</constraint>
     <constraint source="spec FR-08">Overlapping effective ranges for the same timekeeper or classification on one card are refused at import and again at publish.</constraint>

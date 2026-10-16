@@ -65,14 +65,14 @@ Result:
 - Class changed on 0 of 35 documents. Documents where "before" matched the expectation and "after" does not: 0. Errors: 0. No true invoice dropped out of InvoiceCandidate, so the escalation trigger did not fire.
 - Both paths agree with the expectation on 34 of 35. The one divergence from my expectation, X-remittance, is NotInvoice in BOTH paths (I had expected Unknown), so it is not a regression.
 - Hints on the 16 synthetic invoices (ground truth known): invoice number 16/16 before and after; total 15/16 before and after. NotInvoice documents carrying number or total hints: 0 before, 0 after.
-- The escalation wording "confidence crossing `ClassificationConfidenceThreshold`" is moot: that option is declared but never read (DEF-042c, #1988).
+- The escalation wording "confidence crossing `ClassificationConfidenceThreshold`" is moot: that option is declared but never read (DEF-018, #1988).
 
 ## Dev changes (all idempotent; nothing destructive)
 
 - `sprk_analysisaction` row `invoice-classify`: id `aefb10ba-e0c8-f111-a05c-0022482913fc`, `sprk_modeltier` 100000000 (Fast), `sprk_temperature` 0.0, system prompt (JPS, 6540 chars) and output schema (3588 chars) from the mirrors, input schema from `inputschemas/`. Created by `scripts/ebilling/Ensure-ActionRow.ps1` (re-run: UNCHANGED).
 - `sprk_playbookconsumer` row `invoice-classify|default|*`: id `210fa163-e1c8-f111-a05c-0022482913fc`, enabled, priority 500, Action `invoice-classify`. Seeded by `Seed-PlaybookConsumers.ps1` from the full mirror (36 rows upserted, 0 failed).
-- `Seed-PlaybookConsumers.ps1 -DiffOnly` afterwards shows only four pre-existing differences (`assistant-suggest|default|`, `chat-summarize|reanalyze|*`, `create-project|default|*`, `create-todo|default|`: live rows missing from the mirror) and none for `invoice-classify`. The POML's "no difference" cannot be met literally until those four rows are added to the mirror (DEF-042a, #1986). I did not run `-Export`, which would also drop the per-row `$comment` fields.
-- Dev `/healthz` is Healthy (200). `/healthz/catalog` was already 503 before this task (eight Binding rows without a `ConsumerTypes` constant on this branch, DEF-042b, #1987) and is still 503 for that reason alone; `invoice-classify` has a row and a constant.
+- `Seed-PlaybookConsumers.ps1 -DiffOnly` afterwards shows only four pre-existing differences (`assistant-suggest|default|`, `chat-summarize|reanalyze|*`, `create-project|default|*`, `create-todo|default|`: live rows missing from the mirror) and none for `invoice-classify`. The POML's "no difference" cannot be met literally until those four rows are added to the mirror (DEF-016, #1986). I did not run `-Export`, which would also drop the per-row `$comment` fields.
+- Dev `/healthz` is Healthy (200). `/healthz/catalog` was already 503 before this task (eight Binding rows without a `ConsumerTypes` constant on this branch, DEF-017, #1987) and is still 503 for that reason alone; `invoice-classify` has a row and a constant.
 
 ## Deviations and findings
 
@@ -81,7 +81,7 @@ Result:
 3. The Action mirror is JPS-shaped (like `triage-email.action.json`), not the `systemPrompt` / `outputSchema` shape of `agreement-classify`; the contract test therefore reads the sidecar for the schema.
 4. Added golden utterance GU-142 (`invoice-classify`, event channel) so `GoldenUtteranceEvalSuiteTests` covers the new `All` entry.
 5. Handler test is a seam test over the real facade, `ActionResolver`, `ActionRunner`, `TextExtractorService` and `RecordContainerResolver` (strict rule, `EmailProcessing:DefaultContainerId`) with only data boundaries doubled; it lives at `tests/integration/seam/Finance/AttachmentClassificationJobHandlerTests.cs` (KEEP path, tests/CLAUDE.md B5), not a mocked unit test.
-6. `ClassificationConfidenceThreshold` is unused (DEF-042c, #1988).
+6. `ClassificationConfidenceThreshold` is unused (DEF-018, #1988).
 7. A clean NuGet restore of master currently fails under warnings-as-errors with NU1903 (high) on `System.Security.Cryptography.Pkcs` 10.0.11; this branch restores clean (`dotnet list package --vulnerable --include-transitive`: no vulnerable packages). Master was published with `-p:NuGetAudit=false` for the size comparison.
 
 ## BFF hygiene (CLAUDE.md section 10, NFR-01)

@@ -43,6 +43,7 @@
   </context>
 
   <constraints>
+    <constraint source="DEF-015 (owner, 2026-10-15)">Do not create Procedure Library sprk_document rows linked to a matter, project or work assignment: how procedure files are stored (dedicated Procedures table vs unlinked Documents) is an open design discussion with the owner. If this task needs a decision, STOP and report.</constraint>
     <constraint source="ADR-013, ADR-043, D-52">AI only through IInvoiceAi to IActionRunner. No by-name playbook lookup, no C# output schema (schema lives in the Action row and its mirror), no node-graph engine.</constraint>
     <constraint source="ADR-039, spec FR-27">Model output is untrusted: each proposal's ruleType must be one of the 11 billing names (closed enum in the output schema) and its parameters must pass 070's schema for that type server-side; otherwise it is dropped and listed with a reason.</constraint>
     <constraint source="project">The job writes Draft rows only (domain Billing, rule set lookup, clause quote and location, consequence from the allowed list); it never sets Published, in-force dates or current version. Re-delivery of the same job creates no duplicate drafts (NFR-08).</constraint>

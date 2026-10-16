@@ -84,7 +84,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open - owner decision (shared external-access code) |
+| **Status** | Open - design discussion with the owner (2026-10-15) |
 | **Urgency** | before 075 / 078 create Procedure Library `sprk_document` rows linked to matters or projects |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 028 (adversarial review pass 1) |
@@ -95,6 +95,8 @@
 **Fails without it**: D-63 "firm users never see the Procedure Library" holds for content but not for metadata, if any Procedure Library row is ever linked to a matter or project a firm collaborates on.
 
 **Options**: (1) the eBilling consumers (075 / 078) never link Procedure Library rows to a matter or project (a convention, with a test in those tasks); (2) the external list and fetch routes exclude rows whose `sprk_graphdriveid` is a configured eBilling container (a change to shared external-access code owned by SPA-external-access-platform-r3 / unified-access-control-r2).
+
+**Owner (2026-10-15)**: needs more discussion. Procedure files need not be `sprk_document` rows at all: a dedicated Procedures table with its own SPE file association, or Documents that cannot be linked to matters / projects. Today every environment writes to one container, so the container is never checked; eBilling introduces the first internal-only containers. Until decided, no task creates Procedure Library `sprk_document` rows linked to a core record (constraint on 075 / 078). The independent 028 review adds a second exposure route: the external module-data documents grid (`ExternalAccessModule.cs:397-421`), which cannot filter on `sprk_graphdriveid`.
 
 ### ISS-010 — Generic child-record create route bypasses the FR-05 invoice-family core-record guard
 
@@ -697,7 +699,7 @@ Make the required-level update wait for a settled read of the length the previou
 
 ---
 
-### DEF-042a — Binding mirror `sprk_playbookconsumer-rows.json` is missing four live dev rows; `Seed-PlaybookConsumers.ps1 -DiffOnly` is never clean
+### DEF-016 — Binding mirror `sprk_playbookconsumer-rows.json` is missing four live dev rows; `Seed-PlaybookConsumers.ps1 -DiffOnly` is never clean
 
 | Field | Value |
 |---|---|
@@ -715,7 +717,7 @@ Make the required-level update wait for a settled read of the length the previou
 
 ---
 
-### DEF-042b — Dev `/healthz/catalog` is Unhealthy: eight Binding rows have no `ConsumerTypes` constant; the check is documented backwards
+### DEF-017 — Dev `/healthz/catalog` is Unhealthy: eight Binding rows have no `ConsumerTypes` constant; the check is documented backwards
 
 | Field | Value |
 |---|---|
@@ -731,7 +733,7 @@ Make the required-level update wait for a settled read of the length the previou
 
 ---
 
-### DEF-042c — `FinanceOptions.ClassificationConfidenceThreshold` is declared but never read
+### DEF-018 — `FinanceOptions.ClassificationConfidenceThreshold` is declared but never read
 
 | Field | Value |
 |---|---|
