@@ -58,6 +58,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-19: Sub-agent fan-out multiplies cost and exhausts memory](#g-19-sub-agent-fan-out-multiplies-cost-and-exhausts-memory)
 - [G-20: Deleting a worktree deletes through its junctions into another worktree](#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree)
 - [G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents](#g-21-in-jsdom-a-fluent-v9-dialog-can-be-aria-hidden-so-role-queries-cannot-find-its-contents)
+- [G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts](#g-22-python3-on-windows-is-the-store-alias-stub-and-hangs-on-stdin-scripts)
 
 ---
 
@@ -1197,6 +1198,23 @@ Cross-session concurrency is not enforceable by settings; it stays a practice.
 - Leave a one-line comment at the query that cites this entry.
 
 **Enforced by:** prose only. A lint rule cannot tell that a role query will run inside an open dialog. The durable fix would be a shared jest setup that makes tabster's modalizer activate under jsdom. An attempt that deduplicated `@fluentui/react-*` through `moduleNameMapper` passed once and then failed, so it was reverted.
+
+---
+
+### G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts
+
+> **Added 2026-10-15** after the third occurrence. **Class**: environment trap.
+
+**What happens.** A Python.org install on Windows provides `python.exe` and `py.exe`, not `python3.exe`. So `python3` resolves to `%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe`, an App Execution Alias stub that launches the real interpreter. The stub does not reliably forward standard input. With a script fed on stdin (`python3 - <<EOF`, `python3 - file...`), the real interpreter never gets the script and spins at 100% CPU, and the Bash call times out. Occurrences:
+- 2026-10-13: processes leaked for days;
+- 2026-10-15: another session's `python3 -` call ran for 76 minutes;
+- 2026-10-15: `scripts/quality/post-edit-lint.sh`, which runs after every edit, preferred `python3`. Fixed in #1999.
+
+Agents reach for `python3` from Linux/macOS habit.
+
+**Rule.** Use `python` (the real interpreter) on this machine, never `python3`. In scripts that must also run on Linux, pick the interpreter at run time and skip any path under `WindowsApps` (see `post-edit-lint.sh`).
+
+**Enforced by:** the PreToolUse hook `scripts/quality/guard-python3-stub.py` (Bash and PowerShell). It denies `python3` in command position only when `python3` resolves into `WindowsApps`, so it does nothing where `python3` is real. It ignores quoted text (including multi-line `-m "..."` / `--body "..."`), heredoc and here-string bodies, comments and arguments. Known limits: misses `python3` inside a quoted `bash -c "..."` string, in a script file, or behind a prefix word with options (`env -i`, `xargs -I{}`). One false-deny shape remains: double quotes nested in `"$(printf "...")"` with `python3` at the start of an inner line. Use a heredoc for such messages. Controls: `scripts/quality/tests/test_guard_python3_stub.py`, run in CI by `agent-guard-tests`. Machine-level fix (optional, per developer): turn off the `python3.exe` App execution alias and add a `python3.exe` copy of `python.exe` next to the real interpreter.
 
 ---
 
