@@ -170,4 +170,7 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | ≈00:30 UTC | **H8 ✓** (first live H8 pass: root container bound); H6 dispatched (retry 1) | — |
 | 00:30:34 UTC | H6 → **Failed** `import-invocation-failed`: SpaarkeMaster 1.2.3.0 managed import refused (empty option labels) | **L39**. Import rolled back; nothing installed |
 | ≈00:40–01:10 UTC | Live-metadata check of the handlers' Dataverse names (read-only) → L40 fixed in code. L39: spaarkedev1 labels written (22 options, dry run first) and SpaarkeMaster 1.2.3.1 in dev; PR #1995 (source 1.2.3.1, script fixes, CI guard) | Waiting for PR checks → merge → publish 1.2.3.1 → redeploy (L40) → resume H6 |
+| ≈01:05 UTC | Dev control plane redeployed from `ac83a69db` (L40) | All post-deploy checks OK |
+| 01:10 UTC | PR #1995 merged (`4c7be32b9`, every check terminal and green, `--merge`); `publish-dataverse-solutions-manifest.yml` run 38833701320 with `publish: true` | **success**: `dataverse-solutions-latest.json` → SpaarkeMaster **1.2.3.1** (build `2026.10.16-160`, sha `4c7be32b9`), read back |
+| 01:12:45 UTC | `POST …/resume` (run Failed @ H6) | **202** |
 | ≈19:30 UTC | External-access R3 deployed spaarke-bff-dev `1.0.0+e276357a7` (source `c20bff283`, which contains #1901 `98c5962d7`), with owner OK. | The identity-link reconciliation job now skips the ACME in-progress registry row, so its per-run failure logs should stop. Not a provisioning action. |
