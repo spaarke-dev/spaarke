@@ -4,7 +4,7 @@
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-148). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-106**).
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-107**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -21,10 +21,10 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
-| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | PR #2018 in Opus review; after BFF deploy run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first) |
+| 062 Know narrative, retire Critical Today | `C:\wts-062` | sonnet/high | ✅ merged #2018 `33a98774`. To master in next batch; after the dev BFF has it run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first; row ce299eb4-…) |
 | 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | ESCALATED: needs (sprk_matter, sprk_budget) VerifiedJoin; owner asked (recommend inside 063) |
 | 045 Decision Record tab [uac] | `C:\wts-045` | sonnet/medium | ✅ merged #2014 `1931b405c`; after Console deploys from master run `scripts/seed-decision-records-workspace-layout.ps1` (-WhatIf first) |
-| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | PR #2019 in Opus review; uac-r2 OK on ledger row. 100/101 routes each need their own ledger classification (uac-r2) |
+| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | PR #2019 head db6ce49cc: fix round done; uac-r2 OK to merge; second adversarial pass running |
 | 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
 | 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
 | 049 revoke Signal Write + DR Create [uac] | `C:\wts-049` | sonnet/high | PR #2022 MERGED into docs (2 adversarial passes + uac-r2 OK + re-check). LIVE APPLY PENDING owner: after the 055 check and the Ontology Administrator answer (Q6; `$A5Waiver = $null` if removed). Run from a checkout of the docs branch: `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Apply` then `-Verify` (expect exit 0). Notify uac-r2 before/after. Rollback: security-roles.md §14 |
