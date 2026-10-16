@@ -1697,6 +1697,10 @@ public class RecordOwnerAssignmentCensusTests
                                        + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
                                        + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
                                        + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
+        ["OntologyAdminClassificationService.cs"] = "Ontology platform R1 task 103 (D-22, FR-59): creates and PATCHes rows of sprk_triagecategory as the caller, "
+                                                    + "writing only its own scalar columns (sprk_name, sprk_classifierguidance, sprk_enabled). The table is "
+                                                    + "organisation-owned reference data (no ownerid, no business-unit filing) and no lookup is written, so "
+                                                    + "nothing is created under a record or re-filed.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
