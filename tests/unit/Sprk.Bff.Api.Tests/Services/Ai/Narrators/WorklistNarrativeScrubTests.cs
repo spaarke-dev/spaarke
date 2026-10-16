@@ -41,6 +41,18 @@ public sealed class WorklistNarrativeScrubTests
         "Some items to do are past due.",
         "Your worklist has 8 items.",
         "A total of 8 items are open.",
+        // A word that merely STARTS with a connector ("la" in lane, "of" in office, "the" in theme) is not a connector.
+        "Do lane has 5 items",
+        "Do theme items are past due.",
+    };
+
+    // Lane names the model is given (the worklist category names are "Items to decide" / "Items to do" ).
+    public static TheoryData<string> LaneNameOutputs => new()
+    {
+        "Decide lane holds 3 items",
+        "Decide office items are past due.",
+        "Decide theme items are past due.",
+        "Decide lane holds 3 items. Do lane has 5 items.",
     };
 
     [Theory]
@@ -54,11 +66,26 @@ public sealed class WorklistNarrativeScrubTests
     }
 
     [Theory]
+    [MemberData(nameof(LaneNameOutputs))]
+    public async Task Narrate_OfAWorklistRequest_ReturnsNoValidationMetadata_ForLaneNameOutputs(string summary)
+    {
+        var sut = BuildNarrator(summary, []);
+
+        var response = await sut.NarrateAsync(WorklistShapedRequest(), CancellationToken.None);
+
+        response.ValidationMetadata.Should().BeNull();
+        response.Tldr.Summary.Should().Be(summary);
+    }
+
+    [Theory]
     [InlineData("Acme Corp has 3 items.")]
     [InlineData("There are 3 items for Johnson & Lee.")]
     [InlineData("Davis v. Metro Transit has 2 items to do.")]
     [InlineData("May Chen has 3 items to do.")]
     [InlineData("Will Parker has 3 items to do.")]
+    [InlineData("Maria de la Cruz has 3 items to do.")]
+    [InlineData("Jean le Blanc has 3 items to do.")]
+    [InlineData("Carlos del Rio has 3 items to do.")]
     public void Scrub_WithEmptyAllowList_StillRemoves_AnUnlistedProperName(string text)
     {
         var result = new EntityNameScrubber().Scrub(text, []);
