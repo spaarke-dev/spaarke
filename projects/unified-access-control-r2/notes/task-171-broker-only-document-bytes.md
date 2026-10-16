@@ -239,7 +239,8 @@ permission added on PS's container.
 2. `/api/obo/me/files/x.txt` as a user flagged `sprk_isexternal = true` (or disabled) → **403** `acting_user_not_eligible`.
 3. SPE admin: `GET …/containers/{BU1}/customproperties` shows no `SprkStd…`/`SprkJit…`; a PUT naming one → **403**
    `spe.admin.deny.container_grant_marker_server_owned`.
-4. Self-registration of a demo user: the container gains `SprkStd<systemuserid>` = the new permission id.
+4. Self-registration of a demo user: the container gains `SprkDemo<Entra object id>` = the new permission id (was
+   `SprkStd<systemuserid>` until #1363); demo expiry removes the role and the marker.
 5. `/office` on a BU document by a user of ANOTHER unit with no role → `canEdit: false`, `role: none`.
 
 **I. Error text (acceptance 7)** — a remaining OBO 403 (e.g. Compose Path B on a container U has no role on) reads
@@ -428,6 +429,9 @@ version content; an unknown id is 404.
 - **(finding 6)** Self-registration targets `environment.DataverseUrl`. When that is NOT the BFF's own Dataverse, the
   `SprkStd…` marker names a systemuser the BFF's sync cannot see; if the container is also not stamped on one of the
   BFF's business units the grant is never visited (same as before — but now at least marked).
+  **Resolved by #1363:** Step 8 now records `SprkDemo<Entra object id>`, which neither sync pass parses, and demo
+  expiry removes it through `RemoveMarkedGrantAsync` (it also clears a task-171-era `SprkStd…` marker naming the
+  user's permission).
 
 - **(trade-off, owner question pending)** App-only writes make SharePoint's "Modified by" / the SPE version author the
   Spaarke app. The person is on the Dataverse row for creates (`createdby` / `sprk_createdbyperson`); there is no existing

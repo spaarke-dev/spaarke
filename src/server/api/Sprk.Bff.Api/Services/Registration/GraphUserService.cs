@@ -390,7 +390,15 @@ public sealed class GraphUserService
                 },
                 cancellationToken: ct);
 
-            return members?.Value != null && members.Value.Count > 0;
+            if (members?.Value is null)
+            {
+                // No collection is not "no members": the membership is unread, so a removal is not skipped on it
+                // (the RemoveUserFromTeamAsync rule, #1363).
+                throw new InvalidOperationException(
+                    $"Graph returned no membership collection for group {groupId}; membership of user {userId} is unknown.");
+            }
+
+            return members.Value.Count > 0;
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
