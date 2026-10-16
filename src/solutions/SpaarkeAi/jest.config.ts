@@ -106,6 +106,9 @@ const config: Config = {
       },
     ],
   },
+  // One copy of Fluent/Griffel/tabster/keyborg regardless of which package's source
+  // imports them — see jest.resolver.cjs (GitHub #1963 part 2).
+  resolver: '<rootDir>/jest.resolver.cjs',
   testRunner: 'jest-circus/runner',
   collectCoverage: false,
   moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
