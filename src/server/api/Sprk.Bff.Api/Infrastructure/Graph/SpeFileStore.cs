@@ -224,24 +224,6 @@ public class SpeFileStore : ISpeFileOperations
         => _driveItemOps.GetPreviewUrlAsync(driveId, itemId, correlationId, ct);
 
     /// <summary>
-    /// Creates a recipient-openable SPE sharing link for a DriveItem APP-ONLY (R2 item 12 — the email composer's "Link"
-    /// attachments; task 171 moved it off OBO). Delegates to <see cref="DriveItemOperations.CreateSharingLinkAsync"/>.
-    /// </summary>
-    /// <remarks>
-    /// <c>virtual</c> (unified-access-control-r2 task 072): a test asserting that an unauthorized caller was denied must
-    /// be able to prove NO LINK WAS MINTED. A 403 assertion alone would pass even if the createLink had already been
-    /// issued — and unlike a failed download, a minted SPE URL cannot be taken back.
-    /// </remarks>
-    public virtual Task<string?> CreateSharingLinkAsync(
-        string driveId,
-        string itemId,
-        string linkType,
-        string scope,
-        DateTimeOffset? expiration = null,
-        CancellationToken ct = default)
-        => _driveItemOps.CreateSharingLinkAsync(driveId, itemId, linkType, scope, expiration, ct);
-
-    /// <summary>
     /// Resolve a container ID to its drive ID.
     /// Drive IDs start with "b!" (base64-encoded SharePoint site reference).
     /// Container IDs are GUIDs like "a1234567-89ab-cdef-0123-456789abcdef".

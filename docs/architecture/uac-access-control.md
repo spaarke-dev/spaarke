@@ -134,7 +134,7 @@ closed.
 - **Where it applies.** The read path (`AccessibleRecordSetService`: direct-only cancellation, Restricted, the systemuser
   plane's Restricted survivor — one walk per composition shared with the No Access veto) and every access caller of the
   flag read through `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync`: the write-time grant policy, the
-  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the share-link refusal, the
+  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the
   Restricted share remover and the Assigned-To materializer. The No Access guard and enforcer treat a record with a secure
   ancestor as secure (Q4's "secure" is the record or any filing ancestor, round 82).
 - **The contact plane honours a secure parent's No Access list (#1425).** The read-time contact veto and the write-time

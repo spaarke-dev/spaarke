@@ -181,7 +181,7 @@ public class SpeAppOnlyContainerIsolationTests
         "UploadSmall", "ContainerDrive", "DriveSubscription", "DriveDelta",
         "MembershipGrant",
         // The app-only twins added by unified-access-control-r2 task 171 (broker-only SPE bytes).
-        "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "SharingLink", "DriveItem",
+        "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "DriveItem",
         "ReplaceContent", "UploadSession",
         "MembershipReadAccess", "MembershipReadMarkers", "MembershipGrantMarked", "MembershipRemoveMarked",
     };
@@ -219,7 +219,6 @@ public class SpeAppOnlyContainerIsolationTests
             "DownloadVersion" => () => drive.DownloadFileVersionAsync(ForeignContainer, "item", "1.0"),
             "CurrentVersionId" => () => drive.GetCurrentVersionIdAsync(ForeignContainer, "item"),
             "EmbedPreview" => () => drive.GetEmbedPreviewUrlAsync(ForeignContainer, "item"),
-            "SharingLink" => () => drive.CreateSharingLinkAsync(ForeignContainer, "item", "view", "organization"),
             "DriveItem" => () => drive.GetDriveItemAsync(ForeignContainer, "item"),
             "ReplaceContent" => () => upload.ReplaceFileContentAsync(ForeignContainer, "item", new MemoryStream(new byte[] { 1 }), ifMatch: null),
             "UploadSession" => () => upload.CreateUploadSessionAsync(ForeignContainer, "a.txt", Sprk.Bff.Api.Models.ConflictBehavior.Fail),
