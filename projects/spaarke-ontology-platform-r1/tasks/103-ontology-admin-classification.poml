@@ -4,7 +4,7 @@
     <title>Ontology admin slice (c): Classification admin</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>104, 008, 057, 072, 074 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Admin writes to sprk_triagecategory, a cross-domain table that changes classifier behaviour on the next enrichment.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -105,6 +105,8 @@
     <criterion testable="true">Given a measured category, when listed, then its recall, set size and date show against the floor (D-49); negative: no confidence calibration is shown.</criterion>
     <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2038 merged `6b20467f4` into docs/ontology-platform-design. Classification admin (slice c): category list with references, volume and recall; guidance edits, On/Off (with a confirmation when a rule reads the category) and rename, all written as the caller (D-22). A rename is refused (409) when a rule references the category, the category is routed, or the name is taken; it is refused as unverifiable unless the caller's read of sprk_policy and sprk_policyversion is covered row by row (unconditional Global, or unconditional Deep on the root BU). Reviews: Opus pass 1, fix round 1, Sonnet re-check plus uac-r2 (found the per-row BU and RecordFilterId fail-open), fix round 2 with a seeding proof, uac-r2 OK. Pending owner: alternate key on sprk_triagecategory.sprk_name (schema). Known limits: notes sections 6 and 10.3.</completion>
 
   <notes>spec.md FR-59; D-22; reconciliation M-10, C-16; #41, #44.</notes>
 
