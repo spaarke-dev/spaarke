@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — Guard: no `python3` where it is the Windows Store stub (FAILURE-MODES G-22)
+
+Third occurrence of the `python3` Store-stub hang: another session's `python3 -` call spun at 100% CPU for 76 minutes. The rule "use `python`" had been prose only.
+
+- **`scripts/quality/guard-python3-stub.py`** (new PreToolUse hook on `Bash|PowerShell`, registered in `.claude/settings.json`): denies `python3` in command position when it resolves into `WindowsApps`, and tells the agent to use `python`. It does nothing where `python3` is real. Quoted text, heredoc and here-string bodies, comments and arguments are ignored. About 0.25 s; fails open.
+- **Controls**: `scripts/quality/tests/test_guard_python3_stub.py` (18 must-fire, 30 must-not-fire including multi-line commit messages and PR bodies, a 3 s budget), picked up by the existing CI job `agent-guard-tests`.
+- **`.claude/FAILURE-MODES.md`**: G-22.
+
+---
 ###### 2026-10-15 — CI polling with `gh --jq`; lint hook skips the `python3` Store stub
 
 A `/worktree-sync` CI wait failed silently. The agent piped `gh pr checks` into `jq`, which is not installed in Git Bash here. The loop read the empty result as "pending" and used up its 30-minute window without reading a check.

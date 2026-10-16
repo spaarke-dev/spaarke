@@ -287,6 +287,14 @@ export { AnalysisHubWidget } from './widgets/workspace/AnalysisHubWidget';
 export type { AnalysisHubWidgetData } from './widgets/workspace/AnalysisHubWidget';
 
 // ---------------------------------------------------------------------------
+// Worklist lookup (ontology task 156): the decision wizard's Person / Lookup search over Dataverse
+// (contacts, sprk_budget, sprk_organization). Exported so LegalWorkspace's `worklist` section shim can
+// fill `WorklistWidget`'s `lookup` slot exactly as `WorklistWorkspaceWidget` does.
+// ---------------------------------------------------------------------------
+export { createWorklistLookup } from './widgets/workspace/worklistLookup';
+export type { WorklistLookupDataSource } from './widgets/workspace/worklistLookup';
+
+// ---------------------------------------------------------------------------
 // Widgets: DocumentUploadWizardWidget — embedded document upload (AIPU2-104)
 //
 // Three-step file upload flow (Select → Details → Review & Upload) embedded
