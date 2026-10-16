@@ -229,6 +229,19 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task External_firms_are_those_of_the_callers_own_contact()
+    {
+        // Another contact, with collaborate on the same matter, belongs to no firm: the filter reads the caller's memberships, nobody else's.
+        _resolver.Principal = Collaborator(AccessRights.Read | AccessRights.Create, contactId: Guid.NewGuid());
+
+        var response = await PostExternalAsync(Form(), $"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmForbidden);
+        NothingWritten();
+    }
+
+    [Fact]
     public async Task External_caller_in_two_firms_must_name_one()
     {
         _participations.Firms = new[] { FirmId, OtherFirmId };
@@ -410,6 +423,23 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task External_reads_that_fault_are_503_record_unavailable_not_a_500_or_a_404()
+    {
+        _h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+        _h.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+
+        var one = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{Guid.NewGuid()}");
+        var list = await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions");
+
+        one.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(one)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        list.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(list)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    [Fact]
     public async Task External_list_is_200_and_empty_for_a_caller_with_no_firm()
     {
         _participations.Firms = Array.Empty<Guid>();
@@ -492,6 +522,33 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Internal_get_whose_read_faults_is_503_record_unavailable()
+    {
+        var id = Guid.NewGuid();
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, id, AccessRights.Read);
+        _h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    [Fact]
+    public async Task Internal_submit_whose_firm_read_faults_is_503_firm_unverifiable()
+    {
+        GrantInternalSubmit();
+        _h.FirmReadFailure = new TimeoutException("throttled");
+
+        var response = await PostInternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        NothingWritten();
+    }
+
+    [Fact]
     public async Task Internal_get_without_read_on_the_submission_is_404()
     {
         var id = Guid.NewGuid();
@@ -526,7 +583,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         public bool Unreadable { get; set; }
 
+        /// <summary>The memberships of the test contact only; any other contact belongs to no firm (so a filter that read the wrong contact fails).</summary>
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default) =>
-            Task.FromResult(Unreadable ? ActiveOrgMemberships.Failed : new ActiveOrgMemberships(Firms, Firms, false));
+            Task.FromResult(Unreadable ? ActiveOrgMemberships.Failed
+                : contactId == InvoiceSubmissionServiceTests.ContactId ? new ActiveOrgMemberships(Firms, Firms, false)
+                : new ActiveOrgMemberships(Array.Empty<Guid>(), Array.Empty<Guid>(), false));
     }
 }

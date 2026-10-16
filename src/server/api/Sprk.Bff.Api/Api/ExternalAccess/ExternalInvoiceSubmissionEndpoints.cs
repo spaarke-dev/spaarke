@@ -11,6 +11,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -120,12 +121,19 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         var principal = scope.Principal;
-        var views = await service.ListAsync(
-            scope.FirmIds,
-            principal.AccessibleMatterIds,
-            principal.GetAccessibleProjectIds().ToList(),
-            principal.AccessibleWorkAssignmentIds,
-            ct);
-        return Results.Ok(views);
+        try
+        {
+            var views = await service.ListAsync(
+                scope.FirmIds,
+                principal.AccessibleMatterIds,
+                principal.GetAccessibleProjectIds().ToList(),
+                principal.AccessibleWorkAssignmentIds,
+                ct);
+            return Results.Ok(views);
+        }
+        catch (SdapProblemException ex)
+        {
+            return InvoiceSubmissionEndpoints.ReadFault(ex);
+        }
     }
 }

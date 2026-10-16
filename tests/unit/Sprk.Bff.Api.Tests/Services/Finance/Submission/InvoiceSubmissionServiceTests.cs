@@ -13,6 +13,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -30,7 +31,9 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// </summary>
 /// <remarks>
 /// Maintain-class (ADR-038): these are the intake guarantees every channel relies on. Dataverse, SPE, the allocator and the queue are
-/// substituted at their narrow seams; the validation, the 013 guard and the orchestration are real.
+/// substituted at their narrow seams; the validation, the 013 guard and the orchestration are real. Each write double behaves like the
+/// real service it stands in for: it commits first, then fails or honours the token, so a "failure" can leave a committed write behind
+/// whose reply never arrived.
 /// </remarks>
 public sealed class InvoiceSubmissionServiceTests
 {
@@ -73,6 +76,8 @@ public sealed class InvoiceSubmissionServiceTests
         public readonly List<(Guid SubmissionId, Guid FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
         public readonly List<JobContract> JobsSent = new();
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
+        public readonly List<string> PathLookups = new();
+        public readonly List<CancellationToken> WriteTokens = new();
 
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
         public ContainerDecision Container = new(ContainerDecisionOutcome.ResolvedFallback, Drive);
@@ -85,6 +90,10 @@ public sealed class InvoiceSubmissionServiceTests
         public Exception? DocumentCreateFailure;
         public Exception? DocumentUpdateFailure;
         public Exception? AllocatorFailure;
+        public Exception? UploadFailure;
+        public Exception? ExternalCreateFailure;
+        public Exception? FirmReadFailure;
+        public Action? OnUpload;
 
         public int Writes => Uploads.Count + DocumentCreates.Count + ExternalCreates.Count + Allocations.Count + JobsSent.Count;
 
@@ -99,9 +108,17 @@ public sealed class InvoiceSubmissionServiceTests
                 new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
                 null!);
             Spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken _) =>
+                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken ct) =>
                 {
                     Uploads.Add((drive, name, conflict));
+                    WriteTokens.Add(ct);
+                    OnUpload?.Invoke();
+                    if (UploadFailure is not null)
+                    {
+                        throw UploadFailure;
+                    }
+
+                    ct.ThrowIfCancellationRequested();
                     return new FileHandleDto("item-1", name, null, content.Length, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, "https://web/item-1", drive);
                 });
             Spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -110,38 +127,58 @@ public sealed class InvoiceSubmissionServiceTests
                     FileDeletes.Add((drive, item));
                     return true;
                 });
+            // The item an upload committed sits at its path whether or not the upload's reply arrived.
+            Spe.Setup(s => s.GetDriveItemByPathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string drive, string path, CancellationToken _) =>
+                {
+                    PathLookups.Add(path);
+                    return Uploads.Any(u => u.Drive == drive && u.Name == path)
+                        ? new SpeDriveItemSummary("item-1", path, null, null, null, "application/pdf", null, null, null)
+                        : null;
+                });
 
             ExternalData = new Mock<ExternalDataService>(
                 new HttpClient(), new ConfigurationBuilder().Build(), Mock.Of<TokenCredential>(), NullLogger<ExternalDataService>.Instance, null!, null!);
             ExternalData.Setup(x => x.CreateDocumentAsync(
                     It.IsAny<ExternalDataService.DocumentParentKind>(), It.IsAny<Guid>(), It.IsAny<ExternalUploadedFilePointers>(), It.IsAny<Guid>(),
                     It.IsAny<CallerPrincipal>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((ExternalDataService.DocumentParentKind kind, Guid parent, ExternalUploadedFilePointers pointers, Guid team, CallerPrincipal _, CancellationToken _) =>
+                .ReturnsAsync((ExternalDataService.DocumentParentKind kind, Guid parent, ExternalUploadedFilePointers pointers, Guid team, CallerPrincipal _, CancellationToken ct) =>
                 {
                     ExternalCreates.Add((kind, parent, pointers, team));
+                    WriteTokens.Add(ct);
+                    if (ExternalCreateFailure is not null)
+                    {
+                        throw ExternalCreateFailure;
+                    }
+
+                    ct.ThrowIfCancellationRequested();
                     return new ExternalDocumentDto { SprkDocumentid = DocumentId.ToString() };
                 });
 
             Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((CreateDocumentRequest r, CancellationToken _) =>
+                .ReturnsAsync((CreateDocumentRequest r, CancellationToken ct) =>
                 {
+                    DocumentCreates.Add(r);
+                    WriteTokens.Add(ct);
                     if (DocumentCreateFailure is not null)
                     {
                         throw DocumentCreateFailure;
                     }
 
-                    DocumentCreates.Add(r);
+                    ct.ThrowIfCancellationRequested();
                     return DocumentId.ToString();
                 });
             Documents.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Returns((string id, UpdateDocumentRequest r, CancellationToken _) =>
+                .Returns((string id, UpdateDocumentRequest r, CancellationToken ct) =>
                 {
+                    WriteTokens.Add(ct);
                     if (DocumentUpdateFailure is not null)
                     {
                         throw DocumentUpdateFailure;
                     }
 
                     DocumentUpdates.Add((id, r));
+                    ct.ThrowIfCancellationRequested();
                     return Task.CompletedTask;
                 });
 
@@ -151,10 +188,23 @@ public sealed class InvoiceSubmissionServiceTests
             Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity switch
                 {
-                    "sprk_organization" => Firm!,
+                    "sprk_organization" => FirmReadFailure is { } firmFailure ? throw firmFailure : Firm!,
                     "sprk_matter" => MatterReadFailure is { } failure ? throw failure : Matter!,
                     "sprk_invoicesubmission" => Submission!,
                     _ => null!,
+                });
+            // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.
+            Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                {
+                    var collection = new EntityCollection();
+                    if (q.EntityName == "sprk_document"
+                        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid" && c.Values.Contains("item-1")))
+                    {
+                        collection.Entities.AddRange(ExternalCreates.Select(_ => new Entity("sprk_document", DocumentId)));
+                    }
+
+                    return collection;
                 });
             Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Callback((string entity, Guid id, CancellationToken _) => Deleted.Add((entity, id)))
@@ -169,10 +219,17 @@ public sealed class InvoiceSubmissionServiceTests
 
             Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
                     It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+                .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
                 {
                     Allocations.Add((id, firm, number, fields));
-                    return AllocatorFailure is { } failure ? throw failure : Allocation;
+                    WriteTokens.Add(ct);
+                    if (AllocatorFailure is { } failure)
+                    {
+                        throw failure;
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    return Allocation;
                 });
 
             var sbOptions = Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions
@@ -183,14 +240,16 @@ public sealed class InvoiceSubmissionServiceTests
             });
             Jobs = new Mock<JobSubmissionService>(sbOptions, Mock.Of<ILogger<JobSubmissionService>>(), new Mock<ServiceBusClient>().Object);
             Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-                .Returns((JobContract job, CancellationToken _) =>
+                .Returns((JobContract job, CancellationToken ct) =>
                 {
+                    WriteTokens.Add(ct);
                     if (JobFailure is not null)
                     {
                         throw JobFailure;
                     }
 
                     JobsSent.Add(job);
+                    ct.ThrowIfCancellationRequested();
                     return Task.CompletedTask;
                 });
         }
@@ -421,6 +480,17 @@ public sealed class InvoiceSubmissionServiceTests
     }
 
     [Fact]
+    public async Task A_firm_that_cannot_be_read_is_503_firm_unverifiable_not_a_500()
+    {
+        var h = new Harness { FirmReadFailure = new TimeoutException("throttled") };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 503 && o.ErrorCode == InvoiceSubmissionErrors.FirmUnverifiable);
+        h.Writes.Should().Be(0);
+    }
+
+    [Fact]
     public async Task A_core_record_that_does_not_exist_is_422_and_one_that_cannot_be_read_is_503()
     {
         var missing = new Harness { Matter = null };
@@ -531,22 +601,93 @@ public sealed class InvoiceSubmissionServiceTests
     }
 
     [Fact]
-    public async Task A_cancelled_request_is_compensated_and_rethrown()
+    public async Task An_internal_document_create_carries_its_id_so_a_create_whose_reply_is_lost_is_deleted_by_it()
+    {
+        var h = new Harness { DocumentCreateFailure = new TimeoutException("the create timed out after Dataverse committed it") };
+
+        var outcome = await h.Build().SubmitAsync(Internal(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
+        var presetId = h.DocumentCreates.Should().ContainSingle().Subject.Id;
+        presetId.Should().NotBeNull().And.NotBe(Guid.Empty);
+        h.Deleted.Should().Equal(("sprk_document", presetId!.Value));
+        h.FileDeletes.Should().Equal((Drive, "item-1"));
+    }
+
+    [Fact]
+    public async Task A_spa_document_create_whose_reply_is_lost_is_found_by_its_file_and_deleted()
+    {
+        // The external create mints the id itself; the committed row carries the uploaded item.
+        var h = new Harness { ExternalCreateFailure = new TimeoutException("the create timed out after Dataverse committed it") };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
+        h.Deleted.Should().Equal(("sprk_document", DocumentId));
+        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_upload_whose_reply_is_lost_is_found_by_its_path_and_deleted()
+    {
+        var h = new Harness { UploadFailure = new TimeoutException("the PUT timed out after Graph stored the bytes") };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 500 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
+        h.PathLookups.Should().Equal(h.Uploads.Single().Name);
+        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.ExternalCreates.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_upload_answered_409_by_a_retried_put_removes_its_own_file_and_refuses()
+    {
+        // The name carries the submission id, so a 409 means this request's own first PUT committed and the handler's retry collided with it.
+        var h = new Harness { UploadFailure = new SpaarkeStorageException("nameAlreadyExists", 409) };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 409 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
+        h.PathLookups.Should().Equal(h.Uploads.Single().Name);
+        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.ExternalCreates.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task A_caller_who_disconnects_mid_write_gets_a_complete_submission_not_orphans(InvoiceSubmissionChannel channel)
+    {
+        // The tab closes while the bytes upload. Every later write still runs to the end: an abandoned write may commit with its reply
+        // (the id compensation would need) lost.
+        var h = new Harness();
+        using var cts = new CancellationTokenSource();
+        h.OnUpload = cts.Cancel;
+
+        var outcome = await h.Build().SubmitAsync(channel == InvoiceSubmissionChannel.Spa ? Spa() : Internal(), cts.Token);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.JobsSent.Should().ContainSingle();
+        h.Deleted.Should().BeEmpty();
+        h.FileDeletes.Should().BeEmpty();
+        h.WriteTokens.Should().HaveCount(5).And.OnlyContain(t => !t.CanBeCanceled, "no write observes the caller's token");
+    }
+
+    [Fact]
+    public async Task A_caller_already_gone_before_the_upload_writes_nothing()
     {
         var h = new Harness();
         using var cts = new CancellationTokenSource();
-        h.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Returns(() =>
-            {
-                cts.Cancel();
-                throw new OperationCanceledException(cts.Token);
-            });
+        cts.Cancel();
 
         var act = () => h.Build().SubmitAsync(Spa(), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        h.Deleted.Select(d => d.Entity).Should().Equal("sprk_invoicesubmission", "sprk_document");
-        h.FileDeletes.Should().ContainSingle();
+        h.Writes.Should().Be(0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -583,6 +724,23 @@ public sealed class InvoiceSubmissionServiceTests
         };
 
         InvoiceSubmissionService.ToView(row).CoreRecord.Should().BeNull("no route can scope an FR-05 violation to a caller");
+    }
+
+    [Fact]
+    public async Task A_read_fault_is_a_503_problem_never_a_500_or_not_found()
+    {
+        var h = new Harness();
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+        var service = h.Build();
+
+        (await service.Invoking(s => s.GetAsync(Guid.NewGuid(), CancellationToken.None)).Should().ThrowAsync<SdapProblemException>())
+            .Which.Should().Match<SdapProblemException>(e => e.StatusCode == 503 && e.Code == InvoiceSubmissionErrors.CoreRecordUnavailable);
+        (await service.Invoking(s => s.ListAsync(new[] { FirmId }, new[] { MatterId }, Array.Empty<Guid>(), Array.Empty<Guid>(), CancellationToken.None))
+                .Should().ThrowAsync<SdapProblemException>())
+            .Which.StatusCode.Should().Be(503);
     }
 
     [Fact]

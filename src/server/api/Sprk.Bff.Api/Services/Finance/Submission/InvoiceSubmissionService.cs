@@ -28,6 +28,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// (number, file, firm, core-record fields, owner, container), then the bytes, then the rows, then the job. A failure after the upload is
 /// compensated in reverse order with its own token, so it leaves no Received submission behind (acceptance criterion 7). A compensation that
 /// itself fails is logged and never masks the original failure.</para>
+/// <para><b>The writes ignore the caller's token.</b> From the upload to the enqueue every call runs under <see cref="CancellationToken.None"/>:
+/// Graph, Dataverse and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply (the id
+/// compensation needs) is lost. A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans.
+/// A caller already gone before the first write writes nothing.</para>
 /// <para><b>Only creator of submissions.</b> The row is created by <see cref="ITrackingNumberAllocator"/> with its number already set (D-87); the
 /// submission id is minted here once per request and is also the job's idempotency key. This service never creates <c>sprk_invoice</c> (task 049
 /// does).</para>
@@ -130,10 +134,14 @@ public class InvoiceSubmissionService
         }
 
         // ── 2. Reads that decide whether anything may be written ──
-        if (!await IsActiveFirmAsync(request.FirmId, ct))
+        switch (await IsActiveFirmAsync(request.FirmId, ct))
         {
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid,
-                "The firm was not found or is not active.");
+            case null:
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly.");
+            case false:
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid,
+                    "The firm was not found or is not active.");
         }
 
         var row = new Entity(SubmissionEntity);
@@ -257,7 +265,8 @@ public class InvoiceSubmissionService
             && file.Content.AsSpan().StartsWith(PdfSignature);
     }
 
-    private async Task<bool> IsActiveFirmAsync(Guid firmId, CancellationToken ct)
+    /// <summary>True for an active firm, false for a missing or inactive one, null when it could not be read (a fault is never "no firm").</summary>
+    private async Task<bool?> IsActiveFirmAsync(Guid firmId, CancellationToken ct)
     {
         try
         {
@@ -267,6 +276,11 @@ public class InvoiceSubmissionService
         catch (Exception ex) when (IsNotFound(ex))
         {
             return false;
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Invoice submission refused: firm {FirmId} could not be read", firmId);
+            return null;
         }
     }
 
@@ -279,20 +293,28 @@ public class InvoiceSubmissionService
         var core = request.CoreRecord;
         var submissionId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
+
+        // 1. The bytes go under a flat name unique to this submission (two firms' "invoice.pdf" never collide; Fail never overwrites). The
+        //    name carries the submission id, so whatever sits at it can only be this request's own upload.
+        var uploadPath = SpeUploadPath.SanitizeFileName(UploadName(file.FileName, submissionId));
+        string? uploadAttemptedAt = null;
         string? uploadedItemId = null;
         Guid? documentId = null;
-        // True from the moment the allocator is asked: a create whose reply is lost (timeout, cancellation) may have committed the row, so
-        // compensation deletes it by its id whenever it MAY exist (a delete of an absent row is ignored).
+        // True from the moment the allocator is asked: a create whose reply is lost (a timeout) may have committed the row, so compensation
+        // deletes it by its id whenever it MAY exist (a delete of an absent row is ignored).
         var submissionMayExist = false;
+
+        // A caller already gone writes nothing; from here on no write observes the caller's token (see the remarks).
+        ct.ThrowIfCancellationRequested();
+        var write = CancellationToken.None;
 
         try
         {
-            // 1. The bytes, under a flat name unique to this submission (two firms' "invoice.pdf" never collide; Fail never overwrites).
-            var uploadPath = SpeUploadPath.SanitizeFileName(UploadName(file.FileName, submissionId));
             FileHandleDto? uploaded;
             await using (var content = new MemoryStream(file.Content, writable: false))
             {
-                uploaded = await _spe.UploadSmallAsync(driveId, uploadPath, content, ConflictBehavior.Fail, ct);
+                uploadAttemptedAt = uploadPath;
+                uploaded = await _spe.UploadSmallAsync(driveId, uploadPath, content, ConflictBehavior.Fail, write);
             }
 
             if (uploaded is null)
@@ -302,10 +324,12 @@ public class InvoiceSubmissionService
 
             uploadedItemId = uploaded.Id;
 
-            // 2. The document row, linked to the core record, then typed Invoice. The id is held as soon as the row exists, so a failed
-            //    follow-up update is compensated too.
-            documentId = await CreateDocumentRowAsync(request, uploaded, driveId, file, owner, ct);
-            await CompleteDocumentRowAsync(request, documentId.Value, uploaded, driveId, file, ct);
+            // 2. The document row, linked to the core record, then typed Invoice. Internal: the id is chosen here and sent with the create,
+            //    so a create whose reply is lost is still deleted by it. SPA: the external create mints the id; a lost reply is found by
+            //    the uploaded item instead (CompensateAsync). Either way a failed follow-up update is compensated too.
+            documentId = request.Channel == InvoiceSubmissionChannel.Spa ? null : Guid.NewGuid();
+            documentId = await CreateDocumentRowAsync(request, documentId, uploaded, driveId, file, owner, write);
+            await CompleteDocumentRowAsync(request, documentId.Value, uploaded, driveId, file, write);
 
             // 3. The submission, created with its tracking number (D-87).
             foreach (var (column, value) in resolverFields.ToFields())
@@ -340,18 +364,18 @@ public class InvoiceSubmissionService
             }
 
             submissionMayExist = true;
-            var allocation = await _allocator.CreateSubmissionAsync(submissionId, request.FirmId, number, row.Attributes.ToDictionary(), ct);
+            var allocation = await _allocator.CreateSubmissionAsync(submissionId, request.FirmId, number, row.Attributes.ToDictionary(), write);
             if (!allocation.Succeeded)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 // A refusal creates nothing (TrackingNumberAllocator: the bound was reached without a create).
-                await CompensateAsync(submissionId, submissionMayExist: false, documentId, driveId, uploadedItemId);
+                await CompensateAsync(submissionId, submissionMayExist: false, documentId, driveId, uploadedItemId, uploadAttemptedAt);
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
 
             // 4. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
-            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), ct);
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), write);
 
             _logger.LogInformation(
                 "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; job {JobId} enqueued",
@@ -360,23 +384,19 @@ public class InvoiceSubmissionService
 
             return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, documentId.Value));
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Invoice submission {SubmissionId} cancelled by the caller; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId);
-            throw;
-        }
         catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict && uploadedItemId is null)
         {
-            // The name is unique to this submission, so a collision means the same request raced itself; nothing was written.
-            _logger.LogWarning("Invoice submission {SubmissionId}: the upload name was already taken; nothing was written", submissionId);
+            // The name carries this submission's id, so the file holding it is this request's own: the PUT committed, its reply was lost
+            // and the Graph handler's retry was answered 409. Remove it (found by its path) and refuse; nothing else was written yet.
+            _logger.LogWarning("Invoice submission {SubmissionId}: the upload was answered 409 (a retried PUT); removing the file it left", submissionId);
+            await CompensateAsync(submissionId, submissionMayExist: false, documentId: null, driveId, itemId: null, uploadAttemptedAt);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.Failed,
-                "The invoice could not be stored because a file with the same name exists. Nothing was saved; try again.");
+                "The invoice could not be stored. Nothing was saved; try again.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId} failed; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId);
+            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId, uploadAttemptedAt);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
                 "The invoice could not be submitted and nothing was saved. Try again; if it keeps failing, contact support.");
         }
@@ -384,10 +404,11 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// Creates the document row. SPA: the external surface's create (<see cref="ExternalDataService.CreateDocumentAsync"/>), which binds the core
-    /// record, the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person.
+    /// record, the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person
+    /// and the id this service chose (<see cref="CreateDocumentRequest.Id"/>).
     /// </summary>
     private async Task<Guid> CreateDocumentRowAsync(
-        InvoiceSubmissionRequest request, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file,
+        InvoiceSubmissionRequest request, Guid? presetId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file,
         RecordOwnerResolution owner, CancellationToken ct)
     {
         var core = request.CoreRecord;
@@ -405,6 +426,7 @@ public class InvoiceSubmissionService
 
         return Guid.Parse(await _documents.CreateDocumentAsync(new CreateDocumentRequest
         {
+            Id = presetId,
             Name = uploaded.Name,
             ContainerId = driveId,
             OwningTeamId = owner.OwningTeamId,
@@ -471,8 +493,23 @@ public class InvoiceSubmissionService
     }
 
     /// <summary>Best effort, reverse order, own token: a failed compensation is logged and never masks the original failure.</summary>
-    private async Task CompensateAsync(Guid submissionId, bool submissionMayExist, Guid? documentId, string driveId, string? itemId)
+    /// <param name="uploadPath">The path an upload was attempted at (null when none was). With no <paramref name="itemId"/> the upload's reply
+    /// never arrived, so the item is looked up by this path: the name carries the submission id, so anything there is this request's own.</param>
+    private async Task CompensateAsync(
+        Guid submissionId, bool submissionMayExist, Guid? documentId, string driveId, string? itemId, string? uploadPath)
     {
+        if (itemId is null && uploadPath is not null)
+        {
+            try
+            {
+                itemId = (await _spe.GetDriveItemByPathAsync(driveId, uploadPath, CancellationToken.None))?.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up the uploaded file by its path", submissionId);
+            }
+        }
+
         if (submissionMayExist)
         {
             try
@@ -491,13 +528,24 @@ public class InvoiceSubmissionService
 
         if (documentId is { } doc)
         {
+            await DeleteDocumentAsync(submissionId, doc);
+        }
+        else if (itemId is not null)
+        {
+            // No id came back from the document create (a lost reply on the SPA path, which mints the id itself): the row, if it was
+            // committed, carries the uploaded item in sprk_graphitemid.
             try
             {
-                await _entities.DeleteAsync(DocumentEntity, doc, CancellationToken.None);
+                var query = new QueryExpression(DocumentEntity) { ColumnSet = new ColumnSet(false), TopCount = 5 };
+                query.Criteria.AddCondition("sprk_graphitemid", ConditionOperator.Equal, itemId);
+                foreach (var row in (await _entities.RetrieveMultipleAsync(query, CancellationToken.None)).Entities)
+                {
+                    await DeleteDocumentAsync(submissionId, row.Id);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete document {DocumentId}", submissionId, doc);
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up a document for the uploaded file", submissionId);
             }
         }
 
@@ -514,11 +562,30 @@ public class InvoiceSubmissionService
         }
     }
 
+    private async Task DeleteDocumentAsync(Guid submissionId, Guid documentId)
+    {
+        try
+        {
+            await _entities.DeleteAsync(DocumentEntity, documentId, CancellationToken.None);
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            // A create whose reply was lost went the other way (the preset id was never committed). Nothing to remove.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete document {DocumentId}", submissionId, documentId);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Read (app-only; the routes scope before they return anything)
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>One submission, read app-only; null when it does not exist. The caller's route decides whether the caller may see it.</summary>
+    /// <summary>
+    /// One submission, read app-only; null when it does not exist. The caller's route decides whether the caller may see it. A read fault
+    /// throws <see cref="ReadUnavailable"/> (503, retryable), never a 500 and never "not found".
+    /// </summary>
     public virtual async Task<InvoiceSubmissionView?> GetAsync(Guid submissionId, CancellationToken ct)
     {
         if (submissionId == Guid.Empty)
@@ -535,11 +602,22 @@ public class InvoiceSubmissionService
         {
             return null;
         }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Invoice submission {SubmissionId} could not be read", submissionId);
+            throw ReadUnavailable();
+        }
     }
+
+    /// <summary>The 503 a read fault becomes (<see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>); the routes render it.</summary>
+    internal static SdapProblemException ReadUnavailable() => new(
+        InvoiceSubmissionErrors.CoreRecordUnavailable, "Invoice submissions unavailable",
+        "Invoice submissions could not be read right now. Try again shortly.", StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>
     /// The newest submissions of <paramref name="firmIds"/> filed against any of the given core records, newest first, at most
-    /// <see cref="MaxListSize"/>. Read app-only; the scope IS the query (a record outside the sets is never read).
+    /// <see cref="MaxListSize"/>. Read app-only; the scope IS the query (a record outside the sets is never read). A read fault throws
+    /// <see cref="ReadUnavailable"/>.
     /// </summary>
     public virtual async Task<IReadOnlyList<InvoiceSubmissionView>> ListAsync(
         IReadOnlyCollection<Guid> firmIds,
@@ -567,7 +645,17 @@ public class InvoiceSubmissionService
                 query.Criteria.AddCondition(column, ConditionOperator.In, chunk.Cast<object>().ToArray());
                 query.AddOrder("createdon", OrderType.Descending);
 
-                var page = await _entities.RetrieveMultipleAsync(query, ct);
+                EntityCollection page;
+                try
+                {
+                    page = await _entities.RetrieveMultipleAsync(query, ct);
+                }
+                catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+                {
+                    _logger.LogWarning(ex, "Invoice submissions could not be listed");
+                    throw ReadUnavailable();
+                }
+
                 foreach (var row in page.Entities)
                 {
                     found[row.Id] = ToView(row);
@@ -628,6 +716,8 @@ public class InvoiceSubmissionService
             CreatedOn = row.GetAttributeValue<DateTime?>("createdon"),
         };
     }
+
+    private static bool IsCallerCancellation(Exception ex, CancellationToken ct) => ex is OperationCanceledException && ct.IsCancellationRequested;
 
     private static bool IsNotFound(Exception ex)
     {

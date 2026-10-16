@@ -1,6 +1,7 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -217,7 +218,17 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
         }
 
-        var view = await _submissions.GetAsync(submissionId, http.RequestAborted);
+        InvoiceSubmissionView? view;
+        try
+        {
+            view = await _submissions.GetAsync(submissionId, http.RequestAborted);
+        }
+        catch (SdapProblemException ex)
+        {
+            // A read fault is 503 (retryable), never a 500 and never the not-found 404.
+            return (null, InvoiceSubmissionEndpoints.ReadFault(ex));
+        }
+
         if (view is not { FirmId: { } firmId, CoreRecord: { } core }
             || !firms.Contains(firmId)
             || !principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))

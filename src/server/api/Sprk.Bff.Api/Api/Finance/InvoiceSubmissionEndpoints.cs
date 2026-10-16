@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -171,9 +172,19 @@ public static class InvoiceSubmissionEndpoints
 
     private static async Task<IResult> GetAsync(Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
     {
-        var view = await service.GetAsync(id, ct);
-        return view is null ? FinanceAuthorizationFilter.UniformRecordNotFound(http) : Results.Ok(view);
+        try
+        {
+            var view = await service.GetAsync(id, ct);
+            return view is null ? FinanceAuthorizationFilter.UniformRecordNotFound(http) : Results.Ok(view);
+        }
+        catch (SdapProblemException ex)
+        {
+            return ReadFault(ex);
+        }
     }
+
+    /// <summary>A read fault of the service (<see cref="InvoiceSubmissionService.ReadUnavailable"/>, 503) in this feature's problem shape.</summary>
+    internal static IResult ReadFault(SdapProblemException ex) => Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Shared with the external route
