@@ -24,7 +24,7 @@ import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/u
 import type { DataGridConfiguration } from '../../../Spaarke.UI.Components/src/types/DataGridConfiguration';
 import type { SavedQueryResult } from '../../../Spaarke.UI.Components/src/services/IDataverseClient';
 
-// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet and HighPrioritySection render their row menu through the
+// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet renders its row menu through the
 // shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
 // a stub would hide the menu behaviour these suites assert.
 export { RowActionMenu } from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';

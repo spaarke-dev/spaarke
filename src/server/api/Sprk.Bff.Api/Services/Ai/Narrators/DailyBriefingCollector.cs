@@ -177,6 +177,15 @@ public class DailyBriefingCollector : ICodedWorkflow
     internal const string ChannelMatters = "matters";
     internal const string ChannelProjects = "projects";
     internal const string ChannelTodos = "to-dos";
+    /// <summary>The failed-channel code for the monitored-records subscription count (task 062); not a channel of items.</summary>
+    internal const string ChannelMonitored = "monitored";
+    /// <summary>
+    /// The category the narrative counts monitored records with recent activity under (task 062, BR-3). The count is the monitored
+    /// records MODIFIED WITHIN the recency window, not the number of records the user monitors, so the label says so with the real
+    /// window (<paramref name="recencyHours"/> is the setting the count was taken with) and the narrative cannot read it as a total.
+    /// </summary>
+    internal static string MonitoredCategoryLabel(int recencyHours) =>
+        $"Monitored records changed in the last {recencyHours} {(recencyHours == 1 ? "hour" : "hours")}";
 
     // Per-channel row caps (defensive — large result sets degrade narrator quality
     // before they cost LLM tokens). Operator may tune later via config table (deferred
@@ -372,8 +381,11 @@ public class DailyBriefingCollector : ICodedWorkflow
     // 152 this was an org-wide, app-only scan returning every flagged record in the tenant, with names and
     // descriptions, to every caller (owner escalation (b): narrowed to the caller's people-targeted set).
     //
-    // No LLM call — widget renders as a compact list of clickable record refs.
-    // Ordered by due date ascending (undated items last).
+    // Task 062 (FR-31, FR-32, BR-3): this is NO LONGER a list. "Critical Today" is retired as a surface; nothing it meant is lost:
+    //   - sprk_highpriority is a RANK INPUT — the second key of the worklist read route's order (D-42, SignalReadService).
+    //   - sprk_monitor is a SUBSCRIPTION to Know — the narrative counts monitored records with recent activity
+    //     (WithMonitoredSubscription), and DailyBriefingSuggestionProducer reads the same items for proactive suggestions.
+    // Neither flag makes a Work Item: a flag says someone cares, not what is wrong (row-contract requirement 4).
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1283,8 +1295,9 @@ public class DailyBriefingCollector : ICodedWorkflow
 
     /// <summary>
     /// Project the 6 channel item arrays into the request shape the narrator consumes.
-    /// Empty channels are filtered (no point narrating a 0-item bucket). Priority items
-    /// = top overdue tasks + top upcoming tasks (most urgent surface first).
+    /// Empty channels are filtered (no point narrating a 0-item bucket). Task 062 (FR-34): NO priority
+    /// items are named — the narrative SUMMARISES Do volume (the category counts) rather than listing it,
+    /// and the model never picks a "top action": the first worklist row is the top action.
     /// </summary>
     private static DailyBriefingNarrateRequest BuildNarrateRequest(
         BriefingItem[] upcomingTasks,
@@ -1323,17 +1336,8 @@ public class DailyBriefingCollector : ICodedWorkflow
             new NotificationCategoryDto { Name = "To Dos",         Count = todos.Length,         UnreadCount = todos.Length },
         }.Where(c => c.Count > 0).ToArray();
 
-        // Priority items = top overdue (most urgent) + top upcoming.  Surface a small set
-        // so the narrator can construct a focused "top action" sentence.
-        var priorityItems = overdueTasks.Take(3)
-            .Concat(upcomingTasks.Take(3))
-            .Select(i => new PriorityItemDto
-            {
-                Category = "Tasks",
-                Title = i.Title,
-                DueDate = i.DueDate
-            })
-            .ToArray();
+        // Task 062 (FR-34): Do volume is SUMMARISED by the category counts above, never listed — no named priority items.
+        var priorityItems = Array.Empty<PriorityItemDto>();
 
         var channels = new[]
         {
@@ -1428,13 +1432,13 @@ public class DailyBriefingCollector : ICodedWorkflow
             .Take(TldrFactsMaxKeyDates)
             .ToArray();
 
-        // Record names: the bounded set of names the TL;DR is permitted to reference. Priority-
-        // item titles first (already curated + most likely to be worth naming), then the
-        // regarding/record names surfaced across channels — deduplicated and capped so a
-        // 50-row channel does not dump every record name into the LLM call.
+        // Record names: the bounded set of names the TL;DR is permitted to reference. Task 062 (FR-34): the Do channels (tasks,
+        // To Dos) contribute COUNTS only — the narrative summarises Do volume, it never lists those items — so only the
+        // Know channels' (documents, matters, projects) regarding/record names, and any caller-supplied priority-item titles,
+        // are nameable. Deduplicated and capped so a 50-row channel does not dump every record name into the LLM call.
         var recordNames = request.PriorityItems.Select(p => p.Title)
-            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.RegardingName)))
-            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.Title)))
+            .Concat(request.Channels.Where(IsKnowChannel).SelectMany(ch => ch.Items.Select(i => i.RegardingName)))
+            .Concat(request.Channels.Where(IsKnowChannel).SelectMany(ch => ch.Items.Select(i => i.Title)))
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(TldrFactsMaxRecordNames)
@@ -1448,6 +1452,48 @@ public class DailyBriefingCollector : ICodedWorkflow
             KeyDates = keyDates,
             RecordNames = recordNames,
         };
+    }
+
+    /// <summary>Know channels (awareness: something changed, nothing to do) — the only ones whose items the TL;DR may name.</summary>
+    private static bool IsKnowChannel(ChannelNarrationInput channel) =>
+        channel.Category is ChannelDocuments or ChannelMatters or ChannelProjects;
+
+    /// <summary>
+    /// Task 062 (BR-3): <c>sprk_monitor</c> is a SUBSCRIPTION to Know. Adds one category to the narrative request — the number of
+    /// monitored records changed within the recency window — so the narrative can say "2 monitored records changed" without
+    /// listing them. Counts only (no names), and it is NOT added to <see cref="DailyBriefingNarrateRequest.TotalNotificationCount"/>
+    /// (a monitored matter that changed is usually already in the Matters channel). When any flagged-entity read failed the count
+    /// would be an undercount, so NO category is added and the section is reported in <c>FailedChannels</c> instead (task 152:
+    /// "could not be loaded" is never "nothing changed"). Pure: <paramref name="nowUtc"/> is injected.
+    /// </summary>
+    internal static DailyBriefingNarrateRequest WithMonitoredSubscription(
+        DailyBriefingNarrateRequest request,
+        HighPriorityCollection flagged,
+        int recencyHours,
+        DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(flagged);
+
+        if (flagged.FailedEntityTypes.Length > 0)
+        {
+            return request with { FailedChannels = request.FailedChannels.Append(ChannelMonitored).ToArray() };
+        }
+
+        var since = nowUtc - TimeSpan.FromHours(recencyHours);
+        var changed = flagged.Items.Count(i => i.Monitor && i.ModifiedOn is { } m && m >= since);
+        if (changed == 0)
+        {
+            return request;
+        }
+
+        var withCategory = request with
+        {
+            Categories = request.Categories
+                .Append(new NotificationCategoryDto { Name = MonitoredCategoryLabel(recencyHours), Count = changed, UnreadCount = changed })
+                .ToArray(),
+        };
+        return withCategory with { TldrFacts = BuildTldrFacts(withCategory) };
     }
 
     /// <summary>

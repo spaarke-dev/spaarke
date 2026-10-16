@@ -616,13 +616,19 @@ describe('end to end over the route client (the BFF is the only thing the widget
     await userEvent.click(recordButton());
     await waitFor(() => expect(lanesReads).toBe(2));
 
-    const post = calls.find(c => c.method === 'POST');
-    expect(post).toMatchObject({
-      url: `https://bff.test/api/v1/inquiries/${SERVICE_REQUEST_ID}/disposition`,
-      body: { replyCommunicationId: REPLY.newest, disposition: 100000003 },
-    });
-    // Every call went to the BFF.
-    expect(calls.every(c => c.url.startsWith('https://bff.test/api/v1/'))).toBe(true);
+    // The POSTs are exactly two: the Briefing narrative's counts, sent on load (task 062), and the disposition. Nothing else writes.
+    const posts = calls.filter(c => c.method === 'POST');
+    expect(posts.map(c => c.url)).toEqual([
+      'https://bff.test/api/ai/daily-briefing/narrate',
+      `https://bff.test/api/v1/inquiries/${SERVICE_REQUEST_ID}/disposition`,
+    ]);
+    expect(posts[1]).toMatchObject({ body: { replyCommunicationId: REPLY.newest, disposition: 100000003 } });
+    // Every call went to the BFF: the versioned routes, plus the one narrate route.
+    expect(
+      calls.every(
+        c => c.url.startsWith('https://bff.test/api/v1/') || c.url === 'https://bff.test/api/ai/daily-briefing/narrate'
+      )
+    ).toBe(true);
   });
 
   it('shows the 409 reason from a returned problem and keeps the To Do open', async () => {
