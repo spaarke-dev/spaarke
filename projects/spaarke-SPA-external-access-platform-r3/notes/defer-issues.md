@@ -522,6 +522,49 @@ External users cannot submit an invoice through the portal; invoices are created
 
 ---
 
+### ISS-013 — No stamp sets or checks `removeUnverifiedEmailClaim`, which email-bound registration relies on
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (before any customer stamp enables A9 workforce sign-in) |
+| **Filed** | 2026-10-16 |
+| **Source** | Task 047 adversarial review, known limit K1 (`notes/task-047-notes.md:186`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2001 |
+
+**Description**
+
+Task 047's registration endpoint binds a workforce sign-in to an existing contact by the token's `email` claim. That is safe only if `email` is domain-verified. Entra guarantees this only when the app registrations have `authenticationBehaviors.removeUnverifiedEmailClaim = true`. The design (`notes/a9-bff-design.md:77`, `:199`) and the provisioning coordination note (item 6) both say so.
+
+Today nothing sets or checks it on a customer stamp:
+
+- Provisioning has only the coordination note. No handler sets it on the stamp BFF app, and no verification step (H13) reads it back. Checked the provisioning worktree at `241c2a7dc`, 2026-10-16.
+- The BFF does not check it at runtime either.
+
+On dev, R3 task 059 sets it in the same step that makes the BFF app multitenant, so dev is not exposed.
+
+Failure mode: suppose a stamp's BFF app or SPA client is provisioned without the flag. A user in a directory listed in that stamp's `WorkforceIdentity:CustomerTenantIds` whose mail attribute holds an unverified-domain address equal to an existing contact's email can register as that contact. That user then sees that contact's records.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs:253` (`email` claim source)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityBinder.cs` (email match to bind)
+- `projects/customer-provisioning-orchestration-r1/notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md` row 6
+- `projects/spaarke-SPA-external-access-platform-r3/tasks/059-*.poml` (dev setup)
+
+**Suggested fix**
+
+Provisioning H3 sets the flag on the stamp BFF app (get-before-set, read back), and H13 verifies it on the BFF app and the SPA client. Confirm on Learn whether the property is Graph beta only.
+
+Optionally add defence in depth at runtime, independent of app configuration: request the `xms_edov` optional claim and have registration refuse an email match without it. This is a hypothesis; validate the claim's availability first.
+
+**Estimated effort**: provisioning, hours. Runtime check: a day, including tests.
+**Blockers**: none.
+**Related**: ADR-028 A9; R3 tasks 047, 059; customer-provisioning-orchestration-r1 (H3, H13).
+
+---
+
+
 ## Closed
 
 (none)

@@ -232,3 +232,9 @@ Known limits (K, not fixed here):
 - K2: The inactive-contact read is `$top=2`, so with three or more deactivated contacts on one email only two are flagged. The refusal itself is unaffected.
 - K2: When the base binding column is missing, the schema hint names `Set-ContactIdentityBindingSchema.ps1`, but the A9 script is the one that adds the home columns; the operator may need both.
 
+
+## Main session, after merge (2026-10-16)
+
+- Merged into R3 as `176857143` (`--no-ff`; `git merge-tree` dry run clean); the BFF builds with `-warnaserror` and 0 warnings.
+- K1 `removeUnverifiedEmailClaim` (fix-round-1 list): filed as ISS-013, #2001. No stamp sets or checks it (provisioning has only the coordination note, row 6). Dev is covered by task 059, which sets it in the same step that makes the dev BFF app multitenant, so 047 on dev is not exposed before 059.
+- K2 raw tid/oid in logs: no change needed. `.claude/constraints/auth.md:173` requires every authenticated server log to carry `oid` and `tenantId`, so the values are logged by policy, not leaked.
