@@ -101,7 +101,7 @@
   </acceptance-criteria>
 
   <notes>The brief mentions a containerId filter; the files index does carry containerId, but FR-34 scopes by core record, and the documentIds scope built from the core-record query is narrower and already excludes other records — containerId adds nothing and is not used (recorded deviation). RequireEbillingEnabled() is 040's (wave W2-1, not a declared dependency): confirm at Step 0. Parallel group P4-A: own files; FinanceModule.cs and EndpointMappingExtensions.cs are shared append points. UI is 111's. COMPLETED 2026-10-16: see notes/107-related-work-api.md. Built GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (InvoiceRelatedWorkEndpoints + InvoiceRelatedWorkService); candidates from sprk_document (line's own core lookup, sprk_createdbycontact = the timekeeper's linked contact, createdon window +-settings days, cap 50), each put to the caller's own Read (GetCallerRecordAccessAsync on sprk_documents, fail closed), then ranked by ISemanticSearchService in documentIds scope (narrative only). Deviations: createdon (not sprk_createddatetime, null in dev); extra empty reasons no-core-record / no-line-date / no-narrative / none-indexed / not-a-fee-line; NullSemanticSearchService (ADR-032 P3) added so the unconditional service resolves with AI off; ledger 130 -> 131; ADR-010 count 164 (ceiling 165); publish +0.015 MB vs parent; no vulnerable packages. Dev has 0 sprk_timekeeper rows, so the path is not exercisable live yet. TASK-INDEX.md is updated by the main session.
-rework: none task 107</notes>
+rework: fix-round-1 task 107</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

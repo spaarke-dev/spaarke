@@ -79,6 +79,10 @@ The finding: authorizing the route on invoice A said nothing about invoice B on 
 
 **A2 (F2).** `DisallowHistoryContext.InvoicesConsidered` counted only invoices that had a Reduced or Disallowed line (distinct owners of the returned lines), so 12 decided invoices with 2 cuts reported 2. It is now the number of decided, readable invoices examined (`decidedIds.Length`), which is what the UI's "N invoices considered" must mean. Test: `InvoicesConsidered_CountsEveryDecidedReadableInvoice_NotOnlyThoseWithCuts`.
 
+## 7c. Fix-round-4 (from the task 107 review): "more" and "too large" must not count invoices the caller cannot read
+
+`AllExamined` was `complete && rows.Count <= MaxSiblingAccessChecks`, so it counted every sibling invoice including unreadable ones: a caller who could read 3 of 250 invoices on a record was told `hasMore = true` and got `.too-large` for disallow and rate history, which reveals that unreadable invoices exist. Now the sibling walk checks invoices newest first in pages (shared `CallerReadCheck.ScanAsync`) until more than `MaxReadableSiblings` (200) are READABLE or the rows (or the `MaxSiblingAccessChecks` ceiling, now 1000) run out; `hasMore` is `readable > 10` only, and the too-large codes fire only when more than 200 are readable (or at the ceiling, see the 107 notes, section 10, K2 (b)). The loop is the shared helper also used by 107. Tests: `SiblingsTheCallerCannotRead_NeverMakeTheAnswerTooLarge_OrSayMore` (250 siblings, 3 readable), and `MoreReadableSiblingsThanCanBeSummarised_...` (the old too-large test, now over 201 readable).
+
 ## 8. BFF hygiene (root section 10)
 
 - Placement: BFF, B4 live request (a synchronous read of Dataverse for a user-facing panel; no queue, schedule or AI).
