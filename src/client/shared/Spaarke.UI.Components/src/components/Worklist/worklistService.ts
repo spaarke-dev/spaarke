@@ -15,6 +15,8 @@ import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { isApiError, problemOf } from '../../utils/thrownFetchError';
 import type { DecisionOutcome, RecordClass, ResolutionType } from '../ConsoleKit';
 import type { PastDueWording, WorkType, WorklistCore, WorklistItem, WorklistLane } from './types';
+import { acceptNarrative } from './worklistNarrative';
+import type { WorklistNarrativeRequest, WorklistNarrativeText } from './worklistNarrative';
 
 /** The worklist's `set` values: the two lanes, or one of the three secondary sets. */
 export type WorklistSetName = 'lanes' | 'closedToday' | 'suppressed' | 'closedEarlier';
@@ -129,6 +131,12 @@ export interface WorklistService {
   findInquiryForTodo(todoId: string): Promise<InquiryForTodo | null>;
   /** Records the disposition. Resolves on 200 with whether the To Do was completed; throws `InquiryRequestError` (status and reason code) otherwise. */
   recordDisposition(serviceRequestId: string, request: InquiryDispositionRequest): Promise<RecordDispositionResult>;
+  /**
+   * The Briefing narrative over the list (task 062): prose the Assistant writes from the request's counts, or `null` when none can be
+   * shown (the call failed, the answer had no summary, or its entity-name scrub removed a term). Never throws: the narrative is an
+   * extra, and the list does not wait on it. Optional so a host or test double without one simply shows no narrative.
+   */
+  narrate?(request: WorklistNarrativeRequest): Promise<WorklistNarrativeText | null>;
 }
 
 export interface WorklistServiceOptions {
@@ -162,6 +170,7 @@ export class InquiryRequestError extends Error {
 
 const ROUTE = '/api/v1/signals/worklist';
 const INQUIRY_ROUTE = '/api/v1/inquiries';
+const NARRATE_ROUTE = '/api/ai/daily-briefing/narrate';
 
 const WORK_TYPES: ReadonlySet<string> = new Set<WorkType>([
   'askOutsideCounsel',
@@ -443,6 +452,20 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
       }
       const flag = (body as { todoCompleted?: unknown } | null)?.todoCompleted;
       return { todoCompleted: flag === true };
+    },
+
+    async narrate(request: WorklistNarrativeRequest): Promise<WorklistNarrativeText | null> {
+      try {
+        const response = await fetch(`${root}${NARRATE_ROUTE}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(request),
+        });
+        if (!response.ok) return null;
+        return acceptNarrative(await response.json());
+      } catch {
+        return null;
+      }
     },
   };
 }

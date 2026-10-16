@@ -149,7 +149,7 @@ public sealed class CodedWorkflowConventionTests
             NullLogger<AnalysisActionService>.Instance);
         actions.Setup(s => s.GetActionByCodeAsync(TldrActionCode, It.IsAny<CancellationToken>()))
                .ReturnsAsync(MakeAction(TldrActionCode,
-                   """{ "type":"object", "properties": { "summary":{"type":"string"}, "keyTakeaways":{"type":"array","items":{"type":"string"}}, "topAction":{"type":"string"} }, "required":["summary","keyTakeaways","topAction"], "additionalProperties":false }"""));
+                   """{ "type":"object", "properties": { "summary":{"type":"string"}, "keyTakeaways":{"type":"array","items":{"type":"string"}} }, "required":["summary","keyTakeaways"], "additionalProperties":false }"""));
 
         // Strict — the TL;DR action is the ONLY LLM call the narrator makes post-R5 task
         // 010; any other invocation (e.g. a resurrected per-channel call) throws and fails
@@ -161,8 +161,7 @@ public sealed class CodedWorkflowConventionTests
             .ReturnsAsync(JsonSerializer.Serialize(new
             {
                 summary = TldrSummary,
-                keyTakeaways = new[] { "Acme contract overdue" },
-                topAction = "Review the Acme engagement letter."
+                keyTakeaways = new[] { "Acme contract overdue" }
             }));
 
         var scrubber = new Mock<IEntityNameScrubber>(MockBehavior.Loose);

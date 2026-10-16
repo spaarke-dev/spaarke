@@ -20,6 +20,9 @@ let mockLayouts: unknown[] = [];
 jest.mock('@spaarke/ai-widgets', () => ({
   useAiSession: () => ({ authenticatedFetch: jest.fn(), bffBaseUrl: 'https://bff.test', isAuthenticated: true }),
   useDispatchPaneEvent: () => mockDispatch,
+  // Ontology task 104: the gated Administration entry (not under test here; the caller has no admin tab).
+  useOntologyAdminTabAvailable: () => false,
+  ONTOLOGY_ADMIN_WIDGET_TYPE: 'ontology-admin',
 }));
 
 jest.mock('../../../hooks/useWorkspaceLayouts', () => ({

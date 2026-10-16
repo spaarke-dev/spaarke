@@ -162,41 +162,69 @@ public sealed class DailyBriefingCompositeServiceTests
     // ─── Render leg (widget path) ─────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task RenderAsync_CollectsThenDispatches_AttachesHighPriorityAndCollectToolCall()
+    public async Task RenderAsync_CollectsThenDispatches_AndReturnsNoCriticalTodayList()
     {
         _collector.Payload = BuildRequest();
-        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_matter", Name = "Acme" } };
+        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_matter", Name = "Acme", HighPriority = true } };
         SetupBinding(BuildCodedBinding());
         SetupWorkflowResolution();
         var routed = SetupRouterPassthrough();
 
         var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
-        response.HighPriorityItems.Should().ContainSingle(i => i.Name == "Acme");
         _workflow.Executions.Single().UserId.Should().Be(SystemUserId, "user-OBO identity flows into the workflow context");
 
         var invocation = routed.Invocations.Single();
         invocation.Session.ToolChains!.Single().Calls
             .Should().Contain(c => c.ToolId == DailyBriefingCompositeService.CollectToolId);
 
-        // The stored payload carries the high-priority section — the widget response, the
-        // ledger entry, and any email rendering must agree (attached BEFORE the write).
-        invocation.Payload.GetProperty("sections").GetProperty("highPriority")[0]
-            .GetProperty("name").GetString().Should().Be("Acme");
+        // Task 062 (FR-32): "Critical Today" is retired as a list. A flagged record is not returned to the widget, not stored in the
+        // ledger payload, and not written into the narrative request: sprk_highpriority is a rank input of the worklist read route.
+        JsonSerializer.SerializeToElement(response).TryGetProperty("highPriorityItems", out _).Should().BeFalse();
+        JsonSerializer.SerializeToElement(response).TryGetProperty("highPriorityFailedEntityTypes", out _).Should().BeFalse();
+        var sections = invocation.Payload.GetProperty("sections");
+        sections.TryGetProperty("highPriority", out _).Should().BeFalse();
+        sections.TryGetProperty("highPriorityFailedEntityTypes", out _).Should().BeFalse();
+        _workflow.Executions.Single().ArgumentsJson.Should().NotContain("Acme");
+    }
+
+    [Fact]
+    public async Task RenderAsync_MonitoredRecordsWithRecentActivity_AreCountedInTheNarrative_NeverListed()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _collector.Payload = BuildRequest();
+        _collector.HighPriority = new[]
+        {
+            new HighPriorityItemDto { EntityType = "sprk_matter", Name = "Acme", Monitor = true, ModifiedOn = now.AddHours(-2) },
+            new HighPriorityItemDto { EntityType = "sprk_project", Name = "Beta", Monitor = true, ModifiedOn = now.AddHours(-30) },
+            new HighPriorityItemDto { EntityType = "sprk_document", Name = "Gamma", Monitor = true, ModifiedOn = now.AddDays(-40) },
+            new HighPriorityItemDto { EntityType = "sprk_event", Name = "Delta", HighPriority = true, ModifiedOn = now.AddHours(-1) },
+        };
+        SetupBinding(BuildCodedBinding());
+        SetupWorkflowResolution();
+        SetupRouterPassthrough();
+
+        await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        var args = _workflow.Executions.Single().ArgumentsJson;
+        var sent = JsonSerializer.Deserialize<DailyBriefingNarrateRequest>(args, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        // Default recency window is 120 hours: Acme and Beta changed inside it, Gamma did not, Delta is not monitored.
+        sent.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120)).Which.Count.Should().Be(2);
+        sent.TotalNotificationCount.Should().Be(BuildRequest().TotalNotificationCount, "a monitored record is a subscription, not an extra notification");
+        args.Should().NotContain("Acme").And.NotContain("Beta").And.NotContain("Gamma").And.NotContain("Delta");
     }
 
     [Fact]
     public async Task RenderAsync_EmptyCollect_ShortCircuits_NoDispatchNoLedger()
     {
         _collector.Payload = new DailyBriefingNarrateRequest();
-        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_event", Name = "Urgent" } };
+        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_event", Name = "Urgent", HighPriority = true } };
 
         var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
-        // Nothing to narrate: no Binding resolve, no workflow, no ledger entry — but the
-        // structured high-priority list still surfaces (operator design decision).
+        // Nothing to narrate: no Binding resolve, no workflow, no ledger entry. A flagged record alone no longer surfaces as a list (task 062).
         response.ChannelNarratives.Should().BeEmpty();
-        response.HighPriorityItems.Should().ContainSingle(i => i.Name == "Urgent");
+        response.Tldr.Summary.Should().BeEmpty();
         _routing.VerifyNoOtherCalls();
         _workflow.Executions.Should().BeEmpty();
     }
@@ -207,7 +235,7 @@ public sealed class DailyBriefingCompositeServiceTests
     public async Task EmailAsync_EmailBinding_RoutesPayloadCarryingEmailEnvelope()
     {
         _collector.Payload = BuildRequest();
-        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_matter", Name = "Acme Corp" } };
+        _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_matter", Name = "Acme Corp", HighPriority = true } };
         SetupBinding(
             BuildCodedBinding() with { Disposition = BindingDisposition.Email },
             consumerCode: "email");
@@ -220,12 +248,13 @@ public sealed class DailyBriefingCompositeServiceTests
         binding.Disposition.Should().Be(BindingDisposition.Email);
 
         // Capability supplies presentation: the routed payload carries the email envelope
-        // the OutputRouter email leg delivers (to / subject / htmlBody), and the emailed
-        // HTML includes the high-priority section (attached BEFORE the ledger write).
+        // the OutputRouter email leg delivers (to / subject / htmlBody). The email carries no "High Priority" list and no "Top action"
+        // line (task 062, FR-32).
         var email = payload.GetProperty("email");
         email.GetProperty("to")[0].GetString().Should().Be("user@contoso.com");
         email.GetProperty("subject").GetString().Should().Contain("Daily Briefing");
-        email.GetProperty("htmlBody").GetString().Should().Contain("narrated summary").And.Contain("Acme Corp");
+        email.GetProperty("htmlBody").GetString().Should().Contain("narrated summary")
+            .And.NotContain("Acme Corp").And.NotContain("High Priority").And.NotContain("Top action");
     }
 
     [Fact]
@@ -243,9 +272,10 @@ public sealed class DailyBriefingCompositeServiceTests
 
     // ─── Failure markers reach the reader (task 152 verifier round 1 item 3; ADR-003) ─────────
     //
-    // The collector marks a channel / High Priority entity type whose caller-context read failed. These pin that the
+    // The collector marks a channel / flagged entity type whose caller-context read failed. These pin that the
     // composite carries those markers all the way to the widget response, the ledger entry and the email — "could not
-    // be loaded" stays distinguishable from "nothing to report" past the collector.
+    // be loaded" stays distinguishable from "nothing to report" past the collector. Task 062: a failed flagged-entity read
+    // (the monitored-records subscription) is reported as the "monitored" channel, since the list it fed is retired.
 
     [Fact]
     public async Task RenderAsync_FailureMarkers_ReachTheResponse_AndTheLedgerEntry()
@@ -258,13 +288,11 @@ public sealed class DailyBriefingCompositeServiceTests
 
         var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
-        response.FailedChannels.Should().Equal("matters");
-        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_invoice");
+        response.FailedChannels.Should().Equal("matters", DailyBriefingCollector.ChannelMonitored);
 
         var sections = routed.Invocations.Single().Payload.GetProperty("sections");
-        sections.GetProperty("failedChannels").EnumerateArray().Select(e => e.GetString()).Should().Equal("matters");
-        sections.GetProperty("highPriorityFailedEntityTypes").EnumerateArray().Select(e => e.GetString())
-            .Should().Equal("sprk_invoice");
+        sections.GetProperty("failedChannels").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("matters", DailyBriefingCollector.ChannelMonitored);
     }
 
     [Fact]
@@ -276,8 +304,8 @@ public sealed class DailyBriefingCompositeServiceTests
         var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         response.ChannelNarratives.Should().BeEmpty();
-        response.FailedChannels.Should().Equal(new[] { "to-dos" }, "an empty briefing whose sections FAILED is not 'all caught up'");
-        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_event");
+        response.FailedChannels.Should().Equal(
+            new[] { "to-dos", DailyBriefingCollector.ChannelMonitored }, "an empty briefing whose sections FAILED is not 'all caught up'");
         _routing.VerifyNoOtherCalls();
     }
 
@@ -292,11 +320,11 @@ public sealed class DailyBriefingCompositeServiceTests
 
         var response = await CreateSut().EmailAsync(SystemUserId, TenantId, "user@contoso.com", CancellationToken.None);
 
-        response.FailedChannels.Should().Equal("matters");
+        response.FailedChannels.Should().Equal("matters", DailyBriefingCollector.ChannelMonitored);
         var html = routed.Invocations.Single().Payload.GetProperty("email").GetProperty("htmlBody").GetString();
         html.Should().Contain("Some sections could not be loaded")
             .And.Contain("matters")
-            .And.Contain("high priority (sprk_invoice)");
+            .And.Contain(DailyBriefingCollector.ChannelMonitored);
     }
 
     [Fact]
@@ -321,8 +349,7 @@ public sealed class DailyBriefingCompositeServiceTests
 
         var response = await CreateSut().EmailAsync(SystemUserId, TenantId, "user@contoso.com", CancellationToken.None);
 
-        response.FailedChannels.Should().Equal("documents");
-        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_project");
+        response.FailedChannels.Should().Equal("documents", DailyBriefingCollector.ChannelMonitored);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────────────────
@@ -413,7 +440,7 @@ public sealed class DailyBriefingCompositeServiceTests
             Executions.Add(context);
             return Task.FromResult<object?>(new DailyBriefingNarrateResponse
             {
-                Tldr = new TldrResult { Summary = "narrated summary", KeyTakeaways = ["one"], TopAction = "act" },
+                Tldr = new TldrResult { Summary = "narrated summary", KeyTakeaways = ["one"] },
                 ChannelNarratives =
                 [
                     new ChannelNarrationResult

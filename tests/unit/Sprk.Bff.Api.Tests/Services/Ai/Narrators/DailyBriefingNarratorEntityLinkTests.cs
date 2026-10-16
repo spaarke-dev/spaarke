@@ -414,7 +414,10 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         facts.CategoryCounts.Should().BeEquivalentTo(req.Categories);
         facts.PriorityItemCount.Should().Be(req.PriorityItems.Length);
         facts.KeyDates.Should().ContainSingle(d => d.RecordName == item1.Title && d.Date == dueDate);
-        facts.RecordNames.Should().Contain(new[] { item1.Title, item2.Title, "Beta Matter", "Gamma Matter" });
+        // Task 062 (FR-34): the Do channel (overdue-tasks) contributes counts only; its regarding name is not nameable. The Know channel
+        // (documents) and the caller-supplied priority title stay nameable.
+        facts.RecordNames.Should().Contain(new[] { item1.Title, item2.Title, "Gamma Matter" });
+        facts.RecordNames.Should().NotContain("Beta Matter");
 
         // Negative half of the contract: the raw per-channel item fields (id/sourceEntityType)
         // never reach the LLM — only the aggregated facts do.
@@ -448,8 +451,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         var tldrJson = JsonSerializer.Serialize(new
         {
             summary = "summary",
-            keyTakeaways = new[] { "k1" },
-            topAction = "action"
+            keyTakeaways = new[] { "k1" }
         });
 
         // Strict — the TL;DR action is the ONLY LLM call this narrator is allowed to make
@@ -490,7 +492,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         Id = Guid.NewGuid(),
         Name = TldrActionCode,
         SystemPrompt = "TLDR.",
-        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}},"topAction":{"type":"string"}},"required":["summary","keyTakeaways","topAction"],"additionalProperties":false}""",
+        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}}},"required":["summary","keyTakeaways"],"additionalProperties":false}""",
         SortOrder = 0,
         ExecutorType = ExecutorType.AiAnalysis,
         OwnerType = ScopeOwnerType.System,
