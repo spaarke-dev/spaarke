@@ -301,6 +301,10 @@ public partial class RouteAuthorizationGuardTests
             "/api/finance/ratecards/* (ebilling-r1 task 078, FR-29) -- rate card and timekeeper workbook template, import and publish. "
             + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
             + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
+            + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
+            + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -791,7 +795,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/ratecards/import-template, POST /api/finance/ratecards/import and POST /api/finance/ratecards/{rateCardId}/publish.
     // Classified by GovernedFiles (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse
     // table privilege, D-76); the kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 126;
+    //
+    // 126 -> 127 (2026-10-16, ebilling-r1 task 106, FR-33). Net +1: Api/Finance/InvoiceContextEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/context. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read on the
+    // route's invoice); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 127;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
