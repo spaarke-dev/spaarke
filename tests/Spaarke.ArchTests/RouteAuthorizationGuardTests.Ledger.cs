@@ -38,7 +38,8 @@ public partial class RouteAuthorizationGuardTests
             "/api/v1/ontology/admin + RequireRateLimiting(dataverse-query) + RequireAuthorization (OntologyAdminEndpoints.cs:38-41), bound "
             + "into Api/Ontology/OntologyAdminRulesEndpoints.cs by group.MapOntologyAdminRulesEndpoints() (ontology platform R1 task 100) "
             + "and into Api/Ontology/OntologyAdminAuthoringEndpoints.cs by OntologyAdminAuthoringEndpoints.MapOntologyAdminAuthoringEndpoints"
-            + "(group) (task 101); it also registers GET /capabilities itself (task 104)."),
+            + "(group) (task 101), and calls app.MapOntologyAdminClassificationEndpoints() for Api/Ontology/OntologyAdminClassificationEndpoints.cs "
+            + "(task 103), which declares its own group under the same URL prefix; it also registers GET /capabilities itself (task 104)."),
         new Aggregator("Api/ExternalAccess/ExternalAccessEndpoints.cs",
             "externalGroup /api/v1/external + RequireAuthorization(ExternalCollaboration) + CallerPrincipal (:54-57) and "
             + "adminGroup /api/v1/external-access + RequireAuthorization + AddDelegationRuleFilter (:123-126), bound into "
@@ -295,6 +296,14 @@ public partial class RouteAuthorizationGuardTests
             + "RetrieveUserPrivilegeByPrivilegeName on the id WhoAmI returned). It decides only whether the Console shows the tab; it is "
             + "never the security boundary. RequireAuthorization on the group; takes no id (Permanent CallerScopedOnly below). Tasks 100 "
             + "and 101 add their admin routes to this group, each authorized as the caller."),
+        new GovernedFile("Api/Ontology/OntologyAdminClassificationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/v1/ontology/admin/classification (ontology platform R1 task 103, D-22, FR-59, D-49) -- the Classification area: GET /categories "
+            + "(the triage categories with guidance, On/Off, the policy versions that read each, 30-day volume and stored recall), POST /categories "
+            + "(a new category, always saved Off), PATCH /categories/{categoryId} (name and guidance; a rename is refused while any policy version "
+            + "reads the category) and PUT /categories/{categoryId}/enabled (On/Off). The file declares its own group (RequireAuthorization) and "
+            + "every read and write runs AS THE CALLER through IDataverseUserClient, so Dataverse enforces the Spaarke Ontology Administrator role "
+            + "(a Console User's write is refused 403) and the audit names the human; an unresolved caller is the single 403. Nothing reads the "
+            + "task 104 capability answer (OntologyAdminCallerBoundaryGuardTests)."),
         new GovernedFile("Api/Ontology/OntologyAdminRulesEndpoints.cs", Scope.GroupGated,
             "/api/v1/ontology/admin/rules/* (ontology platform R1 task 100, D-22, FR-57) -- the Rules area of the Ontology admin tab: the "
             + "rule list and rule page (reads), PUT /{policyId}/enabled (On/Off) and POST /{policyId}/retire. The group is bound by "
@@ -822,9 +831,14 @@ public partial class RouteAuthorizationGuardTests
     //
     // 127 -> 128 (2026-10-16, spaarke-ontology-platform-r1 task 101). Net +1: Api/Ontology/OntologyAdminAuthoringEndpoints.cs ADDED --
     // the four rule-authoring routes on the Ontology admin group (GroupGated; OntologyAdminEndpoints.cs becomes a pinned Aggregator).
-    // Classified by GovernedFiles and four HandlerDecisions (IDataverseUserClient). Merged after task 100
-    // (OntologyAdminRulesEndpoints.cs, 127); lane 103 may add files in parallel.
-    private const int ExpectedEndpointFileCount = 128;
+    // Classified by GovernedFiles and four HandlerDecisions (IDataverseUserClient).
+    //
+    // 128 -> 129 (2026-10-16, spaarke-ontology-platform-r1 task 103). Net +1: Api/Ontology/OntologyAdminClassificationEndpoints.cs ADDED --
+    // GET/POST /api/v1/ontology/admin/classification/categories, PATCH /categories/{categoryId:guid} and PUT /categories/{categoryId:guid}/enabled.
+    // Classified by GovernedFiles (RouteLevelGate, its own group) and one HandlerDecision per route below.
+    //
+    // Integration (2026-10-16): the 126 of task 104 + 100 + 101 + 103 = 129 (one file each; verified by the census pin test).
+    private const int ExpectedEndpointFileCount = 129;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1884,6 +1898,33 @@ public partial class RouteAuthorizationGuardTests
             + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:726). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
             + "D-123); a fault is 503 (SignalReadEndpoints.cs:72), never a shorter list."),
+        new HandlerDecision("GET /api/v1/ontology/admin/classification/categories", "ListCategoriesAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.ListAsync" },
+            "Ontology task 103: the handler's only I/O is OntologyAdminClassificationService.ListAsync (OntologyAdminClassificationEndpoints.cs:111), "
+            + "every read of which (the categories :75, the policies and their versions :84, the 30-day aggregate :85) goes through the caller's own "
+            + "IDataverseUserClient, so Dataverse trims to what the caller may read. An unresolved caller is the single 403 "
+            + "(OntologyAdminClassificationEndpoints.cs:163); a fault reading the categories is 503."),
+        new HandlerDecision("POST /api/v1/ontology/admin/classification/categories", "CreateCategoryAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.CreateAsync" },
+            "Ontology task 103: CreateAsync (OntologyAdminClassificationEndpoints.cs:122) reads the names and then POSTs the row AS THE CALLER "
+            + "through IDataverseUserClient (OntologyAdminClassificationService.cs:190), so Dataverse enforces prvCreatesprk_TriageCategory "
+            + "(a Console User gets 403 not_permitted). The row is written with sprk_enabled = false (:183); the request has no enabled member."),
+        new HandlerDecision("PATCH /api/v1/ontology/admin/classification/categories/{categoryId:guid}", "UpdateCategoryAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.UpdateAsync" },
+            "Ontology task 103: UpdateAsync (OntologyAdminClassificationEndpoints.cs:135) reads the row (OntologyAdminClassificationService.cs:792; "
+            + "a row the caller cannot read is the uniform 404), then, for a rename only (:250), refuses it while the routing configuration is keyed by "
+            + "the name (:342, in process through IOptionsMonitor, no app identity), unless the caller's own read covers every policy version "
+            + "(:351; WhoAmI :451, then every RolePrivilege row for prvReadsprk_Policy and prvReadsprk_PolicyVersion :513, and, only when a Deep row "
+            + "decides, the root business unit :563, all AS THE CALLER; a privilege is covered only by a row that is Global, or Deep on the ROOT "
+            + "business unit, with no RecordFilterId: a Deep grant on a child unit (a team role), a conditional grant or a row with no business unit "
+            + "gives 409 rename_unverifiable and the reference read is never made, and a root-unit read that is not exactly one row is 503), "
+            + "while any policy version reads the category by id or name, or when that cannot be checked (503). It then PATCHes AS THE CALLER "
+            + "through IDataverseUserClient, version-conditional (:808), so Dataverse enforces prvWritesprk_TriageCategory."),
+        new HandlerDecision("PUT /api/v1/ontology/admin/classification/categories/{categoryId:guid}/enabled", "SetCategoryEnabledAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminClassificationService.SetEnabledAsync" },
+            "Ontology task 103: SetEnabledAsync (OntologyAdminClassificationEndpoints.cs:147) reads the row (OntologyAdminClassificationService.cs:792), "
+            + "re-checks the name among the active categories when turning On, then PATCHes sprk_enabled AS THE CALLER through IDataverseUserClient, "
+            + "version-conditional (:808, from :320), so Dataverse enforces prvWritesprk_TriageCategory."),
         new HandlerDecision("GET /api/v1/ontology/admin/rules", "ListRulesAsync", "IDataverseUserClient",
             new[] { "OntologyAdminRulesService.ListAsync" },
             "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.ListAsync (OntologyAdminRulesEndpoints.cs:83). It lists the "
