@@ -1,7 +1,7 @@
 # Task 049 role-removal evidence (whatif)
 
 - Environment: https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
-- Run (UTC): 20261016T154431Z
+- Run (UTC): 20261016T161249Z
 - Operator systemuserid: 1d02f31c-1872-f011-b4cb-7c1e52671ad0
 - Mode: whatif - NOTHING WAS CHANGED IN DATAVERSE
 - Script: scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1
@@ -40,7 +40,7 @@ PLAN: 3 RemovePrivilegeRole call(s), ROOT roles only; order is the two Decision 
   remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [root copy, BU Spaarke, id 2f2b2137-bfbe-f111-aaaf-0022482913fc] D-147
   remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [root copy, BU Spaarke, id 51c924e2-bdbe-f111-a05b-3833c5e9614d] D-62
   remove prvWritesprk_Signal            (Deep) from Spaarke Console User [root copy, BU Spaarke, id 51c924e2-bdbe-f111-a05b-3833c5e9614d] D-17
-K-A: Console User Create on sprk_decisionrecord is still held (removed first in this run); its Signal Write is removed only once that Create is gone.
+K-A: Console User Create on sprk_decisionrecord is still held (removed first in this run); its Signal Write is removed only after a read-back of the root shows that Create absent.
 
   declined/whatif: would remove prvCreatesprk_DecisionRecord from ROOT role 'Spaarke Ontology Administrator' (BU 'Spaarke', 2f2b2137-bfbe-f111-aaaf-0022482913fc)
   declined/whatif: would remove prvCreatesprk_DecisionRecord from ROOT role 'Spaarke Console User' (BU 'Spaarke', 51c924e2-bdbe-f111-a05b-3833c5e9614d)
@@ -98,10 +98,10 @@ UNION OF ROLES (NFR-11), PROJECTED: the live state with the planned removals tak
 
 ASSERTIONS
   PASS A1   Write/Delete on sprk_decisionrecord is held only by platform and admin roles; platform roles have no human member; every team membership was read
-  PASS A2   Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service
+  PASS A2   Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service (which has no human member)
   PASS A3   Spaarke Console User does not hold Write on sprk_signal
   PASS A4   Control: Spaarke Ontology Service still holds Write on sprk_signal and Create on sprk_decisionrecord
-  PASS A5   Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (one named waiver)
+  PASS A5   Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service, which has no human member (one named waiver)
        Spaarke Ontology Administrator (Deep): WAIVED (owner question open: Ontology Administrator Signal Write)
 
 FINDING (not an assertion): non-platform, non-admin, non-writer roles that still hold Write on sprk_signal

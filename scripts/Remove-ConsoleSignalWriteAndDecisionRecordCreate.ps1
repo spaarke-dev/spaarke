@@ -37,10 +37,12 @@
     ASSERTIONS (exit 1 if any fails)
       A1  No Spaarke role and no non-platform, non-admin role holds Write or Delete on sprk_decisionrecord, and the platform
           roles holding them have no human member.
-      A2  Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service (the writer).
+      A2  Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service (the writer),
+          and that service role has no human member and no human via a team (same condition as A1).
       A3  Spaarke Console User does not hold Write on sprk_signal.
       A4  Control: Spaarke Ontology Service still holds Create on sprk_decisionrecord and Write on sprk_signal.
-      A5  Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service. ONE named waiver
+      A5  Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (no human member, no
+          human via a team). ONE named waiver
           ($A5Waiver below) lets Spaarke Ontology Administrator (Deep) pass while the owner question is open; it is printed
           as WAIVED, and any other holder fails the run. Remove the waiver by setting $A5Waiver to $null.
     A team-membership read that fails fails A1 (a membership that cannot be read is never counted as zero humans).
@@ -54,8 +56,10 @@
       -Verify          Read-only. Union check on the live state, no plan. Exit 0 / 1 on the assertions.
 
     EVIDENCE. Every mode writes the run transcript plus the before/after privilege listings to -EvidencePath (default:
-    projects/spaarke-ontology-platform-r1/notes/049-role-removal-evidence-<mode>-<utc>.md). An -Apply that fails part-way
-    still writes the file, listing the removals made before the failure.
+    projects/spaarke-ontology-platform-r1/notes/049-role-removal-evidence-<mode>-<utc>.md). Everything from the apply loop to
+    the end of the run (removals, AFTER read, member reads, union check) is inside one try/catch/finally, so a run that fails
+    there (for example a 503 after the removals) still writes the file, listing the removals made before the failure, and exits
+    1. A failure BEFORE the apply loop (the BEFORE read) happens before any write and writes no file.
 
     Auth: the operator's own az CLI identity (az account get-access-token). No secrets.
 
@@ -259,8 +263,8 @@ if ($Mode -ne 'verify') {
 
     # K-A (binding): Console User Signal Write goes only after its Decision Record Create is gone (removed in this run, or absent now).
     $consoleRoot = @($before['Spaarke Console User'] | Where-Object IsRoot)[0]
-    $script:ConsoleDrCreateGone = (@($consoleRoot.Privileges | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -eq 0)
-    Out-Line ("K-A: Console User Create on sprk_decisionrecord is {0}; its Signal Write is removed only once that Create is gone." -f $(if ($script:ConsoleDrCreateGone) { 'ALREADY ABSENT' } else { 'still held (removed first in this run)' }))
+    $consoleCreateAbsentAtStart = (@($consoleRoot.Privileges | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -eq 0)
+    Out-Line ("K-A: Console User Create on sprk_decisionrecord is {0}; its Signal Write is removed only after a read-back of the root shows that Create absent." -f $(if ($consoleCreateAbsentAtStart) { 'ALREADY ABSENT' } else { 'still held (removed first in this run)' }))
 }
 
 # ── Step 3: APPLY ────────────────────────────────────────────────────────────────────────────────────────────
@@ -270,54 +274,42 @@ $after = [ordered]@{}
 $verifySnap = [ordered]@{}
 $union = [ordered]@{}
 $applyError = $null
+# One try/catch/finally from here to the end of the run: any failure once the removals begin (the apply loop, the AFTER read, the
+# member reads, the union check) is recorded, the evidence file is still written, and the run exits 1. The exit code is set after
+# the finally; `exit` is never called inside the try. (The body is not re-indented, to keep the diff reviewable.)
+try {
 if ($Mode -ne 'verify') {
     Out-Line ''
-    try {
-        foreach ($p in $planned) {
-            $target = "ROOT role '$($p.Role)' (BU '$($p.BuName)', $($p.RoleId))"
-            # K-A also covers a declined or failed call: Console User Signal Write goes only if its Create is gone.
-            if ($Mode -eq 'apply' -and $p.Role -eq 'Spaarke Console User' -and $p.Privilege -eq 'prvWritesprk_Signal' -and -not $script:ConsoleDrCreateGone) {
-                $msg = 'K-A: SKIPPED the Console User Signal Write removal because its Decision Record Create was neither removed in this run nor already absent (the Create removal was declined or did not happen). Re-run once the Create is gone.'
+    foreach ($p in $planned) {
+        $target = "ROOT role '$($p.Role)' (BU '$($p.BuName)', $($p.RoleId))"
+        # K-A, by read-back (never by trusting a 204 or a flag): Console User Signal Write goes only if the Console User ROOT
+        # now shows NO Create on sprk_decisionrecord. A declined, failed or silently ineffective Create removal skips it.
+        if ($Mode -eq 'apply' -and $p.Role -eq 'Spaarke Console User' -and $p.Privilege -eq 'prvWritesprk_Signal') {
+            $createStillHeld = @(Get-RolePrivilegeList $p.RoleId | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -gt 0
+            if ($createStillHeld) {
+                $msg = 'K-A: SKIPPED the Console User Signal Write removal because a read-back of the Console User root still shows Create on sprk_decisionrecord (the Create removal was declined, failed or had no effect). Re-run once the Create is gone.'
                 Out-Line "  $msg" 'Red'
                 $failures.Add($msg)
                 continue
             }
-            if ($PSCmdlet.ShouldProcess($target, "RemovePrivilegeRole $($p.Privilege) ($($p.Depth)) [$($p.Decision)]")) {
-                if ($Mode -ne 'apply') { Out-Line "  dry run: would remove $($p.Privilege) from $target"; continue }
-                # Re-read the root immediately before the call; a privilege that is already gone is not removed again.
-                if (@(Get-RolePrivilegeList $p.RoleId | Where-Object Id -eq $p.PrivilegeId).Count -eq 0) {
-                    Out-Line "  already absent on $target; no call made" 'Gray'
-                    if ($p.Role -eq 'Spaarke Console User' -and $p.Privilege -eq 'prvCreatesprk_DecisionRecord') { $script:ConsoleDrCreateGone = $true }
-                    continue
-                }
-                Invoke-DvPost "roles($($p.RoleId))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{
-                    Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $p.PrivilegeId }
-                }
-                $removedCalls.Add($p)
-                if ($p.Role -eq 'Spaarke Console User' -and $p.Privilege -eq 'prvCreatesprk_DecisionRecord') { $script:ConsoleDrCreateGone = $true }
-                Out-Line "  removed $($p.Privilege) from $target at $([DateTime]::UtcNow.ToString('HH:mm:ss'))Z" 'Green'
+        }
+        if ($PSCmdlet.ShouldProcess($target, "RemovePrivilegeRole $($p.Privilege) ($($p.Depth)) [$($p.Decision)]")) {
+            if ($Mode -ne 'apply') { Out-Line "  dry run: would remove $($p.Privilege) from $target"; continue }
+            # Re-read the root immediately before the call; a privilege that is already gone is not removed again.
+            if (@(Get-RolePrivilegeList $p.RoleId | Where-Object Id -eq $p.PrivilegeId).Count -eq 0) {
+                Out-Line "  already absent on $target; no call made" 'Gray'
+                continue
             }
-            else {
-                Out-Line "  declined/whatif: would remove $($p.Privilege) from $target"
+            Invoke-DvPost "roles($($p.RoleId))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{
+                Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $p.PrivilegeId }
             }
+            $removedCalls.Add($p)
+            Out-Line "  removed $($p.Privilege) from $target at $([DateTime]::UtcNow.ToString('HH:mm:ss'))Z" 'Green'
+        }
+        else {
+            Out-Line "  declined/whatif: would remove $($p.Privilege) from $target"
         }
     }
-    catch {
-        $applyError = $_
-        $msg = "APPLY ERROR after $($removedCalls.Count) removal(s): $($_.Exception.Message)"
-        Out-Line $msg 'Red'
-        $failures.Add($msg)
-    }
-    finally {
-        # A failed run still leaves its evidence: which removals were made before the failure.
-        if ($applyError) {
-            Out-Line ''
-            Out-Line ("Removals made before the failure: {0}" -f $(if ($removedCalls.Count) { (($removedCalls | ForEach-Object { "$($_.Role)/$($_.Privilege)" }) -join '; ') } else { 'none' })) 'Yellow'
-            Out-Line "RESULT: FAIL ($Mode): $($failures.Count) problem(s). Run -Verify to read the live state." 'Red'
-            Write-RunEvidence
-        }
-    }
-    if ($applyError) { exit 1 }
 }
 
 # ── Step 4: AFTER and diff (apply only) ──────────────────────────────────────────────────────────────────────
@@ -465,13 +457,17 @@ function Test-Assert([string]$Id, [string]$Text, [bool]$Pass, [string]$Detail = 
     Out-Line ("  {0} {1,-4} {2}{3}" -f $(if ($Pass) { 'PASS' } else { 'FAIL' }), $Id, $Text, $(if (-not $Pass -and $Detail) { " -> $Detail" } else { '' })) $(if ($Pass) { 'Green' } else { 'Red' })
     if (-not $Pass) { $failures.Add("ASSERT $Id : $Text -> $Detail") }
 }
+# A role with a human member (directly, or through a team) or an unreadable team membership. Same condition as A1.
+function Test-HasHumanOrUnreadable([object]$Holder) {
+    $Holder.Members.HumanUsers.Count -gt 0 -or $Holder.Members.HumansViaTeams -gt 0 -or $Holder.Members.TeamReadFailures.Count -gt 0
+}
 $wd = @($union['Write on sprk_decisionrecord']) + @($union['Delete on sprk_decisionrecord'])
 $a1Bad = @($wd | Where-Object { $_.Class -notin @('platform', 'admin') })
 $a1Humans = @($wd | Where-Object { $_.Class -eq 'platform' -and ($_.Members.HumanUsers.Count -gt 0 -or $_.Members.HumansViaTeams -gt 0) })
 $a1TeamFail = @($wd | Where-Object { $_.Members.TeamReadFailures.Count -gt 0 })
 Test-Assert 'A1' 'Write/Delete on sprk_decisionrecord is held only by platform and admin roles; platform roles have no human member; every team membership was read' ($a1Bad.Count -eq 0 -and $a1Humans.Count -eq 0 -and $a1TeamFail.Count -eq 0) ("non-platform/admin holders: [" + (($a1Bad.Name) -join ', ') + "]; platform roles with a human member: [" + (($a1Humans.Name) -join ', ') + "]; roles with an unreadable team membership: [" + (($a1TeamFail.Name) -join ', ') + "]")
-$a2Bad = @($union['Create on sprk_decisionrecord'] | Where-Object { $_.Class -notin @('platform', 'admin', 'spaarke-service') })
-Test-Assert 'A2' 'Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service' ($a2Bad.Count -eq 0) ("unexpected holders: [" + (($a2Bad.Name) -join ', ') + "]")
+$a2Bad = @($union['Create on sprk_decisionrecord'] | Where-Object { $_.Class -notin @('platform', 'admin', 'spaarke-service') -or ($_.Class -eq 'spaarke-service' -and (Test-HasHumanOrUnreadable $_)) })
+Test-Assert 'A2' 'Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service (which has no human member)' ($a2Bad.Count -eq 0) ("unexpected holders (or a service role with a human / unreadable member): [" + (($a2Bad.Name) -join ', ') + "]")
 $a3 = @($union['Write on sprk_signal'] | Where-Object Name -eq 'Spaarke Console User')
 Test-Assert 'A3' 'Spaarke Console User does not hold Write on sprk_signal' ($a3.Count -eq 0) 'Console User still holds it'
 $a4w = @($union['Write on sprk_signal'] | Where-Object Name -eq $ControlRole)
@@ -481,8 +477,8 @@ Test-Assert 'A4' "Control: $ControlRole still holds Write on sprk_signal and Cre
 # one other role and is printed; any other holder fails the run.
 $signalHolders = @($union['Write on sprk_signal'])
 $a5Waived = @($signalHolders | Where-Object { $A5Waiver -and $_.Name -eq $A5Waiver.Role })
-$a5Bad = @($signalHolders | Where-Object { $_.Class -notin @('platform', 'admin', 'spaarke-service') -and -not ($A5Waiver -and $_.Name -eq $A5Waiver.Role) })
-Test-Assert 'A5' 'Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (one named waiver)' ($a5Bad.Count -eq 0) ("unexpected holders: [" + (($a5Bad.Name) -join ', ') + "]")
+$a5Bad = @($signalHolders | Where-Object { -not ($A5Waiver -and $_.Name -eq $A5Waiver.Role) -and ($_.Class -notin @('platform', 'admin', 'spaarke-service') -or ($_.Class -eq 'spaarke-service' -and (Test-HasHumanOrUnreadable $_))) })
+Test-Assert 'A5' 'Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service, which has no human member (one named waiver)' ($a5Bad.Count -eq 0) ("unexpected holders (or a service role with a human / unreadable member): [" + (($a5Bad.Name) -join ', ') + "]")
 foreach ($w in $a5Waived) { Out-Line ("       {0} ({1}): WAIVED (owner question open: {2})" -f $w.Name, $w.Depth, $A5Waiver.Label) 'Yellow' }
 if ($Mode -eq 'apply' -and $failures.Count -gt 0) { Out-Line '' ; Out-Line 'The after-diff, a divergent copy or an assertion failed: STOP, report, and decide whether to restore (escalation in the 049 POML).' 'Red' }
 
@@ -497,6 +493,19 @@ $verdict = if ($failures.Count -eq 0) { "RESULT: PASS ($Mode)" } else { "RESULT:
 Out-Line $verdict $(if ($failures.Count -eq 0) { 'Green' } else { 'Red' })
 if ($projection) { Out-Line 'Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run with -Apply, then -Verify, for the live result.' }
 
-Write-RunEvidence
-if ($failures.Count -gt 0) { exit 1 }
+}
+catch {
+    $applyError = $_
+    $msg = "RUN ERROR after $($removedCalls.Count) removal(s): $($_.Exception.Message)"
+    Out-Line ''
+    Out-Line $msg 'Red'
+    $failures.Add($msg)
+    Out-Line ("Removals made before the failure: {0}" -f $(if ($removedCalls.Count) { (($removedCalls | ForEach-Object { "$($_.Role)/$($_.Privilege)" }) -join '; ') } else { 'none' })) 'Yellow'
+    Out-Line "RESULT: FAIL ($Mode): $($failures.Count) problem(s). Run -Verify to read the live state." 'Red'
+}
+finally {
+    # Always: the transcript and whatever was read so far, including the removals made before any failure.
+    Write-RunEvidence
+}
+if ($applyError -or $failures.Count -gt 0) { exit 1 }
 exit 0

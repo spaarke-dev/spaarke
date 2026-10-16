@@ -85,12 +85,13 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
             </Role>
             """;
         // Console User is the role the Signal Write rule fires on, so the look-alike names must sit HERE to prove the match is
-        // exact: a StartsWith / Contains / EndsWith matcher would report them, an Ordinal equality does not.
+        // exact: a StartsWith (SignalExtra), EndsWith (xprvWrite...) or Contains matcher would report them, an Ordinal equality does not.
         const string consoleUserRole = """
             <Role id="{00000000-0000-0000-0000-000000000003}" name="Spaarke Console User">
               <RolePrivileges>
                 <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
                 <RolePrivilege name="prvWritesprk_SignalExtra" level="Deep" />
+                <RolePrivilege name="xprvWritesprk_Signal" level="Deep" />
                 <RolePrivilege name="prvAppendTosprk_Signal" level="Deep" />
                 <RolePrivilege name="prvReadsprk_Signal" level="Deep" />
               </RolePrivileges>

@@ -1,7 +1,7 @@
 # Task 049 role-removal evidence (verify)
 
 - Environment: https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
-- Run (UTC): 20261016T154459Z
+- Run (UTC): 20261016T161328Z
 - Operator systemuserid: 1d02f31c-1872-f011-b4cb-7c1e52671ad0
 - Mode: verify
 - Script: scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1
@@ -79,10 +79,10 @@ UNION OF ROLES (NFR-11), LIVE state
 
 ASSERTIONS
   PASS A1   Write/Delete on sprk_decisionrecord is held only by platform and admin roles; platform roles have no human member; every team membership was read
-  FAIL A2   Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service -> unexpected holders: [Spaarke Console User, Spaarke Ontology Administrator]
+  FAIL A2   Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service (which has no human member) -> unexpected holders (or a service role with a human / unreadable member): [Spaarke Console User, Spaarke Ontology Administrator]
   FAIL A3   Spaarke Console User does not hold Write on sprk_signal -> Console User still holds it
   PASS A4   Control: Spaarke Ontology Service still holds Write on sprk_signal and Create on sprk_decisionrecord
-  FAIL A5   Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (one named waiver) -> unexpected holders: [Spaarke Console User]
+  FAIL A5   Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service, which has no human member (one named waiver) -> unexpected holders (or a service role with a human / unreadable member): [Spaarke Console User]
        Spaarke Ontology Administrator (Deep): WAIVED (owner question open: Ontology Administrator Signal Write)
 
 FINDING (not an assertion): non-platform, non-admin, non-writer roles that still hold Write on sprk_signal

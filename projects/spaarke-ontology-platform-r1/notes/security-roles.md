@@ -925,7 +925,7 @@ Live `roleprivilegescollection` rows for `prvWritesprk_Signal` and `prvCreatespr
 edits a copy. The two Create removals run before the Signal Write (uac-r2 K-A: Write on `sprk_signal` never goes without
 Create on `sprk_decisionrecord` in the same change). K-A also covers a declined or failed call: Console User's Signal Write is
 removed only if its Decision Record Create was removed in the same run or is already absent; otherwise the script skips it,
-prints why and exits non-zero. A failed `-Apply` still writes its evidence file, listing the removals made before the failure. Repo: `Roles/Spaarke Console User.xml` (-2 lines) and
+prints why and exits non-zero. Everything from the apply loop to the end of the run (removals, the AFTER read, member reads, the union check) sits in one `try/catch/finally`, so a run that fails there (for example a 503 after the removals) still writes its evidence file, listing the removals made before the failure, and exits 1; a failure in the BEFORE read happens before any write and leaves no file. The K-A check for the Signal Write is by read-back: it re-reads Console User's root and requires Create on `sprk_decisionrecord` to be absent (a 204 is not trusted). Repo: `Roles/Spaarke Console User.xml` (-2 lines) and
 `Roles/Spaarke Ontology Administrator.xml` (-1 line). Source guard: `tests/Spaarke.ArchTests/SpaarkeRoleLedgerPrivilegeGuardTests.cs`.
 
 **Client-write grep (POML constraint 2), 2026-10-16, branch `db1e7daf9` and `origin/master` `0ccc75b4c`:** no client write to
@@ -954,9 +954,11 @@ open owner item. **Nothing changed in a way that invalidates the plan.**
 
 **Before (read-only, 2026-10-16, `-Verify`):** each of the 6 BU copies of Console User reports 23 privileges, of Ontology
 Administrator 38, of Ontology Service 50, identical per role. `RetrieveRolePrivilegesRole` on an inherited copy reports the
-root's set (so the "0 on child copies" of §10.1 and §7.3 is not what this call returns today; the call mirrors the root), but the
-child copies are inherited and cannot be edited, so the script plans and applies on the root only (3 calls, not 18) and checks
-the other five copies of each role by read-back. Union:
+root's set. What a child copy returns is call-dependent: `roleprivileges_association` on a child returns 0 (the rows live on the
+root, which is the "0 on child copies" of §10.1 and §7.3), while `RetrieveRolePrivilegesRole` returns the root's set. The child
+copies are inherited and cannot be edited, so the script plans and applies on the root only (3 calls, not 18) and checks the
+other five copies of each role by read-back. That `DIVERGENT` check is therefore defence in depth, not independent evidence (the
+call reads through to the root); the live union check (A1 to A5) is the real guard. Union:
 
 | Privilege | Holders now | After the three removals |
 |---|---|---|
@@ -986,9 +988,9 @@ depth (Deep, `privilegedepthmask` 4), taking the ids from the 2026-10-16 live re
 
 | Removal | Root role id | Privilege | Privilege id | Depth |
 |---|---|---|---|---|
-| D-147 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
-| D-62 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
 | D-17 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
+| D-62 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
+| D-147 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
 
 ```powershell
 $base = 'https://spaarkedev1.crm.dynamics.com'
@@ -999,14 +1001,22 @@ function Restore($roleId, $privName, $privId) {
   $body = @{ Privileges = @(@{ '@odata.type' = 'Microsoft.Dynamics.CRM.RolePrivilege'; Depth = 'Deep'; PrivilegeId = $privId; PrivilegeName = $privName; BusinessUnitId = $bu }) } | ConvertTo-Json -Depth 5
   Invoke-RestMethod -Uri "$base/api/data/v9.2/roles($roleId)/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $h -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 }
-# Restoring only adds privileges back; the order is not safety-relevant.
+# Restore D-17 (Signal Write) before D-62 (DR Create): the reverse of removal (K-A).
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # D-17
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-62
 Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-147
 ```
 
-Then `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Verify` shows the inherited copies matching their
-roots again (the platform propagates the root's privileges to the five child copies) and the before-removal state (A2, A3, A5 fail).
+After restoring:
+1. `RetrieveRolePrivilegesRole` on both roots shows **23** (Console User) and **38** (Ontology Administrator) privileges, and the
+   diff against the BEFORE listing in `049-role-removal-evidence-whatif-*.md` / `-verify-*.md` is empty (same names, same depths).
+2. `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Verify` shows the inherited copies matching their
+   roots again and the before-removal state (A2, A3, A5 fail).
+3. Revert the repo role XML as well (`Roles/Spaarke Console User.xml`, `Roles/Spaarke Ontology Administrator.xml`), or the next
+   SpaarkeMaster import removes the privileges again; the ArchTest `SpaarkeRoleLedgerPrivilegeGuardTests` then fails until the
+   guard is changed with the decision.
+4. `AddPrivilegesRole` may also add the four SharePoint privileges it is known to re-inject (setup guide §5.4; see the
+   Secure Record Owner strip above); that is a no-op here because both roles already hold all four at Global (BEFORE evidence). The 23 / 38 counts in step 1 confirm it.
 
 Still to do by the main session after uac-r2's check: `-Apply`, `-Verify`, the live negatives (non-admin update of a
 `sprk_signal` row, and create of a `sprk_decisionrecord`, both refused: task 008 §10.4 method), and one decision recorded in
