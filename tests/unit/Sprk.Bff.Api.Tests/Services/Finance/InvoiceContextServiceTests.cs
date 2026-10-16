@@ -866,20 +866,40 @@ public class InvoiceContextServiceTests
     }
 
     [Fact]
-    public async Task MoreSiblingsThanCanBeChecked_PriorInvoicesIsPartialAndSaysMore_TheAggregatesAreUnavailable()
+    public async Task MoreReadableSiblingsThanCanBeSummarised_PriorInvoicesSaysMore_TheAggregatesAreUnavailable()
     {
         var h = FullFixture();
-        h.Prior = Enumerable.Range(1, InvoiceContextService.MaxSiblingAccessChecks + 1)
+        h.Prior = Enumerable.Range(1, InvoiceContextService.MaxReadableSiblings + 1)
             .Select(i => PriorInvoice(Guid.NewGuid(), $"INV-{i:000}", new DateTime(2026, 1, 1).AddDays(-i), 10m, null, InvoiceStatusCodes.Paid))
             .ToList();
 
         var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
-        h.Access.Calls.Count(c => c.EntitySet == "sprk_invoices").Should().Be(InvoiceContextService.MaxSiblingAccessChecks);
+        h.Access.Calls.Count(c => c.EntitySet == "sprk_invoices").Should().Be(InvoiceContextService.MaxReadableSiblings + 1);
         context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
         context.PriorInvoices.Data!.HasMore.Should().BeTrue();
         context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowTooLarge, "a total over some of the readable invoices would be wrong, so it is not given");
         context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateTooLarge);
+    }
+
+    [Fact]
+    public async Task SiblingsTheCallerCannotRead_NeverMakeTheAnswerTooLarge_OrSayMore()
+    {
+        // 250 other invoices on the record, 3 of them readable: nothing in the answer may depend on the 247 the caller cannot open.
+        var h = FullFixture();
+        h.Prior = Enumerable.Range(1, 250)
+            .Select(i => PriorInvoice(Guid.NewGuid(), $"INV-{i:000}", new DateTime(2026, 1, 1).AddDays(-i), 10m, null, InvoiceStatusCodes.Paid))
+            .ToList();
+        h.Access.Refuse(h.Prior.Skip(3).Select(e => e.Id).ToArray());
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
+        context.PriorInvoices.Data!.Items.Should().HaveCount(3);
+        context.PriorInvoices.Data.HasMore.Should().BeFalse("only invoices the caller can read may say there are more");
+        context.DisallowHistory.Code.Should().NotBe(InvoiceContextService.CodeDisallowTooLarge);
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Available);
+        context.RateHistory.Code.Should().NotBe(InvoiceContextService.CodeRateTooLarge);
     }
 
     /// <summary>The caller's rights on each sibling invoice, answered the way Dataverse's RetrievePrincipalAccess would.</summary>

@@ -100,7 +100,7 @@ public sealed record RateHistoryContext(IReadOnlyList<TimekeeperRateHistory> Tim
 /// on <c>sprk_invoices(B)</c>, answered by Dataverse for the caller through <see cref="AuthorizationService.GetCallerRecordAccessAsync"/> (no
 /// token, no answer, no rows). The prior-invoices list, the disallow-history figures and the previously-billed rates are then built only from
 /// readable invoices: the figures are recomputed over them, not hidden or estimated. If the caller's rights cannot be determined for any one
-/// of them, or there are more than <see cref="MaxSiblingAccessChecks"/> (so the readable set would be incomplete), the sections that need other
+/// of them, or more than <see cref="MaxReadableSiblings"/> are readable (so the set would be incomplete), the sections that need other
 /// invoices are unavailable with a stable code (<c>.access-check-failed</c> / <c>.too-large</c>) - never the unfiltered data. The current
 /// invoice's own lines (the rate section's "billed on this invoice") are covered by the route's authorization.</para>
 /// <para><b>The core record is the caller's to read too.</b> The route authorizes the invoice, not the matter / project / work assignment it is
@@ -184,10 +184,17 @@ public sealed class InvoiceContextService
     private static readonly DateOnly AllPeriodsFrom = new(1900, 1, 1);
     private static readonly DateOnly AllPeriodsTo = new(2999, 12, 31);
 
-    /// <summary>The most sibling invoices whose Read the caller is asked about (each is one cached, per-record rights lookup).</summary>
-    public const int MaxSiblingAccessChecks = 200;
+    /// <summary>
+    /// The most READABLE sibling invoices the aggregate sections (disallow, rate history) will summarise. More than this and they say the set is too
+    /// large; the test is on invoices the caller can Read, so the answer never depends on how many the caller cannot.
+    /// </summary>
+    public const int MaxReadableSiblings = 200;
 
-    private const int AccessCheckParallelism = 8;
+    /// <summary>
+    /// A hard ceiling on the sibling invoices whose Read is asked about (each is one cached, per-record rights lookup) - a safety bound, not a
+    /// design limit. Only a record with more invoices than this (and fewer than <see cref="MaxReadableSiblings"/> readable among the newest) reaches it.
+    /// </summary>
+    public const int MaxSiblingAccessChecks = 1000;
 
     /// <summary>The <see cref="OperationAccessPolicy"/> key the route authorizes the invoice with; siblings are held to the same bar.</summary>
     private const string SiblingReadOperation = "finance.read";
@@ -249,7 +256,7 @@ public sealed class InvoiceContextService
 
         // Whether the caller can Read the core record itself (the route only authorized the invoice): one check, shared by the core record,
         // budget and rate history sections, which all show data that lives on or is scoped to that record.
-        var coreAccess = new Lazy<Task<AccessOutcome>>(() => CheckCoreRecordReadAsync(scope, caller, token));
+        var coreAccess = new Lazy<Task<CallerReadOutcome>>(() => CheckCoreRecordReadAsync(scope, caller, token));
         var coreRecord = GuardAsync(invoiceId, SectionCoreRecord, token, ct, () => LoadCoreRecordAsync(scope, coreAccess, token), "Core record details");
         var budget = GuardAsync(invoiceId, SectionBudget, token, ct, () => LoadBudgetAsync(scope, coreAccess, token), "Budget");
         var prior = GuardAsync(invoiceId, SectionPriorInvoices, token, ct, () => LoadPriorInvoicesAsync(scope, siblings), "Prior invoices");
@@ -368,25 +375,26 @@ public sealed class InvoiceContextService
     };
 
     /// <summary>
-    /// Can the CALLER Read the invoice's core record? The same question as the sibling invoices (<see cref="CheckReadAsync"/>), asked of
+    /// Can the CALLER Read the invoice's core record? The same question as the sibling invoices (<see cref="CallerReadCheck"/>), asked of
     /// <c>sprk_matters</c> / <c>sprk_projects</c> / <c>sprk_workassignments</c>: <c>finance.read</c> is defined as Read on that parent record, and every other
-    /// finance route that shows the record's figures requires it. No caller token, no answer: <see cref="AccessOutcome.Failed"/>.
+    /// finance route that shows the record's figures requires it. No caller token, no answer: <see cref="CallerReadOutcome.Failed"/>.
     /// </summary>
-    private async Task<AccessOutcome> CheckCoreRecordReadAsync(InvoiceScope scope, InvoiceCaller caller, CancellationToken ct)
+    private async Task<CallerReadOutcome> CheckCoreRecordReadAsync(InvoiceScope scope, InvoiceCaller caller, CancellationToken ct)
     {
         if (scope.Core is not { } core)
         {
-            return AccessOutcome.Failed;   // unreachable: the sections return the unresolved-core message before they ask
+            return CallerReadOutcome.Failed;   // unreachable: the sections return the unresolved-core message before they ask
         }
 
         if (string.IsNullOrWhiteSpace(caller.UserId) || string.IsNullOrWhiteSpace(caller.AccessToken))
         {
             _logger.LogWarning("Invoice context: invoice {InvoiceId} has no caller identity or token to check the core record with; the sections that need it are unavailable", scope.InvoiceId);
-            return AccessOutcome.Failed;
+            return CallerReadOutcome.Failed;
         }
 
-        var outcome = await CheckReadAsync(caller, CoreEntitySet(core.Kind), core.Id, ct);
-        if (outcome != AccessOutcome.Readable)
+        var outcome = await CallerReadCheck.CheckAsync(
+            _authorization, caller, CoreEntitySet(core.Kind), SiblingReadOperation, core.Id, _logger, "Invoice context", ct);
+        if (outcome != CallerReadOutcome.Readable)
         {
             _logger.LogWarning("Invoice context: caller access to the core record of invoice {InvoiceId} is {Outcome}", scope.InvoiceId, outcome);
         }
@@ -394,7 +402,7 @@ public sealed class InvoiceContextService
         return outcome;
     }
 
-    private async Task<ContextSection<CoreRecordContext>> LoadCoreRecordAsync(InvoiceScope scope, Lazy<Task<AccessOutcome>> coreAccess, CancellationToken ct)
+    private async Task<ContextSection<CoreRecordContext>> LoadCoreRecordAsync(InvoiceScope scope, Lazy<Task<CallerReadOutcome>> coreAccess, CancellationToken ct)
     {
         if (scope.Core is not { } core)
         {
@@ -403,9 +411,9 @@ public sealed class InvoiceContextService
 
         switch (await coreAccess.Value)
         {
-            case AccessOutcome.Failed:
+            case CallerReadOutcome.Failed:
                 return ContextSection<CoreRecordContext>.Unavailable(CodeCoreAccessCheckFailed, "Your access to the core record could not be confirmed, so its details are not shown.");
-            case AccessOutcome.Refused:
+            case CallerReadOutcome.Refused:
                 return ContextSection<CoreRecordContext>.Unavailable(CodeCoreAccessDenied, "You do not have access to the core record this invoice is filed under.");
         }
 
@@ -439,7 +447,7 @@ public sealed class InvoiceContextService
     // Budget (the rollups, as stored)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private async Task<ContextSection<BudgetContext>> LoadBudgetAsync(InvoiceScope scope, Lazy<Task<AccessOutcome>> coreAccess, CancellationToken ct)
+    private async Task<ContextSection<BudgetContext>> LoadBudgetAsync(InvoiceScope scope, Lazy<Task<CallerReadOutcome>> coreAccess, CancellationToken ct)
     {
         if (scope.Core is not { } core)
         {
@@ -454,9 +462,9 @@ public sealed class InvoiceContextService
 
         switch (await coreAccess.Value)
         {
-            case AccessOutcome.Failed:
+            case CallerReadOutcome.Failed:
                 return ContextSection<BudgetContext>.Unavailable(CodeBudgetAccessCheckFailed, "Your access to the core record could not be confirmed, so its budget is not shown.");
-            case AccessOutcome.Refused:
+            case CallerReadOutcome.Refused:
                 return ContextSection<BudgetContext>.Unavailable(CodeBudgetAccessDenied, "You do not have access to the core record this invoice is filed under.");
         }
 
@@ -541,17 +549,15 @@ public sealed class InvoiceContextService
     private sealed record Sibling(Guid Id, string? Number, DateOnly? Date, decimal? Billed, decimal? Approved, int StatusCode);
 
     /// <param name="Readable">The siblings the caller can Read, most recent first (the order the invoices were read in).</param>
-    /// <param name="AllExamined">False when there were more siblings than <see cref="MaxSiblingAccessChecks"/> (or than a bounded read returns), so <paramref name="Readable"/> may be missing some the caller can read.</param>
+    /// <param name="AllExamined">False when the set may be missing siblings the caller can read: more than <see cref="MaxReadableSiblings"/> are readable, or the read or the <see cref="MaxSiblingAccessChecks"/> ceiling stopped the walk first. It never depends on the siblings the caller cannot read, except at that ceiling.</param>
     /// <param name="AccessCheckFailed">True when the caller's rights could not be determined for at least one sibling; <paramref name="Readable"/> is then empty and must not be used.</param>
     private sealed record SiblingSet(IReadOnlyList<Sibling> Readable, bool AllExamined, bool AccessCheckFailed);
-
-    private enum AccessOutcome { Readable, Refused, Failed }
 
     /// <summary>
     /// The other invoices of this firm on this core record that the caller can Read. One read of the siblings (all statuses, most recent first),
     /// then the same rights question the route asks about the invoice itself (<c>finance.read</c> on <c>sprk_invoices</c>, answered by Dataverse
     /// for the caller through <see cref="AuthorizationService.GetCallerRecordAccessAsync"/>), once per sibling, at most
-    /// <see cref="AccessCheckParallelism"/> at a time. Any sibling whose rights cannot be determined (no caller token, a faulted lookup that
+    /// <see cref="CallerReadCheck.Parallelism"/> at a time (the shared <see cref="CallerReadCheck"/> loop). Any sibling whose rights cannot be determined (no caller token, a faulted lookup that
     /// did not grant Read, an exception) fails the whole set: the sections report it, and nothing falls back to the unfiltered list.
     /// </summary>
     private async Task<SiblingSet> LoadReadableSiblingsAsync(InvoiceScope scope, InvoiceCaller caller, CancellationToken ct)
@@ -580,34 +586,24 @@ public sealed class InvoiceContextService
         query.AddOrder("sprk_invoiceid", OrderType.Ascending);
 
         var (rows, complete) = await ReadPagedAsync(query, ct);
-        var candidates = rows.Take(MaxSiblingAccessChecks).ToList();
-        var allExamined = complete && rows.Count <= MaxSiblingAccessChecks;
 
-        var outcomes = new AccessOutcome[candidates.Count];
-        using var gate = new SemaphoreSlim(AccessCheckParallelism);
-        await Task.WhenAll(candidates.Select(async (row, index) =>
-        {
-            await gate.WaitAsync(ct);
-            try
-            {
-                outcomes[index] = await CheckReadAsync(caller, FinanceAuthorizationFilter.InvoiceEntitySet, row.Id, ct);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }));
+        // Walk the siblings newest first, asking the caller's Read of each, until more than MaxReadableSiblings are readable or the ceiling is
+        // reached. The "too many" answer therefore rests on invoices the caller CAN read, never on how many they cannot.
+        var scan = await CallerReadCheck.ScanAsync(
+            _authorization, caller, FinanceAuthorizationFilter.InvoiceEntitySet, SiblingReadOperation,
+            rows, row => row.Id, stopAtReadable: MaxReadableSiblings + 1, MaxSiblingAccessChecks, _logger, "Invoice context", ct);
 
-        if (outcomes.Contains(AccessOutcome.Failed))
+        if (scan.Failed)
         {
             _logger.LogWarning(
-                "Invoice context: the caller's rights could not be determined for {Failed} of {Checked} sibling invoices of invoice {InvoiceId}; the sections that need them are unavailable",
-                outcomes.Count(o => o == AccessOutcome.Failed), outcomes.Length, scope.InvoiceId);
-            return new SiblingSet([], allExamined, true);
+                "Invoice context: the caller's rights could not be determined for sibling invoices of invoice {InvoiceId}; the sections that need them are unavailable",
+                scope.InvoiceId);
+            return new SiblingSet([], false, true);
         }
 
-        var readable = candidates
-            .Where((_, index) => outcomes[index] == AccessOutcome.Readable)
+        var allExamined = complete && scan.AllExamined && scan.Readable.Count <= MaxReadableSiblings;
+
+        var readable = scan.Readable
             .Select(row => new Sibling(
                 row.Id,
                 row.GetAttributeValue<string>("sprk_invoicenumber"),
@@ -618,29 +614,6 @@ public sealed class InvoiceContextService
             .ToList();
 
         return new SiblingSet(readable, allExamined, false);
-    }
-
-    private async Task<AccessOutcome> CheckReadAsync(InvoiceCaller caller, string entitySet, Guid recordId, CancellationToken ct)
-    {
-        try
-        {
-            var snapshot = await _authorization.GetCallerRecordAccessAsync(
-                caller.UserId, entitySet, recordId, caller.AccessToken, ct);
-
-            if (OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, SiblingReadOperation))
-            {
-                // A degraded (probe-derived) Read is still Dataverse's own "the caller can retrieve this row".
-                return AccessOutcome.Readable;
-            }
-
-            // No Read: Dataverse's answer, unless the lookup itself faulted - then it is not an answer.
-            return snapshot.Faulted ? AccessOutcome.Failed : AccessOutcome.Refused;
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Invoice context: the rights check on {EntitySet} {RecordId} faulted", entitySet, recordId);
-            return AccessOutcome.Failed;
-        }
     }
 
     private async Task<ContextSection<PriorInvoicesContext>> LoadPriorInvoicesAsync(InvoiceScope scope, Lazy<Task<SiblingSet>> siblings)
@@ -669,7 +642,7 @@ public sealed class InvoiceContextService
             .ToList();
 
         return ContextSection<PriorInvoicesContext>.Available(
-            new PriorInvoicesContext(PriorInvoiceLimit, set.Readable.Count > PriorInvoiceLimit || !set.AllExamined, items));
+            new PriorInvoicesContext(PriorInvoiceLimit, set.Readable.Count > PriorInvoiceLimit, items));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -790,7 +763,7 @@ public sealed class InvoiceContextService
 
     private sealed record FeeLine(Guid? TimekeeperId, string? AsBilled, decimal? Rate, DateOnly? Date);
 
-    private async Task<ContextSection<RateHistoryContext>> LoadRateHistoryAsync(InvoiceScope scope, Lazy<Task<SiblingSet>> siblings, Lazy<Task<AccessOutcome>> coreAccess, CancellationToken ct)
+    private async Task<ContextSection<RateHistoryContext>> LoadRateHistoryAsync(InvoiceScope scope, Lazy<Task<SiblingSet>> siblings, Lazy<Task<CallerReadOutcome>> coreAccess, CancellationToken ct)
     {
         if (!TryRequireFirmAndCore<RateHistoryContext>(scope, out var firmId, out var core, out var unavailable))
         {
@@ -837,9 +810,9 @@ public sealed class InvoiceContextService
             // The approved rates include cards scoped to the core record; those are the record's own data, so the caller needs Read on it.
             switch (await coreAccess.Value)
             {
-                case AccessOutcome.Failed:
+                case CallerReadOutcome.Failed:
                     return ContextSection<RateHistoryContext>.Unavailable(CodeRateAccessCheckFailed, "Your access to the core record could not be confirmed, so no rate history is shown.");
-                case AccessOutcome.Refused:
+                case CallerReadOutcome.Refused:
                     return ContextSection<RateHistoryContext>.Unavailable(CodeRateAccessDenied, "You do not have access to the core record this invoice is filed under, whose rate cards are part of the rate history.");
             }
 

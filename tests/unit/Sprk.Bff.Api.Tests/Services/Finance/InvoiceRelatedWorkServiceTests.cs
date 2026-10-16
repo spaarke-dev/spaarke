@@ -463,9 +463,134 @@ public class InvoiceRelatedWorkServiceTests
         var result = (await h.GetAsync())!;
 
         result.Truncated.Should().BeTrue();
-        h.Rights.Calls.Should().HaveCount(InvoiceRelatedWorkService.MaxCandidates);
-        h.Rights.Calls.Select(c => c.Id).Should().NotContain(Doc(1), "the oldest candidates are the ones cut");
         h.SearchRequests.Single().DocumentIds!.Count.Should().Be(InvoiceRelatedWorkService.MaxCandidates);
+        h.SearchRequests.Single().DocumentIds.Should().NotContain(Doc(1).ToString(), "the oldest readable candidates are the ones cut");
+    }
+
+    [Fact]
+    public async Task ARunOfRestrictedNewDocuments_DoesNotHideTheReadableOlderOnes()
+    {
+        // 60 candidates, the 50 newest restricted: the old single capped read saw only the restricted ones and answered "nothing".
+        var h = new Harness { WindowDays = 30 };
+        for (var n = 1; n <= 60; n++)
+        {
+            h.Documents.Add(Document(Doc(n), $"Doc {n}", At(10).AddMinutes(n)));
+            h.Scores[Doc(n)] = n / 1000.0;
+        }
+
+        h.Rights.OnlyReadable(Enumerable.Range(1, 10).Select(Doc).ToArray());
+
+        var result = (await h.GetAsync())!;
+
+        result.Status.Should().Be(RelatedWorkStatus.Available);
+        result.Items.Select(i => i.DocumentId).Should().BeEquivalentTo(Enumerable.Range(1, 10).Select(Doc));
+        result.Truncated.Should().BeFalse("only readable documents can say there are more");
+        h.SearchRequests.Single().DocumentIds!.Count.Should().Be(10);
+    }
+
+    [Fact]
+    public async Task ManyUnreadableDocumentsAndOneReadable_BeyondTheCap_IsNotTruncated()
+    {
+        // 51 candidates (one more than the cap) of which only the oldest is readable: truncated would reveal the 50 restricted ones.
+        var h = new Harness { WindowDays = 30 };
+        for (var n = 1; n <= InvoiceRelatedWorkService.MaxCandidates + 1; n++)
+        {
+            h.Documents.Add(Document(Doc(n), $"Doc {n}", At(10).AddMinutes(n)));
+            h.Scores[Doc(n)] = n / 1000.0;
+        }
+
+        h.Rights.OnlyReadable(Doc(1));
+
+        var result = (await h.GetAsync())!;
+
+        result.Truncated.Should().BeFalse();
+        result.Items.Select(i => i.DocumentId).Should().Equal(Doc(1));
+    }
+
+    [Fact]
+    public async Task AnExhaustedCheckBudget_AnswersLikeAnEmptyWindow_NeverRevealingWhatWasNotReached()
+    {
+        // The 200 newest are restricted and 30 readable ones lie behind them: the budget runs out on the restricted ones.
+        var h = new Harness { WindowDays = 30 };
+        for (var n = 1; n <= InvoiceRelatedWorkService.MaxCandidateChecks + 30; n++)
+        {
+            h.Documents.Add(Document(Doc(n), $"Doc {n}", At(10).AddMinutes(n)));
+            h.Scores[Doc(n)] = 0.5;
+        }
+
+        h.Rights.OnlyReadable(Enumerable.Range(1, 30).Select(Doc).ToArray());
+
+        var result = (await h.GetAsync())!;
+        var empty = (await new Harness { WindowDays = 30 }.GetAsync())!;
+
+        result.Should().BeEquivalentTo(empty);
+        result.Truncated.Should().BeFalse();
+        h.Rights.Calls.Count.Should().BeLessThanOrEqualTo(InvoiceRelatedWorkService.MaxCandidateChecks);
+        h.SearchRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task LongDocumentsTakingEveryChunk_DoNotCrowdOutTheRest_TheUnrankedAreSearchedAgain()
+    {
+        var h = new Harness { WindowDays = 30 };
+        var longOnes = new HashSet<string> { Doc(1).ToString(), Doc(2).ToString(), Doc(3).ToString() };
+        for (var n = 1; n <= 15; n++)
+        {
+            h.Documents.Add(Document(Doc(n), $"Doc {n}", At(10).AddMinutes(n)));
+            h.Scores[Doc(n)] = n <= 3 ? 0.9 : 0.1 + n / 1000.0;
+        }
+
+        // Three briefs fill every chunk of the limit, so a search that includes them returns only them.
+        h.SearchOverride = request =>
+        {
+            var ids = request.DocumentIds!;
+            var dominant = ids.Where(longOnes.Contains).ToList();
+            var results = (dominant.Count > 0 ? dominant : ids)
+                .Select(id => new SearchResult { DocumentId = id, CombinedScore = h.Scores[Guid.Parse(id)] })
+                .ToList();
+            return Task.FromResult(new SemanticSearchResponse { Results = results, Metadata = new SearchMetadata { ReturnedResults = results.Count } });
+        };
+
+        var result = (await h.GetAsync())!;
+
+        result.Items.Should().HaveCount(InvoiceRelatedWorkService.MaxResults);
+        result.Items.Select(i => i.DocumentId).Take(3).Should().BeEquivalentTo(new[] { Doc(1), Doc(2), Doc(3) });
+        h.SearchRequests.Should().HaveCount(2);
+        h.SearchRequests[1].DocumentIds.Should().NotContain(longOnes, "the second search is over the readable documents not yet ranked");
+    }
+
+    [Fact]
+    public async Task TheExtraSearches_AreCapped()
+    {
+        var h = new Harness { WindowDays = 30 };
+        for (var n = 1; n <= 15; n++)
+        {
+            h.Documents.Add(Document(Doc(n), $"Doc {n}", At(10).AddMinutes(n)));
+        }
+
+        // Every search ranks exactly one new document.
+        h.SearchOverride = request =>
+        {
+            var results = new List<SearchResult> { new() { DocumentId = request.DocumentIds![0], CombinedScore = 0.5 } };
+            return Task.FromResult(new SemanticSearchResponse { Results = results, Metadata = new SearchMetadata { ReturnedResults = 1 } });
+        };
+
+        var result = (await h.GetAsync())!;
+
+        h.SearchRequests.Should().HaveCount(1 + InvoiceRelatedWorkService.MaxExtraSearches);
+        result.Items.Should().HaveCount(1 + InvoiceRelatedWorkService.MaxExtraSearches);
+    }
+
+    [Fact]
+    public async Task ReadableDocumentsTheIndexDoesNotHold_AreNotSearchedForAgainAndAgain()
+    {
+        // Two readable, one indexed: the second search (for the unranked one) finds nothing new and ends the loop.
+        var h = WithDocuments((1, 0.5), (2, null));
+
+        var result = (await h.GetAsync())!;
+
+        result.Items.Select(i => i.DocumentId).Should().Equal(Doc(1));
+        h.SearchRequests.Should().HaveCount(2);
     }
 
     // =========================================================================================

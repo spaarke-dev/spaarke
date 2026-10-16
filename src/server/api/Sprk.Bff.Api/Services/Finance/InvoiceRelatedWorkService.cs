@@ -53,7 +53,7 @@ public sealed record RelatedWorkItem(Guid DocumentId, string? Name, DateTime Cre
 /// <param name="Reason">Set when <paramref name="Status"/> is <c>empty</c>.</param>
 /// <param name="Code">Set when <paramref name="Status"/> is <c>unavailable</c> (<c>related-work.*</c>).</param>
 /// <param name="WindowDays">The settings window (plus or minus days around the line date) that was applied; null when it never got that far.</param>
-/// <param name="Truncated">More candidate documents than <see cref="InvoiceRelatedWorkService.MaxCandidates"/> exist; the most recent were considered.</param>
+/// <param name="Truncated">More documents the CALLER can read than <see cref="InvoiceRelatedWorkService.MaxCandidates"/> exist; the most recent were considered. Never set by documents the caller cannot read.</param>
 public sealed record RelatedWorkDto(
     Guid InvoiceId,
     Guid LineId,
@@ -80,7 +80,10 @@ public sealed record RelatedWorkDto(
 /// <c>createdon</c> window), each candidate is checked for Read AS THE CALLER (<see cref="AuthorizationService.GetCallerRecordAccessAsync"/> on
 /// <c>sprk_documents</c> with the <c>read</c> operation, the same question <c>AddDocumentAuthorizationFilter("read")</c> asks), and the search runs in
 /// <c>documentIds</c> scope over the readable ids only. A document of another core record is never a candidate; an unreadable one is
-/// never searched or returned and never counted in any message (an all-unreadable window answers exactly as an empty one).</para>
+/// never searched or returned and never counted in any message or flag (an all-unreadable window answers exactly as an empty one). Documents are
+/// checked newest first, in pages, until more than <see cref="MaxCandidates"/> are readable or <see cref="MaxCandidateChecks"/> have been asked
+/// about, so a run of restricted documents does not hide readable older ones; if the search ranks fewer documents than it could (long documents can
+/// take every chunk), the unranked readable ones are searched again, at most <see cref="MaxExtraSearches"/> times.</para>
 /// <para><b>Fail closed.</b> No caller id or token, a rights lookup that throws, or one that is <c>Faulted</c> and did not grant Read makes the
 /// whole answer <c>unavailable</c> (<c>related-work.access-check-failed</c>); the unfiltered candidate list is never used. A faulted lookup
 /// that did grant Read (the degraded read-probe) counts as readable, as the route filters treat it.</para>
@@ -89,8 +92,17 @@ public sealed record RelatedWorkDto(
 /// </remarks>
 public sealed class InvoiceRelatedWorkService
 {
-    /// <summary>The most candidate documents considered (each costs one cached rights lookup); the search contract allows 100.</summary>
+    /// <summary>The most READABLE candidate documents searched (the search contract allows 100). More readable ones than this set <c>truncated</c>.</summary>
     public const int MaxCandidates = 50;
+
+    /// <summary>
+    /// The most documents whose Read is asked about (each is one cached rights lookup), newest first. A budget, not a count of anything shown:
+    /// when it runs out the answer is the readable ones found so far, flagged exactly as a complete answer would be.
+    /// </summary>
+    public const int MaxCandidateChecks = 200;
+
+    /// <summary>The most extra searches made for readable candidates the first search did not rank (long documents can take every chunk of one).</summary>
+    public const int MaxExtraSearches = 2;
 
     /// <summary>The most documents returned.</summary>
     public const int MaxResults = 10;
@@ -98,7 +110,6 @@ public sealed class InvoiceRelatedWorkService
     /// <summary>The settings column allows 0 to 90 days (<c>EbillingSettings.RelatedWorkWindowDays</c>); clamped again here.</summary>
     public const int MaxWindowDays = 90;
 
-    private const int AccessCheckParallelism = 8;
     private const int MaxQueryLength = 1000;
     private const string DocumentReadOperation = "read";
 
@@ -239,59 +250,101 @@ public sealed class InvoiceRelatedWorkService
         var from = DateTime.SpecifyKind(eventDate.Date, DateTimeKind.Utc).AddDays(-windowDays);
         var toExclusive = DateTime.SpecifyKind(eventDate.Date, DateTimeKind.Utc).AddDays(windowDays + 1);
 
-        // 4. Candidates: this core record, this author, this window.
-        var (candidates, truncated) = await ReadCandidatesAsync(coreColumn, coreId, contactId.Value, from, toExclusive, ct);
-        if (candidates.Count == 0)
+        // 4. Candidates: this core record, this author, this window - newest first, at most the check budget of them.
+        var candidates = await ReadCandidatesAsync(coreColumn, coreId, contactId.Value, from, toExclusive, ct);
+
+        // 5. Only what the CALLER can read goes any further. Newest first, until more than MaxCandidates are readable or the budget is spent,
+        //    so a run of documents the caller cannot read never hides the readable ones behind it.
+        if (string.IsNullOrWhiteSpace(caller.UserId) || string.IsNullOrWhiteSpace(caller.AccessToken))
         {
-            return Empty(invoiceId, lineId, RelatedWorkReason.NoneInWindow, windowDays);
+            _logger.LogWarning("Related work has no caller identity or token to check documents with; nothing is shown");
+            return Unavailable(invoiceId, lineId, CodeAccessCheckFailed, windowDays,
+                "Your access to the related documents could not be checked, so none are shown.");
         }
 
-        // 5. Only what the CALLER can read goes any further.
-        var readable = await FilterReadableAsync(candidates, caller, ct);
-        if (readable is null)
+        var scan = await CallerReadCheck.ScanAsync(
+            _authorization, caller, FinanceAuthorizationFilter.DocumentEntitySet, DocumentReadOperation,
+            candidates, c => c.Id, stopAtReadable: MaxCandidates + 1, MaxCandidateChecks, _logger, "Related work", ct);
+
+        if (scan.Failed)
         {
             return Unavailable(invoiceId, lineId, CodeAccessCheckFailed, windowDays,
                 "Your access to the related documents could not be checked, so none are shown.");
         }
 
-        if (readable.Count == 0)
+        if (scan.Readable.Count == 0)
         {
-            // Same answer as an empty window, and no truncation flag: neither may reveal that unreadable documents exist.
+            // Same answer whether the window is empty or holds only documents the caller cannot read (or the budget ran out on them).
             return Empty(invoiceId, lineId, RelatedWorkReason.NoneInWindow, windowDays);
         }
 
+        // "More than we searched" is a fact about documents the caller CAN read; unreadable ones never set it.
+        var truncated = scan.Readable.Count > MaxCandidates;
+        var readable = scan.Readable.Take(MaxCandidates).ToList();
+
         // 6. Rank the readable candidates by similarity to the narrative (documentIds scope, the narrative is the only text sent).
-        SemanticSearchResponse response;
+        var query = narrative.Length > MaxQueryLength ? narrative[..MaxQueryLength] : narrative;
+        var byId = readable.ToDictionary(c => c.Id);
+        var best = new Dictionary<Guid, double>();
+        var remaining = readable.Select(c => c.Id).ToList();
+        var wanted = Math.Min(MaxResults, readable.Count);
+
         try
         {
-            response = await _search.SearchAsync(
-                new SemanticSearchRequest
+            // The search counts CHUNKS, not documents: a few long documents can fill the limit and push the rest out. While fewer documents
+            // than wanted are ranked, search again over the readable ones not yet ranked (at most MaxExtraSearches more times).
+            for (var round = 0; round <= MaxExtraSearches && remaining.Count > 0; round++)
+            {
+                var response = await _search.SearchAsync(
+                    new SemanticSearchRequest
+                    {
+                        Query = query,
+                        Scope = SearchScope.DocumentIds,
+                        DocumentIds = remaining.Select(id => id.ToString("D")).ToList(),
+                        Options = new SearchOptions { Limit = 50, IncludeHighlights = false },
+                    },
+                    tenantId,
+                    ct);
+
+                // The search can only return ids it was given; the intersection is kept anyway so nothing outside the readable set can ever surface.
+                var found = 0;
+                foreach (var hit in response.Results)
                 {
-                    Query = narrative.Length > MaxQueryLength ? narrative[..MaxQueryLength] : narrative,
-                    Scope = SearchScope.DocumentIds,
-                    DocumentIds = readable.Select(c => c.Id.ToString("D")).ToList(),
-                    Options = new SearchOptions { Limit = 50, IncludeHighlights = false },
-                },
-                tenantId,
-                ct);
+                    if (!Guid.TryParse(hit.DocumentId, out var id) || !byId.ContainsKey(id))
+                    {
+                        continue;
+                    }
+
+                    if (best.TryGetValue(id, out var score))
+                    {
+                        best[id] = Math.Max(score, hit.CombinedScore);
+                    }
+                    else
+                    {
+                        best[id] = hit.CombinedScore;
+                        found++;
+                    }
+                }
+
+                if (found == 0 || best.Count >= wanted)
+                {
+                    break;
+                }
+
+                remaining = remaining.Where(id => !best.ContainsKey(id)).ToList();
+            }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Related work search for line {LineId} failed ({Candidates} candidates)", lineId, readable.Count);
-            return Unavailable(invoiceId, lineId, CodeSearchUnavailable, windowDays, "Related work could not be searched.", truncated);
+            return Unavailable(invoiceId, lineId, CodeSearchUnavailable, windowDays, "Related work could not be searched.");
         }
 
-        // The search can only return ids it was given; the intersection is kept anyway so nothing outside the readable set can ever surface.
-        var byId = readable.ToDictionary(c => c.Id);
-        var ranked = response.Results
-            .Select(r => (Parsed: Guid.TryParse(r.DocumentId, out var id) ? id : Guid.Empty, r.CombinedScore))
-            .Where(r => byId.ContainsKey(r.Parsed))
-            .GroupBy(r => r.Parsed)
-            .Select(g => (Id: g.Key, Score: g.Max(r => r.CombinedScore)))
-            .OrderByDescending(r => r.Score)
-            .ThenBy(r => r.Id)
+        var ranked = best
+            .OrderByDescending(r => r.Value)
+            .ThenBy(r => r.Key)
             .Take(MaxResults)
-            .Select(r => new RelatedWorkItem(r.Id, byId[r.Id].Name, byId[r.Id].CreatedOn, r.Score))
+            .Select(r => new RelatedWorkItem(r.Key, byId[r.Key].Name, byId[r.Key].CreatedOn, r.Value))
             .ToList();
 
         return ranked.Count == 0
@@ -352,13 +405,13 @@ public sealed class InvoiceRelatedWorkService
 
     private sealed record Candidate(Guid Id, string? Name, DateTime CreatedOn);
 
-    private async Task<(IReadOnlyList<Candidate> Candidates, bool Truncated)> ReadCandidatesAsync(
+    private async Task<IReadOnlyList<Candidate>> ReadCandidatesAsync(
         string coreColumn, Guid coreId, Guid contactId, DateTime from, DateTime toExclusive, CancellationToken ct)
     {
         var query = new QueryExpression(DocumentEntity)
         {
             ColumnSet = new ColumnSet(DocumentName, "createdon", coreColumn, DocumentCreatedByContact),
-            TopCount = MaxCandidates + 1,
+            TopCount = MaxCandidateChecks,
             Criteria = new FilterExpression(LogicalOperator.And),
         };
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
@@ -375,82 +428,11 @@ public sealed class InvoiceRelatedWorkService
 
         // The query is the authority on the core record and the author; they are re-checked on the rows so that a row of another core record
         // or another author can never become a candidate, whatever the source returns.
-        var rows = page.Entities
+        return page.Entities
             .Where(e => e.GetAttributeValue<EntityReference>(coreColumn)?.Id == coreId
                         && e.GetAttributeValue<EntityReference>(DocumentCreatedByContact)?.Id == contactId)
-            .ToList();
-
-        var truncated = rows.Count > MaxCandidates;
-        var candidates = rows
-            .Take(MaxCandidates)
             .Select(e => new Candidate(e.Id, e.GetAttributeValue<string>(DocumentName), e.GetAttributeValue<DateTime>("createdon")))
             .ToList();
-        return (candidates, truncated);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Documents the CALLER can Read
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private enum AccessOutcome { Readable, Refused, Failed }
-
-    /// <summary>The candidates the caller can Read, or <c>null</c> when the caller's rights could not be determined for at least one of them.</summary>
-    private async Task<IReadOnlyList<Candidate>?> FilterReadableAsync(
-        IReadOnlyList<Candidate> candidates, InvoiceContextService.InvoiceCaller caller, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(caller.UserId) || string.IsNullOrWhiteSpace(caller.AccessToken))
-        {
-            _logger.LogWarning("Related work has no caller identity or token to check documents with; nothing is shown");
-            return null;
-        }
-
-        var outcomes = new AccessOutcome[candidates.Count];
-        using var gate = new SemaphoreSlim(AccessCheckParallelism);
-        await Task.WhenAll(candidates.Select(async (candidate, index) =>
-        {
-            await gate.WaitAsync(ct);
-            try
-            {
-                outcomes[index] = await CheckReadAsync(caller, candidate.Id, ct);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }));
-
-        if (outcomes.Contains(AccessOutcome.Failed))
-        {
-            _logger.LogWarning(
-                "Related work: the caller's rights could not be determined for {Failed} of {Checked} candidate documents; nothing is shown",
-                outcomes.Count(o => o == AccessOutcome.Failed), outcomes.Length);
-            return null;
-        }
-
-        return candidates.Where((_, index) => outcomes[index] == AccessOutcome.Readable).ToList();
-    }
-
-    private async Task<AccessOutcome> CheckReadAsync(InvoiceContextService.InvoiceCaller caller, Guid documentId, CancellationToken ct)
-    {
-        try
-        {
-            var snapshot = await _authorization.GetCallerRecordAccessAsync(
-                caller.UserId, FinanceAuthorizationFilter.DocumentEntitySet, documentId, caller.AccessToken, ct);
-
-            if (OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, DocumentReadOperation))
-            {
-                // A degraded (probe-derived) Read is still Dataverse's own "the caller can retrieve this row".
-                return AccessOutcome.Readable;
-            }
-
-            // No Read: Dataverse's answer, unless the lookup itself faulted - then it is not an answer.
-            return snapshot.Faulted ? AccessOutcome.Failed : AccessOutcome.Refused;
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Related work: the rights check on document {DocumentId} faulted", documentId);
-            return AccessOutcome.Failed;
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
