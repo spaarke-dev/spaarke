@@ -35,6 +35,14 @@ namespace Sprk.Bff.Api.Services.Ai.Context;
 /// <c>systemuser.azureactivedirectoryobjectid</c>, ADR-028), never a value from client Args or an LLM
 /// completion. Consumed by <see cref="ContextBinder"/> to key the User slice's user-memory fragment.
 /// </summary>
+/// <remarks>
+/// <b>Known limit (issue #1576): a newly disabled user still resolves for up to 10 minutes.</b> The lookup is delegated
+/// to <see cref="ISystemUserIdentityResolver.ResolveSystemUserIdAsync"/>, which excludes disabled systemusers but caches
+/// each oid → systemuserid mapping for 10 minutes. A user disabled at time T therefore still resolves until about
+/// T + 10 min on every caller of this resolver — including the authorization checks in
+/// <c>CommunicationRecordAuthorizationFilter</c> (caller resolution) and <c>DecisionRouteCores</c>, not only memory
+/// recall. The same limit is stated on <see cref="ISystemUserIdentityResolver"/>.
+/// </remarks>
 public interface ICallerSystemUserResolver
 {
     /// <summary>
