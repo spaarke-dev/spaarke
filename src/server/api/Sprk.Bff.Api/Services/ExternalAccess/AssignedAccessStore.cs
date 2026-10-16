@@ -324,7 +324,10 @@ public sealed record AssignedAccessLedgerWrite(
     DateOnly? GrantedExpiry = null);
 
 /// <summary>A root's registry-column values, as read (<c>null</c> value = column empty).</summary>
-public sealed record AssignedRootSnapshot(IReadOnlyDictionary<string, Guid?> Values);
+/// <param name="Values">The registry columns.</param>
+/// <param name="Owner">The root's CURRENT owner — its owning user, else its owning team — or <c>null</c> when the read carried
+/// neither (#1620: what the owner-aware revoke of an auto share needs).</param>
+public sealed record AssignedRootSnapshot(IReadOnlyDictionary<string, Guid?> Values, DataversePrincipalRef? Owner = null);
 
 /// <summary>A systemuser that may be represented by an assigned contact — the reverse of task 141's link.</summary>
 public sealed record AssignedLinkCandidate(
@@ -771,7 +774,7 @@ public class AssignedAccessStore
         ExternalGrantRootType rootType, Guid rootId, IReadOnlyCollection<string> fields, CancellationToken ct)
     {
         var idColumn = RootIdColumnFor(rootType);
-        var select = string.Join(",", new[] { idColumn }.Concat(fields.Select(f => $"_{f}_value")));
+        var select = string.Join(",", new[] { idColumn, OwningUserColumn, OwningTeamColumn }.Concat(fields.Select(f => $"_{f}_value")));
         var rows = await _dataverse.QueryAsync<JsonElement>(
             ExternalGrantRoot.BindFor(rootType).EntitySet,
             filter: $"{idColumn} eq {rootId:D}",
@@ -792,7 +795,24 @@ public class AssignedAccessStore
                 : null;
         }
 
-        return new AssignedRootSnapshot(values);
+        return new AssignedRootSnapshot(values, OwnerOf(rows[0]));
+    }
+
+    private const string OwningUserColumn = "_owninguser_value";
+    private const string OwningTeamColumn = "_owningteam_value";
+
+    /// <summary>The row's owner: its owning user, else its owning team, else <c>null</c> (#1620).</summary>
+    private static DataversePrincipalRef? OwnerOf(JsonElement row)
+    {
+        static Guid? IdOf(JsonElement row, string column) =>
+            row.TryGetProperty(column, out var v) && v.ValueKind == JsonValueKind.String
+            && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+                ? id
+                : null;
+
+        return IdOf(row, OwningUserColumn) is { } user ? DataversePrincipalRef.User(user)
+            : IdOf(row, OwningTeamColumn) is { } team ? DataversePrincipalRef.Team(team)
+            : null;
     }
 
     /// <summary>

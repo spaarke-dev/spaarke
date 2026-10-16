@@ -197,7 +197,8 @@ Describe 'Customer shared mailbox (H14m)' {
             if (@($global:T263MemberOf | Where-Object { $Filter -like "*'$($_.DistinguishedName)'*" }).Count -gt 0) { $global:T263Mailboxes }
         }
         Mock -ModuleName SidecarCore Get-Group { T263Grp $global:T263GroupName }
-        Mock -ModuleName SidecarCore Test-CustomerMailboxWritePermission { @() }
+        # Test-CustomerMailboxWritePermission is NOT mocked: it reads the stubs above, which carry -Shared and
+        # -BypassSecurityGroupManagerCheck, so every test here runs the real PRQ-E-16 probe (T186 L60).
         Mock -ModuleName SidecarCore New-Mailbox { $m = T263Mbx $Name; $global:T263Mailboxes = @($m); $m }
         Mock -ModuleName SidecarCore Add-DistributionGroupMember { $global:T263MemberOf = @(T263Grp $global:T263GroupName) }
         Mock -ModuleName SidecarCore Test-ServicePrincipalAuthorization {
@@ -270,6 +271,29 @@ Describe 'Customer shared mailbox (H14m)' {
         Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
     }
 
+    It 'accepts the scope group when Exchange appended its 14-digit creation time to the Name (T186 L59)' {
+        # Live: a group created in the admin center 2026-10-14 19:48:47 UTC is named 'Spaarke-AppAccess-acme20261014194847'.
+        $global:T263GroupName = 'Spaarke-AppAccess-acme20261014194847'
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme20261014194847' }
+    }
+
+    It 'still refuses a group whose Name only resembles this customer''s (T186 L59 must-fire)' {
+        foreach ($other in 'Spaarke-AppAccess-acme2', 'Spaarke-AppAccess-acme2026101419484', 'Spaarke-AppAccess-acme202610141948471', 'Spaarke-AppAccess-acme2x0261014194847') {
+            InModuleScope SidecarCore -Parameters @{ Other = $other } {
+                param($Other)
+                Test-ScopeGroupName -Actual $Other -Expected 'Spaarke-AppAccess-acme' | Should -BeFalse -Because $Other
+            }
+        }
+        InModuleScope SidecarCore {
+            Test-ScopeGroupName -Actual 'spaarke-appaccess-ACME' -Expected 'Spaarke-AppAccess-acme' | Should -BeTrue
+            Test-ScopeGroupName -Actual '' -Expected 'Spaarke-AppAccess-acme' | Should -BeFalse
+        }
+    }
+
     It 'retries the join while a new mailbox replicates, then succeeds' {
         InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
         $global:T263JoinFailures = 2
@@ -301,7 +325,26 @@ Describe 'Customer shared mailbox (H14m)' {
         $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
 
         $r.outcome | Should -Be 'Failure'
-        $r.diagnostic | Should -BeLike '*PRQ-E-16*'
+        $r.diagnostic | Should -BeLike '*cannot run Add-DistributionGroupMember -BypassSecurityGroupManagerCheck — prerequisite PRQ-E-16*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
+    }
+
+    It 'the PRQ-E-16 probe finds nothing missing when both write parameters are loaded (T186 L60)' {
+        InModuleScope SidecarCore { @(Test-CustomerMailboxWritePermission).Count | Should -Be 0 }
+    }
+
+    It 'the PRQ-E-16 probe names exactly what the session lacks (T186 L60 must-fire)' {
+        # Exchange Online loads a cmdlet without the parameters the caller's roles do not grant.
+        Mock -ModuleName SidecarCore Get-Command -ParameterFilter { $Name -eq 'New-Mailbox' } {
+            [pscustomobject]@{ Parameters = @{ Name = $null } }
+        }
+        Mock -ModuleName SidecarCore Get-Command -ParameterFilter { $Name -eq 'Add-DistributionGroupMember' } { $null }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.diagnostic | Should -BeLike '*cannot run New-Mailbox -Shared / Add-DistributionGroupMember -BypassSecurityGroupManagerCheck — *'
+        $r.diagnostic | Should -Not -BeLike '*System.Object*'
         Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly
     }
 
@@ -363,5 +406,39 @@ Describe 'Customer mailbox request validation' {
         $errors = (Test-CustomerMailboxRequest -Body (T263Body -Name 'ceo' -Role 'Application Exchange Full Access')) -join ' '
         $errors | Should -BeLike '*sprk-{customerId}-mail*'
         $errors | Should -BeLike '*not one the sidecar knows*'
+    }
+}
+
+# T186 L61: an Exchange failure names the command that threw, the error id and the inner exception — Exchange's
+# "A server side error has occurred" message alone named neither the cmdlet nor the cause.
+Describe 'Exchange failure diagnostic (T186 L61)' {
+    It 'names the command, the message, the error id, the category and the inner exception' {
+        function global:New-Mailbox { [CmdletBinding()] param() throw [InvalidOperationException]::new('A server side error has occurred.', [System.Net.WebException]::new('BadRequest: proxy address in use')) }
+        $record = $null
+        try { New-Mailbox } catch { $record = $_ }
+
+        $text = Format-ExchangeError $record
+
+        $text | Should -BeLike 'New-Mailbox: A server side error has occurred.*'
+        $text | Should -BeLike '*id: *'
+        $text | Should -BeLike '*category: *'
+        $text | Should -BeLike '*at: New-Mailbox <*'
+        $text | Should -BeLike '*inner WebException: BadRequest: proxy address in use*'
+    }
+
+    It 'stays one bounded line' {
+        $record = $null
+        try { throw ("line one`nline two " + ('x' * 3000)) } catch { $record = $_ }
+
+        $text = Format-ExchangeError $record
+
+        $text | Should -Not -Match "`n"
+        $text.Length | Should -BeLessOrEqual 1501
+    }
+
+    It 'every route reports Exchange failures through it' {
+        $listener = Get-Content (Join-Path $PSScriptRoot 'Listener.ps1') -Raw
+        ([regex]::Matches($listener, 'Exchange call failed: \$\(Format-ExchangeError \$_\)')).Count | Should -Be 4
+        $listener | Should -Not -BeLike '*Exchange call failed: $($_.Exception.Message)*'
     }
 }

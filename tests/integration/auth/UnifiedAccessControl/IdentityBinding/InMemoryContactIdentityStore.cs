@@ -372,9 +372,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'."));
             }
 
-            // If-Match: the version when given, "*" otherwise — a missing row is 404, never created.
+            // Mirrors DataverseContactIdentityStore (#2005): no row version, no write — never If-Match: *.
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                Writes.Add(("refused-unversioned-invite-marker", contactId, string.Empty));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the invite mark"));
+            }
+
             if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
-            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is not null && !VersionMatches(etag, c.Version))
+            if (!VersionMatches(etag, c.Version))
             {
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
             }
@@ -393,7 +399,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     /// <summary>
     /// Task 185: the plain bind PLUS the invite-code hash cleared, in the ONE conditional write (recorded as one "bind" whose
-    /// detail ends <c>|invite-code-hash=null</c>). Same rules as <see cref="BindOidAsync"/>: no row version, no write.
+    /// detail ends <c>|invite-code-hash=null</c>). Same rules as <see cref="BindOidAsync"/>: no row version, no write. #2005:
+    /// where the hash column is not provisioned it is the plain bind (the real store's fallback).
     /// </summary>
     public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
@@ -405,11 +412,11 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         {
             if (FailBind) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
 
-            // The consuming bind names the hash column: where it is not provisioned the platform refuses the whole PATCH.
+            // The consuming bind names the hash column: where it is not provisioned the platform refuses the whole PATCH, and
+            // DataverseContactIdentityStore re-sends the plain bind under the same version (#2005) — modelled as the plain bind.
             if (consumeInvite && (InviteCodeHashColumnMissing || InviteMarkerStatus == LookupStatus.ColumnMissing))
             {
-                return new StoreWriteResult(StoreWriteStatus.Failed,
-                    Error: "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'.");
+                consumeInvite = false;
             }
             // Mirrors DataverseContactIdentityStore: no row version, no write (never an unconditional bind).
             if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)

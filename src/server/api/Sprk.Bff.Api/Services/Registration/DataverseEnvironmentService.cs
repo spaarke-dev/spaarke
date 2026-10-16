@@ -22,9 +22,22 @@ public class DataverseEnvironmentService : IDisposable
 
     private const string EntitySetName = "sprk_dataverseenvironments";
 
+    /// <summary>The Dataverse error code for "the record does not exist" — the only 404 that means absent (#1363).</summary>
+    internal const string RecordNotFoundErrorCode = "0x80040217";
+
+    /// <summary>
+    /// Named <see cref="IHttpClientFactory"/> client for environment-registry reads.
+    /// Registered in <c>RegistrationModule</c> so HTTP connections are pooled per ADR-010
+    /// (avoids ad-hoc HttpClient instantiation, which starves the connection pool).
+    /// Separate from <see cref="RegistrationDataverseService.HttpClientName"/> so neither service's
+    /// client configuration (headers, handlers) leaks into the other's.
+    /// </summary>
+    public const string HttpClientName = "DataverseEnvironment";
+
     public DataverseEnvironmentService(
         IConfiguration configuration,
         TokenCredential credential,
+        IHttpClientFactory httpClientFactory,
         ILogger<DataverseEnvironmentService> logger)
     {
         _logger = logger;
@@ -38,10 +51,10 @@ public class DataverseEnvironmentService : IDisposable
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger.LogInformation("DataverseEnvironmentService targeting Dataverse at {ApiUrl}", _apiUrl);
 
-        _httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/")
-        };
+        // Factory-created client (pooled handler per ADR-010). BaseAddress is set here because the
+        // Dataverse URL is resolved from runtime config, not known at DI registration time.
+        _httpClient = httpClientFactory.CreateClient(HttpClientName);
+        _httpClient.BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/");
     }
 
     #region Token Management
@@ -90,12 +103,14 @@ public class DataverseEnvironmentService : IDisposable
 
     /// <summary>
     /// Retrieves a single environment record by ID.
-    /// Returns null if not found.
+    /// Returns null only when Dataverse answers that the record does not exist (404 with error code
+    /// <see cref="RecordNotFoundErrorCode"/>); any other 404 (a missing entity set, a routing fault) and every other
+    /// failure throws, so a caller never reads a fault as absence (#1363).
     /// NFR-01: Fresh read from Dataverse (no caching).
     /// </summary>
     /// <remarks>
     /// Virtual for the same reason as <see cref="GetActiveEnvironmentsAsync"/>: a test stands in for the registry at
-    /// this boundary without an HTTP double (<c>DemoExpirationService</c> reads each request's own target environment).
+    /// this boundary without an HTTP double (<c>DemoExpirationJob</c> reads each request's own target environment).
     /// </remarks>
     public virtual async Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
     {
@@ -108,11 +123,41 @@ public class DataverseEnvironmentService : IDisposable
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return null;
+        {
+            var errorCode = await ReadErrorCodeAsync(response, ct);
+            if (string.Equals(errorCode, RecordNotFoundErrorCode, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            throw new HttpRequestException(
+                $"Reading environment {environmentId} returned 404 with error code '{errorCode ?? "(none)"}', not "
+                + $"{RecordNotFoundErrorCode} (record not found); the environment's existence is unknown.",
+                inner: null,
+                System.Net.HttpStatusCode.NotFound);
+        }
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
         return DataverseEnvironmentRecord.MapFromJson(json);
+    }
+
+    /// <summary>The <c>error.code</c> of a Dataverse error body, or null when the body is not one.</summary>
+    private static async Task<string?> ReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            return body.ValueKind == JsonValueKind.Object
+                   && body.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -146,8 +191,8 @@ public class DataverseEnvironmentService : IDisposable
 
     public void Dispose()
     {
+        // _httpClient is owned by IHttpClientFactory (pooled handler) — not disposed here.
         _tokenSemaphore?.Dispose();
-        _httpClient?.Dispose();
     }
 
     #endregion

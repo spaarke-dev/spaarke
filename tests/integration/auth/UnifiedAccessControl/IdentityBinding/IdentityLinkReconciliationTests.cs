@@ -472,6 +472,94 @@ public class IdentityLinkReconciliationTests
         _store.SystemUsers[user].PrimaryContactId.Should().Be(linked, "the existing link is never cleared or re-pointed");
     }
 
+    // ── #2005: every systemuser bind consumes a pending invite-code hash ─────────────────────────────
+
+    /// <summary>
+    /// #2005: a licensed user email-bound onto a contact that holds a pending invite-code hash (a granted contact is
+    /// auto-invited, 185 §11) clears that hash in the SAME conditional write as the oid, so a later operator unbind cannot
+    /// revive the invite link. Where the hash column is not provisioned the bind is exactly the plain bind, as before.
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the systemuser <c>BindByEmail</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASystemUserEmailBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "invited.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "invited.member@spaarke.com");
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundAndLinked);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+        _store.SystemUsers[user].PrimaryContactId.Should().Be(contact);
+    }
+
+    /// <summary>
+    /// #2005: the same for a user already LINKED to an unbound contact (L12, <c>BindLinkedContact</c>).
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the <c>BindLinkedContact</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ALinkedContactBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "linked.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "linked.member@spaarke.com", primaryContactId: contact);
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundLinkedContact);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+    }
+
+    /// <summary>
+    /// #2005 K2: the job's before/after change log (what a report-only run lists) says the bind also clears the invite-code
+    /// hash, so a dry run does not under-report the write. The hash value itself is never logged.
+    /// </summary>
+    [Theory]
+    [InlineData(false)] // BindByEmail
+    [InlineData(true)]  // BindLinkedContact (L12)
+    public async Task TheChangeLog_OfAWorkforceBind_SaysTheInviteCodeHashIsCleared_NeverItsValue(bool linked)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var stored = InviteCode.Create(contact).StoredValue;
+        _store.AddContact(contact, "dry.run@spaarke.com", inviteCodeHash: stored);
+        _store.AddSystemUser(user, oid, "dry.run@spaarke.com", primaryContactId: linked ? contact : null);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: false, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(linked ? SystemUserLinkOutcome.BoundLinkedContact : SystemUserLinkOutcome.BoundAndLinked);
+        var bind = outcome.Changes.Should().ContainSingle(c => c.Entity == "contact").Subject;
+        bind.After.Should().Be(
+            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} sprk_externalinvitecodehash=(cleared)");
+        outcome.Changes.Should().AllSatisfy(c => (c.Before + c.After).Should().NotContain(stored));
+        _store.Writes.Should().BeEmpty("a dry run writes nothing");
+        _store.Contacts[contact].InviteCodeHash.Should().Be(stored);
+    }
+
+    private void AssertBoundOnce(Guid contact, Guid oid, bool consumed)
+    {
+        _store.Writes.Where(w => w.Op == "bind").Should().ContainSingle().Which.Should().Be(("bind", (Guid?)contact,
+            consumed
+                ? $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"
+                : $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
+        _store.Contacts[contact].Oid.Should().Be(oid.ToString("D"));
+        _store.Contacts[contact].InviteCodeHash.Should().BeNull();
+    }
+
     // ── Failure shapes ───────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -793,7 +881,11 @@ public class IdentityLinkReconciliationTests
 
     /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
     private sealed class RegistryDouble(IConfiguration configuration, string[] activeUrls, bool fails)
-        : DataverseEnvironmentService(configuration, Mock.Of<TokenCredential>(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            Mock.Of<TokenCredential>(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public override Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
             => fails

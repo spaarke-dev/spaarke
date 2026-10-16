@@ -1009,7 +1009,7 @@ public class ExternalParticipationService
     /// record's own flags (<see cref="GetRootRecordFlagsAsync"/>) and those of every record it is filed under, through the
     /// ONE filing walk (<see cref="EffectiveRootFlags"/>). Every access decision asks this, not the own-row read: the
     /// read-time cancellation and Restricted veto fold the same walk themselves (<c>AccessibleRecordSetService</c>); the
-    /// grant policy, the grantor ceiling, the share-link refusal, the internal-user Restricted bar, the No Access enforcer,
+    /// grant policy, the grantor ceiling, the internal-user Restricted bar, the No Access enforcer,
     /// the Restricted share remover and the Assigned-To materializer read it here.
     /// </summary>
     /// <remarks>
