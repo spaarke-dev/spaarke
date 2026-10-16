@@ -317,7 +317,10 @@ public class ThresholdRuleTests
 
     [Fact]
     public void TheClosedRuleTypeSet_IsUnchanged() =>
-        Enum.GetValues<RuleType>().Should().BeEquivalentTo(new[] { RuleType.Threshold, RuleType.Switch, RuleType.Existence });
+        // ebilling-r1 task 070 (FR-24): the Ontology domain is unchanged; the eleven Billing members are pinned in
+        // Billing/BillingRuleCatalogueTests.
+        Enum.GetValues<RuleType>().Where(t => RuleDomains.DomainOf(t) == RuleDomain.Ontology)
+            .Should().BeEquivalentTo(new[] { RuleType.Threshold, RuleType.Switch, RuleType.Existence });
 
     // ── The evaluation gate hands the evaluator the same CompiledPredicate contract ───────────────────────────
 

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -111,7 +112,14 @@ public sealed class RuleBodyDescriber
         // The rule type is the body's own "type" member (the schema pins it to the type's name, so a stored version whose
         // column disagrees with its body is refused at evaluation and is not worth describing). Anything unreadable
         // falls back to Existence, whose validation then names the problem.
-        var ruleType = BodyRuleType(ruleBodyJson);
+        // ebilling-r1 task 070 (FR-24 MUST): a "type" member that names no closed-set member is refused here, never described
+        // as Existence. Only a body with no readable "type" at all still falls back to Existence (whose validation refuses it).
+        if (BodyRuleType(ruleBodyJson) is not { } ruleType)
+        {
+            return new RuleDescriptionResult(null,
+                $"The rule body's type is not a member of the closed rule-type set (reason: {OntologyWriterFailureReason.RuleTypeUnsupported}).");
+        }
+
         var validation = _validator.ValidateForSave(ruleType.ToString(), ruleBodyJson, messageTemplate: null);
         if (!validation.IsValid)
         {
@@ -122,6 +130,14 @@ public sealed class RuleBodyDescriber
         try
         {
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
+            if (RuleDomains.IsBilling(ruleType))
+            {
+                // Deterministic, one sentence per billing type, no lookup read (BillingRuleCatalogue.Describe).
+                var (text, formal) = BillingRuleCatalogue.Describe(ruleType, doc.RootElement);
+                return new RuleDescriptionResult(
+                    new RuleDescription(new[] { new RuleClauseDescription("rule", ruleType.ToString(), text, formal) }), null);
+            }
+
             return ruleType == RuleType.Threshold
                 ? DescribeThreshold(doc.RootElement)
                 : await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
@@ -142,18 +158,28 @@ public sealed class RuleBodyDescriber
         }
     }
 
-    /// <summary>Threshold when the body says so, otherwise Existence (also for text that does not parse).</summary>
-    private static RuleType BodyRuleType(string? ruleBodyJson)
+    /// <summary>The closed-set member the body's <c>"type"</c> names, by exact (ordinal) name; Existence when the body has no
+    /// <c>"type"</c> member or does not parse (its validation then names the problem); <c>null</c> when a <c>"type"</c> member
+    /// is present but names no member (a refusal, ebilling-r1 task 070).</summary>
+    private static RuleType? BodyRuleType(string? ruleBodyJson)
     {
         try
         {
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
-            return doc.RootElement.ValueKind == JsonValueKind.Object
-                   && doc.RootElement.TryGetProperty("type", out var type)
-                   && type.ValueKind == JsonValueKind.String
-                   && type.GetString() == nameof(RuleType.Threshold)
-                ? RuleType.Threshold
-                : RuleType.Existence;
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("type", out var type))
+            {
+                return RuleType.Existence;
+            }
+
+            if (type.ValueKind == JsonValueKind.String && type.GetString() is { } name)
+            {
+                foreach (var member in Enum.GetValues<RuleType>())
+                {
+                    if (string.Equals(name, member.ToString(), StringComparison.Ordinal)) return member;
+                }
+            }
+
+            return null;
         }
         catch (Exception ex) when (ex is PredicateCompilationException or JsonException or InvalidOperationException)
         {

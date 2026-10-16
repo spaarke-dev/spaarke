@@ -1,0 +1,83 @@
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+
+namespace Sprk.Bff.Api.Services.Signals;
+
+/// <summary>
+/// The rules system a <see cref="RuleType"/> belongs to (ebilling-r1 task 070, spec FR-24, D-23 / D-26). Code only: a
+/// member's domain is fixed by <see cref="RuleDomains.DomainOf"/>, never read from data.
+/// </summary>
+public enum RuleDomain
+{
+    /// <summary>Ontology Signals: compiled to FetchXML by <see cref="PredicateCompiler"/>, evaluated by the Signals passes.</summary>
+    Ontology,
+
+    /// <summary>eBilling: evaluated in memory per invoice; obtainable only through
+    /// <see cref="PolicyVersionValidator.TryPrepareBillingRule"/>.</summary>
+    Billing,
+}
+
+/// <summary>
+/// The closed rule-type to domain mapping, and the <c>sprk_policy.sprk_domain</c> allowlist every Ontology reader applies
+/// (ebilling-r1 task 070; ontology-r1 review of task 019, 2026-10-15).
+/// </summary>
+/// <remarks>
+/// <para><b>Allowlist, not "!= Billing".</b> An Ontology reader loads a policy only when its <c>sprk_domain</c> is empty
+/// (no backfill: empty reads as Ontology) or Ontology (100000001). Billing (100000000), the reserved Docketing
+/// (100000002) and any value added later are excluded without a code change here.</para>
+/// <para><b>Two layers.</b> <see cref="AddOntologyPolicyAllowlist"/> narrows the Dataverse query; <see cref="IsOntologyPolicy"/>
+/// re-checks each row read (a reader must select <see cref="PolicyDomainColumn"/>), so a query that lost its filter still
+/// cannot hand a Billing row to an Ontology pass.</para>
+/// </remarks>
+public static class RuleDomains
+{
+    /// <summary>The <c>sprk_policy</c> column holding the global choice <c>sprk_policydomain</c> (task 019).</summary>
+    public const string PolicyDomainColumn = "sprk_domain";
+
+    /// <summary><c>sprk_policydomain</c> Billing (task 019, dev 2026-10-15).</summary>
+    public const int PolicyDomainBilling = 100000000;
+
+    /// <summary><c>sprk_policydomain</c> Ontology (task 019, dev 2026-10-15). Empty reads as this value.</summary>
+    public const int PolicyDomainOntology = 100000001;
+
+    /// <summary>Exhaustive: a new <see cref="RuleType"/> member does not compile into a domain until it is added here.</summary>
+    public static RuleDomain DomainOf(RuleType ruleType) => ruleType switch
+    {
+        RuleType.Threshold or RuleType.Switch or RuleType.Existence => RuleDomain.Ontology,
+        RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.TimeIncrement or RuleType.DailyHoursCap
+            or RuleType.NonBillableActivity or RuleType.ExpenseRule or RuleType.InvoiceAge or RuleType.CoreRecordWindow
+            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation => RuleDomain.Billing,
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a member of the closed RuleType set."),
+    };
+
+    /// <summary>True only for a defined member whose domain is <see cref="RuleDomain.Billing"/>.</summary>
+    public static bool IsBilling(RuleType ruleType) =>
+        Enum.IsDefined(ruleType) && DomainOf(ruleType) == RuleDomain.Billing;
+
+    /// <summary>True only for a defined member whose domain is <see cref="RuleDomain.Ontology"/>.</summary>
+    public static bool IsOntology(RuleType ruleType) =>
+        Enum.IsDefined(ruleType) && DomainOf(ruleType) == RuleDomain.Ontology;
+
+    /// <summary>Adds <c>(sprk_domain is null OR sprk_domain = Ontology)</c> to <paramref name="query"/>'s criteria (AND).</summary>
+    public static void AddOntologyPolicyAllowlist(QueryExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var domain = new FilterExpression(LogicalOperator.Or);
+        domain.AddCondition(PolicyDomainColumn, ConditionOperator.Null);
+        domain.AddCondition(PolicyDomainColumn, ConditionOperator.Equal, PolicyDomainOntology);
+        query.Criteria.AddFilter(domain);
+    }
+
+    /// <summary>True when the row's <c>sprk_domain</c> is empty or Ontology. Any other value, or a value of the wrong
+    /// type, is not an Ontology policy (fail closed).</summary>
+    public static bool IsOntologyPolicy(Entity policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        if (!policy.Attributes.TryGetValue(PolicyDomainColumn, out var value) || value is null)
+        {
+            return true;
+        }
+
+        return value is OptionSetValue { Value: PolicyDomainOntology };
+    }
+}

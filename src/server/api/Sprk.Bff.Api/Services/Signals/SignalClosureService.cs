@@ -150,10 +150,15 @@ public sealed class SignalClosureService
         var policies = new Dictionary<Guid, string>();
         foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
         {
-            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode") };
+            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn) };
             query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
+            // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent.
+            RuleDomains.AddOntologyPolicyAllowlist(query);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            foreach (var row in rows.Entities) policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+            foreach (var row in rows.Entities.Where(RuleDomains.IsOntologyPolicy))
+            {
+                policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+            }
         }
 
         return policies;

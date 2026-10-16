@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -137,7 +138,7 @@ public sealed class PolicyVersionValidator
     /// <param name="messageTemplate">The policy version's <c>sprk_messagetemplate</c>, or null/blank if none.</param>
     public PolicyVersionValidationResult ValidateForSave(string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate)
     {
-        var (result, _) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null);
+        var (result, _) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, forOntologyEvaluation: false);
         return result;
     }
 
@@ -174,7 +175,7 @@ public sealed class PolicyVersionValidator
         PolicyVersionValidationResult result;
         try
         {
-            (result, compiled) = ValidateInternal(pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId);
+            (result, compiled) = ValidateInternal(pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId, forOntologyEvaluation: true);
         }
         catch (Exception)
         {
@@ -209,6 +210,115 @@ public sealed class PolicyVersionValidator
     }
 
     /// <summary>
+    /// The fail-closed billing gate (ebilling-r1 task 070, spec FR-24): the ONLY way to obtain a
+    /// <see cref="BillingRuleDefinition"/>. Mirrors <see cref="TryPrepareForEvaluation"/>: it runs the same save-time checks
+    /// as <see cref="ValidateForSave"/> for a billing type (length cap, the type's schema, the template against the type's
+    /// fact-field set) and on refusal logs <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> (id, code and bounded
+    /// reason only), meters <see cref="OntologyWriterTelemetry.RecordPolicyInvalid"/>, sets <paramref name="definition"/> to
+    /// null and returns false. An Ontology type, an unknown, blank or combined type, an invalid body and an oversized body
+    /// are all refused. Never throws for the row's content.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pv"/> is null (a caller bug).</exception>
+    public bool TryPrepareBillingRule(PolicyVersionSnapshot pv, [NotNullWhen(true)] out BillingRuleDefinition? definition)
+    {
+        ArgumentNullException.ThrowIfNull(pv);
+
+        PolicyVersionValidationResult result;
+        definition = null;
+        try
+        {
+            if (!RuleBodySchemaValidator.TryParseRuleType(pv.RuleType, out var ruleType))
+            {
+                result = UnknownRuleType(pv.RuleType);
+            }
+            else if (!RuleDomains.IsBilling(ruleType))
+            {
+                result = PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported,
+                    $"sprk_ruletype '{ruleType}' is not a billing rule type; the billing gate evaluates only the billing " +
+                    "catalogue (FR-24).");
+            }
+            else
+            {
+                result = ValidateBilling(ruleType, pv.RuleBody, pv.MessageTemplate);
+                if (result.IsValid)
+                {
+                    definition = BillingRuleDefinition.FromValidatedBody(pv.PolicyVersionId, pv.PolicyCode, ruleType, pv.RuleBody!);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Same rule as TryPrepareForEvaluation: nothing about the row's content escapes as an exception. Type name only.
+            result = PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.InternalError,
+                $"Unexpected {ex.GetType().Name} preparing this billing rule.");
+            definition = null;
+        }
+
+        if (result.IsValid && definition is not null)
+        {
+            return true;
+        }
+
+        var reason = result.Reason ?? OntologyWriterFailureReason.InternalError;
+        _logger.LogError(
+            OntologyWriterEvents.PolicyVersionInvalid,
+            "Billing policy version {PolicyVersionId} ({PolicyCode}) failed validation at the billing gate; it is not " +
+            "evaluated (reason={Reason}).",
+            pv.PolicyVersionId, pv.PolicyCode, reason);
+        OntologyWriterTelemetry.RecordPolicyInvalid(reason);
+
+        definition = null;
+        return false;
+    }
+
+    private static PolicyVersionValidationResult UnknownRuleType(string? ruleTypeRaw) =>
+        PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported,
+            $"Unknown sprk_ruletype '{ruleTypeRaw}'. The closed set is {RuleBodySchemaValidator.ClosedSetDescription} " +
+            "(design.md CM-7; ebilling-r1 FR-24); adding a type is a code change with review, not a data value.");
+
+    /// <summary>
+    /// Save-time checks for a billing type (ebilling-r1 task 070): the length cap before any parse, the type's schema, then
+    /// the template. A billing body is never compiled: <see cref="PredicateCompiler"/> refuses every billing type. A template
+    /// token must be in <see cref="BillingRuleCatalogue.TemplateFactFields"/> for the type, the static set of values the
+    /// type's handler (task 071) supplies for a finding.
+    /// </summary>
+    private PolicyVersionValidationResult ValidateBilling(RuleType ruleType, string? ruleBodyJson, string? messageTemplate)
+    {
+        if (ruleBodyJson is not null && ruleBodyJson.Length > RuleBodySchemaValidator.MaxRuleBodyLength)
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleBodyTooLarge,
+                RuleBodySchemaValidator.RuleBodyTooLongMessage(ruleBodyJson.Length));
+        }
+
+        var schemaResult = _schemaValidator.Validate(ruleType, ruleBodyJson);
+        if (!schemaResult.IsValid)
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.SchemaInvalid, schemaResult.Errors);
+        }
+
+        if (!string.IsNullOrWhiteSpace(messageTemplate))
+        {
+            if (SignalWriter.HasMalformedPlaceholder(messageTemplate))
+            {
+                return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.TemplateMalformed,
+                    "sprk_messagetemplate contains a malformed {{...}} placeholder (unbalanced braces, an empty token, or a " +
+                    "character outside [A-Za-z0-9_.] in the field name). Curly braces are reserved for {{field}} placeholders.");
+            }
+
+            var allowed = BillingRuleCatalogue.TemplateFactFields(ruleType);
+            var refused = SignalWriter.ExtractTemplateTokens(messageTemplate).Where(t => !allowed.Contains(t)).ToArray();
+            if (refused.Length > 0)
+            {
+                return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.TemplateTokenOutsideReadSet,
+                    $"sprk_messagetemplate references field(s) a {ruleType} rule does not read: " +
+                    $"[{string.Join(", ", refused)}]. Allowed: [{string.Join(", ", allowed.Order(StringComparer.Ordinal))}].");
+            }
+        }
+
+        return PolicyVersionValidationResult.Success();
+    }
+
+    /// <summary>
     /// The shared validation body for both <see cref="ValidateForSave"/> and
     /// <see cref="TryPrepareForEvaluation"/>: rule type, then the length cap (before any parse — finding F2),
     /// then schema shape (evaluated ONCE — finding F2), then full compilation without re-evaluating the schema,
@@ -216,7 +326,7 @@ public sealed class PolicyVersionValidator
     /// alongside a success result so <see cref="TryPrepareForEvaluation"/> never has to compile twice.
     /// </summary>
     private (PolicyVersionValidationResult Result, CompiledPredicate? Compiled) ValidateInternal(
-        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId)
+        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId, bool forOntologyEvaluation)
     {
         try
         {
@@ -227,9 +337,22 @@ public sealed class PolicyVersionValidator
             // ruletype was being metered as schema_invalid instead of rule_type_unsupported.
             if (!RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out var ruleType))
             {
-                return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported,
-                    $"Unknown sprk_ruletype '{ruleTypeRaw}'. The closed set is Threshold, Switch, Existence " +
-                    "(design.md CM-7); adding a type is a code change with review, not a data value."), null);
+                return (UnknownRuleType(ruleTypeRaw), null);
+            }
+
+            if (!RuleDomains.IsOntology(ruleType))
+            {
+                // ebilling-r1 task 070 (FR-24 MUST): the Ontology evaluator never compiles, evaluates or treats as true a type
+                // of another domain -- refused FIRST, before any length, schema or compile step. Save-time validation of a
+                // billing type runs the billing checks instead (no compile).
+                if (forOntologyEvaluation || !RuleDomains.IsBilling(ruleType))
+                {
+                    return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported,
+                        $"sprk_ruletype '{ruleType}' is a {RuleDomainName(ruleType)} rule type; the Ontology evaluator does " +
+                        "not evaluate it (FR-24: a consumer that cannot evaluate a type refuses it)."), null);
+                }
+
+                return (ValidateBilling(ruleType, ruleBodyJson, messageTemplate), null);
             }
 
             if (ruleType == RuleType.Switch)
@@ -347,4 +470,7 @@ public sealed class PolicyVersionValidator
                 $"Unexpected {ex.GetType().Name} during rule-body validation."), null);
         }
     }
+
+    private static string RuleDomainName(RuleType ruleType) =>
+        Enum.IsDefined(ruleType) ? RuleDomains.DomainOf(ruleType).ToString() : "unknown";
 }
