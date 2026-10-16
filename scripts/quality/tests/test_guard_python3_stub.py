@@ -41,6 +41,9 @@ class MustFire(unittest.TestCase):
         "ls; python3 x.py",
         "  python3 x.py",
         "if true; then python3 x.py; fi",
+        "echo 'x' && python3 x.py",
+        'echo "it\'s" && python3 x.py',
+        "git commit -m 'a\nb' && python3 x.py",
     ]
 
     def test_bash_commands_denied(self):
@@ -82,7 +85,19 @@ class MustNotFire(unittest.TestCase):
         "echo done # then python3",
         "py -3 x.py",
         "",
+        # Multi-line quoted strings (review F1 of #2003): a line inside them is text, not a command.
+        "git commit -m 'fix: hook\npython3 was the stub'",
+        'git commit -m "fix: hook\n\nUse `python` not `python3`; see G-22."',
+        'gh pr create --title "x" --body "Line one\npython3 at line start\nmore"',
+        'git commit -m "don\'t run\npython3; it\'s the stub"',
+        "command -v python3",
+        "which python3",
     ]
+
+    def test_powershell_multiline_string_and_block_comment_allowed(self):
+        for cmd in ['git commit -m "fix: a\n\npython3 b"', "<#\npython3 x.py is bad\n#>\nWrite-Output hi"]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(run(cmd, tool="PowerShell")[1], "")
 
     def test_text_mentions_allowed(self):
         for cmd in self.CASES:

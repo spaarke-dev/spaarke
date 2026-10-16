@@ -13,7 +13,10 @@ when `python3` on this machine resolves into a `WindowsApps` folder. Where `pyth
 macOS, a Windows machine with a python3 shim) it does nothing. Text that is not executed is ignored: quoted strings,
 heredoc and here-string bodies, comments, and arguments (`grep python3 x`, `git commit -m "... python3 ..."`).
 
-Known limit: `python3` inside a quoted `bash -c "..."` / `pwsh -Command "..."` string or a script file is not seen.
+Known limits (misses, never false denies): `python3` inside a quoted `bash -c "..."` / `pwsh -Command "..."` string
+or a script file; behind a prefix word with options (`env -i python3`, `xargs -I{} python3`); and after a `<<WORD`
+that appears inside a single-line quoted string, which is read as a heredoc start. One false-deny shape remains:
+double quotes nested inside `"$(printf "...")"` with `python3` at the start of an inner line.
 Fails open: unreadable input or any internal error lets the call through silently. The test seam
 SPRK_PYTHON3_RESOLVES_TO overrides the resolved path ("" = not found). Enforced by: this hook; controls in
 scripts/quality/tests/test_guard_python3_stub.py.
@@ -54,10 +57,11 @@ def strip_unexecuted(command):
     # PowerShell here-strings.
     text = re.sub(r"@'\r?\n.*?\r?\n'@", "''", text, flags=re.DOTALL)
     text = re.sub(r'@"\r?\n.*?\r?\n"@', '""', text, flags=re.DOTALL)
-    # Quoted strings (single quotes have no escapes; double quotes allow backslash escapes).
-    text = re.sub(r"'[^'\n]*'", "''", text)
-    text = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', text)
-    # Comments: a # at line start or after whitespace, to end of line.
+    # Quoted strings, in one pass so the leftmost quote wins, and spanning lines (a multi-line `git commit -m "..."`
+    # or `--body "..."` is common). Single quotes have no escapes; double quotes allow backslash escapes.
+    text = re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", lambda m: m.group(0)[0] * 2, text, flags=re.DOTALL)
+    # PowerShell block comments, then line comments (a # at line start or after whitespace, to end of line).
+    text = re.sub(r"<#.*?#>", "", text, flags=re.DOTALL)
     text = re.sub(r"(^|\s)#[^\n]*", r"\1", text)
     return text
 

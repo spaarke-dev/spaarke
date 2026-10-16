@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 Third occurrence of the `python3` Store-stub hang: another session's `python3 -` call spun at 100% CPU for 76 minutes. The rule "use `python`" had been prose only.
 
 - **`scripts/quality/guard-python3-stub.py`** (new PreToolUse hook on `Bash|PowerShell`, registered in `.claude/settings.json`): denies `python3` in command position when it resolves into `WindowsApps`, and tells the agent to use `python`. It does nothing where `python3` is real. Quoted text, heredoc and here-string bodies, comments and arguments are ignored. About 0.25 s; fails open.
-- **Controls**: `scripts/quality/tests/test_guard_python3_stub.py` (15 must-fire, 22 must-not-fire, a 3 s budget), picked up by the existing CI job `agent-guard-tests`.
+- **Controls**: `scripts/quality/tests/test_guard_python3_stub.py` (18 must-fire, 30 must-not-fire including multi-line commit messages and PR bodies, a 3 s budget), picked up by the existing CI job `agent-guard-tests`.
 - **`.claude/FAILURE-MODES.md`**: G-22.
 
 ---
