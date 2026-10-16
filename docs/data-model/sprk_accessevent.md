@@ -1,5 +1,7 @@
 # sprk_accessevent — Access Event Log
 
+> 🔴 **SUPERSEDED (2026-10-16): this table does not exist in any environment, and nothing writes it.** Task 087 (the writers) was cut, and FR-32 (attestation and point-in-time replay) is deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303). Until then, "who could see record X on date D" is answered from the Dataverse audit log, which records grant-row changes, shares (Share / Unshare / Modify Share) and access-flag changes on the audited tables. `scripts/Deploy-AccessEventEntity.ps1` refuses to run without `-Force`. The design below is kept as input to #1303 only.
+
 > **Entity Purpose**: The **append-only log of access GRANT and DENY state changes** (spec FR-32,
 > design.md §7). Every explicit grant, revoke, POA share/unshare, deny-list add/remove and
 > secure/restricted/standing-grant flag flip that passes through a BFF writer lands here as one

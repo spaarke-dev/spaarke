@@ -1,6 +1,11 @@
 <#
 .SYNOPSIS
-    Creates the sprk_accessevent append-only access event log table in Dataverse (FR-32).
+    SUPERSEDED (2026-10-16) - do not run. Created the sprk_accessevent table (FR-32), which nothing writes.
+
+    Task 087 (the writers) was cut, and FR-32 is deferred to GitHub #1303 (uac-r2 release review,
+    2026-10-16). The table was never deployed to any environment. Until #1303 is built, "who could see
+    X on date D" is answered from the Dataverse audit log. The script refuses to run unless -Force is
+    passed; #1303 re-derives the schema with its evaluator-versioning design.
 
 .DESCRIPTION
     Idempotent schema deployment for `sprk_accessevent` — the append-only log of GRANT and DENY
@@ -59,6 +64,8 @@
 
 [CmdletBinding()]
 param(
+    # Superseded guard (2026-10-16): the table has no writer. Only #1303 may pass this.
+    [switch]$Force,
     [Parameter(Mandatory = $false)]
     [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
 
@@ -70,6 +77,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $Force) {
+    throw "Deploy-AccessEventEntity.ps1 is SUPERSEDED (2026-10-16): sprk_accessevent has no writer (task 087 cut; FR-32 deferred to GitHub #1303). Not run."
+}
 
 $EntityLogicalName = "sprk_accessevent"
 $EntitySchemaName  = "sprk_AccessEvent"
