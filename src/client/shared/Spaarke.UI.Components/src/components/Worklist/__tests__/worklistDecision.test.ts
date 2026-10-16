@@ -125,6 +125,24 @@ describe('resolutionFor with a Decision Record', () => {
     expect(hasRecordedDecision(resolution)).toBe(false);
   });
 
+  it('an inquiry-sent record (Signal still Acknowledged, no resolution type) is shown as recorded and still open', () => {
+    const resolution = resolutionFor(
+      itemFrom({ resolutionType: null, resolvedOn: null, decision: DECISION }),
+      'decided',
+      TODAY
+    )!;
+    expect(resolution.leftOpen).toBe(true);
+    expect(resolution.resolutionType).toBe('Acted');
+    expect(resolution.recordNumber).toBe('DR-00042');
+    expect(hasRecordedDecision(resolution)).toBe(true);
+    const dismissal = resolutionFor(
+      itemFrom({ resolutionType: null, resolvedOn: null, decision: { ...DECISION, recordClass: 'Dismissal' } }),
+      'decided',
+      TODAY
+    )!;
+    expect(dismissal.resolutionType).toBe('Dismissed');
+  });
+
   it('an open item never has a resolution, record or not', () => {
     expect(resolutionFor(itemFrom({ decision: DECISION }), 'lanes', TODAY)).toBeNull();
   });

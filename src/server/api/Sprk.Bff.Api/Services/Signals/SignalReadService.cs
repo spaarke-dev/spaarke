@@ -265,15 +265,18 @@ public sealed class SignalReadService
     private readonly TimeProvider _clock;
     private readonly ILogger<SignalReadService> _logger;
     private readonly SignalSuppressionService _families;
+    private readonly DecisionRecordWriter _records;
 
     public SignalReadService(
         IDataverseUserClient user,
         IGenericEntityService entities,
         IIdentityNormalizationService identity,
         SignalSuppressionService families,
+        DecisionRecordWriter records,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
+        _records = records ?? throw new ArgumentNullException(nameof(records));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -571,10 +574,17 @@ public sealed class SignalReadService
         var doc = XDocument.Parse(WithDecisionRecordColumn(closedEarlierFetch));
         var filter = doc.Root!.Element("entity")!.Elements("filter").FirstOrDefault();
         var window = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_resolvedon");
-        if (filter is null || window is null)
+        var status = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_signalstatus");
+        if (filter is null || window is null || status is null)
         {
             return null;
         }
+
+        // A review that leaves its Signal open (inquiry sent, reminder, follow-on only) writes a Decision Record and leaves the Signal
+        // Acknowledged: those records belong in the history too, so Acknowledged joins Resolved here (closedToday / closedEarlier unchanged).
+        status.SetAttributeValue("operator", "in");
+        status.SetAttributeValue("value", null);
+        status.Add(new XElement("value", "100000001"), new XElement("value", "100000002"));
 
         window.SetAttributeValue("operator", "last-x-days");
         window.SetAttributeValue("value", DecidedWindowDays.ToString(CultureInfo.InvariantCulture));
@@ -1036,6 +1046,15 @@ public sealed class SignalReadService
     {
         var found = new Dictionary<Guid, WorklistDecisionRecord>();
         var ids = recordIds.Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new DecisionRecordReads(found, null);
+        }
+
+        // Only a record the ontology writer itself created is a Decision Record here (the condition DecisionCommitService.FindRecordAsync
+        // uses): Console User can Create a row and Write a Signal's lookup, and no field is secured, so any other row could be a forgery
+        // ("Judgement, decided by <partner>"). Such a row is treated like an unreadable one. A WhoAmI fault throws to ReadAsync's catch (503).
+        var writerUserId = await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
         foreach (var chunk in ids.Chunk(IdChunk))
         {
             var fetch = new XElement("fetch",
@@ -1046,10 +1065,27 @@ public sealed class SignalReadService
                         new XElement("attribute", new XAttribute("name", "fullname"))),
                     new XElement("filter", new XAttribute("type", "and"),
                         new XElement("condition", new XAttribute("attribute", "sprk_decisionrecordid"), new XAttribute("operator", "in"),
-                            chunk.Select(id => new XElement("value", id.ToString("D")))))));
+                            chunk.Select(id => new XElement("value", id.ToString("D")))),
+                        new XElement("condition", new XAttribute("attribute", DecisionRecordWriter.CreatedByColumn), new XAttribute("operator", "eq"),
+                            new XAttribute("value", writerUserId.ToString("D"))))));
 
             var response = await _user.GetAsync(
                 $"{DecisionRecordEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
+            if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                if (response.StatusCode == 401)
+                {
+                    // The same mapped code, but the caller's token failed mid-request: a fault, not a verdict (as the witness read).
+                    _logger.LogWarning("Signal read: the Decision Record read was answered 401; unavailable.");
+                    return new DecisionRecordReads(found, SignalReadResult.Unavailable("decision record read unauthorized"));
+                }
+
+                // A 403 is "no Read on the table (or on the confirming user the query links to)": the records are omitted. Warning, not Debug:
+                // an empty tab from a refused read looks exactly like "no decisions".
+                _logger.LogWarning("Signal read: the caller's Decision Record read was refused (403); the records are omitted.");
+                return new DecisionRecordReads(found, null);
+            }
+
             var result = ReadAccessRows(response, "decision record");
             if (result.Outcome is { } failure)
             {

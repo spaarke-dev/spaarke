@@ -75,11 +75,27 @@ BU or share decision for the owner, not something the tab widens: it adds no rea
 Open uac-r2 PRs checked (`gh pr list --state open`): #2007 (contact bind / invite code) only; no overlap with the route, the lineage, the owner
 config or the ledger. Nothing on master invalidates the plan; no uac-r2 file changed.
 
+## Fix round (review of #2014)
+
+- **F1 forged records.** `ReadDecisionRecordsAsync` adds `createdby eq <writer user id>` (`DecisionRecordWriter.WriterUserIdAsync` / `CreatedByColumn`, as `DecisionCommitService.FindRecordAsync` does); the read stays as the caller. Console User can Create a row and Write a Signal's lookup, so any other row could be a forgery. A non-writer record is unreadable: the item stays listed with no `decision`, and `decided` drops it. A WhoAmI fault is a 503.
+- **F1 open-Signal records.** In `set=decided` only, the status condition is widened to `in (Acknowledged, Resolved)`, so a review that leaves its Signal open (inquiry sent, reminder, follow-on only) is listed. `closedToday` and `closedEarlier` stay Resolved. The client shows such a row as recorded and still open (`resolutionFor`: `leftOpen`, resolution Acted, or Dismissed for a Dismissal class).
+- **F3 who decided.** The test double returns the name only through the outer link `systemuser` on `sprk_confirmedby`; a test asserts the link and the absence of `ownerid`.
+- **F2 401 / 403.** Only an actual 403 means "no Read on the table (or on the confirming user the query links to)": the records are omitted and a Warning is logged. A 401 is a fault: 503 (as the witness read).
+- **Seeding proof** (four mutations applied together: `createdby` condition removed, link `to` changed to `ownerid`, 401 branch disabled, status `in` changed to `eq`): 9 tests failed, including each targeted test (forged, inquiry-sent, status widening, who-decided link, 401/403). Service restored; 69 pass.
+
+### Disclosed limits (no code change)
+
+- **K1 (one row per Signal).** A later review overwrites `sprk_signal.sprk_decisionrecord`, so the tab shows only the latest record for a Signal reviewed twice. Gate DRs (D-139) have no Signal and are not listed. The fix is a record-first read (list Decision Records, then join to the Signal); the main session files the issue.
+- **K1 (Do lane).** Decided Do-lane items follow the subject's current assignee ("mine" rule), so a reassigned To Do moves its record to the new assignee's tab.
+- **K3.** `steps[].values` and the note are returned as stored. Not a new disclosure: the caller can already read them in the model-driven app.
+- **K4.** "Who decided" is `sprk_confirmedby` (the systemuser who confirmed), per D-145b, never `ownerid`. The D-129 wording is for the main session to raise with the owner.
+- **K2.** The outer link to systemuser fails as a whole without `prvReadUser`; the 403 Warning covers it.
+
 ## Verification
 
-- BFF `SignalReadRouteTests`: 64 pass (53 before + 11 new). Mutation: removing the decided-set drop and the closed-query column select fails 7 tests. `RouteAuthorizationGuard` + `RecordOwnerAssignmentCensus` ArchTests: 122 pass. `DoLanePrivacy` (static members of the service): 45 pass.
-- UI.Components jest: `DecisionRecords` (16) + `Worklist/__tests__/worklistDecision` (9) new; Worklist, ConsoleKit, WorkspaceShell suites pass (350 total in the three runs). Mutation: reverting `resolutionFor` and the class filter fails 8 tests.
-- DailyBriefing.Components jest: `decisionRecordsSectionRegistration` (5 new) + `legalWorkspaceSectionRegistry` + `worklistSectionRegistration`: 18 pass.
+- BFF `SignalReadRouteTests`: 69 pass (53 before + 16 new). Mutation: removing the decided-set drop and the closed-query column select fails 7 tests. `RouteAuthorizationGuard` + `RecordOwnerAssignmentCensus` ArchTests: 122 pass. `DoLanePrivacy` (static members of the service): 45 pass.
+- UI.Components jest: `DecisionRecords` (16) + `Worklist/__tests__/worklistDecision` (10) new; `DecisionWizard.test.tsx` has 1 failure (Discard check `alertdialog`) that also fails with the pre-fix `worklistWizardItem.ts`, in a file this PR does not touch; Worklist, ConsoleKit, WorkspaceShell suites pass (350 total in the three runs). Mutation: reverting `resolutionFor` and the class filter fails 8 tests.
+- DailyBriefing.Components jest: `decisionRecordsSectionRegistration` (5 new) + `legalWorkspaceSectionRegistry`: 10 pass.
 - `tsc --noEmit` in UI.Components: 9 errors before and after (unresolved `@spaarke/auth`, `@spaarke/sdap-client`, `FileUploadService.ts`), none in a touched file. eslint on the new and changed client files: clean.
 - BFF hygiene (section 10): placement = in the BFF, extending the existing Signal read route and service (no new route, DI registration, package or background work; `bff-extensions.md` criteria: the read must run as the caller beside the existing Signal reads). Publish size, fresh worktrees at `C:\wb45m` (branch `79731ff5f`) vs `C:\wb45b` (`origin/docs/ontology-platform-design` @ `eb10d114b`): `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included, 192 files each side: 38,953,600 B -> 38,961,006 B (+7,406 B, +0.007 MB; 37.156 MB total). No package changed, so no new CVE (`dotnet list package --vulnerable` not re-run).
 - Not run (no browser): the two UI tests in the POML (filter then Open under the status bar; dark mode). The jest tests render both themes and prove the launcher call and the wizard item; the visual check is the owner's, as for 055.

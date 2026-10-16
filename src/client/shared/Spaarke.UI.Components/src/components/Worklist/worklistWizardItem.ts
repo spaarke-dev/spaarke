@@ -109,15 +109,21 @@ export function resolutionFor(
       note: until ? `Not raised again until ${until}` : 'Suppressed',
     };
   }
-  if (!item.resolutionType) {
-    return { resolutionType: 'ConditionCleared', leftOpen: true, note: 'Closed - how it closed was not recorded' };
-  }
   const decision = item.decision;
-  if (!decision) return { resolutionType: item.resolutionType, decidedOn: item.resolvedOn ?? null };
+  if (!decision) {
+    if (!item.resolutionType) {
+      return { resolutionType: 'ConditionCleared', leftOpen: true, note: 'Closed - how it closed was not recorded' };
+    }
+    return { resolutionType: item.resolutionType, decidedOn: item.resolvedOn ?? null };
+  }
   // Task 045 (#1959 item 2): the Decision Record the route returned (read as the caller), so the wizard replays the steps. `steps`
-  // stays undefined when the stored envelope was unreadable: the wizard then shows no replay (`hasRecordedDecision`).
+  // stays undefined when the stored envelope was unreadable: the wizard then shows no replay (`hasRecordedDecision`). A record whose
+  // review left its Signal open (inquiry sent, reminder, follow-on only: the decided set lists it, status Acknowledged) has no
+  // resolution type: it is shown as recorded and still open.
+  const leftOpen = !item.resolutionType;
   return {
-    resolutionType: item.resolutionType,
+    resolutionType: item.resolutionType ?? (decision.recordClass === 'Dismissal' ? 'Dismissed' : 'Acted'),
+    ...(leftOpen ? { leftOpen: true, note: 'Decision recorded - this item is still open' } : {}),
     recordClass: decision.recordClass,
     recordNumber: decision.number,
     decidedByName: decision.decidedByName,
