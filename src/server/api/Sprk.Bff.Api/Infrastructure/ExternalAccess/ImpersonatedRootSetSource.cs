@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Communication;
 
@@ -298,6 +299,59 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
             .Concat(customerTenantIds.Where(g => g != Guid.Empty).Select(g => g.ToString("D")))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// The configured customer home directories for <see cref="EvictionTenants"/> (r3 task 048). Never throws: it is read
+    /// inside clean-up <c>finally</c> blocks, where an invalid reloaded configuration (<c>OptionsValidationException</c>)
+    /// must not skip the eviction under the request's own tenants. Absent or unreadable → none, logged.
+    /// </summary>
+    internal static IReadOnlySet<Guid> CustomerTenantIdsOrNone(
+        IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity, ILogger logger)
+    {
+        if (workforceIdentity is null)
+        {
+            return new HashSet<Guid>();
+        }
+
+        try
+        {
+            return workforceIdentity.CurrentValue.ParsedCustomerTenantIds();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                "[EXT-ACCESS] WorkforceIdentity:CustomerTenantIds could not be read ({ExceptionType}): root sets are cleared "
+                + "under the request's tenants only; a linked user's home sign-in keeps its set until the cache TTL.",
+                ex.GetType().Name);
+            return new HashSet<Guid>();
+        }
+    }
+
+    /// <summary>
+    /// The same customer home directories read straight from configuration, for a class that holds
+    /// <see cref="IConfiguration"/> rather than the options (r3 task 048). Never throws; non-GUID entries are skipped.
+    /// </summary>
+    internal static IReadOnlySet<Guid> CustomerTenantIdsOrNone(IConfiguration? configuration)
+        => configuration?.GetSection(WorkforceIdentityOptions.SectionName + ":" + nameof(WorkforceIdentityOptions.CustomerTenantIds))
+               .GetChildren()
+               .Select(c => Guid.TryParse(c.Value?.Trim(), out var g) ? g : Guid.Empty)
+               .Where(g => g != Guid.Empty)
+               .ToHashSet()
+           ?? new HashSet<Guid>();
+
+    /// <summary>
+    /// <see cref="InvalidateAsync(ITenantCache, ClaimsPrincipal?, Guid, string, ILogger)"/> under the caller's namespace
+    /// AND every customer home directory (<see cref="EvictionTenants"/>, r3 task 048). Same non-fatal contract.
+    /// </summary>
+    internal static async Task InvalidateAsync(
+        ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType,
+        IReadOnlySet<Guid> customerTenantIds, ILogger logger)
+    {
+        foreach (var tenant in EvictionTenants(new[] { CacheTenantFor(caller) }, customerTenantIds))
+        {
+            await InvalidateForTenantAsync(cache, tenant, systemUserId, entityType, logger).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

@@ -1141,6 +1141,21 @@ public class ContactBindingDecisionTests
     }
 
     [Fact]
+    public void DecideHomeLinkWrite_ItsOwnPair_InAFormThe046ReadCannotMatch_OrAlsoOnAnotherSystemUser_IsACollision()
+    {
+        // Braces: the same GUID, but the 046 resolution's D-form filter never finds it, so sign-in would still fail.
+        var braced = new HomeLinkRow(GuestUser, false, LinkTenant.ToString("B"), LinkOid.ToString("D"), "W/\"7\"");
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(braced), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+
+        // A second holder of the same pair: the 046 resolution denies it as ambiguous, so "already linked" would mislead.
+        var own = Guest(GuestUser, tenant: LinkTenant, oid: LinkOid);
+        var second = new HomeLinkRow(OtherUser, false, LinkTenant.ToString("D"), LinkOid.ToString("D"));
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(own), HomeLinkLookup.Of(own, second), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+    }
+
+    [Fact]
     public void DecideHomeLinkWrite_ThePairOnAnotherSystemUser_IsACollision_WhateverItsState()
     {
         var holder = new HomeLinkRow(OtherUser, true, LinkTenant.ToString("D"), LinkOid.ToString("D"));

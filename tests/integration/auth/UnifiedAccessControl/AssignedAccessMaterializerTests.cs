@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -1051,6 +1052,31 @@ public class AssignedAccessMaterializerTests
         _h.Cache.Removed.Should().Contain(r => r.Tenant == TestTenant && r.Id == expectedId,
             "the key ImpersonatedRootSetSource.GetAsync reads for that user");
         _h.Cache.Removed.Should().NotContain(r => r.Tenant == "anonymous");
+    }
+
+    /// <summary>r3 task 048 (046 review K1): also every customer home directory a linked user's home sign-in reads under.</summary>
+    [Fact]
+    public async Task AShareWrittenInTheJob_AlsoClearsTheUsersRootSetUnderEveryCustomerHomeTenant()
+    {
+        var customer = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480e2");
+        _h.Configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureAd:TenantId"] = TestTenant,
+                ["WorkforceIdentity:CustomerTenantIds:0"] = customer.ToString("D"),
+            })
+            .Build();
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        await _h.Materializer.MaterializeAsync(
+            new AssignedAccessRequest(Matter, _matter, AssignedAccessTrigger.Job, null, false,
+                _h.Materializer.DeploymentTenants()),
+            CancellationToken.None);
+
+        var expectedId = ImpersonatedRootSetSource.CacheId(user, MatterTable);
+        _h.Cache.Removed.Should().Contain(r => r.Tenant == TestTenant && r.Id == expectedId);
+        _h.Cache.Removed.Should().Contain(r => r.Tenant == customer.ToString("D") && r.Id == expectedId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

@@ -397,7 +397,8 @@ public sealed class RestrictedExternalShareRemover
             finally
             {
                 // A9 (r3 task 048): also every customer home directory — a linked user's home sign-in reads under its tid.
-                foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(cacheTenants, CustomerTenantIds()))
+                foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(
+                             cacheTenants, ImpersonatedRootSetSource.CustomerTenantIdsOrNone(_workforceIdentity, _logger)))
                 {
                     await ImpersonatedRootSetSource.InvalidateForTenantAsync(_cache, tenant, userId, logical, _logger)
                         .ConfigureAwait(false);
@@ -533,26 +534,5 @@ public sealed class RestrictedExternalShareRemover
     {
         [System.Text.Json.Serialization.JsonPropertyName("_owninguser_value")]
         public Guid? OwningUser { get; set; }
-    }
-
-    /// <summary>
-    /// The configured customer home directories for eviction (r3 task 048). Never throws: an invalid reloaded configuration
-    /// must not skip the deployment tenant's eviction in the finally block that calls this. It then clears under the
-    /// request's tenants only, and logs.
-    /// </summary>
-    private IReadOnlySet<Guid> CustomerTenantIds()
-    {
-        try
-        {
-            return _workforceIdentity.CurrentValue.ParsedCustomerTenantIds();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                "[RESTRICTED-EXTERNAL] WorkforceIdentity:CustomerTenantIds could not be read ({ExceptionType}): root sets are cleared "
-                + "under the request's tenants only; a linked user's home sign-in keeps its set until the cache TTL.",
-                ex.GetType().Name);
-            return new HashSet<Guid>();
-        }
     }
 }

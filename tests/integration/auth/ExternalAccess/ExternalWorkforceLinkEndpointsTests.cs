@@ -5,10 +5,14 @@
 //   1. The BEARER comes from RegistrationTestAuthHandler, which stamps the identity's AuthenticationType from a header (as
 //      the real WorkforceHome / Bearer / Ciam handlers do), so the WorkforceHome-only rule is exercised for real.
 //   2. The default scheme's signing metadata is a StaticConfigurationManager over a local RSA key, and its issuer check is
-//      the exact Spaarke-tenant v2 issuer (the shared test host's AzureAd:TenantId is not a GUID, so Identity Web's own
-//      issuer validator cannot be pointed at a test tenant here). The real Identity Web default-scheme parameters are
-//      exercised in SpaarkeGuestTokenValidatorTests. The validator's A9 inputs (AzureAd:TenantId / ClientId) come from an
-//      overlay configuration with a GUID tenant.
+//      the exact Spaarke-tenant issuer, v1 or v2 (the shared test host's AzureAd:TenantId is not a GUID, so Identity Web's
+//      AadIssuerValidator cannot be pointed at a test tenant here; NO test runs that validator — the live check is task
+//      074). Everything else is the host's real default-scheme configuration: Identity Web's audience validator and the AAD
+//      signing-key issuer check (IDX40004) stay in the path, and the audiences are the shape AuthorizationModule leaves in
+//      production (AzureAd:Audience = api://{app}, plus the Copilot audience). The validator's A9 inputs
+//      (AzureAd:TenantId / ClientId) come from an overlay configuration with a GUID tenant.
+//   The guest token is a v1 access token (aud api://{app}, iss sts.windows.net), the shape the stamp BFF app issues: its
+//   default scheme accepts the api:// audience only.
 
 using System.Net;
 using System.Security.Claims;
@@ -176,6 +180,33 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
     }
 
     [Fact]
+    public async Task TwoEnabledSystemUsers_OnTheGuestOid_Is403SystemUserAmbiguous_NotRetryable_NoWrite()
+    {
+        SeedGuestSystemUser();
+        _store.AddSystemUser(Guid.NewGuid(), _guestOid, "duplicate@spaarke.example");
+
+        var response = await Post(Body(GuestToken()));
+
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalWorkforceLinkEndpoints.ReasonSystemUserAmbiguous);
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AConcurrentChangeToTheSystemUser_Is412_ReReadOnce_ThenLinked()
+    {
+        var user = SeedGuestSystemUser();
+        _store.BeforeHomeLinkWrite = u => u.Version += 1000; // another writer touched the row after our read
+
+        var response = await Post(Body(GuestToken()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await Json(response)).GetProperty("outcome").GetString().Should().Be("linked");
+        _store.Reads.Count(r => r == "guest-systemuser").Should().Be(2, "the 412 re-reads before writing again");
+        _store.Writes.Select(w => w.Op).Should().Equal("home-link");
+        user.HomeObjectId.Should().Be(_homeOid.ToString("D"));
+    }
+
+    [Fact]
     public async Task SystemUser_LinkedToADifferentPair_Is403LinkCollision_AndIsNotRePointed()
     {
         var user = SeedGuestSystemUser();
@@ -332,7 +363,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
     {
         var claims = new Dictionary<string, object>
         {
-            ["ver"] = "2.0",
+            ["ver"] = "1.0",
             ["tid"] = SpaarkeTenantId,
             ["oid"] = _guestOid.ToString("D"),
             ["sub"] = Guid.NewGuid().ToString("D"),
@@ -348,7 +379,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
         var notBefore = exp.AddMinutes(-70);
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
-            Issuer = LinkFixture.SpaarkeIssuer,
+            Issuer = LinkFixture.SpaarkeIssuerV1,
             Audience = audience,
             IssuedAt = notBefore,
             NotBefore = notBefore,
@@ -398,6 +429,9 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
     {
         public const string SpaarkeIssuer = "https://login.microsoftonline.com/" + SpaarkeTenantId + "/v2.0";
 
+        /// <summary>The Spaarke tenant's v1 issuer (a v1 access token's iss).</summary>
+        public const string SpaarkeIssuerV1 = "https://sts.windows.net/" + SpaarkeTenantId + "/";
+
         /// <summary>The stamp BFF app (a GUID, as AzureAd:ClientId is in every environment).</summary>
         public const string BffAppId = "4a8b0c3e-7d21-4f5a-9e6b-048048048a00";
 
@@ -433,8 +467,9 @@ public sealed class ExternalWorkforceLinkEndpointsTests : IClassFixture<External
                     options.TokenValidationParameters.ValidAudiences = new[] { BffAudience, CopilotAudience };
                     options.TokenValidationParameters.IssuerValidator = (issuer, _, _) =>
                         string.Equals(issuer, SpaarkeIssuer, StringComparison.Ordinal)
+                        || string.Equals(issuer, SpaarkeIssuerV1, StringComparison.Ordinal)
                             ? issuer
-                            : throw new SecurityTokenInvalidIssuerException("Not the Spaarke tenant's v2 issuer.");
+                            : throw new SecurityTokenInvalidIssuerException("Not the Spaarke tenant's issuer.");
                 });
 
                 services.RemoveAll<SpaarkeGuestTokenValidator>();
