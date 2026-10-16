@@ -65,6 +65,8 @@ public class FinanceContainerIdOptionsTests
     [InlineData(ProcedureLibraryKey, "#{SPE_PROCEDURE_LIBRARY_CONTAINER_ID}#")] // an unsubstituted template token
     [InlineData(OutputKey, "b!")]                                               // the prefix alone
     [InlineData(OutputKey, "b!two ids")]                                        // whitespace inside
+    [InlineData(OutputKey, "b!x,b!y")]                                          // a list of ids, not one id
+    [InlineData(ProcedureLibraryKey, "b!x;b!y")]                                // a list of ids, not one id
     public async Task MalformedId_FailsStartup_NamingTheKey(string key, string value)
     {
         using var host = BuildHost(new() { [key] = value });
@@ -73,5 +75,64 @@ public class FinanceContainerIdOptionsTests
 
         (await act.Should().ThrowAsync<OptionsValidationException>())
             .Which.Message.Should().Contain(key);
+    }
+
+    private const string EmailDefaultKey = "EmailProcessing:DefaultContainerId";
+    private const string ArchiveKey = "Communication:ArchiveContainerId";
+    private const string IdA = "b!tqSgSM13R06R6O5ymHDynNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y";
+    private const string IdB = "b!1m_ZuA0VWUKCsWg44OvUtNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y";
+    private const string IdC = "b!9zQ_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdefghijklmnopqrstuvwxyz-_";
+
+    // Refusal 1: the two eBilling containers are the same container.
+    [Fact]
+    public async Task ProcedureLibraryEqualsOutput_FailsStartup_NamingBothKeys()
+    {
+        using var host = BuildHost(new() { [ProcedureLibraryKey] = IdA, [OutputKey] = IdA });
+
+        var act = async () => await host.StartAsync();
+
+        var message = (await act.Should().ThrowAsync<OptionsValidationException>()).Which.Message;
+        message.Should().Contain(ProcedureLibraryKey).And.Contain(OutputKey);
+    }
+
+    // Refusals 2-5: either eBilling key pasted with the email default or the communication archive container.
+    [Theory]
+    [InlineData(ProcedureLibraryKey, EmailDefaultKey)]
+    [InlineData(OutputKey, EmailDefaultKey)]
+    [InlineData(ProcedureLibraryKey, ArchiveKey)]
+    [InlineData(OutputKey, ArchiveKey)]
+    public async Task EqualsAnotherIndexedContainer_FailsStartup_NamingBothKeys(string financeKey, string otherKey)
+    {
+        using var host = BuildHost(new() { [financeKey] = IdA, [otherKey] = IdA });
+
+        var act = async () => await host.StartAsync();
+
+        var message = (await act.Should().ThrowAsync<OptionsValidationException>()).Which.Message;
+        message.Should().Contain(financeKey).And.Contain(otherKey);
+    }
+
+    // Must-pass control: four distinct ids boot; and an empty Finance key never collides with an empty other key.
+    [Fact]
+    public async Task DistinctIds_Boot()
+    {
+        using var distinct = BuildHost(new()
+        {
+            [ProcedureLibraryKey] = IdA,
+            [OutputKey] = IdB,
+            [EmailDefaultKey] = IdC,
+            [ArchiveKey] = "b!archiveContainerIdThatIsDifferent",
+        });
+        await distinct.StartAsync();
+        await distinct.StopAsync();
+
+        using var emptyEverywhere = BuildHost(new()
+        {
+            [ProcedureLibraryKey] = "",
+            [OutputKey] = "",
+            [EmailDefaultKey] = "",
+            [ArchiveKey] = "",
+        });
+        await emptyEverywhere.StartAsync();
+        await emptyEverywhere.StopAsync();
     }
 }

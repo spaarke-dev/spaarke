@@ -137,6 +137,7 @@ public class IOptionsDriftTests
         },
         ["WorkforceIdentityOptions"] = Array.Empty<Guard>(), // WorkforceIdentityOptionsValidator checks the SHAPE of CustomerTenantIds elements only; an empty list is valid, so no key is demanded.
         ["ContentUnderstandingOptions"] = Array.Empty<Guard>(), // ContentUnderstandingOptionsValidator (ebilling-r1 task 043): an empty Endpoint is valid (reader not configured -> FeatureDisabledException at call time); the other keys have valid defaults. It checks the SHAPE of values that are set, so no key is demanded.
+        ["FinanceOptions"] = Array.Empty<Guard>(), // FinanceOptionsValidator (ebilling-r1 task 028): checks only that the two eBilling container ids, when set, differ from each other and from EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId. Empty is valid, so no key is demanded.
     };
 
     // ───────────────────────────────────── channels ─────────────────────────────────────

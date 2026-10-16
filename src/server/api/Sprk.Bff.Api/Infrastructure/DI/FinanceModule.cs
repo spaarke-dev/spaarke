@@ -25,6 +25,9 @@ public static class FinanceModule
         // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
         // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
         // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key.
+        // The two container ids must also be distinct from each other and from the email/archive containers
+        // (FinanceOptionsValidator; fails start-up naming both keys).
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))
             .ValidateDataAnnotations()

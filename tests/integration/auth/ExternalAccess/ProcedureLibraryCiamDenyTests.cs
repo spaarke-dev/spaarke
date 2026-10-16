@@ -1,5 +1,5 @@
 // ebilling-r1 task 028 (FR-16, D-55, D-63): a firm (CIAM) user can never download the bytes of a document in the Procedure
-// Library container, and has no search route through which to find one.
+// Library container, and has no content or RAG search route through which to find one.
 //
 // SCOPE — BYTES, NOT METADATA. These tests prove the file content is refused. They do NOT prove the row's metadata is hidden:
 // a Procedure Library sprk_document row filed (by mistake) under a record the firm can read still appears in that record's
@@ -17,7 +17,8 @@
 //   container, the communication archive, the unfiled default) — never a container that is only an app setting, such as the
 //   Procedure Library. So even a Procedure Library document filed (by mistake) under a record the firm CAN read is refused.
 //   SEARCH. No search route admits the Ciam scheme, and the default (workforce) scheme rejects every CIAM token
-//   (AuthorizationModuleCiamTests). The /api/v1/external group has no search route.
+//   (AuthorizationModuleCiamTests). The /api/v1/external group has no content or RAG search route. (Its module-data route,
+//   /api/v1/external/api/dataverse/*, does return sprk_documentname for a document filed under a firm-readable record: DEF-015.)
 //
 // Every must-fire has its must-not-fire control (the same document through its derived container IS served; the external
 // group DOES admit the Ciam scheme), so a check that only ever refuses would fail here.
@@ -202,7 +203,7 @@ public sealed class CiamSearchRouteTests : IClassFixture<CustomWebAppFactory>
                  || r.StartsWith("/api/v1/external/", StringComparison.OrdinalIgnoreCase),
             "a CIAM token authenticates only on the external group (not on the workforce /api/v1/external-access group)");
         ciamRoutes.Should().NotContain(r => r.Contains("search", StringComparison.OrdinalIgnoreCase),
-            "the external group has no search route, so search never returns a document to a firm user (D-63)");
+            "the external group has no content or RAG search route (D-63); the module-data route can still return sprk_documentname for a document filed under a firm-readable record, which is DEF-015 and not asserted here");
         searchRoutes.Should().OnlyContain(s => !s.Anonymous && !s.AdmitsCiam,
             "every search route is authenticated on the workforce scheme, which rejects CIAM tokens");
     }

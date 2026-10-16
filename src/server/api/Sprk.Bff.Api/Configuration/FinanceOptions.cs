@@ -76,6 +76,10 @@ public class FinanceOptions
     [RegularExpression(ContainerIdPattern, ErrorMessage = "Finance:EbillingOutputContainerId must be a SharePoint Embedded container id starting with 'b!', or empty.")]
     public string EbillingOutputContainerId { get; set; } = string.Empty;
 
-    /// <summary>A SharePoint Embedded container (drive) id: <c>b!</c> followed by no whitespace. Empty passes (optional key).</summary>
-    private const string ContainerIdPattern = @"^b![^\s]+$";
+    /// <summary>
+    /// A SharePoint Embedded container (drive) id: <c>b!</c> followed by URL-safe base64 characters only (so a comma- or
+    /// space-separated list such as <c>b!x,b!y</c> is refused). Empty passes (optional key). Distinctness from the other
+    /// indexed containers is checked by <see cref="FinanceOptionsValidator"/>.
+    /// </summary>
+    private const string ContainerIdPattern = @"^b![A-Za-z0-9_-]+$";
 }

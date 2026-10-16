@@ -121,11 +121,15 @@
     The brief did not mention the SPE ownership guard; without it every app-only eBilling write to these containers returns 404 spe_container_not_owned.
     Internal (OBO) access to the two containers depends on container permissions; record what the trace finds for 075 / 077 / 078.
 
-    COMPLETED 2026-10-15 (sub-agent worktree, rigor raised to FULL: BFF .cs plus storage access control; two adversarial-review passes). Commits 0935e3c99, ae6ef1a25, 6b30e59c7, 876dd9b4e, plus the docs commit. Detail: notes/028-ebilling-containers.md.
+    COMPLETED 2026-10-15 (sub-agent worktree, rigor raised to FULL: BFF .cs plus storage access control; two adversarial-review passes). Commits d33c95486, dbb277643, 0c594a220, cce75bdbc, 5d7780ac5. Detail: notes/028-ebilling-containers.md.
     - Config: FinanceOptions.ProcedureLibraryContainerId / EbillingOutputContainerId, optional, format-checked (b!...) at start-up; template tokens added.
     - Ownership (D-67): both keys added to GraphModule.StampContainerSettingKeys; only the exact configured ids are owned.
     - Not indexed: FileIndexingService skips a file in the output container on both entry points; no caller stamps a skipped file as indexed; the bulk job counts it as skipped.
     - CIAM: proven for BYTES (download refused 409 by the existing pointer check; no search route admits Ciam). Metadata in external document lists is NOT covered: DEF-015 / #1975 (owner decision).
+    - Callers: every caller has a skip test except IndexingWorkerHostedService (Office worker), which has none; its change only alters a log line.
+    - Known limit: chunks indexed before the output-container key was set are not removed (the skip returns before ReplaceStaleChunks).
+    - Known limit: the bulk-job skip is unreachable until #1516 is fixed.
+    - Review follow-up: container-id pattern tightened to ^b![A-Za-z0-9_-]+$; FinanceOptionsValidator fails start-up when the two ids are equal or equal EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId.
     - Hand-off DEF-013 / #1967; pointer check vs eBilling document reads DEF-014 / #1968.
     - No live change. Publish delta +1,468 B. ADR-010 ceiling unchanged (162). ArchTests 1045/1045.
     rework: fix-round-1 task 028

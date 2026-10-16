@@ -6,10 +6,10 @@
 
 | Area | Change |
 |---|---|
-| Options | `FinanceOptions.ProcedureLibraryContainerId`, `FinanceOptions.EbillingOutputContainerId`. Optional: empty boots. A non-empty value must match `^b![^\s]+$`, otherwise start-up fails (`OptionsValidationException`) with a message naming the key. Validated through the existing `AddOptions<FinanceOptions>().ValidateDataAnnotations().ValidateOnStart()` chain; no new registration. |
+| Options | `FinanceOptions.ProcedureLibraryContainerId`, `FinanceOptions.EbillingOutputContainerId`. Optional: empty boots. A non-empty value must match `^b![A-Za-z0-9_-]+$` (one id; a list such as `b!x,b!y` is refused), otherwise start-up fails (`OptionsValidationException`) with a message naming the key. `FinanceOptionsValidator` (review follow-up) also fails start-up, naming both keys, when the two ids are equal or either equals `EmailProcessing:DefaultContainerId` or `Communication:ArchiveContainerId`; empty values never collide. Validated through the existing `AddOptions<FinanceOptions>().ValidateDataAnnotations().ValidateOnStart()` chain. |
 | Template | `appsettings.template.json` `Finance` section: `#{SPE_PROCEDURE_LIBRARY_CONTAINER_ID}#`, `#{SPE_EBILLING_OUTPUT_CONTAINER_ID}#` with a D-55 comment. (The template is not a stamp channel — the csproj never publishes it.) |
 | Ownership (D-67) | `GraphModule.StampContainerSettingKeys` gains `Finance:ProcedureLibraryContainerId` and `Finance:EbillingOutputContainerId` as single ids, taken verbatim like the default and archive keys. Escalation trigger checked: the guard admits only the exact configured ids (trimmed, blanks dropped); nothing changes for existing keys. |
-| Not indexed | `FileIndexingService` skips a file whose `DriveId` equals `EbillingOutputContainerId` (INFO log, `FileIndexingResult.Skip(...)`: `Success = true`, `Skipped = true`, `SkipReason = container_not_indexed`, 0 chunks). Checked on both entry points before any download or pointer check. `RagIndexingJobHandler`, `PostUploadIndexingEnqueuer` and `RagEndpoints` (index-file, send-to-index) do not stamp `sprk_searchindexed` for a skipped file; send-to-index reports it as "not indexed"; the bulk job counts it as skipped; the Office worker logs it as skipped. Each caller has a test. |
+| Not indexed | `FileIndexingService` skips a file whose `DriveId` equals `EbillingOutputContainerId` (INFO log, `FileIndexingResult.Skip(...)`: `Success = true`, `Skipped = true`, `SkipReason = container_not_indexed`, 0 chunks). Checked on both entry points before any download or pointer check. `RagIndexingJobHandler`, `PostUploadIndexingEnqueuer` and `RagEndpoints` (index-file, send-to-index) do not stamp `sprk_searchindexed` for a skipped file; send-to-index reports it as "not indexed"; the bulk job counts it as skipped; the Office worker logs it as skipped. Every caller has a skip test except `IndexingWorkerHostedService` (the Office worker): it has none, and its change only alters a log line (skipped versus succeeded); the skip itself is decided in `FileIndexingService`, which is tested. |
 
 ### Why `FileIndexingService` is the convergence point
 
@@ -24,9 +24,9 @@ Every path that indexes an SPE **file** calls `IndexFileAsync` or `IndexFileAppO
 
 Container type `8a6ce34c-6055-4681-8f87-2f4f9f921c06` (Spaarke PAYGO 1). Both slots (production + staging). Not set on `spaarke-bff-dev` by this task.
 
-## 3. CIAM trace — why a firm user cannot download or search a Procedure Library document (D-63)
+## 3. CIAM trace — why a firm user cannot download a Procedure Library document, and has no content or RAG search route (D-63)
 
-**Scope: bytes, not metadata.** What is proven is that a firm user gets no file content and has no search route. The external document LIST and fetch routes filter on the record lookup only, so a Procedure Library `sprk_document` row filed under a firm-readable record would still show its name and summary. That gap is DEF-015 / #1975 (owner decision; the fix is in shared external-access code).
+**Scope: bytes, not metadata.** What is proven is that a firm user gets no file content and has no content or RAG search route. The external document LIST and fetch routes filter on the record lookup only, so a Procedure Library `sprk_document` row filed under a firm-readable record would still show its name and summary. That gap is DEF-015 / #1975 (owner decision; the fix is in shared external-access code).
 
 **Who is a CIAM caller.** A CIAM token validates only on the `Ciam` JwtBearer scheme (`AuthorizationModule.cs:65`). That scheme is on two policies only, `CiamExternal` and `ExternalCollaboration` (`AuthorizationModule.cs:433-456`), both used only by the `/api/v1/external` group (`ExternalAccessEndpoints.cs:62`). The default (workforce) scheme rejects any CIAM token (issuer or `tid` guard; pinned by `AuthorizationModuleCiamTests`).
 
@@ -36,9 +36,9 @@ Container type `8a6ce34c-6055-4681-8f87-2f4f9f921c06` (Spaarke PAYGO 1). Both sl
 2. The document is filed under that record through that type's lookup, and every secure root it is also filed to is readable (`IsDocumentReadableUnderAsync`) — otherwise 403.
 3. `IDocumentStorageResolver.GetSpePointersAsync` → `RecordContainerResolver.EnsureDocumentPointerContainerAsync` (`DocumentStorageResolver.cs:107`). This serves only a container derived for the document's records — a business unit's container (interim rule: in the owner's subtree), a secure record's own container, the communication archive, or the unfiled default. The Procedure Library is none of those (it must never be stamped on a business unit — see the hand-off). It is refused with 409 `document_storage_unverified` **even when the document is filed under a record the firm can read**. No SPE read happens.
 
-Uploads by a CIAM user go to the route record's derived container, never to the Procedure Library. The module-data route (`ExternalModuleDataEndpoints`) returns Dataverse rows under the Tier-2 scope filter, never file bytes.
+Uploads by a CIAM user go to the route record's derived container, never to the Procedure Library. The module-data route (`ExternalModuleDataEndpoints`, `/api/v1/external/api/dataverse/*`) returns Dataverse rows under the Tier-2 scope filter, never file bytes. Its "documents" module (`Infrastructure/DI/ExternalAccessModule.cs:397-421`) does return `sprk_documentname` for a document filed under a firm-readable record; that exposure is DEF-015.
 
-**Search.** No route in the external group searches, and every search route uses the workforce scheme, so a CIAM token gets 401 there. Pinned from the real endpoint table.
+**Search.** There is no content or RAG search route in the external group, and every search route uses the workforce scheme, so a CIAM token gets 401 there. Pinned from the real endpoint table. This does not cover the module-data route above, which lists document names (DEF-015).
 
 **Tests (KEEP path, `tests/integration/auth/ExternalAccess/ProcedureLibraryCiamDenyTests.cs`).**
 
@@ -77,6 +77,10 @@ with
 
 > Own = an id in `EmailProcessing__DefaultContainerId` / `Communication__ArchiveContainerId` / `Finance__ProcedureLibraryContainerId` / `Finance__EbillingOutputContainerId` (eBilling, ebilling-r1 D-67) / `SharePointEmbedded__OwnedContainerIds` (operator-only, pre-marker environments) **or** custom property `spaarkeCustomerId` = `Customer__Id`. The two eBilling containers are never stamped on a business unit (`sprk_containerid`).
 
+## 6b. Commits (work/ebilling-r1)
+
+`d33c95486` (config keys and ownership), `dbb277643` (never index the output container), `0c594a220` (CIAM deny tests), `cce75bdbc` (review pass 1 fixes), `5d7780ac5` (notes, DEF-013/014/015). The review follow-up (container-id pattern, distinctness validator, wording, these corrections) is a later commit.
+
 ## 7. Verification
 
 | Check | Result |
@@ -89,7 +93,12 @@ with
 | Packages / CVE | No package change; no new vulnerable package |
 | Live changes | None: no container, container type, App Service setting or Key Vault item created or changed |
 
+### Known limits (independent review follow-up)
+
+- **Chunks indexed before the output-container key was set are not removed.** The skip in `FileIndexingService` returns before `ReplaceStaleChunks`, so a file that was indexed while `Finance:EbillingOutputContainerId` was empty (or different) keeps its chunks after the key is set, until they are removed by hand.
+- **The bulk-job skip is unreachable until #1516 is fixed.** `BulkRagIndexingJobHandler` counts a skipped file as skipped, but the bulk/scheduled RAG sweep queries `sprk_document` columns that do not exist (#1516), so it indexes nothing today; the skip counting is covered by a handler unit test only, not by a working sweep.
+
 ### Review
 
-- **Pass 1** (adversarial-reviewer, opus): 4 F2 and 1 F1 findings — all fixed in 876dd9b4e: caller skip tests, CIAM download test isolates the container rule, exact `/api/v1/external` route match, skips counted as skips, claim narrowed to bytes. Known limits K2 and K4 recorded above. Metadata exposure filed as DEF-015.
+- **Pass 1** (adversarial-reviewer, opus): 4 F2 and 1 F1 findings — all fixed in cce75bdbc: caller skip tests, CIAM download test isolates the container rule, exact `/api/v1/external` route match, skips counted as skips, claim narrowed to bytes. Known limits K2 and K4 recorded above. Metadata exposure filed as DEF-015.
 - **Pass 2** (run in the main agent; the subagent limit was reached): checked every `IndexFileAsync` / `IndexFileAppOnlyAsync` caller and fallback (all pass the skip; the pointer check downloads from the same `DriveId` the skip compares, so the skip cannot be bypassed), other search-index writers (session files, observations, precedents, record matching: none indexes container files), and ownership parsing (single keys trimmed; guard compares `Ordinal`). No F-class finding. Fixed one doc nit: the template comment no longer says the Procedure Library is indexed.
