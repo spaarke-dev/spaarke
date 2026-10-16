@@ -15,7 +15,9 @@
 //      which .claude/constraints/testing.md bans). It proves what only the
 //      wire can: the two whole-object PUTs carry everything that was read (so
 //      nothing is wiped), the sticky name is written BEFORE the value, and an
-//      already-guarded slot gets no write at all.
+//      already-guarded slot gets no write at all. slotConfigNames goes as raw
+//      JSON over the same pipeline (T186 L43); the fake also answers with the
+//      live new-site shape ("id": null, null name lists) that broke the typed GET.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -155,6 +157,44 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     }
 
     [Fact]
+    public async Task EnsureAsync_NewSite_ArmAnswersNullIdAndNullNames_StillGuards()
+    {
+        // T186 L43 — the exact live answer for sprk-acme-prod-api, a site that has
+        // never had a sticky name: "id": null and every name list null. The typed
+        // SlotConfigNamesResource GET threw ArgumentNullException('resourceId') on it.
+        var arm = new FakeAppServiceArm(
+            stickyAppSettingNames: null,
+            stickyConnectionStringNames: null,
+            slotSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Staging" },
+            liveNewSiteShape: true);
+
+        var result = await NewWriter(arm).EnsureAsync(NewRequest(), CancellationToken.None);
+
+        result.Should().Be(new SlotStickyAppSettingResult.Success(StickyNameAdded: true, SettingWritten: true));
+        arm.Writes.Should().HaveCount(2);
+        StringArray(arm.Writes[0].Properties, "appSettingNames").Should().Equal(GuardName);
+        arm.Writes[0].Properties.GetProperty("connectionStringNames").ValueKind.Should().Be(JsonValueKind.Null,
+            "a property ARM returned is written back as read");
+        arm.Writes[1].Path.Should().EndWithEquivalentOf($"/slots/{SlotName}/config/appsettings");
+    }
+
+    [Fact]
+    public async Task EnsureAsync_ArmRejectsStickyNamesWrite_ReturnsFailure_BeforeAnySlotWrite()
+    {
+        var arm = new FakeAppServiceArm(
+            stickyAppSettingNames: Array.Empty<string>(),
+            stickyConnectionStringNames: Array.Empty<string>(),
+            slotSettings: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Staging" },
+            rejectNamesWrite: true);
+
+        var result = await NewWriter(arm).EnsureAsync(NewRequest(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<SlotStickyAppSettingResult.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("AuthorizationFailed").And.Contain("403");
+        arm.Writes.Should().BeEmpty("no value reaches the slot unless its name is sticky first");
+    }
+
+    [Fact]
     public async Task EnsureAsync_AlreadyGuarded_MakesNoWrite()
     {
         var arm = new FakeAppServiceArm(
@@ -215,21 +255,27 @@ public sealed class ArmSlotStickyAppSettingWriterTests
     /// </summary>
     private sealed class FakeAppServiceArm
     {
-        private readonly string[] _stickyAppSettingNames;
-        private readonly string[] _stickyConnectionStringNames;
+        private readonly string[]? _stickyAppSettingNames;
+        private readonly string[]? _stickyConnectionStringNames;
         private readonly Dictionary<string, string> _slotSettings;
         private readonly bool _rejectSettingsWrite;
+        private readonly bool _rejectNamesWrite;
+        private readonly bool _liveNewSiteShape;
 
         public FakeAppServiceArm(
-            string[] stickyAppSettingNames,
-            string[] stickyConnectionStringNames,
+            string[]? stickyAppSettingNames,
+            string[]? stickyConnectionStringNames,
             Dictionary<string, string> slotSettings,
-            bool rejectSettingsWrite = false)
+            bool rejectSettingsWrite = false,
+            bool rejectNamesWrite = false,
+            bool liveNewSiteShape = false)
         {
             _stickyAppSettingNames = stickyAppSettingNames;
             _stickyConnectionStringNames = stickyConnectionStringNames;
             _slotSettings = slotSettings;
             _rejectSettingsWrite = rejectSettingsWrite;
+            _rejectNamesWrite = rejectNamesWrite;
+            _liveNewSiteShape = liveNewSiteShape;
         }
 
         public List<(string Path, JsonElement Properties)> Writes { get; } = new();
@@ -247,6 +293,14 @@ public sealed class ArmSlotStickyAppSettingWriterTests
                 if (request.Method == HttpMethod.Get)
                 {
                     Reads.Add(path);
+                    if (_liveNewSiteShape)
+                    {
+                        // Verbatim shape of the live ARM answer (2026-10-16), tags omitted.
+                        return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK,
+                            "{\"id\":null,\"location\":\"West US 2\",\"name\":\"" + AppServiceName + "\"," +
+                            "\"properties\":{\"appSettingNames\":null,\"azureStorageConfigNames\":null,\"connectionStringNames\":null}," +
+                            "\"type\":\"Microsoft.Web/sites\"}");
+                    }
                     return Json(HttpStatusCode.OK, new
                     {
                         id = SiteId + "/config/slotConfigNames",
@@ -261,6 +315,12 @@ public sealed class ArmSlotStickyAppSettingWriterTests
                 }
                 if (request.Method == HttpMethod.Put)
                 {
+                    if (_rejectNamesWrite)
+                    {
+                        return ArmSdkTestFakes.JsonResponse(HttpStatusCode.Forbidden, ArmSdkTestFakes.ArmErrorBody(
+                            "AuthorizationFailed",
+                            "The client does not have authorization to perform action Microsoft.Web/sites/config/write."));
+                    }
                     return RecordWriteAndEcho(request, path,
                         SiteId + "/config/slotConfigNames", "slotConfigNames", "Microsoft.Web/sites/config");
                 }
