@@ -55,7 +55,8 @@ public sealed record TimekeeperMatchRequest(string? BilledName, DateOnly? LineDa
 /// (<see cref="TimekeeperUnmatchedReason.AiUnavailable"/>); resolution does not fail.</para>
 /// <para><b>Known name on the roster but not approved.</b> If the effective name matches (exactly or normalized) a roster row of the firm
 /// that is not Approved and active on the date, the line is unmatched with <see cref="TimekeeperUnmatchedReason.NotApprovedOnLineDate"/>
-/// and the AI stage is skipped, so the AI cannot hop from a known unapproved person to a look-alike approved one.</para>
+/// and the AI stage is skipped, so the AI cannot hop from a known unapproved person to a look-alike approved one. A roster row with exactly
+/// the billed name that is not eligible ends the match before stage 2, so a normalized match cannot map it to an approved longer name.</para>
 /// <para><b>Evidence for the AI threshold</b> (task notes): on the evaluation-set rosters no different-person pair reached 0.90.</para>
 /// </remarks>
 public sealed class TimekeeperMatcher
@@ -174,6 +175,15 @@ public sealed class TimekeeperMatcher
             return exact.Count == 1
                 ? Matched(exact[0].Entry, TimekeeperMatchStage.Exact, 1m)
                 : Unmatched(TimekeeperUnmatchedReason.Ambiguous);
+        }
+
+        // A roster person with exactly the billed name who is not approved on this date ends the match before stage 2: stage 2 would
+        // otherwise map "David Lee" (Inactive, Pending or out of date) to an Approved "David K. Lee" (a middle name on one side only is
+        // treated as missing). Only the exact key is used: a row that merely normalizes to the billed name (an ended 2026 row of a person
+        // whose 2027 row is eligible, billed "Doe, Jane") must not block the eligible row's normalized match.
+        if (session.Roster.Any(c => c.Key == key && !IsEligible(c.Entry, date)))
+        {
+            return Unmatched(TimekeeperUnmatchedReason.NotApprovedOnLineDate);
         }
 
         // Stage 2: normalized.
