@@ -98,3 +98,10 @@ Defects (all confirmed, all fixed):
 Results: focused `InvoiceContext` + `InvoiceRelatedWork` 130 pass (unit and contract projects compile together); `Finance` filter 972 pass, 2 skipped; ArchTests 1056 pass; build 0 warnings, 0 errors.
 
 Mutation proofs (each killed): `truncated` from all candidates (2 tests fail); cap applied before the Read check (3); no extra searches (3); extra-search id list never shrinks (2); 106 `AllExamined` from all rows (1); helper treats a faulted lookup as Refused (3); helper ignores a Failed batch (6).
+
+## Reviewer's K2 side channels (added by the main session, 2026-10-16)
+
+From the 107 adversarial review, alongside the derived list in section 10:
+- `related-work.access-check-failed` is reachable only when at least one candidate exists: a Dataverse 429/5xx/timeout on an unreadable document's rights lookup answers `unavailable` instead of `none-in-window`. The caller cannot trigger the fault.
+- An all-unreadable window costs up to the check budget of cold rights lookups (8 at a time), so its latency differs from an empty window.
+- The no-token branch answers differently depending on whether candidates exist; it is unreachable because `FinanceAuthorizationFilter` refuses a request without a token (403) before the handler runs.
