@@ -99,7 +99,8 @@
   </acceptance-criteria>
 
   <notes>Completed 2026-10-16. GET /api/finance/invoices/{invoiceId}/context: five independent sections (core record, budget rollups as stored, other invoices, disallow history, rate history), finance.read on the invoice then RequireEbillingEnabled, 200 unless authorization fails, per-section unavailable code, Work Assignment budget notTracked. 9 Dataverse reads independent of line count. Concrete InvoiceContextService (ADR-010 ceiling unchanged at 166). Publish size +0.031 MB (37.325 vs 37.294 MB), no vulnerable packages. Assumptions (decided invoices only for disallow history, core record ambiguity, classification rates) and known limits in notes/106-context-panel-api.md. Rollup staleness in dev is the already-filed #1663.
-rework: fix-round-1 task 106</notes>
+Fix-round-2: other invoices (priorInvoices, disallowHistory, previously billed rates) are limited to invoices the caller can Read via AuthorizationService (finance.read), recomputed over the readable set; a failed access check makes the sections unavailable, never unfiltered. See notes section 7a.
+rework: fix-round-2 task 106</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
