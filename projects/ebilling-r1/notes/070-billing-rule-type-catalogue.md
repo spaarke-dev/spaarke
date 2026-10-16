@@ -39,9 +39,10 @@ only (allowlist: `sprk_domain` null OR Ontology). Handlers are 071; consequence 
 
 Position N = value - 100000002 (pinned by `BillingType_NameAndOptionValueAndDomain_ArePinnedBothWays`).
 
-**Solution source not edited (escalation open):** SpaarkeMaster `Entities/sprk_PolicyVersion/Entity.xml` still lists only the
-three Ontology options. The POML requires asking first: (a) 070 edits only the ruletype option set, after 029, like 015 / 026
-(recommended), or (b) hand the values to a 029 re-sync. Until answered, dev has the values and source does not.
+**Solution source (resolved, commit 0ee94c3f6):** SpaarkeMaster `Entities/sprk_PolicyVersion/Entity.xml` now lists all 14
+options, the three Ontology ones plus the eleven billing ones above (option (a): 070 edits only the ruletype option set, after 029,
+like 015 / 026). Source-only; it ships with the next release import. See "Main-session resolution" below. Since fix-round-1 a
+unit test pins the source option set to `Enum.GetValues<RuleType>()`, names and values (`RuleTypeOptionSetSyncTests`).
 
 ## Parameters (design.md 6.1 -> schema)
 
@@ -73,8 +74,8 @@ names the parameters but not their units or the vocabularies); 071 may extend a 
   readers depend on it.
 - Validator: `ValidateInternal` refuses a non-Ontology type FIRST at evaluation (`rule_type_unsupported`, before length / schema /
   compile); at save a billing type runs `ValidateBilling` (length cap, schema, template vs fact-field set; never compiled).
-  `TryPrepareBillingRule` is the billing gate (logs `PolicyVersionInvalid` with id, code and reason only; meters; never throws
-  for content). `BillingRuleDefinition` has a private constructor and an internal factory called only by the gate, enforced by
+  `TryPrepareBillingRule` is the billing gate (logs `PolicyVersionInvalid` with id, code and reason only; meters
+  `billing.rule.invalid` since fix-round-1, not `ontology.policy.invalid`; never throws for content). `BillingRuleDefinition` has a private constructor and an internal factory called only by the gate, enforced by
   `tests/Spaarke.ArchTests/BillingRuleDefinitionCallerGuardTests.cs` (must-fire controls for call, ldftn, ldtoken).
 - `PredicateCompiler.RequireCompilable` was already an allowlist (Existence, Threshold); only its message changed.
 - Describer: a present `"type"` that names no member (ordinal, so `"existence"`, a number, null, a comma list) is refused as
@@ -169,10 +170,42 @@ DecisionRecordWriter, neither touched here), and paste their answer here. Questi
 
 ## Known limits
 
+- (K1) Any future `sprk_policy` reader must select `sprk_domain`: a missing column reads as Ontology (`RuleDomains.IsOntologyPolicy`:
+  an absent attribute is an Ontology policy, by the no-backfill rule), so a reader that forgets the column would hand a Billing
+  policy to an Ontology pass. Pinned for `ReevaluatePolicyAsync` (`ReevaluatePolicy_RetrieveById_RequestsTheDomainColumn`) and the
+  multi-row reads (`Reader_QueriesCarryTheOntologyAllowlist`) only.
+- (K2) A policy whose `sprk_domain` moves off Ontology strands its open Signals: the readers stop loading it, so nothing closes its
+  Signals as PolicyRetired and the task 145 redaction sweep never reaches them. A privileged data change, not a product path.
+- (K3) Task 071's reader must filter to Billing-domain policies itself: the billing gate's snapshot (`PolicyVersionSnapshot`)
+  carries no domain, so the gate cannot tell a Billing policy's version from a billing-typed version on a null-domain policy.
 - Reflection or another assembly can still call `BillingRuleDefinition.FromValidatedBody` (the ArchTest scans `Sprk.Bff.Api` IL only).
 - A privileged user can change `sprk_domain` directly in Dataverse (019 notes addition (c)); the readers then follow the new value.
 - An adversarial-reviewer pass was not run: the session's concurrent-subagent cap (4) was full. A self-review covered the
   same checklist (see Verification).
+
+## Fix-round-1 (2026-10-16, after review)
+
+- F3: the Signals fake `RetrieveAsync` now records the column set requested for `sprk_policy`
+  (`PolicyRetrieveColumns`); `ReevaluatePolicy_RetrieveById_RequestsTheDomainColumn` asserts `sprk_domain` is requested. Seeded:
+  `sprk_domain` removed from `SignalReevaluationJob.PolicyColumns` -> that test red (1 / 1 failed); restored.
+- F4: stale comments corrected (`RuleBodyDescriber` describes billing bodies, which the compiler refuses and the validator checks
+  without compiling; `RuleDomains.DomainOf` and `RuleType` / `BillingRuleCatalogue` say "switch with a throwing default": an
+  unmapped member compiles and throws at runtime, every caller catches it). `ValidateForSave` takes an optional
+  `RuleDomain? expectedDomain`; a closed-set type of another domain is refused as `rule_type_wrong_domain` (new
+  `OntologyWriterFailureReason.RuleTypeWrongDomain`), an unknown type stays `rule_type_unsupported`, omitted = unchanged. No caller
+  passes it yet: 076 (publish) and the Ontology admin tab (104) should pass `Ontology` / `Billing` for their policy. Seeded: check
+  disabled -> 15 / 16 of the new tests failed (the 16th is the unknown-type control); restored.
+- K1: `TryPrepareForEvaluation`'s tail is `Conclude` (internal): a valid result with no compiled predicate is logged (50301) and
+  metered as `internal_error`, then returns false. Seeded: silent `return false` -> `Conclude_ValidResultButNoCompiledPredicate_...`
+  red (1 / 1); restored.
+- K3: the billing gate meters a new instrument `billing.rule.invalid` (same registered Meter, same reason vocabulary) instead of
+  `ontology.policy.invalid`; the Ontology gate is unchanged. The log stays EventId 50301 (its message says "Billing policy
+  version"); no new EventId, because the 5030x range is Ontology's. Seeded: gate back on the Ontology meter -> 14 / 14 gate rows
+  red; restored.
+- K2 sync guard: `RuleTypeOptionSetSyncTests` reads `sprk_policyversion_sprk_ruletype` from SpaarkeMaster `Entity.xml` and equals it
+  to the enum, names and values, with must-fire controls for a missing, extra, renamed and renumbered option. Seeded: the
+  AiObservation option removed from `Entity.xml` -> red (2 / 2 failed); restored.
+- Verification: BFF build 0 warnings / 0 errors; Signals filter 1833 / 1833 (was 1812; +21 new); `tests/Spaarke.ArchTests` 1056 / 1056.
 
 ## Main-session resolution (2026-10-16): Entity.xml
 

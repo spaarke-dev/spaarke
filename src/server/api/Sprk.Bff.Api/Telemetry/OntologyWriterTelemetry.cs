@@ -54,6 +54,19 @@ public static class OntologyWriterTelemetry
                      "only guaranteed observation point for an invalid policy version.");
 
     /// <summary>
+    /// <c>customMetrics/billing.rule.invalid</c> (ebilling-r1 task 070 fix-round-1, K3): one billing policy version refused by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/>. A separate instrument so
+    /// <c>ontology.policy.invalid</c> (and any Ontology dashboard or alert built on it) counts Ontology policies only; it rides
+    /// the existing <see cref="MeterName"/> because that Meter is already registered with the exporter. Dimensioned by
+    /// <c>reason</c> (<see cref="OntologyWriterFailureReason"/>, the same vocabulary).
+    /// </summary>
+    private static readonly Counter<long> BillingRuleInvalidCounter = Meter.CreateCounter<long>(
+        name: "billing.rule.invalid",
+        unit: "{policyversion}",
+        description: "Count of billing sprk_policyversion rows refused by the fail-closed billing gate, by reason. " +
+                     "Kept off ontology.policy.invalid so Ontology dashboards do not count billing rows.");
+
+    /// <summary>
     /// <c>customMetrics/ontology.decisionplan.refused</c> (task 036): one decision plan refused at read time because it
     /// does not resolve against the closed action catalog. Same <see cref="MeterName"/> (CLAUDE.md section 11: extend,
     /// do not stand up a second Meter). Dimensioned by <c>reason</c> (<see cref="DecisionPlanRefusalReason"/>).
@@ -90,6 +103,12 @@ public static class OntologyWriterTelemetry
     /// </summary>
     public static void RecordPolicyInvalid(string reason) =>
         PolicyInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one billing policy version refused by the billing gate (ebilling-r1 task 070, K3).
+    /// <paramref name="reason"/> MUST be one of <see cref="OntologyWriterFailureReason"/>'s bounded constants; never on
+    /// <c>ontology.policy.invalid</c>.</summary>
+    public static void RecordBillingRuleInvalid(string reason) =>
+        BillingRuleInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
 
     /// <summary>
     /// Records one refused decision plan (task 036). <paramref name="reason"/> MUST be one of
@@ -349,6 +368,12 @@ public static class OntologyWriterFailureReason
     /// authored schema yet (<see cref="Sprk.Bff.Api.Services.Signals.RuleType.Threshold"/> /
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType.Switch"/>, task 020 scope).</summary>
     public const string RuleTypeUnsupported = "rule_type_unsupported";
+
+    /// <summary>ebilling-r1 task 070 fix-round-1: a save-time caller named an expected rule domain
+    /// (<see cref="Sprk.Bff.Api.Services.Signals.RuleDomain"/>) and the version's <c>sprk_ruletype</c> is a closed-set member of
+    /// ANOTHER domain (an Ontology policy carrying a billing type, or the reverse). Distinct from
+    /// <see cref="RuleTypeUnsupported"/>, which means the type is unknown or the consumer cannot evaluate it at all.</summary>
+    public const string RuleTypeWrongDomain = "rule_type_wrong_domain";
 
     /// <summary>The <c>sprk_rulebody</c> exceeds
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.MaxRuleBodyLength"/> characters. Refused

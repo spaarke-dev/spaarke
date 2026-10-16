@@ -22,7 +22,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <b>Grouped by domain (ebilling-r1 task 070, spec FR-24, D-23 / D-27).</b> The members below
 /// <see cref="Existence"/> are the eleven billing rule types of design.md 6.1, in FR-24 order, with option values
 /// 100000003 to 100000013: catalogue position N (FR-26's "1, 2, 6-10") is option value 100000002 + N. Which domain
-/// a member belongs to is <see cref="RuleDomains.DomainOf"/>, an exhaustive switch. An Ontology consumer
+/// a member belongs to is <see cref="RuleDomains.DomainOf"/>, a switch with a throwing default (an unmapped new member compiles
+/// and throws at runtime; a test pins every member's domain). An Ontology consumer
 /// (<see cref="PredicateCompiler"/>, <see cref="PolicyVersionValidator.TryPrepareForEvaluation"/>, the nightly job)
 /// refuses every Billing member; the billing gate (<see cref="PolicyVersionValidator.TryPrepareBillingRule"/>)
 /// refuses every Ontology member. Mirrors the same Dataverse choice: do not renumber.

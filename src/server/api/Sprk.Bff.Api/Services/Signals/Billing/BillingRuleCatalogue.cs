@@ -5,8 +5,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing;
 
 /// <summary>
 /// The eleven billing rule types of spec FR-24 / design.md 6.1 (ebilling-r1 task 070): their catalogue order, embedded
-/// schema, template fact-field set and describer sentence. Closed: every member is an exhaustive switch over
-/// <see cref="RuleType"/>, never a registry, a reflection scan or a data row (D-27).
+/// schema, template fact-field set and describer sentence. Closed: every member is a switch over
+/// <see cref="RuleType"/> (a throwing default for a non-billing type), never a registry, a reflection scan or a data row (D-27).
 /// </summary>
 /// <remarks>
 /// <para><b>Parameters only.</b> A body carries the rule's parameters (a tolerance, an increment, a code list, a number of

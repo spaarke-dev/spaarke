@@ -40,7 +40,12 @@ public static class RuleDomains
     /// <summary><c>sprk_policydomain</c> Ontology (task 019, dev 2026-10-15). Empty reads as this value.</summary>
     public const int PolicyDomainOntology = 100000001;
 
-    /// <summary>Exhaustive: a new <see cref="RuleType"/> member does not compile into a domain until it is added here.</summary>
+    /// <summary>The domain of every defined <see cref="RuleType"/> member. The switch is NOT compiler-exhaustive (the <c>_</c> arm
+    /// satisfies it): a new member that is not added here still compiles and throws <see cref="ArgumentOutOfRangeException"/> at
+    /// runtime. Every caller (<see cref="IsBilling"/> / <see cref="IsOntology"/> inside the validator's save and evaluation
+    /// gates and the billing gate, and the describer) runs inside a catch that turns the throw into a refusal
+    /// (<c>internal_error</c> / a refused description), never a crash; the guard that a member is mapped is a test pinning every
+    /// defined member's domain.</summary>
     public static RuleDomain DomainOf(RuleType ruleType) => ruleType switch
     {
         RuleType.Threshold or RuleType.Switch or RuleType.Existence => RuleDomain.Ontology,

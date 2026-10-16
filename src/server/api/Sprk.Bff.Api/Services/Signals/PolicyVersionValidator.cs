@@ -136,9 +136,17 @@ public sealed class PolicyVersionValidator
     /// <param name="ruleTypeRaw">The policy version's <c>sprk_ruletype</c>, by name or numeric option-set value.</param>
     /// <param name="ruleBodyJson">The policy version's <c>sprk_rulebody</c>.</param>
     /// <param name="messageTemplate">The policy version's <c>sprk_messagetemplate</c>, or null/blank if none.</param>
-    public PolicyVersionValidationResult ValidateForSave(string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate)
+    /// <param name="expectedDomain">Optional (ebilling-r1 task 070 fix-round-1, F4). When given, a <c>sprk_ruletype</c> that is a
+    /// closed-set member of ANOTHER <see cref="RuleDomain"/> is refused with
+    /// <see cref="OntologyWriterFailureReason.RuleTypeWrongDomain"/> before any body check: a save path for an Ontology policy
+    /// passes <see cref="RuleDomain.Ontology"/>, a billing one <see cref="RuleDomain.Billing"/>, so a billing type cannot be saved
+    /// onto an Ontology policy (or the reverse) and only be caught later by a reader's gate. An unknown type is still
+    /// <c>rule_type_unsupported</c>. Omitted (<c>null</c>): behaviour is unchanged, any closed-set member is validated as its own domain.</param>
+    public PolicyVersionValidationResult ValidateForSave(
+        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, RuleDomain? expectedDomain = null)
     {
-        var (result, _) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, forOntologyEvaluation: false);
+        var (result, _) = ValidateInternal(
+            ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, forOntologyEvaluation: false, expectedDomain);
         return result;
     }
 
@@ -173,9 +181,11 @@ public sealed class PolicyVersionValidator
         }
 
         PolicyVersionValidationResult result;
+        CompiledPredicate? candidate;
         try
         {
-            (result, compiled) = ValidateInternal(pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId, forOntologyEvaluation: true);
+            (result, candidate) = ValidateInternal(
+                pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId, forOntologyEvaluation: true, expectedDomain: null);
         }
         catch (Exception)
         {
@@ -186,16 +196,34 @@ public sealed class PolicyVersionValidator
             result = PolicyVersionValidationResult.Failure(
                 OntologyWriterFailureReason.InternalError,
                 "Unexpected failure preparing this policy version for evaluation.");
-            compiled = null;
+            candidate = null;
         }
 
+        return Conclude(pv, result, candidate, out compiled);
+    }
+
+    /// <summary>
+    /// The tail of <see cref="TryPrepareForEvaluation"/>, split out so the "validation passed but nothing was compiled" branch
+    /// can be driven directly by a test (ebilling-r1 task 070 fix-round-1, K1). Success needs BOTH a valid result and a
+    /// compiled predicate. A valid result with no predicate breaks <see cref="ValidateInternal"/>'s contract (Success() is paired
+    /// with a predicate); it is refused like any other invalid policy, logged and metered as
+    /// <see cref="OntologyWriterFailureReason.InternalError"/>, never returned as <c>false</c> in silence.
+    /// </summary>
+    internal bool Conclude(
+        PolicyVersionSnapshot pv, PolicyVersionValidationResult result, CompiledPredicate? candidate,
+        [NotNullWhen(true)] out CompiledPredicate? compiled)
+    {
         if (result.IsValid)
         {
-            // ValidateInternal's contract pairs Success() with a non-null compiled predicate (and only with
-            // one) -- phrased as "return compiled is not null" rather than a bare "return true" so the
-            // compiler's own nullable-flow analysis can verify the [NotNullWhen(true)] contract on `compiled`,
-            // not just this method's own narrative.
-            return compiled is not null;
+            if (candidate is not null)
+            {
+                compiled = candidate;
+                return true;
+            }
+
+            result = PolicyVersionValidationResult.Failure(
+                OntologyWriterFailureReason.InternalError,
+                "Validation passed but produced no compiled predicate.");
         }
 
         _logger.LogError(
@@ -214,7 +242,8 @@ public sealed class PolicyVersionValidator
     /// <see cref="BillingRuleDefinition"/>. Mirrors <see cref="TryPrepareForEvaluation"/>: it runs the same save-time checks
     /// as <see cref="ValidateForSave"/> for a billing type (length cap, the type's schema, the template against the type's
     /// fact-field set) and on refusal logs <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> (id, code and bounded
-    /// reason only), meters <see cref="OntologyWriterTelemetry.RecordPolicyInvalid"/>, sets <paramref name="definition"/> to
+    /// reason only; the message names it a billing policy version), meters <see cref="OntologyWriterTelemetry.RecordBillingRuleInvalid"/>
+    /// (<c>billing.rule.invalid</c>, NOT <c>ontology.policy.invalid</c>), sets <paramref name="definition"/> to
     /// null and returns false. An Ontology type, an unknown, blank or combined type, an invalid body and an oversized body
     /// are all refused. Never throws for the row's content.
     /// </summary>
@@ -265,7 +294,8 @@ public sealed class PolicyVersionValidator
             "Billing policy version {PolicyVersionId} ({PolicyCode}) failed validation at the billing gate; it is not " +
             "evaluated (reason={Reason}).",
             pv.PolicyVersionId, pv.PolicyCode, reason);
-        OntologyWriterTelemetry.RecordPolicyInvalid(reason);
+        // K3 (fix-round-1): its own instrument, so ontology.policy.invalid counts Ontology policies only.
+        OntologyWriterTelemetry.RecordBillingRuleInvalid(reason);
 
         definition = null;
         return false;
@@ -326,7 +356,8 @@ public sealed class PolicyVersionValidator
     /// alongside a success result so <see cref="TryPrepareForEvaluation"/> never has to compile twice.
     /// </summary>
     private (PolicyVersionValidationResult Result, CompiledPredicate? Compiled) ValidateInternal(
-        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId, bool forOntologyEvaluation)
+        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId, bool forOntologyEvaluation,
+        RuleDomain? expectedDomain)
     {
         try
         {
@@ -338,6 +369,13 @@ public sealed class PolicyVersionValidator
             if (!RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out var ruleType))
             {
                 return (UnknownRuleType(ruleTypeRaw), null);
+            }
+
+            if (expectedDomain is { } expected && Enum.IsDefined(ruleType) && RuleDomains.DomainOf(ruleType) != expected)
+            {
+                return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeWrongDomain,
+                    $"sprk_ruletype '{ruleType}' is a {RuleDomains.DomainOf(ruleType)} rule type; this policy is a {expected} " +
+                    "policy and takes only its own domain's rule types (FR-24)."), null);
             }
 
             if (!RuleDomains.IsOntology(ruleType))

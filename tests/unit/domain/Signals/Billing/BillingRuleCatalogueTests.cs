@@ -302,6 +302,7 @@ public class BillingRuleCatalogueTests
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
         using var listener = ListenPolicyInvalid(scope, out var reasons);
+        using var billingListener = ListenPolicyInvalid(scope, out var billingReasons, BillingInvalidInstrument);
         var logger = new CapturingLogger<PolicyVersionValidator>();
 
         var byValue = Validator(logger).TryPrepareForEvaluation(
@@ -312,6 +313,7 @@ public class BillingRuleCatalogueTests
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.EventId.Id
             .Should().Be(OntologyWriterEvents.PolicyVersionInvalid.Id);
         reasons().Should().Equal(OntologyWriterFailureReason.RuleTypeUnsupported);
+        billingReasons().Should().BeEmpty("the Ontology gate keeps metering on ontology.policy.invalid only");
 
         Validator().TryPrepareForEvaluation(Row(type.ToString(), body), Guid.NewGuid(), out _).Should().BeFalse();
     }
@@ -390,7 +392,8 @@ public class BillingRuleCatalogueTests
     {
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
-        using var listener = ListenPolicyInvalid(scope, out var reasons);
+        using var listener = ListenPolicyInvalid(scope, out var ontologyReasons);
+        using var billingListener = ListenPolicyInvalid(scope, out var reasons, BillingInvalidInstrument);
         var logger = new CapturingLogger<PolicyVersionValidator>();
         BillingRuleDefinition? definition = null;
 
@@ -399,11 +402,58 @@ public class BillingRuleCatalogueTests
         act.Should().NotThrow().Which.Should().BeFalse();
         definition.Should().BeNull();
         reasons().Should().Equal(expectedReason);
+        ontologyReasons().Should().BeEmpty("K3: a billing refusal is never counted on ontology.policy.invalid");
         var entry = logger.Entries.Should().ContainSingle().Subject;
         entry.EventId.Id.Should().Be(OntologyWriterEvents.PolicyVersionInvalid.Id);
         if (body is { Length: > 0 } && body.Length < 200)
         {
             entry.Message.Should().NotContain(body, "the rule body is never logged");
+        }
+    }
+
+    // ── Expected-domain save validation (fix-round-1 F4) ────────────────────────────────────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Valid))]
+    public void ValidateForSave_ExpectingOntology_RefusesEveryBillingType_WrongDomain(RuleType type, int optionValue, string body)
+    {
+        var byName = Validator().ValidateForSave(type.ToString(), body, null, RuleDomain.Ontology);
+        var byValue = Validator().ValidateForSave(
+            optionValue.ToString(System.Globalization.CultureInfo.InvariantCulture), body, null, RuleDomain.Ontology);
+
+        byName.IsValid.Should().BeFalse();
+        byName.Reason.Should().Be(OntologyWriterFailureReason.RuleTypeWrongDomain);
+        byValue.Reason.Should().Be(OntologyWriterFailureReason.RuleTypeWrongDomain);
+        // The same row with no expectation, or the matching one, is valid: the parameter changes nothing else.
+        Validator().ValidateForSave(type.ToString(), body, null).IsValid.Should().BeTrue();
+        Validator().ValidateForSave(type.ToString(), body, null, RuleDomain.Billing).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("Existence")]
+    [InlineData("Threshold")]
+    [InlineData("Switch")]
+    [InlineData("100000002")]
+    public void ValidateForSave_ExpectingBilling_RefusesEveryOntologyType_WrongDomain(string ruleType)
+    {
+        var result = Validator().ValidateForSave(ruleType, ValidExistenceBody, null, RuleDomain.Billing);
+
+        result.IsValid.Should().BeFalse();
+        result.Reason.Should().Be(OntologyWriterFailureReason.RuleTypeWrongDomain);
+    }
+
+    [Fact]
+    public void ValidateForSave_ExpectingOntology_StillValidatesAnOntologyType_AndKeepsUnknownAsUnsupported()
+    {
+        Validator().ValidateForSave("Existence", ValidExistenceBody, null, RuleDomain.Ontology).IsValid.Should().BeTrue();
+        Validator().ValidateForSave("Existence", ValidExistenceBody, null).IsValid.Should().BeTrue("no expectation = unchanged");
+
+        foreach (var domain in new RuleDomain?[] { RuleDomain.Ontology, RuleDomain.Billing })
+        {
+            Validator().ValidateForSave("Bogus", ValidExistenceBody, null, domain).Reason
+                .Should().Be(OntologyWriterFailureReason.RuleTypeUnsupported, "an unknown type is not a wrong-domain type");
+            Validator().ValidateForSave(null, ValidExistenceBody, null, domain).Reason
+                .Should().Be(OntologyWriterFailureReason.RuleTypeUnsupported);
         }
     }
 
@@ -476,14 +526,18 @@ public class BillingRuleCatalogueTests
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static MeterListener ListenPolicyInvalid(Guid scope, out Func<IReadOnlyList<string>> reasons)
+    private const string OntologyInvalidInstrument = "ontology.policy.invalid";
+    private const string BillingInvalidInstrument = "billing.rule.invalid";
+
+    private static MeterListener ListenPolicyInvalid(
+        Guid scope, out Func<IReadOnlyList<string>> reasons, string instrumentName = OntologyInvalidInstrument)
     {
         var seen = new List<string>();
         var listener = new MeterListener
         {
             InstrumentPublished = (instrument, l) =>
             {
-                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.policy.invalid")
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == instrumentName)
                 {
                     l.EnableMeasurementEvents(instrument);
                 }

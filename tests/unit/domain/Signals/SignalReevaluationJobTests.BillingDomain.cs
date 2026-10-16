@@ -98,6 +98,23 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task ReevaluatePolicy_RetrieveById_RequestsTheDomainColumn()
+    {
+        // The fake RetrieveAsync returns every stored attribute whatever the ColumnSet, so the response cannot prove the job
+        // asked for sprk_domain. A missing column reads as Ontology in production (IsOntologyPolicy: absent = Ontology), so a
+        // dropped column would silently evaluate a Billing policy: assert the REQUEST (fix-round-1 F3).
+        var h = new Harness();
+        h.Sysadmin.AddPolicy(BillingCode, SignalWriter.LaneDecide, true, ApprovedRateBody, "Billed {{line.rate}}.", ruleType: ApprovedRateOption);
+        SetDomain(h, BillingCode, RuleDomains.PolicyDomainBilling);
+
+        var act = () => h.Job.ReevaluatePolicyAsync(h.Sysadmin.PolicyIdOf(BillingCode));
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        h.Sysadmin.PolicyRetrieveColumns.Should().ContainSingle()
+            .Which.Should().Contain(RuleDomains.PolicyDomainColumn, "the retrieve-by-id must select sprk_domain");
+    }
+
+    [Fact]
     public async Task EvaluateSubject_EnabledBillingDomainPolicy_IsNotEvaluatedByTheEventTrigger()
     {
         var h = new Harness();

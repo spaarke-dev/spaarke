@@ -2901,8 +2901,13 @@ public partial class SignalReevaluationJobTests
             _zoneOfUser[user] = code;
         }
 
+        /// <summary>The column sets requested by retrieve-by-id reads of <c>sprk_policy</c> (ebilling-r1 task 070 fix-round-1, F3).
+        /// The fake still returns every stored attribute, so a test must assert the REQUEST, not the response.</summary>
+        public List<string[]> PolicyRetrieveColumns { get; } = new();
+
         public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
         {
+            if (entityLogicalName == "sprk_policy") PolicyRetrieveColumns.Add(columns);
             var entity = new Entity(entityLogicalName, id);
             if (entityLogicalName == "usersettings" && _zoneOfUser.TryGetValue(id, out var code))
             {
