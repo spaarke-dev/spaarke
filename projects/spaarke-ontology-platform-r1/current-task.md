@@ -15,9 +15,18 @@
 | **Status** | Console live from master `a8c3182ec` (03:44:12Z, hash `06d39356…218e1`); "Worklist" system layout row `202bcde0-…` seeded (sortorder 13). Peers notified. |
 | **Next Action** | When the owner reports the browser check: verify in Dataverse the DR, budget revision, To Do and Signal = Acted; then mark 055 done (POML + TASK-INDEX) and finish `notes/deploy-log.md`. |
 
-## Lanes in flight
+## Lanes in flight (launched 2026-10-16, owner: "continue ... in parallel")
 
-- None.
+Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs branch; don't merge). Each: review → fix round → re-check → merge.
+
+| Task | Worktree / branch | Model | State |
+|---|---|---|---|
+| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | implementing |
+| 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | implementing |
+| 045 Decision Record tab [uac] | `C:\wts-045` `task/ontology-045` | sonnet/medium | implementing |
+| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | implementing |
+
+Next wave as slots free: 073 (memo source #2), 111 (wizard regression + deploy), 126 (gate: #1391 + 048 merged). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
