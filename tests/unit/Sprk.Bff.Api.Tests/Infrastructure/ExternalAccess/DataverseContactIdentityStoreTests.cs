@@ -41,6 +41,20 @@ public class DataverseContactIdentityStoreTests
     }
 
     [Fact]
+    public void TheInactiveEmailLookup_ReadsTwoINACTIVERows_WithTheSameColumnsAndEscaping_AndNeverTheActiveOnes()
+    {
+        // r3 task 047 fix round 2: the registration route's deactivated-contact read.
+        var path = DataverseContactIdentityStore.BuildInactiveEmailLookupPath("o'brien@firm.example");
+
+        path.Should().Contain("statecode eq 1").And.NotContain("statecode eq 0").And.Contain("$top=2");
+        path.Should().Contain(Uri.EscapeDataString("o''brien@firm.example"), "an OData literal doubles its quotes");
+        path.Should().Contain("sprk_externalobjectid").And.Contain("sprk_identityplane").And.Contain("statecode",
+            "the row must carry its state and its binding");
+        DataverseContactIdentityStore.BuildEmailLookupPath("o'brien@firm.example")
+            .Should().Contain("statecode eq 0", "the active read is unchanged");
+    }
+
+    [Fact]
     public void TheReferenceLookup_CountsEverySystemUser_EnabledOrNot()
     {
         var a = Guid.NewGuid();

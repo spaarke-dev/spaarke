@@ -197,6 +197,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>A9 (r3 task 047, fix round 1): a create ends with this status instead of writing (e.g. <c>Forbidden</c>).</summary>
     public StoreWriteStatus? CreateStatusOverride { get; set; }
 
+    /// <summary>A9 (r3 task 047, fix round 2): the inactive-contact-by-email read fails.</summary>
+    public bool FailInactiveEmailLookup { get; set; }
+
+    /// <summary>A9 (r3 task 047, fix round 2): a bind ends with this status instead of writing (e.g. <c>Forbidden</c>).</summary>
+    public StoreWriteStatus? BindStatusOverride { get; set; }
+
     /// <summary>A9 (r3 task 047, fix round 1): the business-unit-by-name read fails.</summary>
     public bool FailBusinessUnitLookup { get; set; }
 
@@ -235,6 +241,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             MaskHomeColumns = FailHomeProbe = FailLicensedUserLookup = FailTeamLookup = false;
             HomeProbeColumnMissing = FailBusinessUnitLookup = false;
             CreateStatusOverride = null;
+            FailInactiveEmailLookup = false;
+            BindStatusOverride = null;
             BusinessUnitsByName.Clear();
             DefaultTeams.Clear();
             Grants.Clear();
@@ -342,6 +350,20 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (EmailLookupStatus != LookupStatus.Read) return Task.FromResult(Failed(EmailLookupStatus));
             var rows = Contacts.Values
                 .Where(c => c.StateCode == 0 && string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase))
+                .Take(2).Select(Row).ToArray();
+            return Task.FromResult(ContactLookup.Of(rows));
+        }
+    }
+
+    public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("inactive-email");
+            AfterRead?.Invoke("inactive-email");
+            if (FailInactiveEmailLookup) return Task.FromResult(Failed(LookupStatus.Failed));
+            var rows = Contacts.Values
+                .Where(c => c.StateCode == 1 && string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase))
                 .Take(2).Select(Row).ToArray();
             return Task.FromResult(ContactLookup.Of(rows));
         }
@@ -583,6 +605,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             if (FailBind) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
+            if (BindStatusOverride is { } overridden) return new StoreWriteResult(overridden, Error: "injected");
 
             // The consuming bind names the hash column: where it is not provisioned the platform refuses the whole PATCH.
             if (consumeInvite && (InviteCodeHashColumnMissing || InviteMarkerStatus == LookupStatus.ColumnMissing))

@@ -253,6 +253,152 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         _store.ContactsBoundTo(_oid).Should().BeEmpty();
     }
 
+    // ── A deactivated contact carries the email (fix round 2; owner 2026-10-15 "Refuse, flag for admin") ──────────
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task InactiveOnlyMatch_Is403RegistrationContactConflict_FlagsTheInactiveContact_NothingCreatedOrBound(
+        bool confirm, bool twoInactive)
+    {
+        // The match is case-insensitive (the token email is not normalised); confirmation never turns a refusal into a bind.
+        var inactive = _store.AddContact(Guid.NewGuid(), email: Email.ToUpperInvariant(), stateCode: 1);
+        var others = twoInactive
+            ? new[] { _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1) }
+            : Array.Empty<InMemoryContactIdentityStore.Contact>();
+
+        var response = await Post(Body(confirm: confirm));
+
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalRegistrationEndpoints.ReasonContactConflict);
+        foreach (var c in others.Append(inactive))
+        {
+            c.Flag!.Reason.Should().Be(IdentityCollisionReason.InactiveContactEmailMatch);
+            c.Flag.CollidingOid.Should().Be(_oid);
+            c.Flag.CollidingPlane.Should().Be(IdentityPlaneMarker.WorkforceHome);
+            c.StateCode.Should().Be(1, "reactivation is the operator's decision");
+            c.Oid.Should().BeNull("the inactive contact is never bound");
+        }
+
+        _store.Writes.Select(w => w.Op).Should().OnlyContain(op => op == "flag");
+        _store.Contacts.Count.Should().Be(1 + others.Length, "no new contact beside the deactivated one");
+        _store.ContactsBoundTo(_oid).Should().BeEmpty();
+        _store.Reads.Should().Contain("inactive-email");
+    }
+
+    [Fact]
+    public async Task InactiveAndOneActiveBindableMatch_ActiveDecides_AsToday_InactiveIsLeftAlone()
+    {
+        var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        var active = _store.AddContact(Guid.NewGuid(), email: Email);
+
+        var ask = await Post(Body(confirm: null));
+        await ShouldBeProblem(ask, HttpStatusCode.Conflict, ExternalRegistrationEndpoints.ReasonExistingRecordFound);
+        _store.Writes.Should().BeEmpty();
+
+        var bind = await Post(Body(confirm: true));
+
+        bind.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ContactIdOf(bind)).Should().Be(active.Id);
+        active.Oid.Should().Be(_oid.ToString("D"));
+        inactive.Flag.Should().BeNull();
+        inactive.Oid.Should().BeNull();
+        _store.Reads.Should().NotContain("inactive-email", "an active match decides; the inactive read is not reached");
+        _store.Writes.Select(w => w.Op).Should().Equal("bind");
+    }
+
+    [Fact]
+    public async Task InactiveAndOneActiveBoundMatch_ConflictsByTheActiveCause_NotTheInactiveOne()
+    {
+        var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        var active = _store.AddContact(Guid.NewGuid(), email: Email,
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.Workforce);
+
+        var response = await Post(Body(confirm: true));
+
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalRegistrationEndpoints.ReasonContactConflict);
+        active.Flag!.Reason.Should().Be(IdentityCollisionReason.BoundToDifferentOid);
+        inactive.Flag.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task InactiveMatchReadFailed_Is503Unavailable_NothingCreated()
+    {
+        _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        _store.FailInactiveEmailLookup = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task InactiveMatchOnADifferentEmail_StillRegisters()
+    {
+        _store.AddContact(Guid.NewGuid(), email: "someone.else@customer.example", stateCode: 1);
+
+        var response = await Post(Body());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task InactiveMatch_WhenTheFlagOptionIsNotProvisioned_StillRefuses403_NothingCreated_AndWarnsNamingTheSchemaScript()
+    {
+        // Dataverse rejects a reason value its choice lacks (an invalid option value): the flag write FAILS. The refusal must
+        // not depend on it, and the operator must learn which script adds the option.
+        var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        _store.FailFlagWrites = true;
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var binder = IdentityBindingTestKit.Binder(_store, log);
+
+        // Through the REAL route (the same store, nothing written) ...
+        var response = await Post(Body());
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalRegistrationEndpoints.ReasonContactConflict);
+
+        // ... and through a binder whose log is captured (the route's logger is not).
+        var result = await binder.RegisterHomeContactAsync(
+            new HomeRegistrationRequest(HomeTenant, _oid, Email, "Mike", "Okafor", null, false, BusinessUnit, "Secure Record"),
+            CancellationToken.None);
+        result.Outcome.Should().Be(HomeRegistrationOutcome.Conflict);
+        result.Wrote.Should().BeFalse();
+        inactive.Flag.Should().BeNull("the flag could not be written");
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().ContainSingle();
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains("scripts/Set-ContactIdentityBindingSchema.ps1")
+            && e.Message.Contains("InactiveContactEmailMatch"));
+    }
+
+    // ── The bind's own faults (fix round 1 leftover) ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task Bind_RefusedForAMissingPrivilege_Is500Environment_NotRetryable_NothingBound()
+    {
+        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        _store.BindStatusOverride = StoreWriteStatus.Forbidden;
+
+        var response = await Post(Body(confirm: true));
+
+        await ShouldBeProblem(response, HttpStatusCode.InternalServerError, ExternalRegistrationEndpoints.ErrorEnvironment);
+        existing.Oid.Should().BeNull();
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Bind_FailedTransiently_StaysA503Unavailable()
+    {
+        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        _store.FailBind = true;
+
+        var response = await Post(Body(confirm: true));
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        existing.Oid.Should().BeNull();
+    }
+
     // ── Probe (046 review K, carried) ──────────────────────────────────────────────────────────────
 
     [Theory]

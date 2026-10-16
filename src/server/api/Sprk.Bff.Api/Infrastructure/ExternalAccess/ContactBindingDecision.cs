@@ -95,6 +95,16 @@ public enum IdentityCollisionReason
     /// holder so an operator can see it; the caller is denied <c>contact_key_conflict</c>.
     /// </summary>
     KeyMirrorConflict = 100000011,
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2; owner 2026-10-15 "Refuse, flag for admin"): no ACTIVE contact carries the
+    /// token email but an INACTIVE one does. The registration is refused (<c>registration_contact_conflict</c>), nothing is
+    /// created or bound, and the inactive contact is flagged so an operator sees it; reactivating it is the operator's
+    /// decision. Held while the flagged contact is still inactive and still carries an email
+    /// (<see cref="ContactBindingDecision.CollisionStillHolds"/>) — the one reason that survives the inactive-contact
+    /// shortcut, because the inactive state IS the collision.
+    /// </summary>
+    InactiveContactEmailMatch = 100000012,
 }
 
 /// <summary>Which caller plane a binding decision is being made for.</summary>
@@ -641,6 +651,12 @@ public static class ContactBindingDecision
     /// around (owner round 4 item 4, B2).
     /// </summary>
     public const string DenyContactKeyConflict = "sdap.access.deny.contact_key_conflict";
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2): the token email matches no active contact but an INACTIVE one. Refused and
+    /// flagged for an administrator; never created around and never bound to the inactive contact.
+    /// </summary>
+    public const string DenyContactInactiveEmailMatch = "sdap.access.deny.contact_inactive_email_match";
 
     /// <summary>
     /// CIAM plane, E11 (task 184, owner round 96; task 185, owner round 98): the email matches one unbound, active, unlinked
@@ -1237,6 +1253,15 @@ public static class ContactBindingDecision
             return true;
         }
 
+        // A registration refused because the email belongs to a DEACTIVATED contact: the inactive state is the collision, so
+        // this is decided BEFORE the inactive shortcut below. It holds while the contact stays inactive and still carries an
+        // email; reactivating it (an operator decision) or removing its email clears the flag. (The party records no email,
+        // so a change to ANOTHER address cannot be told apart here.)
+        if (party.Reason == IdentityCollisionReason.InactiveContactEmailMatch)
+        {
+            return !flagged.IsActive && !string.IsNullOrWhiteSpace(flagged.Email);
+        }
+
         // An operator deactivated the contact: the person was removed, the collision is moot.
         if (!flagged.IsActive)
         {
@@ -1289,6 +1314,7 @@ public static class ContactBindingDecision
         IdentityCollisionReason.GuestLinkUnverified => DenyGuestLinkUnverified,
         IdentityCollisionReason.InviteMatchesWorkforceContact => InviteWorkforceBoundContact,
         IdentityCollisionReason.KeyMirrorConflict => DenyContactKeyConflict,
+        IdentityCollisionReason.InactiveContactEmailMatch => DenyContactInactiveEmailMatch,
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Every collision reason needs its own code."),
     };
 
@@ -1621,6 +1647,30 @@ public static class ContactBindingDecision
             ? new RegistrationEmailDecision(RegistrationEmailAction.Conflict, row.ContactId,
                 FlagContactIds: new[] { row.ContactId }, FlagReason: IdentityCollisionReason.LinkedToOtherUser)
             : new RegistrationEmailDecision(RegistrationEmailAction.BindExisting, row.ContactId);
+    }
+
+    /// <summary>
+    /// Registration (r3 task 047, fix round 2; owner 2026-10-15 "Refuse, flag for admin"): consulted ONLY when
+    /// <see cref="DecideRegistrationEmail"/> found NO active match (<see cref="RegistrationEmailAction.Create"/>). An INACTIVE
+    /// contact carrying the email refuses the registration: <see cref="RegistrationEmailAction.Conflict"/> over every
+    /// inactive match, reason <see cref="IdentityCollisionReason.InactiveContactEmailMatch"/>. None → create as before.
+    /// A read that failed denies (a create is never reached when an inactive match cannot be ruled out). Pure.
+    /// </summary>
+    public static RegistrationEmailDecision DecideInactiveRegistrationEmail(ContactLookup inactiveLookup)
+    {
+        ArgumentNullException.ThrowIfNull(inactiveLookup);
+
+        if (inactiveLookup.Status != LookupStatus.Read)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, DenyCode: LookupDenyCode(inactiveLookup.Status));
+        }
+
+        var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
+        return rows.Count == 0
+            ? new RegistrationEmailDecision(RegistrationEmailAction.Create)
+            : new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
+                FlagContactIds: rows.Select(r => r.ContactId).Distinct().ToList(),
+                FlagReason: IdentityCollisionReason.InactiveContactEmailMatch);
     }
 
     /// <summary>The two workforce planes (Spaarke-tenant and customer home directory): an employee's sign-in, not a CIAM account.</summary>

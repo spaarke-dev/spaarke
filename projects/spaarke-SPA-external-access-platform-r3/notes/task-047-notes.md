@@ -184,9 +184,37 @@ Not changed in this round (carried): a missing column on the BINDING probe (`Cla
 Filed or carried from review; one line each.
 
 - K1: `removeUnverifiedEmailClaim` is not enforced in provisioning (to be filed by the main session).
-- K1: A deactivated contact does not block registration (owner decision pending).
+- K1: RESOLVED in fix round 2 - a deactivated contact carrying the email now refuses the registration and is flagged `InactiveContactEmailMatch` (owner 2026-10-15). The schema option must be applied before 047 deploys.
 - K2: There is a systemuser-link race between the reference lookup and the bind.
 - K2: A pending CIAM invitee can be bound.
 - K2: Two directories with the same mail registering at the same time can create two contacts.
 - K2: Raw tid/oid appear in the shared binder flag logs and in the 046 resolver logs (to be filed).
 - K2: The only-caller ArchTest pins the interface, not the concrete store method or the generic `BindOidAsync(WorkforceHome)`.
+
+## Fix round 2
+
+Owner decision 2026-10-15, "Refuse, flag for admin": when the token email matches no ACTIVE bindable contact but an INACTIVE contact (`statecode` 1) carries it, registration is refused (403 `registration_contact_conflict`, the SPA shows "contact your administrator"), nothing is created or bound, and the inactive contact is flagged. Reactivation stays an operator decision. Second owner decision, same day: the flag reason is a NEW choice value (option 1).
+
+**Why a new value.** `ContactBindingDecision.CollisionStillHolds` returns `false` for every flagged inactive contact before its per-reason switch ("the person was removed, the collision is moot"), and `KeyMirrorConflict` holds only on a mirror carrying the party's oid. The job scans flagged contacts in every state, so any existing reason would be cleared on the next run although nothing changed. Control test: `CollisionStillHolds_Control_EveryOtherReason_IsClearedOnAnInactiveContact` and `Control_AnotherReasonOnAnInactiveContact_IsClearedByTheJob`.
+
+| Id | Change | Where |
+|---|---|---|
+| R2-1 | `IdentityCollisionReason.InactiveContactEmailMatch = 100000012` (100000012 was unused in the enum and in the schema script; the other 100000012 hits in the repo are unrelated choices). Deny code `sdap.access.deny.contact_inactive_email_match` in `DenyCodeFor`. | `ContactBindingDecision.cs` |
+| R2-2 | `CollisionStillHolds`: a case BEFORE the inactive shortcut. The flag holds while the flagged contact is inactive and still carries an email; it clears when the contact is reactivated or its email is blank. The party records no email (it holds oid, plane, reason, time), so a change to ANOTHER non-blank address cannot be detected; storing an email (or a hash) in the parties JSON would change the flag contract and was not done. | `ContactBindingDecision.cs` |
+| R2-3 | `DecideInactiveRegistrationEmail` (pure): inactive rows = Conflict over every inactive row with the new reason; none = Create; a failed read = Deny (503, never a create). | `ContactBindingDecision.cs` |
+| R2-4 | `IContactIdentityStore.FindInactiveContactsByEmailAsync` + `BuildInactiveEmailLookupPath` (`statecode eq 1`, same columns and literal escaping, top 2). Binder: when `DecideRegistrationEmail` says Create (no ACTIVE match), the inactive read decides before the create; active matches decide as before and the inactive read is not reached. The Conflict handling moved into `RefuseAndFlagAsync`, shared by both paths. | `ContactIdentityStore.cs`, `ContactIdentityBinder.cs` |
+| R2-5 | Fail safe: the flag write failing (the option is not provisioned yet, a 400 invalid option value) does not change the answer: 403, nothing created or bound. `RecordPartyAsync` logs a warning naming `scripts/Set-ContactIdentityBindingSchema.ps1` for this reason. | `ContactIdentityBinder.cs` |
+| R2-6 | Schema script: option `100000012 = 'Inactive contact email match'` in `$ReasonOptions`; its existing add-missing-option path covers an environment whose choice predates it. **NOT run against any environment; the main session runs it with owner approval, and it must be applied BEFORE 047 deploys** (until then the flag cannot be written and the operator sees only the warning log). | `scripts/Set-ContactIdentityBindingSchema.ps1` |
+| R2-7 | Round-1 leftover: a `Forbidden` (403, or a 400 naming a privilege) on the BIND PATCH of an existing contact was 503 `registration_unavailable`; it now logs an error and answers `DenyContactCreateUnavailable` = 500 `registration_environment`, like the create. | `ContactIdentityBinder.cs` |
+
+Section 11 for `FindInactiveContactsByEmailAsync`. Existing: `FindActiveContactsByEmailAsync`, filtered `statecode eq 0`, used by the invite service, the binder's token planes and the reconciliation job. Extension: widening that read to every state would hand inactive rows to callers that rely on it being active-only (the invite service, the job's carrier counts), so the registration route gets its own minimal pair read instead. Cost of doing nothing: a deactivated person registering again gets a second contact beside the deactivated one, and the operator never learns of it.
+
+**Tests.** `ExternalRegistrationEndpointsTests`: inactive-only match is 403 and flagged, nothing created or bound (3 shapes: confirm true/false, two inactive, upper-case email); inactive plus one active bindable behaves as before (409, then bind) and leaves the inactive contact alone; inactive plus an active bound match conflicts by the active cause; inactive read failed is 503; inactive match on a different email registers; flag option not provisioned still refuses 403 and warns naming the script; bind `Forbidden` is 500 `registration_environment`; control bind transient failure stays 503. `ContactBindingDecisionTests`: the three decision cases, `CollisionStillHolds_InactiveContactEmailMatch_...` (holds while inactive with an email; clears on reactivation and on a blank email; failed read keeps it) and the every-other-reason control. `IdentityLinkReconciliationTests`: the job keeps the flag across runs while inactive and clears it on reactivation; control that another reason is cleared. `DataverseContactIdentityStoreTests`: the inactive path is pinned (`statecode eq 1`, escaping, columns) and the active path is unchanged. `InMemoryContactIdentityStore` gained the inactive read (it already modelled `statecode`), `FailInactiveEmailLookup` and `BindStatusOverride`; the contract-test wrapper forwards the new method.
+
+**Before / after (seeding proofs, each reverted afterwards; `git diff -- src` matched the finished change each time).**
+- Inactive read dropped from the Create path: 4 failed of 429 (the three inactive-only route cases and the not-provisioned case); restored, 0 failed.
+- Bind `Forbidden` branch disabled: 1 failed (`Bind_RefusedForAMissingPrivilege_...` got 503, expected 500); restored, 0 failed.
+- `CollisionStillHolds` new case disabled: 2 failed (the decision test and the job-level test); restored, 0 failed.
+- Final filtered set (ExternalRegistration, ContactBindingDecision, IdentityLink, ContactIdentityBinder, DataverseContactIdentityStore, WorkforcePrincipalResolver, plus ContactIdentitySchemaAgreement and ExternalAccessContract): 512 passed, 0 failed. ArchTests `AuthenticationSchemeCensus|RouteAuthorizationGuard`: 93 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors. `ContactIdentitySchemaAgreementTests` (the enum equals the script's option list) passes with the new value.
+
+**Deployment prerequisite.** Run `scripts/Set-ContactIdentityBindingSchema.ps1` (owner approval) on every environment that serves the registration route before 047 deploys.

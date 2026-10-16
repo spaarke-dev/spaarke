@@ -640,19 +640,7 @@ public sealed class ContactIdentityBinder
                     return HomeRegistrationResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
 
                 case RegistrationEmailAction.Conflict:
-                {
-                    var flagged = decision.FlagContactIds ?? Array.Empty<Guid>();
-                    // By cause: EmailAmbiguous only for 2+ matches. A single unbindable match carries its own reason so
-                    // the reconciliation job's CollisionStillHolds keeps the flag while that cause holds.
-                    var reason = decision.FlagReason ?? IdentityCollisionReason.EmailAmbiguous;
-                    var wrote = await WriteFlagsAsync(flagged, known, oid, IdentityPlaneMarker.WorkforceHome,
-                        reason, ct).ConfigureAwait(false);
-                    _logger.LogWarning(
-                        "[ID-BIND] Registration for {Who} refused: the email matches contact(s) [{Contacts}] that cannot be "
-                        + "bound (ambiguous, bound, linked or unreadable); flagged {Reason} (wrote={Wrote})",
-                        who, string.Join(",", flagged), reason, wrote);
-                    return new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, Wrote: wrote);
-                }
+                    return await RefuseAndFlagAsync(decision, known, oid, who, ct).ConfigureAwait(false);
 
                 case RegistrationEmailAction.AlreadyBoundToCaller:
                     return await AlreadyRegisteredAsync(tid, oid, who, wroteNothingElse: true, ct).ConfigureAwait(false);
@@ -669,6 +657,18 @@ public sealed class ContactIdentityBinder
                     }
 
                     var write = await _store.BindHomeOidAsync(target.ContactId, target.ETag, tid, oid, ct).ConfigureAwait(false);
+                    if (write.Status == StoreWriteStatus.Forbidden)
+                    {
+                        // A missing privilege on the contact PATCH (HTTP 403, or a 400 that names a privilege): permanent, an
+                        // operator fix - not retryable. Answered like the create's Forbidden (500 registration_environment).
+                        _logger.LogError(
+                            "[ID-BIND] Registration bind for {Who} on contact {ContactId} refused ({DenyCode}): Dataverse refused "
+                            + "the write for a missing privilege (the BFF application user needs write on the contact and its "
+                            + "owner). Nothing was bound.",
+                            who, target.ContactId, ContactBindingDecision.DenyContactCreateUnavailable);
+                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+                    }
+
                     if (write.Status == StoreWriteStatus.Written)
                     {
                         _logger.LogInformation(
@@ -693,11 +693,47 @@ public sealed class ContactIdentityBinder
                 }
 
                 case RegistrationEmailAction.Create:
-                    return await CreateHomeContactAsync(request, who, ct).ConfigureAwait(false);
+                {
+                    // Fix round 2 (owner 2026-10-15, "Refuse, flag for admin"): no ACTIVE match. An INACTIVE contact carrying
+                    // the email refuses the registration and is flagged - never a second contact beside a deactivated one,
+                    // and never bound (reactivation is an operator decision). Active matches above decide as they always did.
+                    var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(request.Email, ct).ConfigureAwait(false);
+                    Remember(known, inactiveLookup);
+                    var inactive = ContactBindingDecision.DecideInactiveRegistrationEmail(inactiveLookup);
+                    if (inactive.Action == RegistrationEmailAction.Deny)
+                    {
+                        _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the inactive-contact read failed",
+                            who, inactive.DenyCode);
+                        return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
+                    }
+
+                    return inactive.Action == RegistrationEmailAction.Conflict
+                        ? await RefuseAndFlagAsync(inactive, known, oid, who, ct).ConfigureAwait(false)
+                        : await CreateHomeContactAsync(request, who, ct).ConfigureAwait(false);
+                }
             }
         }
 
         return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+    }
+
+    /// <summary>
+    /// Refuses a registration whose email matches contact(s) that cannot be bound, and flags them by CAUSE. Nothing is
+    /// bound or created; the refusal stands even if the flag could not be written (the log carries the marker).
+    /// </summary>
+    private async Task<HomeRegistrationResult> RefuseAndFlagAsync(
+        RegistrationEmailDecision decision, Dictionary<Guid, ContactBindingRow> known, Guid oid, string who, CancellationToken ct)
+    {
+        var flagged = decision.FlagContactIds ?? Array.Empty<Guid>();
+        // By cause: EmailAmbiguous only for 2+ matches. A single unbindable match carries its own reason so the
+        // reconciliation job's CollisionStillHolds keeps the flag while that cause holds.
+        var reason = decision.FlagReason ?? IdentityCollisionReason.EmailAmbiguous;
+        var wrote = await WriteFlagsAsync(flagged, known, oid, IdentityPlaneMarker.WorkforceHome, reason, ct).ConfigureAwait(false);
+        _logger.LogWarning(
+            "[ID-BIND] Registration for {Who} refused: the email matches contact(s) [{Contacts}] that cannot be bound "
+            + "(ambiguous, bound, linked, unreadable or inactive); flagged {Reason} (wrote={Wrote})",
+            who, string.Join(",", flagged), reason, wrote);
+        return new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, Wrote: wrote);
     }
 
     private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
@@ -1342,6 +1378,17 @@ public sealed class ContactIdentityBinder
                     current = freshRow;
                     continue;
                 }
+            }
+
+            if (party.Reason == IdentityCollisionReason.InactiveContactEmailMatch)
+            {
+                // Fix round 2: the choice option is added by the schema script. Until it is applied the platform refuses the
+                // reason value; the registration is still refused (the deny stands) and this line is the operator's marker.
+                _logger.LogWarning(
+                    "[ID-BIND] The InactiveContactEmailMatch flag on contact {ContactId} was not written ({Status}); the "
+                    + "'Inactive contact email match' option may not be provisioned in this environment. Apply "
+                    + "scripts/Set-ContactIdentityBindingSchema.ps1. The registration is still refused.",
+                    current.ContactId, write.Status);
             }
 
             // The deny stands regardless; only the operator-visible marker is missing, and the log carries it.

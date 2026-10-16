@@ -855,6 +855,59 @@ public class ContactBindingDecisionTests
         Holds(flag, Unbound(ContactA)).Should().BeFalse();
     }
 
+    // ── r3 047 fix round 2: a DEACTIVATED contact carrying the token email refuses and flags the registration ──────
+
+    [Fact]
+    public void DecideInactiveRegistrationEmail_AnInactiveMatch_IsAConflict_FlaggedInactiveContactEmailMatch_OverEveryInactiveRow()
+    {
+        var rows = new[] { Unbound(ContactA, state: 1), Unbound(ContactB, state: 1) };
+
+        var decision = ContactBindingDecision.DecideInactiveRegistrationEmail(ContactLookup.Of(rows));
+
+        decision.Action.Should().Be(RegistrationEmailAction.Conflict);
+        decision.FlagReason.Should().Be(IdentityCollisionReason.InactiveContactEmailMatch);
+        decision.FlagContactIds.Should().BeEquivalentTo(new[] { ContactA, ContactB });
+    }
+
+    [Fact]
+    public void DecideInactiveRegistrationEmail_NoInactiveRow_Creates_AndAFailedReadDenies()
+    {
+        ContactBindingDecision.DecideInactiveRegistrationEmail(NoRows).Action.Should().Be(RegistrationEmailAction.Create);
+        ContactBindingDecision.DecideInactiveRegistrationEmail(ContactLookup.Failed).Action
+            .Should().Be(RegistrationEmailAction.Deny, "an inactive match cannot be ruled out, so nothing is created");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_InactiveContactEmailMatch_HoldsWhileInactiveAndCarryingAnEmail_ClearsWhenReactivatedOrEmailGone()
+    {
+        var party = Party(IdentityCollisionReason.InactiveContactEmailMatch, Caller, IdentityPlaneMarker.WorkforceHome);
+        var inactive = Unbound(ContactA, state: 1) with { Email = "Mike.Okafor@Customer.example" };
+
+        Holds(party, inactive).Should().BeTrue("the inactive contact still carries the email: the job must NOT clear it");
+        Holds(party, inactive with { StateCode = 0 }).Should().BeFalse("an operator reactivated the contact: resolved");
+        Holds(party, inactive with { Email = null }).Should().BeFalse("the email is gone from the contact: resolved");
+        Holds(party, inactive with { Email = "  " }).Should().BeFalse();
+        ContactBindingDecision.CollisionStillHolds(party, inactive, ContactLookup.Failed, NoRows, ReferenceLookup.Of())
+            .Should().BeTrue("a failed read keeps the party (fail closed)");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_Control_EveryOtherReason_IsClearedOnAnInactiveContact()
+    {
+        // The control for the case above: without the dedicated reason an inactive flagged contact is cleared (the person was
+        // removed) - which is why an existing reason could not carry the deactivated-contact refusal.
+        var inactive = Unbound(ContactA, state: 1) with { Email = "mike.okafor@customer.example" };
+        foreach (var reason in new[]
+                 {
+                     IdentityCollisionReason.BoundToDifferentOid, IdentityCollisionReason.EmailAmbiguous,
+                     IdentityCollisionReason.BindingUnreadable, IdentityCollisionReason.LinkedToOtherUser,
+                 })
+        {
+            Holds(Party(reason, Caller, IdentityPlaneMarker.WorkforceHome), inactive)
+                .Should().BeFalse($"{reason} is moot once the contact is deactivated");
+        }
+    }
+
     // ── r3 047 fix round 1 (F-A): a single unbindable registration match is flagged by CAUSE ──────────
 
     private static ContactBindingRow UnreadableBinding(Guid id) => new(id, 0, null, (int)IdentityPlaneMarker.Workforce);

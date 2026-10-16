@@ -164,6 +164,13 @@ public interface IContactIdentityStore
     /// <summary>ACTIVE contacts whose <c>emailaddress1</c> is <paramref name="email"/>, two rows.</summary>
     Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct);
 
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, fix round 2): INACTIVE contacts (<c>statecode eq 1</c>) whose <c>emailaddress1</c> is
+    /// <paramref name="email"/>, two rows. Read-only; consulted by the registration route only when no ACTIVE contact
+    /// carries the email, so a deactivated contact is refused and flagged instead of a second contact being created.
+    /// </summary>
+    Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct);
+
     /// <summary>One contact by id; a missing row reads as zero rows.</summary>
     Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct);
 
@@ -376,6 +383,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildEmailLookupPath(string email)
         => $"contacts?$select={ContactSelect}"
            + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 0&$top=2";
+
+    /// <summary>
+    /// INACTIVE contacts by email, two rows (r3 task 047, fix round 2). The pair of <see cref="BuildEmailLookupPath"/>:
+    /// <c>statecode eq 1</c> instead of <c>eq 0</c>, same email literal and same selected columns.
+    /// </summary>
+    public static string BuildInactiveEmailLookupPath(string email)
+        => $"contacts?$select={ContactSelect}"
+           + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 1&$top=2";
 
     /// <summary>Systemusers linking any of the contacts — any state, so a disabled user's link still counts.</summary>
     public static string BuildReferenceLookupPath(IReadOnlyCollection<Guid> contactIds)
@@ -909,6 +924,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
         return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct);
+    }
+
+    /// <inheritdoc />
+    public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        return ReadContactsAsync(BuildInactiveEmailLookupPath(email.Trim()), "inactive email lookup", ct);
     }
 
     /// <inheritdoc />

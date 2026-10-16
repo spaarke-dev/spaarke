@@ -235,6 +235,37 @@ public class IdentityLinkReconciliationTests
     }
 
     [Fact]
+    public async Task AnInactiveContactEmailMatchFlag_IsKeptByTheJobWhileTheContactStaysInactive_AndClearedOnReactivation()
+    {
+        // r3 task 047 fix round 2: a registration refused because a DEACTIVATED contact carries the email flags that contact.
+        // Every other reason is cleared on an inactive contact (the person was removed); this one must survive the runs.
+        var registrant = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.InactiveContactEmailMatch, registrant, IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().NotBeNull("it is still inactive and still carries the email");
+
+        _store.Contacts[contact].StateCode = 0;
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().BeNull("an operator reactivated the contact: the job clears the flag");
+    }
+
+    [Fact]
+    public async Task Control_AnotherReasonOnAnInactiveContact_IsClearedByTheJob()
+    {
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.BindingUnreadable, Guid.NewGuid(), IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+
+        _store.Contacts[contact].Flag.Should().BeNull("without the dedicated reason the inactive contact's flag is moot");
+    }
+
+    [Fact]
     public async Task AFlagRaisedByAType2SignIn_IsReEvaluatedFromData_AndClearedOnlyWhenResolved()
     {
         var type2Oid = Guid.NewGuid();

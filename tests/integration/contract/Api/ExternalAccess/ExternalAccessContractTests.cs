@@ -1731,6 +1731,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
 
     public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct) => _inner.FindContactsByKeyMirrorAsync(oid, ct);
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
+    public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindInactiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
