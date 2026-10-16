@@ -41,6 +41,7 @@
       <dependency task="046" status="required">Resolution.</dependency>
       <dependency task="047" status="required">invoice-line-code Action and Binding.</dependency>
       <dependency task="048" status="required">Code-set proposal routes.</dependency>
+      <dependency task="054" status="required">invoice-codeset-match Action and Binding (code-set matching review step, D-93).</dependency>
       <dependency task="049" status="required">Processing job.</dependency>
       <dependency task="050" status="required">Legacy path retired (appsettings no longer carries InvoiceExtractionPlaybookId).</dependency>
       <dependency task="051" status="required">SPA submission UI.</dependency>
@@ -50,6 +51,7 @@
   <constraints>
     <constraint source="dev BFF coordination (R3, 2026-10-16)">Before deploying, read the live dev BFF version (/healthz or the version endpoint; on 2026-10-16 it was 1.0.0+2c2fed38deae9e8a1629a4f1fa36eb4118bad791, deployed by spaarke-SPA-external-access-platform-r3) and run git merge-base --is-ancestor against the build being deployed. If the live commit is not an ancestor, merge master first; never deploy a build that drops another session's live work. Announce the deploy to the other BFF-deploying sessions and wait for the owner's go.</constraint>
     <constraint source="task 047 (2026-10-16)">Seed the invoice-line-code Action with this deploy, in order: (1) scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-line-code; (2) scripts/Deploy-ActionMirrors.ps1 -Filter invoice-line-code; (3) deploy the BFF build carrying ConsumerTypes.InvoiceLineCode together with scripts/dataverse/Seed-PlaybookConsumers.ps1, then run it with -DiffOnly. Accept only when -DiffOnly is clean and /healthz is Healthy (a row without the build, or the build without the row, turns /healthz Degraded / Unhealthy). Model tier stays Fast until DEF-020 / task 162 (notes/047).</constraint>
+    <constraint source="task 054 (2026-10-16)">Seed the invoice-codeset-match Action with this deploy, in the same order: (1) scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-codeset-match; (2) scripts/Deploy-ActionMirrors.ps1 -Filter invoice-codeset-match (-DryRun first); (3) deploy the BFF build carrying ConsumerTypes.InvoiceCodeSetMatch together with scripts/dataverse/Seed-PlaybookConsumers.ps1, then run it with -DiffOnly. Accept only when -DiffOnly is clean and /healthz is Healthy. Until the row and Binding exist, GET proposals still answers 200 with every row marked unreviewed (binding_missing falls back to the embedding ranking). The two sprk_billingcodeset columns (sprk_description, sprk_matchhints) and their tuning text are ALREADY on spaarkedev1 (task 054); SpaarkeMaster source carries the columns and the form's Matching section, so step 8 should find no drift for them. Model tier stays Fast (notes/054).</constraint>
     <constraint source="CLAUDE.md §9">No secrets in the repo, in notes or in app settings typed by hand; Content Understanding auth is managed identity (no key setting). Record setting names and non-secret values only.</constraint>
     <constraint source="project CLAUDE.md §5">Dev only. scripts/Import-SolutionScoped.ps1 is the only solution import path and runs with -PlanOnly here; no real import, no version bump.</constraint>
     <constraint source="ADR-039">Seed the Bindings before deploying the BFF that lists their consumer types in ConsumerTypes.All, so /healthz never goes Unhealthy.</constraint>
@@ -73,8 +75,8 @@
 
   <steps mode="prescriptive">
     <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build and dotnet test green on work/ebilling-r1; record the commit SHA; measure the BFF publish size against a fresh master build.</step>
-    <step order="2">Actions: run scripts/Deploy-ActionMirrors.ps1 -Filter invoice-classify -DryRun, then live; repeat for invoice-line-code. Verify both rows with a Dataverse read query.</step>
-    <step order="3">Bindings: run scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun, then live, then -DiffOnly (expect no difference). Verify the invoice-classify and invoice-line-code rows.</step>
+    <step order="2">Actions: run scripts/Deploy-ActionMirrors.ps1 -Filter invoice-classify -DryRun, then live; repeat for invoice-line-code and invoice-codeset-match (each after its Ensure-ActionRow.ps1). Verify the three rows with a Dataverse read query.</step>
+    <step order="3">Bindings: run scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun, then live, then -DiffOnly (expect no difference). Verify the invoice-classify, invoice-line-code and invoice-codeset-match rows.</step>
     <step order="4">App settings on spaarke-bff-dev (az webapp config appsettings set, staging slot if slot deploy is used): Ebilling__Enabled=true; ContentUnderstanding__Endpoint, ContentUnderstanding__ApiVersion=2025-11-01, ContentUnderstanding__AnalyzerId (from 003 / 004 notes); Finance__ProcedureLibraryContainerId and Finance__EbillingOutputContainerId (from 028 notes). Remove Finance__InvoiceExtractionPlaybookId if present (050). Record names and values (none are secret).</step>
     <step order="5">BFF: run scripts/Deploy-BffApi.ps1 -Environment dev -UseSlotDeploy; confirm hash verification and swap; GET /healthz is Healthy, including the consumer-type reconciliation and the Content Understanding check.</step>
     <step order="6">Route smoke: for every 044 and 048 route call once unauthenticated (expect 401) and once authenticated with the expected status (external routes as a CIAM firm user, internal as an internal user, confirm as an admin; a non-admin confirm expects 403). Record status codes.</step>
@@ -104,7 +106,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">invoice-classify and invoice-line-code Action and Binding rows exist in dev; Seed-PlaybookConsumers.ps1 -DiffOnly reports no difference.</criterion>
+    <criterion testable="true">invoice-classify, invoice-line-code and invoice-codeset-match Action and Binding rows exist in dev; Seed-PlaybookConsumers.ps1 -DiffOnly reports no difference.</criterion>
     <criterion testable="true">/healthz on spaarke-bff-dev is Healthy after deploy, including consumer-type reconciliation and the Content Understanding check.</criterion>
     <criterion testable="true">Every 044 and 048 route answers 401 unauthenticated and its expected status authenticated; a non-admin confirm answers 403; codes recorded.</criterion>
     <criterion testable="true">The external SPA workflow run for dev succeeded (run URL recorded).</criterion>

@@ -63,7 +63,8 @@ public static class CodeSetMappingEndpoints
             .WithSummary("Confirm a code set as the default for one matter type or practice area")
             .WithDescription(
                 "{table} is 'mattertype' or 'practicearea'. Re-reads the row and refuses with 409 when it already has a default code set; " +
-                "otherwise sets sprk_defaultbillingcodeset on exactly that row to the named code set.")
+                "otherwise sets sprk_defaultbillingcodeset on exactly that row to the named code set. The write is conditional on the " +
+                "row version read, so a mapping another admin saved in the meantime is never overwritten (also 409).")
             .Produces<CodeSetMappingConfirmedResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)

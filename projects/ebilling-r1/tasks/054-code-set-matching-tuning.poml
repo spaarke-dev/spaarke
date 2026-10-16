@@ -4,7 +4,7 @@
     <title>Code-set matching: tuning data, full coverage and an AI review step</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Action + Binding (closed catalog), new Dataverse columns, changes to the 048 proposal service and the 047 per-line suggestion hook, and an evaluation gate with must-pass cases.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -101,5 +101,13 @@
     <criterion>Build 0 warnings / 0 errors; Finance, eval-contract and ArchTests green; publish-size delta reported.</criterion>
   </acceptance-criteria>
 
-  <notes></notes>
+  <notes>Completed 2026-10-16 (rigor FULL). Record: projects/ebilling-r1/notes/054-code-set-matching.md.
+- Columns sprk_description / sprk_matchhints on sprk_billingcodeset: on spaarkedev1 (schema script WhatIf, real, rerun 0 changes) and in SpaarkeMaster source (Entity.xml + main form Matching section). Six task sets seeded with tuning text (seed WhatIf, real, rerun 0 writes).
+- Action INVOICE-CODESET-MATCH@v1 (invoice-codeset-match, Fast, temperature 0) + output/input schemas + Binding row + ConsumerTypes.All + GU-144, reached via IInvoiceAi.MatchCodeSetAsync. Action and Binding NOT seeded: task 053 seeds them (commands added to 053's POML).
+- Proposals: embedding pre-rank over rich set profiles, AI review with confirmed mappings as examples, output guard (only a candidate id), NoneFits with no confirmable proposal, unreviewed embedding fallback on any failure; coverage per table in GET proposals. 047 hook uses the same matcher; none-fits gives no suggestion; nothing persisted except by confirm.
+- Live evaluation (gpt-4o-mini Fast deployment, text-embedding-3-large, 2026-10-16): 11/11 dev rows + negative control none, two runs. Employment -> Counseling and Banking &amp; Finance -> Project, reasoning in notes section 2.
+- Fix-now from the 048 review: confirm write is conditional on versionnumber (If-Match); a concurrent mapping answers 409 AlreadyMapped; race test fails with the old write, passes with the fix; 048 notes L1 corrected.
+- ADR-010 delta 0; publish size task delta +0.01 MB (37.38 -> 37.39 MB; master 37.17 MB); no package added; no vulnerable package.
+- Deferred D1 (reported to owner): sequential per-row completions can exceed the 230 s front-end timeout with ~100 unmapped rows.
+rework: none task 054</notes>
 </task>
