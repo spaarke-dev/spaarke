@@ -25,7 +25,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 010 | ✅ [done] | Invoice Line columns on `sprk_billingevent` | STANDARD | sonnet / high | P1-A | none |
-| 011 | 🔲 [open] | Retire `sprk_invoicelineitem` (owner OK before delete) | STANDARD | sonnet / high | P1-B (p-safe false) | 010, 017 |
+| 011 | 🟡 [wip] | Retire `sprk_invoicelineitem` (owner OK before delete) | STANDARD | sonnet / high | P1-B (p-safe false) | 010, 017 |
 | 012 | ✅ [done] | Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes | STANDARD | sonnet / high | P1-A | none |
 | 013 | ✅ [done] | Core-ancestor derivation and one-lookup guard for the invoice family | FULL | opus / high | none (p-safe false: uac-r2 security files, census test shared with 011) | 010, 012, 020, 021, 022, 023, 027 |
 | 014 | ✅ [done] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |

@@ -4,7 +4,7 @@
     <title>Retire sprk_invoicelineitem</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Destructive dev schema change behind an owner gate, plus removal of code / test / doc references; tagged deletion, so code-review and adr-check run regardless (root CLAUDE.md §8).</rigor-reason>
     <model-tier>sonnet</model-tier>
