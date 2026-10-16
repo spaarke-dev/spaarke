@@ -621,6 +621,14 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                     "owner decision; then resume.",
                     cancellationToken).ConfigureAwait(false);
             }
+            if (dataverseUser is DataverseGuestUserOutcome.Disabled disabled)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestDisabled,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {disabled.SystemUserId}) is " +
+                    "a disabled Dataverse user, so they cannot use the environment. H11 wrote nothing and never re-enables a " +
+                    "user: enabling it is an owner decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
             if (dataverseUser is DataverseGuestUserOutcome.Failure userFailure)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,

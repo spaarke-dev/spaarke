@@ -245,6 +245,31 @@ public sealed class H11GuestAccessSeamsTests
     }
 
     [Fact]
+    public async Task EnsureGuestUserAsync_ADisabledGuest_IsRefused_NothingMovedOrAssociated()
+    {
+        // #2034: a disabled user in the root unit — before the fix it was moved, granted the role, and reported Success.
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId, isDisabled: "true");
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.Disabled(SystemUserId));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch || r.Method == HttpMethod.Post);
+        http.Requests.Single(r => r.Uri.Contains("/systemusers(azureactivedirectoryobjectid=")).Uri
+            .Should().Contain("isdisabled", "the lookup selects the flag it decides on");
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AReplyWithoutIsDisabled_FailsClosed_NothingWritten()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId, isDisabled: "");
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic.Should().Contain("isdisabled");
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch || r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
     public async Task EnsureGuestUserAsync_AGuestAddedToTheRoot_IsMovedToTheCustomerUnit_AndReadBack_BeforeAnyRole()
     {
         var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId);
@@ -372,7 +397,7 @@ public sealed class H11GuestAccessSeamsTests
 
     private static FakeHttp DataverseFake(
         int roleRows, bool roleHeld, Func<HttpResponseMessage>? userRead = null, string userUnit = CustomerBuId,
-        string? unitAfterMove = null, string? heldRoleUnit = null)
+        string? unitAfterMove = null, string? heldRoleUnit = null, string isDisabled = "false")
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
@@ -398,7 +423,9 @@ public sealed class H11GuestAccessSeamsTests
             if (uri.Contains("/systemusers(azureactivedirectoryobjectid="))
             {
                 return userRead?.Invoke()
-                    ?? Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{userUnit}}"}""");
+                    ?? Json(HttpStatusCode.OK, isDisabled.Length == 0
+                        ? $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{userUnit}}"}"""
+                        : $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{userUnit}}","isdisabled":{{isDisabled}}}""");
             }
             return Json(HttpStatusCode.BadRequest, $"{{\"error\":{{\"code\":\"unexpected request {req.Method} {uri}\"}}}}");
         });

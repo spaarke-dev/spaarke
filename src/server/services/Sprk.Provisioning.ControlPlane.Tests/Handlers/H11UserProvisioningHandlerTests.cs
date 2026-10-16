@@ -336,6 +336,24 @@ public sealed class H11UserProvisioningHandlerTests
     }
 
     [Fact]
+    public async Task Issue2034_ADisabledGuest_QuarantinesTheRun_NeverReportedAsProvisioned()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var repo = new FakeRepository(run, "e");
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(),
+            FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.Disabled("sysuser-x")));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H11Rejections.GuestDisabled);
+        failure.Diagnostic.Should().Contain("sysuser-x").And.Contain("entry 1").And.NotContain("ada@customer.com");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+    }
+
+    [Fact]
     public async Task T232_Model1WithNativeAccount_IsRefusedBeforeAnyGraphCall()
     {
         var run = BuildRun(identityPreset: "NativeAccount", usersJson: NativeUsersJson, tenancyModel: "Model1");

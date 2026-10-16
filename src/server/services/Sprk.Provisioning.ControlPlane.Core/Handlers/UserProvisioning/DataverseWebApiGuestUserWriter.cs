@@ -185,7 +185,14 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         try
         {
             var token = await AcquireTokenAsync(envUri, request.TenantId, cancellationToken).ConfigureAwait(false);
-            var (systemUserId, unitId) = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
+            var (systemUserId, unitId, isDisabled) = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
+
+            // #2034: a disabled systemuser cannot sign in, so moving it or granting roles would report a guest who has
+            // access when they do not. Nothing is written; re-enabling a user is an owner decision.
+            if (isDisabled)
+            {
+                return new DataverseGuestUserOutcome.Disabled(systemUserId.ToString("D"));
+            }
 
             // T259: the guest belongs in the customer's unit. Dataverse adds it to the ROOT on the read above; move it from
             // there (before any role — a unit change strips roles) and read it back. Never move it out of any other unit.
@@ -276,7 +283,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             .ToList();
     }
 
-    private async Task<(Guid SystemUserId, Guid? BusinessUnitId)> ReadOrAddSystemUserAsync(
+    private async Task<(Guid SystemUserId, Guid? BusinessUnitId, bool IsDisabled)> ReadOrAddSystemUserAsync(
         Uri envUri, AccessToken token, Guid objectId, CancellationToken ct)
     {
         // Alternate key: Dataverse adds a security-group member who is not yet a user (Microsoft, group-team article).
@@ -288,7 +295,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             async attemptCt =>
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get,
-                    new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value"));
+                    new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value,isdisabled"));
                 ApplyHeaders(request, token);
                 using var response = await _httpClient.SendAsync(request, attemptCt).ConfigureAwait(false);
                 var body = await response.Content.ReadAsStringAsync(attemptCt).ConfigureAwait(false);
@@ -316,7 +323,12 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             ? parsed
             : throw new InvalidOperationException(
                 $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) returned no systemuserid.");
-        return (userId, UnitOf(doc.RootElement));
+        // Fail closed: a reply without a boolean isdisabled is not read as an enabled user.
+        var isDisabled = doc.RootElement.TryGetProperty("isdisabled", out var disabled) && disabled.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? disabled.ValueKind == JsonValueKind.True
+            : throw new InvalidOperationException(
+                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) returned no isdisabled value.");
+        return (userId, UnitOf(doc.RootElement), isDisabled);
     }
 
     private async Task<Guid?> ReadBusinessUnitAsync(Uri envUri, AccessToken token, Guid systemUserId, CancellationToken ct)

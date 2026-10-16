@@ -149,7 +149,7 @@ public sealed class H11ReplicationRetryTests
         var reads = 0;
         var http = DataverseFake(() => ++reads < 3
             ? Json(HttpStatusCode.NotFound, """{"error":{"code":"0x80072560"}}""")
-            : Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{CustomerBuId}}"}"""));
+            : Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{CustomerBuId}}","isdisabled":false}"""));
 
         var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
 

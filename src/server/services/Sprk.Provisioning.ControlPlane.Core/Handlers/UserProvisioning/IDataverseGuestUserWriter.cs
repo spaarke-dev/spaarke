@@ -64,7 +64,8 @@ public interface IDataverseGuestUserWriter
     /// <see cref="DataverseGuestUserRequest.BusinessUnitId"/> (read back), and associates every role in
     /// <see cref="DataverseGuestUserRequest.RoleIds"/> it does not hold yet. A user in any other unit is not moved:
     /// <see cref="DataverseGuestUserOutcome.InForeignBusinessUnit"/>, nothing written. A user holding a role of another unit
-    /// is <see cref="DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit"/>, nothing written or removed.
+    /// is <see cref="DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit"/>, nothing written or removed. A disabled user is
+    /// <see cref="DataverseGuestUserOutcome.Disabled"/>, nothing written (#2034).
     /// </summary>
     Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken cancellationToken);
 }
@@ -130,4 +131,10 @@ public abstract record DataverseGuestUserOutcome
     /// (<paramref name="BusinessUnitId"/>) — a root role's Deep read would reach the Secure Record unit. Nothing removed.
     /// </summary>
     public sealed record HoldsRoleOutsideBusinessUnit(string SystemUserId, Guid RoleId, Guid BusinessUnitId) : DataverseGuestUserOutcome;
+
+    /// <summary>
+    /// #2034: the guest's systemuser is disabled, so it cannot use the environment. Nothing was written (no move, no role):
+    /// re-enabling a user is an owner decision.
+    /// </summary>
+    public sealed record Disabled(string SystemUserId) : DataverseGuestUserOutcome;
 }
