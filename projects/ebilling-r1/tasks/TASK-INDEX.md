@@ -56,7 +56,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |
 | 045 | 🟡 [wip] | Concurrency-safe tracking numbers `{invoice}.{n}` | FULL | sonnet / xhigh | P2-B | 029 |
 | 046 | ✅ [done] | Resolution and combined confidence | STANDARD | sonnet / xhigh | P2-B | 025, 029 |
-| 047 | 🟡 [wip] | UTBMS coding Action `INVOICE-LINE-CODE@v1` and code-set resolution | STANDARD | sonnet / xhigh | P2-B | 041, 018, 025, 029 |
+| 047 | ✅ [done] | UTBMS coding Action `INVOICE-LINE-CODE@v1` and code-set resolution | STANDARD | sonnet / xhigh | P2-B | 041, 018, 025, 029 |
 | 048 | 🔲 [open] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | 🔲 [open] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050 | 🔲 [open] | Retire the legacy extraction path | STANDARD | sonnet / high | none | 042, 049 |

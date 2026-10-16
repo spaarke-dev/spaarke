@@ -774,3 +774,29 @@ Make the required-level update wait for a settled read of the length the previou
 **Suggested fix**: map the components in the components inventory or package scope, or move them to their owning solution. **Estimated effort**: 1 hour. **Blockers**: none. **Related**: task 029.
 
 ---
+
+### DEF-020 — Invoice line coding cannot run on gpt-5.4-mini with low reasoning effort (AI platform gap)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (AI platform; eBilling interim: Fast tier) |
+| **Urgency** | before task 162 sets the final coding model |
+| **Filed** | 2026-10-16 |
+| **Source** | ebilling-r1 task 047 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2011 |
+
+**Description**: D-51 puts coding on gpt-5.4-mini with low reasoning effort, but:
+- no dev tier maps to that deployment;
+- `OpenAiClient` sends `max_tokens` to every deployment except the configured ReasoningModel, and gpt-5.4-mini rejects it with 400;
+- the Action dispatch path has no reasoning-effort setting (ADR-043).
+
+Measured on 120 lines: 55.0% task top-1 on gpt-4.1-mini and 63.3% on gpt-5.4-mini; NFR-05 is 80%.
+
+**Suggested fix**:
+- detect the gpt-5 or o-series family by model and send `max_completion_tokens`;
+- let a tier or Action name its deployment;
+- add an Action reasoning-effort setting.
+
+**Estimated effort**: 1–2 days (platform). **Blockers**: AI platform ownership. **Related**: tasks 047, 162; D-51.
+
+---

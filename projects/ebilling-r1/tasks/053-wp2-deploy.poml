@@ -48,6 +48,7 @@
   </context>
 
   <constraints>
+    <constraint source="task 047 (2026-10-16)">Seed the invoice-line-code Action with this deploy, in order: (1) scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-line-code; (2) scripts/Deploy-ActionMirrors.ps1 -Filter invoice-line-code; (3) deploy the BFF build carrying ConsumerTypes.InvoiceLineCode together with scripts/dataverse/Seed-PlaybookConsumers.ps1, then run it with -DiffOnly. Accept only when -DiffOnly is clean and /healthz is Healthy (a row without the build, or the build without the row, turns /healthz Degraded / Unhealthy). Model tier stays Fast until DEF-020 / task 162 (notes/047).</constraint>
     <constraint source="CLAUDE.md §9">No secrets in the repo, in notes or in app settings typed by hand; Content Understanding auth is managed identity (no key setting). Record setting names and non-secret values only.</constraint>
     <constraint source="project CLAUDE.md §5">Dev only. scripts/Import-SolutionScoped.ps1 is the only solution import path and runs with -PlanOnly here; no real import, no version bump.</constraint>
     <constraint source="ADR-039">Seed the Bindings before deploying the BFF that lists their consumer types in ConsumerTypes.All, so /healthz never goes Unhealthy.</constraint>
