@@ -7,6 +7,19 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-16 — Context-checkpoint hooks: prompt `/context-handoff` before auto-compaction
+
+With `autoCompactWindow: 400000` (agent-cost rule 6), compaction comes sooner, so a missed checkpoint costs more. Claude cannot see its own context usage, and the only trigger was prose ("when the user or harness reports it is high").
+
+- **`scripts/quality/context-checkpoint.py`** (new), one script with three modes, registered in `.claude/settings.json`:
+  - `warn` on `PostToolUse` (all tools) and `UserPromptSubmit`: reads the latest main-session call's context size from the transcript tail. At 85% of the auto-compact window, and again at 95%, it tells Claude to run `/context-handoff` before any other work. Each level fires once and re-arms below 60%. Sub-agent calls are ignored. The window comes from `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or from settings, where `modelSettings.<model>` wins; with no window set it does nothing. About 0.3 s per call on a 69 MB transcript.
+  - `precompact` on `PreCompact`: writes a git-state snapshot (branch, uncommitted entries, unpushed and recent commits, `current-task.md` age, whether the prompt fired).
+  - `reinject` on `SessionStart` `compact`: prints that snapshot once, beside `reinject-project-state.ps1`.
+- **No blocking of compaction.** The hooks docs say a blocked proactive compaction is skipped silently. They do not say the block reason reaches Claude or that compaction is retried, and on the context-limit recovery path a block fails the request. The `warn` prompt is the signal instead.
+- **Controls**: `scripts/quality/tests/test_context_checkpoint.py` (10 must-fire, 10 must-not-fire, 6 snapshot, 1 budget). The existing CI job `agent-guard-tests` runs them.
+- **Docs**: root `CLAUDE.md` §5 and §16 (+254 bytes, 0 lines), the `context-handoff` skill's Proactive Triggers, and `agent-cost.md` rule 6.
+
+---
 ###### 2026-10-15 — Guard: no `python3` where it is the Windows Store stub (FAILURE-MODES G-22)
 
 Third occurrence of the `python3` Store-stub hang: another session's `python3 -` call spun at 100% CPU for 76 minutes. The rule "use `python`" had been prose only.
