@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-10-16 ~03:50Z (main session; 156 deployed, waiting for the owner's 055 browser check). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-147). Deferred work: one self-contained GitHub issue per item,
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-148). Deferred work: one self-contained GitHub issue per item,
 > label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-104**).
 > Sub-agents never edit this file.
 
