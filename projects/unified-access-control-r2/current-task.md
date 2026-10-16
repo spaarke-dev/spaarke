@@ -1,44 +1,41 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–100b) and `notes/decisions.md`. Task 185 decisions: `notes/185-invite-code-design.md` §11–§12. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment incl. the R3-holds-dev deploy rule, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` and `notes/decisions.md` (D-113 amended 2026-10-16). Task 185: `notes/185-invite-code-design.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-15 (checkpoint #35).
+> **Last Updated**: 2026-10-16 (checkpoint #36).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
-| **Running** | Nothing. The ontology reviews are done: #1874 (145) CLEAN at `75114b170`, #1878 (042) CLEAN at `72fe75054`. Ontology merges them. Their D-139 follow-up PR (one DR per gate decision, written by an ADR-004 job) comes to UAC for review. |
-| **Next Action** | After ontology #1905 merges: update `RouteAuthorizationGuardTests.Ledger.cs` per notes/ledger-followup-1905.md. UAC reviews: #1903 CLEAN (98b5a1ee0), #1905 CLEAN (e5fb90b09), #1907 CLEAN (646c19a42; owner ruling D-144 option (c), DR owned by the communication's owner). #1943 fixed by PR #1949 (645f48a86), LIVE on dev in R3 build 1.0.0+e276357a7 (20:18Z, owner-approved coordinated redeploy). Heartbeat 20:18:47Z carries `recentRootsChanged`; catch-up 2/2 already correct. An optional live write test (make a matter secure through the Web API, then watch its children move) is NOT run; it needs the owner's OK. #1946 CLEAN at 40468a5aa. #1953 (D-145b) CLEAN at 0d522d7bc after 3 re-checks (all 4 keyed DR lookups pin createdby = writer MI; the commit-route FindRecordAsync forgery F1 fixed). The DR Create role removal is with the owner (task 049). #1982 (task 154) comes for review. The ledger update waits for docs/ontology-platform-design to reach master. Coordination proposal rev 2 (441f8e07a). Triage pilot: 208 open issues on Board #2 with recommendations; results in notes/pilot-issue-triage-2026-10-15.md. Waiting on the owner: create the 4 views, then decide in the Triage inbox; I apply the decisions. PR #1983 (registration MUST in /project-pipeline, worktree C:/wtpp) is open, and its merge needs the owner's OK. SPA-r3 task 046 review running (d84a05cfc..bc0113e9d); results go to R3. #1908 closed (fixed by #1666); filed #1914, #1921. #1909 merged 928a71fa7. Then: 136/037/039 (+135 gate) wait on the owner's combined CIAM session, checklist §14 (the agent does the BFF grants on request). Workforce half PASSED 2026-10-14 (notes/task-136 §12). Then pick the next uac-r2 item with the owner: 036, 099, 090 wrap-up, 013/058 bookkeeping. |
+| **Mode** | Final push to release, owner decisions of 2026-10-16. Do 099, 186 and 036. Fix #1620, #1363, #994 and #1010 (verify first). For #1576, investigate, scope and fix: here unless an active project overlaps it. Do not defer or hand it off. For every deferred or not-uac-r2 item, decide NOW, FUTURE (with the reason, in an issue and the defer list) or NEVER (close). Then finish wrap-up: 090, 058, the gate-only tasks, the owner checklist. Then write the **UAT checklist** for the owner, as scenarios by user type. |
+| **Fix bar** | The most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity that brings no value. |
+| **Order** | 099 → 186 (design note and the ceiling question to the owner first) → 036 (runs alone, Opus xhigh). The defect fixes run in parallel where they are parallel-safe. |
 
-## Done this session
-- **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
-- **187** (#1861, `8a1f3bb11`, security #1857): merged, deployed and the live gate passed (G4 is on the owner checklist §13). Owner rounds 99, 100 and 100b.
-- **The secure family is its own project:** `projects/uac-secure-project-r3/` (pre-design), which starts after uac-r2. Task 178 moves there. The team type is decided as an owner team per family (round 100b).
-- **K-145-3:** comment PR #1875 (base docs/ontology-platform-design) is open; ontology merges it.
+## Running (2026-10-16)
+- #1620 fix: owner unshare through the owner-aware `RevokeAccessAsync`. Implementer, worktree `C:/wt1620`, branch `fix/uac-1620-unshare-owner`; result is a PR.
+- #994 fix: playbook Share bit (262144). Implementer, `C:/wt994`, `fix/uac-994-playbook-share-bit`; result is a PR.
+- #1576 investigation, read-only (`C:/wt1576r`): (a) resolvers and isdisabled, (b) own versus effective flag readers, (c) shared HttpClient OBO header race, (d) creator attribution. Returns a fix plan.
+- Assessment of deferred and not-uac-r2 items, read-only. Returns NOW, FUTURE, NEVER, ALREADY-DONE or OTHER-PROJECT for each.
 
-## Other lanes
-- **Ontology:**
-  - CLEAN and merged or merging: #1854 (143), #1858 (148: report-only first, and UAC reviews the dev run before the owner enables writes), #1862 (144).
-  - #1874 (145) CLEAN at `75114b170`; #1878 (042) CLEAN at `72fe75054`. #1871 closed (not planned).
-  - #1891 (038): CLEAN. UAC's K1 fix (witness walker batching) is PR #1892 (`uac/k1-witness-batch`, worktree `C:/wtk1891`), which ontology reviews and merges after #1891. DI-86 and K2 go to the owner through ontology.
-  - Task 183 (#1797) closes after ontology's 148 live gate (412 → Conflict).
-- **Provisioning:** 185's release gate is MET. SpaarkeMaster 1.2.3.0 is published (CI run 38603706393, master `bd52b6290`, PR #1860) and carries `contact.sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. T240d builds on `6da771b96`.
-- **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
-- **word-add-in:** the owner is UATing add-ins on dev at `8a1f3bb11`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
-- **Task 186 (baseline access only):** pending SPA-r3's principal contract. Tell provisioning when the Workforce role is final.
-- **D-187-G1 (doc-type) is fixed**: on master as `c3445d45e` (#1880) and on dev at `4e23edeb2`. The 187 document leg re-ran and PASSED (15 lists now complete; no over-hiding).  #1886 filed (file-less documents listed, then 409).
-- **Issues filed this period:** #1813, #1817, #1830 (triaged), #1857 (task 187, fixed).
+## Queued
+- #1363: demo self-registration SPE writer marker keyed to the demo Dataverse; expiry leaves the marker. Task 171 code.
+- #1010: Manage Access grants list for non-root users; a failed read shows "no grants". Verify against task 172 (team-owned owner column) before fixing.
+- Task 099: the Expiration date picker plus fixes for expired rows and read errors. Run through task-execute.
+- Task 186: design note, then the ceiling question to the owner (service-request privileges?), then the build.
+- Task 036: the FR-20 flag-gated swap. Closes #1074 and #1567.
+- Wrap-up 090: absorbs 058 and #1364's hand-off doc. Fix 183's index status (it shipped; only the K2 live gate is open). Close the 21 done-task issues after checking their evidence.
+
+## Done this session (2026-10-15/16)
+- **PR #2007 MERGED** as `96d5b16c2` (#2005, owner sign-off 2026-10-16): every bind consumes the invite hash; the invite mark is conditional (never `*`); "pending" requires an unconsumed hash. **Not on dev yet.** R3 merges master, folds its home bind onto #2007's store method, then the dev BFF deploys from R3's branch after the ancestry check. Then run #2007's server gate on dev.
+- **PR #1983 MERGED** as `42aecf064`: GitHub registration is a MUST in /project-pipeline.
+- R3 047 #2005 fixes: CLEAN at `4eacd5934`. Deployed to the dev BFF and SPA at `2c2fed38d` (12:59Z and 13:13Z). Heartbeat at 13:00:50Z healthy. #1830 noise is known.
+- Ontology PR #2012 (task 126): UAC review found F1 (the anchor narrowing) and F3 (untested fault paths). **D-113 amended** (each grant applies at its own anchor BU): #1355 comment and notes/decisions.md. Ontology is fixing it; a scoped re-check follows. Their merge is held for UAC.
+- Coordination project worktree: `C:/code_files/spaarke-wt-spaarke-project-coordination-r1`. The owner runs /design-to-spec there.
 
 ## Open owner items
-- The live CIAM sign-ins: checklist §12 (185's code-gated bind) and §11 (184's ExistingAccount option). §13: 187's optional live secure-wall proof.
-- Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), DI-81 #1879 (column audit); and enabling 144/148 writes: ontology holds them off until 146 creates real Signals. One report-only pass then comes to UAC, and writes are enabled only on a CLEAN review (D-138, 2026-10-15).
-- Restate the Model 1 `-Apply` rule once #1815 merges.
-- Task 186 ceiling decision.
-- Checklist §14 (the combined CIAM session closes 135's gate, 136, 037 and 039). #1889 fixed on dev 2026-10-15 (provisioning PR #1885; owner-approved marker backfill). The 136 content check re-ran and PASSED (notes/task-136 §12.1).
-- #1747 and #1776.
-- F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
-
-## Not started
-036, 099, 090 wrap-up, and 013/058 bookkeeping. 136, 037 and 039 are gate-only (checklist §14). (178 moved to uac-secure-project-r3.)
+- The live CIAM checks: §12 (185's code-gated bind; the dev SPA now carries 185) and §11; §13 is optional; §14 is the combined session (135 gate, 136, 037, 039).
+- Task 186 ceiling (asked with the design note).
+- Board #2 triage: the 4 views, or the grouped list.
+- Task 049 (ontology): confirm the Ontology Administrator change to ontology directly.
+- Older items: #1747, #1776, ontology #1876/#1877/#1879; restate the Model 1 `-Apply` rule after #1815; checklist items for 140, 153, 165 and 171.
