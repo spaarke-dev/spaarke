@@ -130,11 +130,6 @@
               <Title Text="Audits" LCID="1033" />
             </Titles>
           </NavBarByRelationshipItem>
-          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_BillingEvent_InvoiceLineItem_1n" Id="nav_sprk_BillingEvent_InvoiceLineItem_1n" Sequence="10000">
-            <Titles>
-              <Title Text="Invoice Line Items" LCID="1033" />
-            </Titles>
-          </NavBarByRelationshipItem>
           <NavBarByRelationshipItem Area="ProcessCenter" Show="false" RelationshipName="hardcoded_{B7196B13-6B9D-42CD-BD58-B19A3953126F}navAsyncOperations" Id="navAsyncOperations" Sequence="9500">
             <Titles>
               <Title Text="System Jobs" LCID="1033" />

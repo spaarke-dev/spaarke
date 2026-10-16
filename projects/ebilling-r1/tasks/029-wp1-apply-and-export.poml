@@ -4,7 +4,7 @@
     <title>Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and solution-source sync of components built in 010-028; no new code; ordered live procedure.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,6 +109,15 @@
     Version bump and Assemble are release steps (SPAARKE-SOLUTION-RELEASE-PROCESS.md section 3); the removed sprk_invoicelineitem must appear in the next release note.
     The BFF caches entity metadata for up to 6 hours (Services/Dataverse/MetadataService.cs; 140-schema-delta.md section 6): later live tests may see stale metadata.
     WP2+ columns are synced by the serial deploy task of their phase (053, 079, 112, 136, 153) using this task's procedure; record the procedure precisely enough for them to reuse.
+    Result 2026-10-16 (details: notes/029-wp1-apply-and-export.md):
+    - Step 1: every WP1 script re-run changed nothing (025 included); no escalation trigger 1.
+    - Steps 2-3: 11 new main forms + section_ebilling on sprk_timekeeper / sprk_invoice / sprk_billingevent, 12 Active views, view "Invoices to review" (0c7694d8-14c9-f111-a05a-7c1e520a989f), eBilling sitemap entries; totals and sprk_amount read-only; entity-scoped publish only. Script: scripts/ebilling/Deploy-EbillingFormsViews.ps1 (reuse for 053 / 079 / 112 / 136 / 153).
+    - View test: returned for the eligible approver (me), not for a different eligible contact, a non-Pending approval or a non-In-Review invoice. Second-user run impossible (roles lack prvRead on sprk_invoiceapproval): finding B.
+    - Steps 4-5: completeness has no eBilling finding left (6 identity findings remain, not eBilling); only eBilling files and hunks copied into src/dataverse/solutions/SpaarkeMaster; sprk_InvoiceLineItem folder, relationship file, AI skill opt-out and role privileges removed; HideCustomAction for Activate / Deactivate added to Entities/sprk_Invoice/RibbonDiff.xml (source only, not live in dev).
+    - Step 6: pac solution pack Both OK; -PlanOnly lists the new tables, sitemaps, app modules, but warns Unmapped 14/18e5156a-... = contact key sprk_externalobjectiduniquekey (identity project, pre-existing): trigger fired in the letter, reported, nothing worked around.
+    - Step 7: dev equals source for all 23 touched tables, no type mismatch.
+    - Open: tables must be added to the two apps in the app designer (AddAppComponents is a no-op); new tables lack role privileges for non-admins; sprk_amount is read-only for Fee / Expense lines too; secure_child_ribbon.js needs a redeploy; Export-SpaarkeMasterSource F12 guard fails on 6 identity components.
+    rework: none task 029
   </notes>
 
   <execution>

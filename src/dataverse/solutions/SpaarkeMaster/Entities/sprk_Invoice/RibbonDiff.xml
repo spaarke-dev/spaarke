@@ -36,6 +36,13 @@
         </FlyoutAnchor>
       </CommandUIDefinition>
     </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Activate.Hide" Location="Mscrm.Form.sprk_invoice.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Deactivate.Hide" Location="Mscrm.Form.sprk_invoice.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Re-activate.Hide" Location="Mscrm.Form.sprk_invoice.Re-activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_invoice.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_invoice.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_invoice.Deactivate.Hide" Location="Mscrm.HomepageGrid.sprk_invoice.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_invoice.Activate.Hide" Location="Mscrm.SubGrid.sprk_invoice.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_invoice.Deactivate.Hide" Location="Mscrm.SubGrid.sprk_invoice.Deactivate" />
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>

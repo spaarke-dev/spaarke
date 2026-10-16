@@ -1899,6 +1899,15 @@ pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1
 pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -OwnerApproval '<date and who>' -WhatIf
 ```
 
+### `ebilling/Deploy-EbillingFormsViews.ps1`
+
+Builds the WP1 forms, views and navigation in dev (`ebilling-r1` task 029; also the procedure later serial tasks reuse: add the new column names to the `$Spec` table and re-run). Rewrites the stub main form and the Active view of the 11 new WP1 tables (read-only controls, rates / codes / eligible-approver subgrids), adds a `section_ebilling` to the existing `sprk_timekeeper`, `sprk_invoice` and `sprk_billingevent` main forms (the five invoice totals and `sprk_billingevent.sprk_amount` are disabled), creates the "Invoices to review" view on `sprk_invoice`, adds the eBilling sitemap entries, then publishes only the touched entities, the two sitemaps and the two app modules (never PublishAllXml). Idempotent: a second run changes nothing and publishes nothing. `-WhatIf` reads everything and writes nothing. Refuses to publish when another pending form / view of a touched entity would go out too, unless `-AllowPendingCollateral`. Dev only in R1. It cannot add tables to an app (the API silently ignores it); it prints that manual app-designer step.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
@@ -2084,3 +2093,4 @@ Most scripts require:
 - **2026-10-15:** Added ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 (sprk_externalidentifier table, ADR-024 regarding lookups, D-68 alternate key on firm, type, normalized value and core record id; `ebilling-r1` task 022).
 - **2026-10-15:** Added ebilling/Deploy-EbillingCorrectionSchema.ps1 (sprk_invoicecorrection structured correction record table, four-value outcome type, SystemRequired invoice lookup, ADR-024 regarding lookups; `ebilling-r1` task 027).
 - **2026-10-15:** Added ebilling/Deploy-EbillingSettingsSchema.ps1 (sprk_ebillingsetting audited singleton table: alternate-key singleton, range-checked threshold / weights / caps / window / chunk size, approver-role multi-selects, AP mapping, default code set lookup, seeded default row; `ebilling-r1` task 025).
+- **2026-10-16:** Added ebilling/Deploy-EbillingFormsViews.ps1 (WP1 main forms, Active views, "Invoices to review" view and eBilling sitemap entries, entity-scoped publish; `ebilling-r1` task 029).

@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{c9644831-ede8-407e-910c-992831ddc1fe}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_invoiceapprovalid">
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_invoice" width="150" />
+          <cell name="sprk_approvalstatus" width="150" />
+          <cell name="sprk_approvedamount" width="150" />
+          <cell name="sprk_decidedby" width="150" />
+          <cell name="sprk_decidedon" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_invoiceapproval">
+          <attribute name="sprk_invoiceapprovalid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_invoice" />
+          <attribute name="sprk_approvalstatus" />
+          <attribute name="sprk_approvedamount" />
+          <attribute name="sprk_decidedby" />
+          <attribute name="sprk_decidedon" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Invoice Approvals" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

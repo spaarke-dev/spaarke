@@ -12,7 +12,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Parallel mode. Done: 001-005, 010, 012-014 (incl. ISS-010 follow-up, cherry-picked 7fc7518a2/38987e4d4/06c5c546d), 016-025, 027, 028, 040-043, 108, 109. 011 done 2026-10-16. Next: 029 (now unblocked). ADR-010 ceiling 162 |
-| **Step** | — |
+| **Step** | 029 step 0 (implementer agent running in main tree) |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | Start 029: apply WP1 schema to dev, sync SpaarkeMaster (drop the line-item files in notes/011 §6), forms/views incl. hide OOB Activate/Deactivate and read-only totals, redeploy the secure-child ribbon web resource |
 
@@ -30,7 +30,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
+| **Task ID** | 029 |
+| **Task File** | tasks/029-wp1-apply-and-export.poml |
+| **Title** | Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views |
+| **Status** | in-progress (STANDARD, sonnet/high, prescriptive) |
+| **Started** | 2026-10-16 |
 
 ## Next Action
 

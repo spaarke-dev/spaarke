@@ -49,6 +49,21 @@
         <SubArea Id="subarea_129b3f5c" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_specontainertypeconfig" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
       </Group>
     </Area>
+    <Area Id="area_ebilling" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0">
+      <Titles>
+        <Title LCID="1033" Title="eBilling" />
+      </Titles>
+      <Group Id="group_ebilling" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown">
+        <Titles>
+          <Title LCID="1033" Title="Billing administration" />
+        </Titles>
+        <SubArea Id="subarea_eb_setting" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_ebillingsetting" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_timekeeper" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_timekeeper" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_ratecard" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_ratecard" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_codeset" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_billingcodeset" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_ruleset" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_ruleset" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+      </Group>
+    </Area>
   </SiteMap>
   <LocalizedNames>
     <LocalizedName description="Spaarke Administration" languagecode="1033" />

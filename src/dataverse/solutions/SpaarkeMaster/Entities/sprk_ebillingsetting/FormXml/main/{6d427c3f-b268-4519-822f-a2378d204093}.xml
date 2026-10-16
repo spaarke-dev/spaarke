@@ -1,0 +1,191 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{6d427c3f-b268-4519-822f-a2378d204093}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{8B62BAAB-1655-D428-BDCE-4EDB8D99759B}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{AC65FD5F-3802-003E-9D02-DFD053A056ED}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{F2201F80-4F0C-6858-F217-B232779666C5}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{09F04EBB-DE18-27D1-4E7B-C0F5ACF2C818}">
+                        <labels>
+                          <label description="Singleton" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_singleton" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_singleton" disabled="true" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{E52BC09B-A86D-054D-F4DF-BF18A15FF1B4}">
+                        <labels>
+                          <label description="Default Code Set" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_defaultcodeset" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_defaultcodeset" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_approvers" id="{730C097A-68E8-AD08-DDFF-053BA5866791}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Approver defaults (used when a record has no approver role)" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{434636D8-A0F1-0680-F98E-219CD9F1DE98}">
+                        <labels>
+                          <label description="Matter Approver Roles" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matterapproverroles" classid="{4AA28AB7-9C13-4F57-A73D-AD894D048B5F}" datafieldname="sprk_matterapproverroles" />
+                      </cell>
+                      <cell id="{9DACB8A0-24DA-7EEE-3120-6A96FC59E5A8}">
+                        <labels>
+                          <label description="Project Approver Roles" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectapproverroles" classid="{4AA28AB7-9C13-4F57-A73D-AD894D048B5F}" datafieldname="sprk_projectapproverroles" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{904FCB69-0C59-EB41-DD0B-2286CA1EF2B5}">
+                        <labels>
+                          <label description="Work Assignment Approver Roles" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_workassignmentapproverroles" classid="{4AA28AB7-9C13-4F57-A73D-AD894D048B5F}" datafieldname="sprk_workassignmentapproverroles" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_reliability" id="{8EFE24E4-C543-ADFB-01F0-E11408F11DF6}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Reliability and confidence weights" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{E56C3308-7A19-30E9-106A-4587439747D0}">
+                        <labels>
+                          <label description="Reliability Threshold" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_reliabilitythreshold" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_reliabilitythreshold" />
+                      </cell>
+                      <cell id="{153653F2-229A-DB6F-B541-BAA567BD208F}">
+                        <labels>
+                          <label description="Weight: Analyzer Confidence" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_weightanalyzer" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_weightanalyzer" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{16DC8FFD-96FD-704A-E0CB-F3668722CF27}">
+                        <labels>
+                          <label description="Weight: Arithmetic Check" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_weightarithmetic" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_weightarithmetic" />
+                      </cell>
+                      <cell id="{205E830E-C73F-01DC-76E0-EB91E0100B57}">
+                        <labels>
+                          <label description="Weight: Reference Match" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_weightreferencematch" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_weightreferencematch" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{14A1D63F-6A9A-F0ED-D74E-6E2D2A707F0C}">
+                        <labels>
+                          <label description="Weight: Model Self-Report" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_weightselfreport" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_weightselfreport" />
+                      </cell>
+                      <cell id="{33245F5F-B8DA-2B0E-7242-EB863E282774}">
+                        <labels>
+                          <label description="Cap: Arithmetic Fails" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_arithmeticfailcap" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_arithmeticfailcap" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{B68094B6-57FC-4783-E698-5A8773804554}">
+                        <labels>
+                          <label description="Cap: No Reference Match" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_referencemissingcap" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_referencemissingcap" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_processing" id="{57E8F2FE-F446-5032-EA9D-90F76DAFB825}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Processing" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{9303253B-1D22-A1F2-3898-60207A14A27B}">
+                        <labels>
+                          <label description="Coding Chunk Size" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_codingchunksize" classid="{C6D124CA-7EDA-4A60-AEA9-7FB8D318B68F}" datafieldname="sprk_codingchunksize" />
+                      </cell>
+                      <cell id="{624009AB-C563-B9C3-7FB3-91CEE884DF6C}">
+                        <labels>
+                          <label description="Related Work Window (days)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_relatedwindowdays" classid="{C6D124CA-7EDA-4A60-AEA9-7FB8D318B68F}" datafieldname="sprk_relatedwindowdays" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{B1772530-EE81-57EC-7474-502B43E2D6DF}">
+                        <labels>
+                          <label description="Firm Notice AI Enabled" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_firmnoticeaienabled" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_firmnoticeaienabled" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_apexport" id="{598AC201-F195-869D-E052-12E2A62DBF9F}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="AP export" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{30DC4223-A612-8CFE-96EF-7DD2445DA953}" colspan="2" rowspan="3">
+                        <labels>
+                          <label description="AP Export Mapping" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_apexportmapping" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_apexportmapping" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

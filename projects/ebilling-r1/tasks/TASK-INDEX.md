@@ -43,7 +43,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 026 | 🔲 [open] | Signal / Decision Record invoice-line subject and derivation | FULL | opus / high | none (p-safe false) | 010, 013, 029 |
 | 027 | ✅ [done] | Correction record schema | STANDARD | sonnet / high | P1-A | none |
 | 028 | ✅ [done] | Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off | STANDARD | sonnet / high | P1-A | none |
-| 029 | 🔲 [open] | Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views | STANDARD | sonnet / high | none (deploy) | 010, 011, 012, 017, 018, 019, 020, 021, 022, 023, 024, 025, 027, 028 |
+| 029 | ✅ [done] | Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views | STANDARD | sonnet / high | none (deploy) | 010, 011, 012, 017, 018, 019, 020, 021, 022, 023, 024, 025, 027, 028 |
 
 ### Phase 2 — Submission and extraction (WP2)
 

@@ -1,0 +1,117 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{7a565ec1-a5db-44fa-8998-44688098e498}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{CFC6696F-642B-F061-5E35-6D7238AB1165}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{D2DB343F-830E-C523-F48F-042E9332E3A0}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Identifier" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{4B06C94F-CEA5-5328-2045-C5C80AD5D24D}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{75EF163A-D107-4283-0DA2-15067EA046B5}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_identifiertype" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_identifiertype" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{109BA971-7562-2AF4-B7F0-0F9FC59653E8}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_identifiervalue" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_identifiervalue" />
+                      </cell>
+                      <cell id="{E3146535-5818-B7B8-9898-2FD51B7036D5}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_normalizedvalue" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_normalizedvalue" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{EA57FDD9-4B8E-3FB5-2C7D-76939DC7F130}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_issuingorganization" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_issuingorganization" />
+                      </cell>
+                      <cell id="{B2A99395-48A2-4125-01A2-E5B01C69804F}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_issuingsystem" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_issuingsystem" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{18DBB53C-1EE7-A4C4-F1FD-0C5B15D125D9}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardinginvoice" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardinginvoice" />
+                      </cell>
+                      <cell id="{C6678690-DE5A-6893-8726-96F7635E865B}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{132C1212-365E-337D-CB3A-33973608F34E}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingproject" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingproject" />
+                      </cell>
+                      <cell id="{56888D52-5565-0383-8DB2-6CF8A1AD7185}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingworkassignment" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingworkassignment" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{CD238F79-5AA2-FBE1-3783-605169111D08}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

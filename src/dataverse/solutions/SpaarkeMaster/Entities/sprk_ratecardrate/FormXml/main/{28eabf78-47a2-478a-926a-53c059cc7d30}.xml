@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{28eabf78-47a2-478a-926a-53c059cc7d30}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{70606057-1B3A-BB7F-30AD-373AACC15459}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{82D275E2-083B-5157-39FD-086106A6B5B4}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{2264BFB4-237C-C4B9-44F7-CD3F3D8E5C6D}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{E01C99FA-4517-339E-73B4-C365B37952FE}">
+                        <labels>
+                          <label description="Rate Card" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_ratecard" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_ratecard" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{135AFF1B-3CCC-454B-AB98-2F9B99691E8D}">
+                        <labels>
+                          <label description="Timekeeper" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_timekeeper" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_timekeeper" />
+                      </cell>
+                      <cell id="{ACA3D176-B64B-3A49-FA42-276282D8240F}">
+                        <labels>
+                          <label description="Classification" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_classification" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_classification" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{D89DB515-AB9E-08C8-F4D9-9156DD486D07}">
+                        <labels>
+                          <label description="Rack Rate" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_rackrate" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_rackrate" />
+                      </cell>
+                      <cell id="{41195023-8465-D705-030A-5F5727137AA6}">
+                        <labels>
+                          <label description="Approved Rate" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_approvedrate" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_approvedrate" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{363D3134-183B-8A4D-05FD-009E4DAA7700}">
+                        <labels>
+                          <label description="Effective From" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_effectivefrom" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_effectivefrom" />
+                      </cell>
+                      <cell id="{FC756432-FD3D-E836-D0EB-A54A51237D52}">
+                        <labels>
+                          <label description="Effective To" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_effectiveto" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_effectiveto" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0ED01DE1-B623-B381-8274-AC366194BE72}">
+                        <labels>
+                          <label description="Owner" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

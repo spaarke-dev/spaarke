@@ -125,7 +125,6 @@
     <RolePrivilege name="prvAppendTosprk_documenttype_ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_NavItem" level="Deep" />
@@ -491,7 +490,6 @@
     <RolePrivilege name="prvReadsprk_FileVersion" level="Deep" />
     <RolePrivilege name="prvReadsprk_GridConfiguration" level="Deep" />
     <RolePrivilege name="prvReadsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvReadsprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvReadsprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvReadsprk_Matter" level="Deep" />
     <RolePrivilege name="prvReadsprk_MatterSubtype_Ref" level="Global" />

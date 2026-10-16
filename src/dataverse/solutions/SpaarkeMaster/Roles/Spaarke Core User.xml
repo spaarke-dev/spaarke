@@ -65,7 +65,6 @@
     <RolePrivilege name="prvAppendsprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Event" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAppendsprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendsprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Matter" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Memo" level="Deep" />
@@ -136,7 +135,6 @@
     <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
@@ -203,7 +201,6 @@
     <RolePrivilege name="prvAssignsprk_Document" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Event" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAssignsprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Matter" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Memo" level="Deep" />
@@ -271,7 +268,6 @@
     <RolePrivilege name="prvCreatesprk_Document" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Event" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvCreatesprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvCreatesprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Matter" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Memo" level="Deep" />
@@ -335,7 +331,6 @@
     <RolePrivilege name="prvDeletesprk_Document" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Event" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvDeletesprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvDeletesprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Matter" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Memo" level="Deep" />
@@ -545,7 +540,6 @@
     <RolePrivilege name="prvReadsprk_FileVersion" level="Deep" />
     <RolePrivilege name="prvReadsprk_GridConfiguration" level="Deep" />
     <RolePrivilege name="prvReadsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvReadsprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvReadsprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvReadsprk_Matter" level="Deep" />
     <RolePrivilege name="prvReadsprk_MatterSubtype_Ref" level="Global" />
@@ -654,7 +648,6 @@
     <RolePrivilege name="prvSharesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvSharesprk_Event" level="Deep" />
     <RolePrivilege name="prvSharesprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvSharesprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvSharesprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvSharesprk_Matter" level="Deep" />
     <RolePrivilege name="prvSharesprk_Memo" level="Deep" />
@@ -728,7 +721,6 @@
     <RolePrivilege name="prvWritesprk_Document" level="Deep" />
     <RolePrivilege name="prvWritesprk_Event" level="Deep" />
     <RolePrivilege name="prvWritesprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvWritesprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvWritesprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvWritesprk_Matter" level="Deep" />
     <RolePrivilege name="prvWritesprk_Memo" level="Deep" />

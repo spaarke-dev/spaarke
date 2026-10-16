@@ -10,8 +10,12 @@
     <layoutxml>
       <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
         <row name="result" id="sprk_timekeeperid">
-          <cell name="sprk_name" width="300" />
-          <cell name="createdon" width="125" />
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_firm" width="150" />
+          <cell name="sprk_classification" width="150" />
+          <cell name="sprk_contact" width="150" />
+          <cell name="sprk_effectivefrom" width="150" />
+          <cell name="sprk_effectiveto" width="150" />
         </row>
       </grid>
     </layoutxml>
@@ -21,7 +25,11 @@
         <entity name="sprk_timekeeper">
           <attribute name="sprk_timekeeperid" />
           <attribute name="sprk_name" />
-          <attribute name="createdon" />
+          <attribute name="sprk_firm" />
+          <attribute name="sprk_classification" />
+          <attribute name="sprk_contact" />
+          <attribute name="sprk_effectivefrom" />
+          <attribute name="sprk_effectiveto" />
           <order attribute="sprk_name" descending="false" />
           <filter type="and">
             <condition attribute="statecode" operator="eq" value="0" />

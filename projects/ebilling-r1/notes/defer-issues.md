@@ -758,3 +758,19 @@ Make the required-level update wait for a settled read of the length the previou
 **Suggested fix**: implement the intended routing or delete the option and its docs. **Estimated effort**: 1 hour. **Blockers**: owner decision on intended behaviour. **Related**: task 042.
 
 ---
+
+### DEF-019 — Contact key `sprk_externalobjectiduniquekey` is unmapped in SpaarkeMaster (another project)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owned by the identity work that added the key) |
+| **Urgency** | before the next SpaarkeMaster release import |
+| **Filed** | 2026-10-16 |
+| **Source** | ebilling-r1 task 029 (pre-existing on master) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2010 |
+
+**Description**: `Import-SolutionScoped.ps1 -PlanOnly` warns `Unmapped component 14/18e5156a-89be-f111-aaaf-0022482913fc`. That component is the contact alternate key, which is already in master's `Entities/Contact/Entity.xml`. The same 6 identity components make the F12 guard in `Export-SpaarkeMasterSource.ps1` throw against dev. It fired task 029's escalation trigger. eBilling did not add it and does not depend on it.
+
+**Suggested fix**: map the components in the components inventory or package scope, or move them to their owning solution. **Estimated effort**: 1 hour. **Blockers**: none. **Related**: task 029.
+
+---
