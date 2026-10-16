@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done: 001-005, 010, 012, 014, 016-025, 027, 040, 041. Running (isolated worktrees, cherry-pick back): 043 (opus, D-81 CU client), 028 (opus, containers; 2 adversarial passes), 013 (opus, core-ancestor; 2 passes; uac-r2 reviews), 108 (bounding-box viewer). ADR-010 1:1 ceiling on branch = 162: sum increments when merging. Agent worktrees sometimes start on master: prompts include a base check. TASK-INDEX tokens [open]/[wip]/[done] |
+| **Task** | Parallel mode. Done: 001-005, 010, 012-014, 016-025, 027, 028, 040-043, 108, 109. Running: D-84 role-list agent (main tree: sprk_userprofilerole + delete 10 non-LEDES options), 028 review follow-ups (worktree), 011 prepare-only (worktree; table delete needs owner OK). ADR-010 ceiling 162. Agent worktrees may start on master: prompts include a base check |
 | **Step** | — |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | Collect results, cherry-pick + build + ADR010/Finance tests, mark done. Then: 042 (after 043; IInvoiceAi overlap), 011 (after 013; shared census test; owner OK before delete), 109, then 029 (deps 011, 028). Pending: #1954 (Console moves sprk_primaryrole to sprk_contacttype_ref) gates deleting the 10 non-LEDES sprk_timekeeperrole options (D-83). Stale worktree dirs locked: agent-ac329e6ec2c0269e7, agent-abb21235b9e0d78f5 (+ its branch) under C:/code_files/spaarke/.claude/worktrees |
+| **Next Action** | Merge results; ask owner OK for 011 delete; then 029 (apply WP1 schema, sync SpaarkeMaster, forms/views incl. hide OOB Activate/Deactivate, read-only totals). Open: DEF-015 design discussion (procedure files storage); uac-r2 review of 013 (questions #1973/#1974 sent); ontology-r1 reviews 109 PR; ISS-009 CU endpoint token merge gate. Stale locked worktree dirs under C:/code_files/spaarke/.claude/worktrees |
 
 ### Files Modified This Session
 - Pipeline output only (README, plan, CLAUDE.md, tasks/). See the pipeline commit.
