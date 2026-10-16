@@ -142,7 +142,7 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
     /// <summary>
     /// After RegistrationDataverseService adds or removes a team member, or binds a business unit, against THIS BFF's
     /// own environment, that user's identity, membership and root-set entries are gone — though the write ran with no
-    /// HttpContext (the DemoExpirationService path) and the entries were cached under a real tenant id.
+    /// HttpContext (the DemoExpirationJob path) and the entries were cached under a real tenant id.
     /// </summary>
     [Theory]
     [InlineData("team-add")]

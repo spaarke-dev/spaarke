@@ -457,7 +457,7 @@ public class RegistrationDataverseService : IDisposable
     /// environment (<paramref name="targetDataverseUrl"/>, else <c>DATAVERSE_URL</c>) is a different one — a demo or
     /// customer target — has nothing here to evict, and is skipped. When either URL is unknown it evicts: an
     /// unnecessary eviction costs one re-read; a missing one leaves old access for the TTLs.</para>
-    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationService</c> is a background path): the eviction is
+    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationJob</c> is a background path): the eviction is
     /// tenant-agnostic. <b>Never fails the write</b> — it has already happened; the TTL is the backstop. Not bound to
     /// the caller's token, for the same reason.</para>
     /// </remarks>
@@ -683,6 +683,7 @@ public class RegistrationDataverseService : IDisposable
     {
         // Removal is never guarded: taking a member OUT of any team cannot widen access (task 144 guards additions).
         var (teamId, _) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
+
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
@@ -709,7 +710,7 @@ public class RegistrationDataverseService : IDisposable
         finally
         {
             // Task 132 (C12): the OVER-GRANT direction — without this the removed user keeps every team-owned record
-            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationService).
+            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationJob).
             await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team remove").ConfigureAwait(false);
         }
     }

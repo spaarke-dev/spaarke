@@ -265,7 +265,7 @@ public sealed class DemoProvisioningService
     /// <summary>
     /// Grants the new user a writer role on the environment's SPE container as a marked DEMO grant
     /// (<see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/>, keyed by the user's Entra object id), which
-    /// demo expiry removes (<c>DemoExpirationService</c>). Granting here lets the new user edit in Office immediately. A
+    /// demo expiry removes (<c>DemoExpirationJob</c>). Granting here lets the new user edit in Office immediately. A
     /// user who already holds a role is left as they are (Graph 409 → nothing recorded).
     /// </summary>
     /// <remarks>

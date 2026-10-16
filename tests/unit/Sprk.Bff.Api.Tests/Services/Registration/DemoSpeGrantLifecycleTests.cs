@@ -1,6 +1,7 @@
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -242,7 +243,7 @@ public class DemoSpeGrantLifecycleTests
             NullLogger<DemoProvisioningService>.Instance);
     }
 
-    private DemoExpirationService Expiration()
+    private DemoExpirationJob Expiration()
     {
         var options = Options.Create(new DemoProvisioningOptions { DemoUsersGroupId = "group-1" });
         var factory = new Mock<IGraphClientFactory>();
@@ -250,15 +251,17 @@ public class DemoSpeGrantLifecycleTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["DATAVERSE_URL"] = "https://admin.crm.dynamics.com" })
             .Build();
-        return new DemoExpirationService(
+        return new DemoExpirationJob(
             new GraphUserService(Mock.Of<IGraphClientFactory>(), new PasswordGenerator(), options, NullLogger<GraphUserService>.Instance),
             RegistrationDataverse(),
             new RegistrationEmailService(null!, Options.Create(new CommunicationOptions()), NullLogger<RegistrationEmailService>.Instance),
             TestSpeOwnership.AllowAll(factory.Object),
             _container,
             new DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance),
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            TimeProvider.System,
             options,
-            NullLogger<DemoExpirationService>.Instance);
+            NullLogger<DemoExpirationJob>.Instance);
     }
 
     private SpeContainerMembershipSync Sync()
@@ -290,7 +293,7 @@ public class DemoSpeGrantLifecycleTests
     /// <see cref="Membership.RemoveMarkedGrantAsync"/>: an unseen permission in a partial list is Failed, a plain writer is
     /// deleted, and the marker is cleared).
     /// </summary>
-    private sealed class InMemoryContainer()
+    internal sealed class InMemoryContainer()
         : Membership(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<Membership>.Instance)
     {
         private int _next;

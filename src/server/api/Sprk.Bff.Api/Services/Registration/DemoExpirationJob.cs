@@ -1,40 +1,73 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
 /// <summary>
-/// Background service that runs daily at midnight UTC to expire demo accounts.
-/// A hand-rolled timer BackgroundService, same structure as DailySendCountResetService (existing debt, ADR-052 §1).
-///
-/// Two responsibilities:
-///   1. Expire: Provisioned records past their expiration date — disable Entra account,
-///      remove from Demo Team, revoke SPE container access, send notification, update status.
-///   2. Warn: Provisioned records expiring within 3 days — send warning email.
-///
-/// Each record is processed independently — one failure does not block others.
+/// Daily at midnight UTC, expires demo accounts whose expiration date has passed and warns those expiring within three
+/// days. Runs on the in-process <c>Spaarke.Scheduling</c> host (ADR-036), registered with <c>AddScheduledJob</c> inside
+/// the demo-provisioning gate of <c>RegistrationModule</c>.
 /// </summary>
-public sealed class DemoExpirationService : BackgroundService
+/// <remarks>
+/// <para><b>Expire</b> — a Provisioned request past its expiration date: (1) disable the Entra account, (2) remove the
+/// systemuser from the environment's team, (3) remove the user from the demo security group, (4) remove the demo SPE
+/// grant (#1363). Only when ALL four succeeded is the request marked <c>Expired</c> and the expired notice sent. A step
+/// that failed leaves the request Provisioned: a Warning naming the request and the failed steps is logged, and the next
+/// run repeats every step. Each step is idempotent on repeat — an account already disabled, a user no longer in the team
+/// or group, a grant already removed all succeed without a change.</para>
+/// <para><b>Each email once.</b> The expired notice is sent AFTER the status write, so a request is notified only once it
+/// has left the Provisioned set the run reads (a status write that fails sends nothing; the next run repeats). A notice
+/// that then fails to send is logged and not retried. The warning is sent at most once per request per UTC day — its
+/// completion marker (<see cref="IIdempotencyService"/>) makes a manual trigger or a second run that day a no-op.</para>
+/// <para><b>ADR-036 A1.</b> One dispatch per tick across every instance (the host's lease, A1-1). Retry (A1-4): the run
+/// THROWS only when the Provisioned list itself cannot be read — nothing was done or sent, so a retry is safe; a
+/// record whose cleanup failed is counted and revisited by the next daily run (the job's own retry would re-send
+/// warnings). Heartbeat (A1-5): one structured line per attempt.</para>
+/// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): migrated by #1363 from a hand-rolled wait-until-midnight
+/// <c>BackgroundService</c> (<c>DemoExpirationService</c>), which ran on every instance — a scaled-out BFF expired, and
+/// emailed, each record once per instance. Same work, same schedule, same dependencies: replaced surface, not added.</para>
+/// </remarks>
+public sealed class DemoExpirationJob : IScheduledJob
 {
+    /// <summary>Stable job id.</summary>
+    public const string JobIdConstant = "demo-expiration";
+
+    /// <summary>Daily at midnight UTC — the schedule the hand-rolled loop kept (the host evaluates cron in UTC).</summary>
+    internal const string DefaultCronSchedule = "0 0 * * *";
+
+    /// <summary>A warning marker only has to outlive its UTC day; a few days covers clock skew between instances.</summary>
+    internal static readonly TimeSpan WarningMarkerLifetime = TimeSpan.FromDays(4);
+
+    private static readonly JsonSerializerOptions ResultJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly GraphUserService _graphUserService;
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
     private readonly SpeContainerOwnershipGuard _ownership;
     private readonly SpeContainerMembershipService _membership;
     private readonly DataverseEnvironmentService _environmentService;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly TimeProvider _timeProvider;
     private readonly DemoProvisioningOptions _options;
-    private readonly ILogger<DemoExpirationService> _logger;
+    private readonly ILogger<DemoExpirationJob> _logger;
 
-    public DemoExpirationService(
+    public DemoExpirationJob(
         GraphUserService graphUserService,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
         SpeContainerOwnershipGuard ownership,
         DataverseEnvironmentService environmentService,
+        IServiceScopeFactory scopeFactory,
+        TimeProvider timeProvider,
         IOptions<DemoProvisioningOptions> options,
-        ILogger<DemoExpirationService> logger,
+        ILogger<DemoExpirationJob> logger,
         ILoggerFactory loggerFactory)
         : this(
             graphUserService, dataverseService, emailService, ownership,
@@ -43,20 +76,22 @@ public sealed class DemoExpirationService : BackgroundService
             new SpeContainerMembershipService(
                 ownership ?? throw new ArgumentNullException(nameof(ownership)),
                 (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>()),
-            environmentService, options, logger)
+            environmentService, scopeFactory, timeProvider, options, logger)
     {
     }
 
     /// <summary>The test seam (ADR-038 §4): the marked-grant primitives are virtual, so a test substitutes them here.</summary>
-    internal DemoExpirationService(
+    internal DemoExpirationJob(
         GraphUserService graphUserService,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
         SpeContainerOwnershipGuard ownership,
         SpeContainerMembershipService membership,
         DataverseEnvironmentService environmentService,
+        IServiceScopeFactory scopeFactory,
+        TimeProvider timeProvider,
         IOptions<DemoProvisioningOptions> options,
-        ILogger<DemoExpirationService> logger)
+        ILogger<DemoExpirationJob> logger)
     {
         _graphUserService = graphUserService ?? throw new ArgumentNullException(nameof(graphUserService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
@@ -64,113 +99,116 @@ public sealed class DemoExpirationService : BackgroundService
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _membership = membership ?? throw new ArgumentNullException(nameof(membership));
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <inheritdoc />
+    public string JobId => JobIdConstant;
+
+    /// <inheritdoc />
+    public string DisplayName => "Demo Account Expiration";
+
+    /// <inheritdoc />
+    public string Description =>
+        "Daily at midnight UTC, expires demo accounts past their expiration date (disables the Entra account, removes the " +
+        "team and group memberships and the SPE container grant, then marks the request Expired and sends the notice) and " +
+        "warns accounts expiring within three days. A request whose cleanup failed stays Provisioned and is retried next run.";
+
+    /// <summary>What one pass did.</summary>
+    internal sealed record PassCounts(
+        int Provisioned, int Expired, int Retrying, int Warned, int AlreadyWarned, int WarningsFailed, int NoExpirationDate);
+
+    /// <inheritdoc />
+    public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("DemoExpirationService started — will process expirations at midnight UTC each day");
+        ArgumentNullException.ThrowIfNull(context);
+        var started = _timeProvider.GetTimestamp();
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                var delayUntilMidnight = CalculateDelayUntilMidnightUtc();
+        // Throws only when the Provisioned list cannot be read: nothing was done or sent, so the host's retry is safe.
+        var counts = await ProcessExpirationsAsync(cancellationToken).ConfigureAwait(false);
 
-                _logger.LogDebug(
-                    "DemoExpirationService sleeping for {Hours:F1} hours until next midnight UTC",
-                    delayUntilMidnight.TotalHours);
+        var duration = _timeProvider.GetElapsedTime(started);
+        _logger.LogInformation(
+            "[DEMO-EXPIRATION] heartbeat attempt={Attempt} provisioned={Provisioned} expired={Expired} retrying={Retrying} " +
+            "warned={Warned} alreadyWarned={AlreadyWarned} warningsFailed={WarningsFailed} noExpirationDate={NoExpirationDate} durationMs={DurationMs}",
+            context.Attempt, counts.Provisioned, counts.Expired, counts.Retrying, counts.Warned, counts.AlreadyWarned,
+            counts.WarningsFailed, counts.NoExpirationDate, (long)duration.TotalMilliseconds);
 
-                await Task.Delay(delayUntilMidnight, stoppingToken);
-
-                await ProcessExpirationsAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("DemoExpirationService stopping due to cancellation");
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during demo expiration processing, will retry in 1 minute");
-
-                // Wait 1 minute before retrying to avoid tight error loops
-                try
-                {
-                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-            }
-        }
-
-        _logger.LogInformation("DemoExpirationService stopped");
+        var success = counts.Retrying == 0 && counts.WarningsFailed == 0;
+        return new JobRunResult(
+            Success: success,
+            ErrorMessage: success ? null : "Some expirations did not complete or some warnings failed — see the Warnings naming each request; the next run retries.",
+            ProcessedItems: counts.Expired + counts.Warned,
+            Duration: duration,
+            ResultJson: JsonSerializer.Serialize(counts, ResultJsonOptions));
     }
 
     /// <summary>
-    /// Main processing method: handles both expired records and pre-expiration warnings.
-    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real pass over a faked Dataverse.
+    /// One pass over every Provisioned request: expire those past their date, warn those within three days.
+    /// Internal so the test assembly (InternalsVisibleTo) runs the real pass over a faked Dataverse.
     /// </summary>
-    internal async Task ProcessExpirationsAsync(CancellationToken ct)
+    internal async Task<PassCounts> ProcessExpirationsAsync(CancellationToken ct)
     {
-        _logger.LogInformation("Starting demo expiration processing at {Time:u}", DateTime.UtcNow);
-
-        // Get all Provisioned requests
         var provisionedRequests = await _dataverseService.GetRequestsByStatusAsync(
-            RegistrationStatus.Provisioned, ct: ct);
+            RegistrationStatus.Provisioned, ct: ct).ConfigureAwait(false);
 
-        _logger.LogInformation("Found {Count} provisioned requests to evaluate", provisionedRequests.Count);
+        var now = _timeProvider.GetUtcNow();
+        int expired = 0, retrying = 0, warned = 0, alreadyWarned = 0, warningsFailed = 0, noDate = 0;
 
-        var now = DateTimeOffset.UtcNow;
-        var expiredCount = 0;
-        var warningCount = 0;
+        using var scope = _scopeFactory.CreateScope();
+        var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
 
         foreach (var request in provisionedRequests)
         {
+            ct.ThrowIfCancellationRequested();
             if (request.ExpirationDate == null)
             {
                 _logger.LogWarning(
                     "Provisioned request {RequestId} ({Email}) has no expiration date, skipping",
                     request.Id, request.Email);
+                noDate++;
                 continue;
             }
 
             if (request.ExpirationDate <= now)
             {
-                // Record has expired — process full expiration
-                await ProcessExpiredRecordAsync(request, ct);
-                expiredCount++;
+                if (await ProcessExpiredRecordAsync(request, ct).ConfigureAwait(false))
+                    expired++;
+                else
+                    retrying++;
             }
             else if (request.ExpirationDate <= now.AddDays(3))
             {
-                // Record expires within 3 days — send warning
-                await ProcessExpirationWarningAsync(request, ct);
-                warningCount++;
+                switch (await ProcessExpirationWarningAsync(request, now, idempotency, ct).ConfigureAwait(false))
+                {
+                    case WarningOutcome.Sent: warned++; break;
+                    case WarningOutcome.AlreadySent: alreadyWarned++; break;
+                    case WarningOutcome.Failed: warningsFailed++; break;
+                }
             }
         }
 
-        _logger.LogInformation(
-            "Demo expiration processing completed at {Time:u}: {Expired} expired, {Warned} warnings sent",
-            DateTime.UtcNow, expiredCount, warningCount);
+        return new PassCounts(provisionedRequests.Count, expired, retrying, warned, alreadyWarned, warningsFailed, noDate);
     }
 
     /// <summary>
-    /// Processes a single expired record: disable account, remove from team, revoke SPE access,
-    /// send notification, update status. Each sub-operation is wrapped in try/catch so one
-    /// failure doesn't block others.
+    /// Expires one record. Returns <see langword="true"/> when it is now Expired; <see langword="false"/> when a cleanup
+    /// step (or the status write) failed — the request stays Provisioned and the next run repeats every step.
     /// </summary>
-    private async Task ProcessExpiredRecordAsync(RegistrationRequestRecord request, CancellationToken ct)
+    private async Task<bool> ProcessExpiredRecordAsync(RegistrationRequestRecord request, CancellationToken ct)
     {
         _logger.LogInformation(
             "Processing expired record {RequestId} ({Email}), expired on {ExpirationDate:u}",
             request.Id, request.Email, request.ExpirationDate);
 
+        var failedSteps = new List<string>();
         var aadObjectId = request.DemoUserObjectId;
         if (string.IsNullOrWhiteSpace(aadObjectId))
         {
+            // Nothing names the user anywhere, so no step can ever run; a retry would never do better.
             _logger.LogWarning(
                 "Expired request {RequestId} has no DemoUserObjectId, skipping Entra/SPE cleanup",
                 request.Id);
@@ -185,16 +223,21 @@ public sealed class DemoExpirationService : BackgroundService
                 await _graphUserService.DisableUserAsync(aadObjectId, ct);
                 _logger.LogInformation("[Expire] Disabled Entra account {AadObjectId}", aadObjectId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                failedSteps.Add("disable Entra account");
                 _logger.LogError(ex,
                     "[Expire] Failed to disable Entra account {AadObjectId} for request {RequestId}",
                     aadObjectId, request.Id);
             }
 
             // The request's own target environment, resolved once for Steps 2 and 4. Null means it could not
-            // be resolved (already logged as an error): those two steps are skipped, never redirected.
+            // be resolved (already logged as an error): those two steps cannot run, never redirected.
             var environment = await ResolveTargetEnvironmentAsync(request, ct);
+            if (environment == null)
+            {
+                failedSteps.Add("resolve target environment (team removal and SPE revoke)");
+            }
 
             // Step 2: Remove from Demo Team in Dataverse
             if (environment != null)
@@ -231,8 +274,9 @@ public sealed class DemoExpirationService : BackgroundService
                             aadObjectId);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
+                    failedSteps.Add("remove from team");
                     _logger.LogError(ex,
                         "[Expire] Failed to remove from Demo Team for request {RequestId}",
                         request.Id);
@@ -248,8 +292,9 @@ public sealed class DemoExpirationService : BackgroundService
                 await _graphUserService.RemoveFromGroupAsync(aadObjectId, _options.DemoUsersGroupId, ct);
                 _logger.LogInformation("[Expire] Removed from security group");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                failedSteps.Add("remove from security group");
                 _logger.LogError(ex,
                     "[Expire] Failed to remove from security group for request {RequestId}",
                     request.Id);
@@ -260,17 +305,34 @@ public sealed class DemoExpirationService : BackgroundService
             {
                 try
                 {
-                    var speContainerId = environment.SpeContainerId
-                        ?? throw new InvalidOperationException(
-                            $"Dataverse environment {environment.Id} is missing SpeContainerId.");
-                    _logger.LogInformation(
-                        "[Expire] Revoking SPE container access for user {AadObjectId} on container {ContainerId}",
-                        aadObjectId, speContainerId);
-                    await RevokeSpeContainerAccessAsync(speContainerId, aadObjectId, ct);
-                    _logger.LogInformation("[Expire] Revoked SPE container access");
+                    if (string.IsNullOrWhiteSpace(environment.SpeContainerId))
+                    {
+                        // Step 8 grants nothing without a container, so there is nothing to revoke.
+                        _logger.LogInformation(
+                            "[Expire] Environment {EnvironmentId} has no SPE container; nothing to revoke for request {RequestId}",
+                            environment.Id, request.Id);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "[Expire] Revoking SPE container access for user {AadObjectId} on container {ContainerId}",
+                            aadObjectId, environment.SpeContainerId);
+                        await RevokeSpeContainerAccessAsync(environment.SpeContainerId, aadObjectId, ct);
+                        _logger.LogInformation("[Expire] Revoked SPE container access");
+                    }
                 }
-                catch (Exception ex)
+                catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
                 {
+                    // Not one of this stamp's containers: since task 227d Step 8 refuses such a container, so no grant this
+                    // stamp could make stands there — and none it could remove. Not retried (the same answer every run).
+                    _logger.LogWarning(
+                        "[Expire] SPE container {ContainerId} of request {RequestId} is not one of this stamp's containers; "
+                        + "no grant of this stamp can stand there, so there is nothing to revoke.",
+                        environment.SpeContainerId, request.Id);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    failedSteps.Add("revoke SPE container access");
                     _logger.LogError(ex,
                         "[Expire] Failed to revoke SPE container access for request {RequestId}",
                         request.Id);
@@ -278,7 +340,7 @@ public sealed class DemoExpirationService : BackgroundService
             }
         }
 
-        // Step 5: Send expired notification email
+        // Step 6: Send expired notification email — after the status write, so it is sent once.
         try
         {
             if (!string.IsNullOrWhiteSpace(request.Email) && !string.IsNullOrWhiteSpace(request.FirstName))
@@ -288,35 +350,40 @@ public sealed class DemoExpirationService : BackgroundService
                 _logger.LogInformation("[Expire] Sent expired notification to {Email}", request.Email);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex,
-                "[Expire] Failed to send expired notification for request {RequestId}",
+                "[Expire] Failed to send expired notification for request {RequestId}; the request is Expired, so it is not resent",
                 request.Id);
         }
 
-        // Step 6: Update status to Expired
+        // Step 5: Update status to Expired — the request leaves the set the next run reads.
         try
         {
             _logger.LogInformation("[Expire] Updating request {RequestId} status to Expired", request.Id);
             await _dataverseService.UpdateRequestStatusAsync(request.Id, RegistrationStatus.Expired, ct: ct);
             _logger.LogInformation("[Expire] Updated request {RequestId} to Expired", request.Id);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogError(ex,
-                "[Expire] Failed to update status to Expired for request {RequestId}",
+            _logger.LogWarning(ex,
+                "[Expire] Request {RequestId} was NOT expired this run: the status write failed. It stays Provisioned and the "
+                + "next run repeats every step; no expired notice is sent until it completes.",
                 request.Id);
+            return false;
         }
+
+        return true;
     }
 
+    private enum WarningOutcome { Sent, AlreadySent, Failed, NotSendable }
+
     /// <summary>
-    /// Sends a pre-expiration warning email for a record expiring within 3 days.
-    /// Warning is sent once per run — the check is date-based (expiration within 3 days
-    /// AND more than 0 days away), so the same record won't get multiple warnings
-    /// since after expiration it enters the expired path instead.
+    /// Sends the pre-expiration warning for a record expiring within 3 days — at most once per request per UTC day, so a
+    /// record gets one warning on each of its last days (the schedule the daily loop kept) however often the job runs.
     /// </summary>
-    private async Task ProcessExpirationWarningAsync(RegistrationRequestRecord request, CancellationToken ct)
+    private async Task<WarningOutcome> ProcessExpirationWarningAsync(
+        RegistrationRequestRecord request, DateTimeOffset now, IIdempotencyService idempotency, CancellationToken ct)
     {
         try
         {
@@ -325,7 +392,14 @@ public sealed class DemoExpirationService : BackgroundService
                 _logger.LogWarning(
                     "Cannot send expiration warning for request {RequestId}: missing email or first name",
                     request.Id);
-                return;
+                return WarningOutcome.NotSendable;
+            }
+
+            // Invariant formatting: the key must not change with the server's culture, or every marker would be missed.
+            var key = string.Create(CultureInfo.InvariantCulture, $"demo-expiration-warning:{request.Id:N}:{now.UtcDateTime:yyyyMMdd}");
+            if (await idempotency.IsEventProcessedAsync(key, ct).ConfigureAwait(false))
+            {
+                return WarningOutcome.AlreadySent;
             }
 
             _logger.LogInformation(
@@ -335,13 +409,19 @@ public sealed class DemoExpirationService : BackgroundService
             await _emailService.SendExpirationWarningAsync(
                 request.Email, request.FirstName, request.ExpirationDate!.Value, ct);
 
+            // Recorded even if the host is stopping: the warning went out. The scheduler's lease serializes runs, so
+            // check-then-mark is enough here (ADR-036 A1-1).
+            await idempotency.MarkEventAsProcessedAsync(key, WarningMarkerLifetime, CancellationToken.None).ConfigureAwait(false);
+
             _logger.LogInformation("[Warning] Sent expiration warning to {Email}", request.Email);
+            return WarningOutcome.Sent;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex,
                 "[Warning] Failed to send expiration warning for request {RequestId} ({Email})",
                 request.Id, request.Email);
+            return WarningOutcome.Failed;
         }
     }
 
@@ -511,19 +591,5 @@ public sealed class DemoExpirationService : BackgroundService
                 request.DataverseEnvironmentId.Value, request.Id);
             return null;
         }
-    }
-
-    /// <summary>
-    /// Calculates the delay from now until the next midnight UTC.
-    /// If it's exactly midnight, schedules for tomorrow's midnight.
-    /// </summary>
-    internal static TimeSpan CalculateDelayUntilMidnightUtc()
-    {
-        var now = DateTime.UtcNow;
-        var nextMidnight = now.Date.AddDays(1);
-        var delay = nextMidnight - now;
-
-        // Safety: ensure at least 1 second delay to avoid tight loops
-        return delay < TimeSpan.FromSeconds(1) ? TimeSpan.FromDays(1) : delay;
     }
 }

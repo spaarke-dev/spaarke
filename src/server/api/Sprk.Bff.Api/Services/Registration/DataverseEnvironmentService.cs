@@ -95,7 +95,7 @@ public class DataverseEnvironmentService : IDisposable
     /// </summary>
     /// <remarks>
     /// Virtual for the same reason as <see cref="GetActiveEnvironmentsAsync"/>: a test stands in for the registry at
-    /// this boundary without an HTTP double (<c>DemoExpirationService</c> reads each request's own target environment).
+    /// this boundary without an HTTP double (<c>DemoExpirationJob</c> reads each request's own target environment).
     /// </remarks>
     public virtual async Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
     {

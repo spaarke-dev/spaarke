@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -21,7 +22,7 @@ using static Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTes
 namespace Sprk.Bff.Api.Tests.Services.Registration;
 
 /// <summary>
-/// customer-provisioning-orchestration-r1 (found at T186): <see cref="DemoExpirationService"/> removes an expired demo
+/// customer-provisioning-orchestration-r1 (found at T186): <see cref="DemoExpirationJob"/> removes an expired demo
 /// user from the team and revokes the SPE container of the environment THE REQUEST WAS PROVISIONED INTO (its own
 /// "Target Environment" lookup, as the approve path reads it) - never of a registry-wide "default" or "first active" row.
 /// </summary>
@@ -30,13 +31,13 @@ namespace Sprk.Bff.Api.Tests.Services.Registration;
 /// row flagged default, else the first active row by name, so a new row that sorted first (e.g. "ACME Corporation")
 /// silently redirected every expiry to it: the row had no TeamName / SpeContainerId, Steps 2 and 4 threw and were logged,
 /// and the record was still marked Expired with the user's access intact.</para>
-/// <para>The real <see cref="DemoExpirationService"/> pass runs over the real <see cref="RegistrationDataverseService"/>
+/// <para>The real <see cref="DemoExpirationJob"/> pass runs over the real <see cref="RegistrationDataverseService"/>
 /// against a recording HTTP stub of the admin Dataverse; the registry is doubled at its virtual reads (the
 /// <c>IdentityLinkReconciliationTests</c> convention), and the ownership guard at its virtual <c>IsOwnedAsync</c>
 /// (<see cref="TestSpeOwnership"/> convention) so the container the revoke asks about is recorded. What each test pins is
 /// the team name queried and the container asked about; the Graph steps are not reachable here and are only counted.</para>
 /// </remarks>
-public class DemoExpirationServiceTargetEnvironmentTests
+public class DemoExpirationJobTargetEnvironmentTests
 {
     private const string AdminDataverse = "https://admin.crm.dynamics.com";
     private const string TargetDataverse = "https://zeta-demo.crm.dynamics.com";
@@ -69,10 +70,10 @@ public class DemoExpirationServiceTargetEnvironmentTests
 
     private readonly RecordingDataverse _dataverse = new();
     private readonly Mock<IGraphClientFactory> _graph = new();
-    private readonly CapturingLogger<DemoExpirationService> _log = new();
+    private readonly CapturingLogger<DemoExpirationJob> _log = new();
     private readonly RecordingGuard _guard;
 
-    public DemoExpirationServiceTargetEnvironmentTests()
+    public DemoExpirationJobTargetEnvironmentTests()
     {
         // Steps 1 and 3 (Entra) are not reachable without a Graph; the factory refuses so each logs and moves on.
         _graph.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph is not reachable in this test."));
@@ -241,7 +242,7 @@ public class DemoExpirationServiceTargetEnvironmentTests
             byId,
             active);
 
-    private DemoExpirationService Sut(DataverseEnvironmentService registry)
+    private DemoExpirationJob Sut(DataverseEnvironmentService registry)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["DATAVERSE_URL"] = AdminDataverse })
@@ -260,12 +261,18 @@ public class DemoExpirationServiceTargetEnvironmentTests
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 
         var options = Options.Create(new DemoProvisioningOptions { DemoUsersGroupId = "group-1" });
-        return new DemoExpirationService(
+        var scopes = new ServiceCollection()
+            .AddSingleton(Mock.Of<Sprk.Bff.Api.Services.Jobs.IIdempotencyService>())
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+        return new DemoExpirationJob(
             new GraphUserService(_graph.Object, new PasswordGenerator(), options, NullLogger<GraphUserService>.Instance),
             dataverse,
             new RegistrationEmailService(null!, Options.Create(new CommunicationOptions()), NullLogger<RegistrationEmailService>.Instance),
             _guard,
             registry,
+            scopes,
+            new FakeTimeProvider(DateTimeOffset.Parse("2026-10-16T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture)),
             options,
             _log,
             NullLoggerFactory.Instance);
@@ -332,6 +339,12 @@ public class DemoExpirationServiceTargetEnvironmentTests
             if (request.Method == HttpMethod.Get && path.EndsWith("/systemusers", StringComparison.Ordinal))
             {
                 SystemUserLookupHosts.Add(request.RequestUri.Host);
+                return Json("{\"value\":[{\"systemuserid\":\"99999999-0000-0000-0000-000000000001\"}]}");
+            }
+
+            if (request.Method == HttpMethod.Get && path.EndsWith("/teammembership_association", StringComparison.Ordinal))
+            {
+                // The idempotency read before a removal (#1363): the user is a member.
                 return Json("{\"value\":[{\"systemuserid\":\"99999999-0000-0000-0000-000000000001\"}]}");
             }
 
