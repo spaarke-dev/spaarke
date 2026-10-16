@@ -141,7 +141,7 @@ Spaarke provisions containers in two distinct flows, with different entry points
 
 **Code path under the hood** (both flows):
 - BFF endpoint → `SpeFileStore.CreateContainerAsync(containerTypeId, displayName, description, ct)` → `ContainerOperations` → Graph `POST /storage/fileStorage/containers`.
-- Container is created **inactive**; must activate by granting at least one owner permission (see "Common pitfalls").
+- Container is created **inactive** and is **deleted automatically if not activated within 24 hours** (Graph v1.0 `fileStorageContainer.status`, Learn updated 2026-08-12). Call `POST /storage/fileStorage/containers/{id}/activate` explicitly (204, idempotent, app-only); see "Common pitfalls".
 
 **Spaarke convention**:
 - Container `displayName` follows the convention: **`Spaarke-<BU-name>`** for BU containers, **`Spaarke-Secure-<matter-id>`** for secure-matter containers.
@@ -466,7 +466,7 @@ Production-relevant constraints — verify against current code, but these are r
 - **Upload ordering — "SPE First, Dataverse Second"** (per `.claude/constraints/data.md`). Upload to SPE **before** creating the `sprk_document` record. Reversing the order causes orphan Dataverse records when the upload fails. Always populate `sprk_graphitemid`, `sprk_graphdriveid`, and `sprk_filepath` from the SPE upload result — never guess or hardcode.
 - **`DefaultContainerId` is Drive ID format**, not raw GUID. Format is base64-encoded `b!...`. Wiring the wrong format will pass type checks and fail at runtime with a Graph 400.
 - **Beta endpoint usage** — `/beta/storage/fileStorage/containers` is the working endpoint as of curation date; some operations are not yet on v1.0. Verify before relying on v1.0.
-- **Container "activation" step** — newly created containers are inactive until at least one owner permission is granted (see `samples/powershell/CreateContainer.ps1`). The boilerplate-aspnet `ActivateContainer` method exists but isn't always called explicitly. Spaarke's provisioning flow must ensure activation; otherwise downstream upload calls fail with permission errors.
+- **Container "activation" step** — a new container is `inactive`, and an inactive container is **deleted automatically after 24 hours** (Learn: [fileStorageContainer](https://learn.microsoft.com/en-us/graph/api/resources/filestoragecontainer?view=graph-rest-1.0), [activate](https://learn.microsoft.com/en-us/graph/api/filestoragecontainer-activate?view=graph-rest-1.0)). The docs say the activate action OR any modifying write (file upload, permission add, custom-property create, property update) "can" activate it, so relying on an implicit write is undocumented-strength. Spaarke rule: call `Containers[id].Activate.PostAsync` explicitly after create (as the control plane does, `GraphContainerProvisioner.cs:234`). `status` is read-only: a `PATCH status=active` is not the documented activation. (Corrected 2026-10-16, uac-r2: this note previously said only an owner-permission grant activates a container.)
 - **SPO token vs. Graph token isolation** — the SP-scoped (`Container.Selected`) token must be acquired separately from Graph tokens (see `samples/embedded-chat/ChatAuthProvider.ts`). Mixing scopes in one request fails.
 - **Container type registration must happen in every consuming tenant** before containers can be created there. Easy to forget when onboarding a new customer environment — add a tenant-onboarding checklist item.
 - **Standard container types cannot be deleted** today (only trial types). Production registration is permanent.
