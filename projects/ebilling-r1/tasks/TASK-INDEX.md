@@ -63,7 +63,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 051 | 🔲 [open] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | 🔲 [open] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
 | 053 | 🔲 [open] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 054 |
-| 054 | 🔲 [open] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
+| 054 | 🟡 [wip] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
 
 ### Phase 3 — Rules (WP3)
 
@@ -91,7 +91,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 104 | 🔲 [open] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
 | 105 | 🔲 [open] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | ✅ [done] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
-| 107 | 🔲 [open] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
+| 107 | 🟡 [wip] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 108 | ✅ [done] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
 | 109 | ✅ [done] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | 🔲 [open] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |

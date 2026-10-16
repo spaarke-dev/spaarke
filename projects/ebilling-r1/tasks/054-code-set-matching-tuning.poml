@@ -4,7 +4,7 @@
     <title>Code-set matching: tuning data, full coverage and an AI review step</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Action + Binding (closed catalog), new Dataverse columns, changes to the 048 proposal service and the 047 per-line suggestion hook, and an evaluation gate with must-pass cases.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -84,6 +84,12 @@
     <trigger>If an admin screen beyond the code-set form's two new fields is needed (for example a coverage page), STOP: UI belongs to a deploy or UI task.</trigger>
     <trigger>If the seeded set list itself lacks a sensible home for a dev reference row (a genuinely missing UTBMS set), STOP and propose seeding it; do not force a wrong mapping.</trigger>
   </escalation>
+
+  <justification>
+    <existing>048's CodeSetProposalService (embeddings over set name + body) and 047's INVOICE-LINE-CODE Action (codes lines, not sets); sprk_billingcodeset has no column describing what work a set covers; sprk_billingcode descriptions exist per code only.</existing>
+    <extension>Extend CodeSetProposalService and 048's routes rather than add a second service; the new Action is a new consumer type because no existing Action decides between code sets; the two columns extend the project-owned sprk_billingcodeset (task 018) because sprk_body holds the standards body, not scope.</extension>
+    <cost-of-doing-nothing>Proposals for Commercial, Mergers &amp; Acquisitions and Commercial Transactions point at Trademark or Bankruptcy on dev (048 probe), the 047 per-line hook passes such a set into line coding, and rows that fit no set get a confirmable wrong proposal instead of a visible gap (D-93).</cost-of-doing-nothing>
+  </justification>
 
   <acceptance-criteria>
     <criterion>sprk_billingcodeset has description and match-hints columns on dev and in SpaarkeMaster source; the six task sets carry tuning text; a seed rerun changes nothing.</criterion>
