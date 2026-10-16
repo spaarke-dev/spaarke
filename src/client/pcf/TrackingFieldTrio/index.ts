@@ -123,6 +123,12 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.48 (task 099a, unified-access-control-r2 — #1010(a)): Current Access reads the record's grants from the BFF
+ *   (`GET /api/v1/external-access/record-grants`, gated by the delegation rule) instead of `context.webAPI` — a
+ *   Write-holder in a child business unit saw none of the root-owned grant rows. A failed read now reaches the modal,
+ *   which shows the server's ProblemDetails `detail` as Current Access's error state instead of "No active grants", and a
+ *   lapsed grant carries its expiry and shows as "Expired {date}". The control no longer reads `sprk_externalrecordaccess`.
+ *
  * v1.0.47 (task 179, unified-access-control-r2 — owner round 89; merged over task 181's v1.0.46): no change in this
  *   file's logic. The bundled `AccessGrantModal` names the rule when Manage Access is refused — Write on the record AND
  *   the Share privilege on its table ("Write and Share required") — and says "Access could not be checked" when the
@@ -338,25 +344,39 @@ const FALLBACK_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
 // than the inline Combobox. This file remains the ONLY place that knows the
 // concrete Dataverse entity names + their `sprk_assigned*` role fields — the
 // shared `AccessGrantModal` stays entity-agnostic (ADR-012 / FR-14).
-const EXTERNAL_ACCESS_ENTITY = 'sprk_externalrecordaccess';
+// v1.0.48 (task 099a): the record's grants are no longer read from `sprk_externalrecordaccess` here — they come from the
+// BFF's `GET /record-grants` (see `fetchExistingGrants`), so the root lookup column this config carried is gone.
 
 // The polymorphic external-grant root config, keyed by the host form's entity
 // (task 070/071). `recordType` is the semantic root type the modal sends as
-// `{recordType, recordId}`; `rootValueField` is the `sprk_externalrecordaccess`
-// lookup filter for reading the record's active grants (fixes the R1
-// `_sprk_projectid_value` bug — the verified lookup name is `_sprk_project_value`,
-// per task 070's live $metadata verification). Matter + Work Assignment carry
+// `{recordType, recordId}`. Matter + Work Assignment carry
 // the SAME `sprk_assigned*` role fields as Project (verified), so a single
 // shared CANDIDATE_ROLE_FIELDS set below serves all three.
 interface IGrantRootConfig {
   recordType: ExternalGrantRootType;
-  rootValueField: string;
 }
 const GRANT_ROOT_BY_ENTITY: Readonly<Record<string, IGrantRootConfig>> = {
-  sprk_project: { recordType: 'project', rootValueField: '_sprk_project_value' },
-  sprk_matter: { recordType: 'matter', rootValueField: '_sprk_matter_value' },
-  sprk_workassignment: { recordType: 'workassignment', rootValueField: '_sprk_workassignment_value' },
+  sprk_project: { recordType: 'project' },
+  sprk_matter: { recordType: 'matter' },
+  sprk_workassignment: { recordType: 'workassignment' },
 };
+
+/** One grant as `GET /api/v1/external-access/record-grants` returns it (task 099a; `RecordGrant` in the BFF). */
+interface IRecordGrantDto {
+  accessRecordId: string;
+  contactId?: string | null;
+  contactName?: string | null;
+  organizationId?: string | null;
+  organizationName?: string | null;
+  accessLevel?: number | null;
+  grantedByName?: string | null;
+  grantedByContactName?: string | null;
+  /** Date Only, `yyyy-MM-dd`. */
+  grantedDate?: string | null;
+  /** Date Only, `yyyy-MM-dd`; null on a legacy unbounded grant. */
+  expiresDate?: string | null;
+  isExpired?: boolean;
+}
 // Back-compat default when the host entity is unknown/unavailable (e.g. a
 // harness environment where `context.page` isn't populated) — preserves the
 // R1 project behavior.
@@ -1120,58 +1140,61 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return map;
   };
 
-  /** Reads the current record's active `sprk_externalrecordaccess` grants
-   * (host-context, single-entity, one `$expand` read). */
+  /**
+   * Reads the current record's active external grants through the BFF — `GET /api/v1/external-access/record-grants`
+   * (unified-access-control-r2 task 099a, #1010(a)).
+   *
+   * WHY NOT `context.webAPI`. Through v1.0.47 this read `sprk_externalrecordaccess` as the USER, so Dataverse row depth
+   * on the grant ROW decided what Current Access showed. Grant rows are written app-only and owned in the root business
+   * unit, and Spaarke Core User reads the table at Deep depth — so a Write-holder in a child business unit saw
+   * "No active grants" on records that had them. The route is gated by the server's delegation rule (Write and Share on
+   * the record, the `/can-manage-access` rule), so its reader is exactly this dialog's audience.
+   *
+   * FAILURE IS NOT EMPTINESS. `authenticatedFetchGated` THROWS on any non-2xx (`ApiError` with the parsed ProblemDetails),
+   * and this method lets it propagate: the modal shows the server's `detail` as Current Access's error state. Through
+   * v1.0.38 a failed read returned `[]`, which the dialog rendered as "No active grants". An answer naming a different
+   * record (the form rebound mid-flight) is refused the same way, never shown as this record's grants.
+   */
   private fetchExistingGrants = async (): Promise<IAccessGrantRecord[]> => {
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
-    // Filter by the bound root's lookup value field (task 070/071 polymorphic
-    // read) — e.g. `_sprk_matter_value` on a Matter form. Replaces the R1
-    // `_sprk_projectid_value` (invalid field name → matched zero rows).
-    // task 073 UAT fix: read the contact + grantedby by their FK VALUE fields + FormattedValue
-    // annotations (the contact/systemuser display names) instead of `$expand=sprk_contactid,sprk_grantedby`
-    // — those lowercase names are NOT the navigation properties (Dataverse 400 "Could not find a property
-    // named 'sprk_contactid'"; the real nav props are PascalCase per task 070). The `_X_value` form is
-    // stable and needs no nav-property-casing.
-    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
-    const rootValueField = this.resolveGrantRoot().rootValueField;
-    const options =
-      `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      // v1.0.35 (task 140): + _sprk_grantedbycontact_value — the CONTACT who issued the grant from the external SPA.
-      // ⚠️ Deploy order: the column (scripts/Deploy-ExternalRecordAccessContactGrantor.ps1) must exist first, or this
-      // read 400s and Current Access shows nothing.
-      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,_sprk_grantedbycontact_value,sprk_accesslevel,sprk_granteddate`;
+    const recordType = this.resolveGrantRoot().recordType;
+    const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
+    const res = await this.authenticatedFetchGated(`/api/v1/external-access/record-grants?${query}`);
+    const body = (await res.json()) as { recordId?: unknown; grants?: unknown; truncated?: unknown } | null;
 
-    let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
-    try {
-      result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
-    } catch {
-      return [];
+    if (typeof body?.recordId !== 'string' || normalizeRecordId(body.recordId) !== normalizeRecordId(recordId)) {
+      throw new Error(`The access list answered for '${String(body?.recordId)}' while this form shows '${recordId}'.`);
+    }
+    if (!Array.isArray(body.grants)) {
+      throw new Error('The access list for this record could not be read (unexpected answer from the server).');
+    }
+    if (body.truncated === true) {
+      console.warn(`[TrackingFieldTrio] Current Access for ${recordType} ${recordId} lists only part of its grants (server cap).`);
     }
 
-    return result.entities.map(e => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const row = e as any;
-      const contactId = (row['_sprk_contact_value'] as string) ?? '';
-      const organizationId = (row['_sprk_organization_value'] as string) ?? '';
+    return (body.grants as IRecordGrantDto[]).map(g => {
+      const contactId = g.contactId ?? '';
+      const organizationId = g.organizationId ?? '';
       // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
       // access to all contacts at that organization, so it renders as "All contacts at {org}" (revocable)
       // instead of a person. A normal per-contact grant keeps the contact's name.
       const isOrgGrant = !contactId && !!organizationId;
-      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this organization';
       return {
-        accessRecordId: row.sprk_externalrecordaccessid as string,
+        accessRecordId: g.accessRecordId,
         // Org rows have no contact — use the org id so the row still has a stable, non-empty key.
         contactId: isOrgGrant ? organizationId : contactId,
         fullName: isOrgGrant
-          ? `All contacts at ${orgName}`
-          : ((row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)'),
+          ? `All contacts at ${g.organizationName ?? 'this organization'}`
+          : (g.contactName ?? '(unknown contact)'),
         email: undefined,
-        accessLevel: row.sprk_accesslevel as number,
-        grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
-        grantedByContactName: (row[`_sprk_grantedbycontact_value${FORMATTED}`] as string) ?? undefined,
-        grantedDate: row.sprk_granteddate ?? undefined,
+        accessLevel: g.accessLevel ?? 0,
+        grantedByName: g.grantedByName ?? undefined,
+        grantedByContactName: g.grantedByContactName ?? undefined,
+        grantedDate: g.grantedDate ?? undefined,
+        expiresDate: g.expiresDate ?? undefined,
+        isExpired: g.isExpired === true,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
     });
@@ -1494,7 +1517,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.47 • Built 2026-10-10',
+      versionText: 'v1.0.48 • Built 2026-10-16',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they

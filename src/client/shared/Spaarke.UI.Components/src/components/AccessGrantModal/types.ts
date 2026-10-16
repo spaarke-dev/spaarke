@@ -59,6 +59,17 @@ export interface IAccessGrantRecord {
   grantedByContactName?: string;
   /** ISO 8601 grant date (`sprk_granteddate`). */
   grantedDate?: string;
+  /**
+   * The grant's expiry (`sprk_expiresdate`, Date Only, `yyyy-MM-dd`) — from `GET /api/v1/external-access/record-grants`
+   * (unified-access-control-r2 task 099a). Absent on rows that are not `sprk_externalrecordaccess` grants (standing
+   * members, user shares) and on a legacy unbounded grant.
+   */
+  expiresDate?: string;
+  /**
+   * The grant confers no access today (the server's read-path rule: the expiry date itself still confers). Rendered as
+   * "Expired {date}" in Current Access (task 099a). Absent means not known to be expired.
+   */
+  isExpired?: boolean;
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no
    * provenance field; this is a client-side annotation of HOW the grant was
    * created, inferred by the caller or defaulted by this modal's own writes).

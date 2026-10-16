@@ -388,10 +388,21 @@ const useStyles = makeStyles({
  * parsing fails, and to an em-dash when absent. */
 function formatGrantDate(iso: string | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  // Task 099a: the BFF's Date Only values (`/record-grants`: grantedDate, expiresDate) arrive as a bare `yyyy-MM-dd`.
+  // `new Date('2026-12-10')` is UTC midnight, which shows as the PREVIOUS day anywhere west of UTC — so a bare date is
+  // read as the calendar date it names.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = dateOnly ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])) : new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+/**
+ * Task 099a: Current Access's error state when the record's grants could not be read and the failure carries no
+ * ProblemDetails `detail` of its own (a network failure, a sign-in failure, a host that threw a plain Error).
+ */
+export const CURRENT_ACCESS_READ_FAILED_MESSAGE =
+  'Current Access could not be loaded, so who has access to this record is not shown here. Close and reopen to try again.';
 
 /** Mirrors the BFF's `SpeContainerRevokeOutcome` enum (camelCase-serialized
  * PascalCase member names via `JsonStringEnumConverter`, no naming policy).
@@ -989,6 +1000,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
+  // Task 099a: set when the record's grants could not be read — Current Access then shows this message (the server's
+  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants".
+  const [currentAccessError, setCurrentAccessError] = React.useState<string | null>(null);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -1214,11 +1228,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     const isCurrent = () => seq === loadSeqRef.current;
     setLoading(true);
     setNotice(null);
+    // Task 099a: the grants read's own failure, kept apart from the others so Current Access can say what failed.
+    let grantsReadFailure: { err: unknown } | null = null;
     try {
       const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
         await Promise.all([
           fetchCandidates(),
-          fetchExistingGrants(),
+          fetchExistingGrants().catch(err => {
+            grantsReadFailure = { err };
+            throw err;
+          }),
           // Standing-grant members (task 073 UAT #2) — optional; a host that
           // hasn't wired the flag omits it. Failing soft so a standing-read
           // problem (e.g. field-level-security denial) never blocks the modal.
@@ -1256,6 +1275,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
       const currentAccess = [...grantList, ...standingOnly, ...userShareList];
       setExistingGrants(currentAccess);
+      setCurrentAccessError(null);
 
       // Task 067: an organization wall in force walls off the organization's people, so the contacts in Current Access
       // are checked against it — only when such a wall exists and there are contacts to check.
@@ -1301,9 +1321,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       );
       setAssignedEntries(assignedList);
       setSecureOwnerInfo(ownerInfo);
-    } catch {
+    } catch (err) {
       if (!isCurrent()) return;
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
+      // Task 099a: Current Access is never shown as "No active grants" when it was not read. The server's ProblemDetails
+      // `detail` is shown verbatim (rendered as text); any other failure gets the generic sentence.
+      const failure: unknown = grantsReadFailure !== null ? (grantsReadFailure as { err: unknown }).err : err;
+      const detail: unknown = problemOf(failure)?.detail;
+      setCurrentAccessError(
+        typeof detail === 'string' && detail.trim() !== '' ? detail.trim() : CURRENT_ACCESS_READ_FAILED_MESSAGE
+      );
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
       setServerAccess(null);
@@ -2320,7 +2347,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
                   <Text className={styles.sectionTitle}>Current Access</Text>
                   <div className={styles.listArea}>
-                    {existingGrants.length === 0 ? (
+                    {currentAccessError !== null ? (
+                      // Task 099a: the read failed — say so (the server's own sentence), never "No active grants".
+                      <MessageBar intent="error" data-testid="current-access-error">
+                        <MessageBarBody>
+                          <MessageBarTitle>Current Access unavailable</MessageBarTitle>
+                          {currentAccessError}
+                        </MessageBarBody>
+                      </MessageBar>
+                    ) : existingGrants.length === 0 ? (
                       <Text className={styles.emptyState}>No active grants for this record.</Text>
                     ) : (
                       existingGrants.map(grant => {
@@ -2394,6 +2429,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               {suppressedReason && <Text className={styles.suppressedReason}>{suppressedReason}</Text>}
                             </div>
                             <div className={styles.rowActions}>
+                              {/* Task 099a: a lapsed grant confers nothing — shown as expired, never as live access. */}
+                              {grant.isExpired && (
+                                <Badge appearance="outline" color="danger" data-testid="grant-expired-badge">
+                                  {grant.expiresDate ? `Expired ${formatGrantDate(grant.expiresDate)}` : 'Expired'}
+                                </Badge>
+                              )}
                               {/* Task 067: the wall's marker, over the level the row would otherwise carry. */}
                               {vetoReason && (
                                 <Badge appearance="filled" color="danger">
