@@ -694,6 +694,10 @@ public static class AnalysisServicesModule
         // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
         services.AddSingleton<IRagService, NullRagService>();
 
+        // ISemanticSearchService (P3 Fail-Fast, ebilling-r1 task 107). The real impl is registered by AddSemanticSearch inside the
+        // compound gate; InvoiceRelatedWorkService (FinanceModule, unconditional) consumes it, so it must resolve on the AI-OFF path.
+        services.AddScoped<ISemanticSearchService, NullSemanticSearchService>();
+
         // ── Tier 1.5 round 4 — flushed by Step 9.5 latent-bug scan 2026-06-01 ─────────────────
         // Two additional P3 Fail-Fast Null-Objects surfaced by the same anti-pattern that the
         // 3 prior Tier 1.5 rounds fixed: unconditional endpoint mappings whose handlers inject
