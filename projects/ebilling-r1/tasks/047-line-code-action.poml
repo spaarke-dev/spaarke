@@ -4,7 +4,7 @@
     <title>UTBMS coding Action INVOICE-LINE-CODE@v1 and code-set resolution</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One Action + Binding through the 041 facade plus a deterministic resolver and a server-side code guard; follows the 042 pattern.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,7 +120,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-22, NFR-05, D-05, D-46, D-51, D-64. Shared append points: FinanceModule.cs, sprk_playbookconsumer-rows.json. The brief names scripts/seed-data/Deploy-Actions.ps1; the current mirror seeding is scripts/Deploy-ActionMirrors.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171). 048 implements the AI code-set suggestion hook defined here.</notes>
+  <notes>Spec FR-22, NFR-05, D-05, D-46, D-51, D-64. Shared append points: FinanceModule.cs, sprk_playbookconsumer-rows.json. The brief names scripts/seed-data/Deploy-Actions.ps1; the current mirror seeding is scripts/Deploy-ActionMirrors.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171). 048 implements the AI code-set suggestion hook defined here.
+    Completion (2026-10-16): code complete and committed; live dev seeding of the Action row and Binding is HELD for the owner (no dev tier maps to gpt-5.4-mini, low reasoning effort needs a platform change, and the accuracy sample is 55.0 percent gpt-4.1-mini / 63.3 percent gpt-5.4-mini task top-1 against NFR-05 80 percent). Acceptance criteria not yet met because of the hold: dev Action and Binding rows exist, Seed-PlaybookConsumers.ps1 -DiffOnly clean, /healthz consumer-type reconciliation Healthy. Seed the Binding row and deploy the BFF carrying the ConsumerTypes.All entry together. Details, options and live commands: projects/ebilling-r1/notes/047-line-code-action.md.
+    rework: fix-round-2 task 047</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
