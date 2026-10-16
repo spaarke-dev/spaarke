@@ -718,7 +718,31 @@ public class DataverseContactIdentityStoreTests
             .Should().Be(BindingReadability.Masked);
         DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Failed, HomeLinkLookup.Of())
             .Should().Be(BindingReadability.Failed);
+        // r3 047 fix round 1: a missing column is a permanent fault of its own, NOT a transient failure (500 vs 503 upstream).
         DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(), HomeLinkLookup.ColumnMissing)
+            .Should().Be(BindingReadability.ColumnMissing);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.ColumnMissing, HomeLinkLookup.Of())
+            .Should().Be(BindingReadability.ColumnMissing);
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Failed, HomeLinkLookup.ColumnMissing)
+            .Should().Be(BindingReadability.ColumnMissing, "a permanent fault is certain whatever the other leg did");
+        DataverseContactIdentityStore.ClassifyHomeProbe(ContactLookup.Of(), HomeLinkLookup.Failed)
             .Should().Be(BindingReadability.Failed);
     }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "anything", true)]
+    [InlineData(HttpStatusCode.BadRequest, "Principal user is missing prvCreateContact privilege.", true)]
+    [InlineData(HttpStatusCode.BadRequest, "{\"error\":{\"code\":\"0x80040220\"}}", true)]
+    [InlineData(HttpStatusCode.BadRequest, "A required property is missing.", false)]
+    [InlineData(HttpStatusCode.TooManyRequests, "privilege", false)]
+    [InlineData(HttpStatusCode.InternalServerError, "privilege", false)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, null, false)]
+    public void IsPermissionFault_IsA403OrAPrivilege400_NeverAThrottleOr5xx(HttpStatusCode status, string? body, bool expected)
+        => DataverseContactIdentityStore.IsPermissionFault(status, body).Should().Be(expected);
+
+    [Fact]
+    public void TheSecureBusinessUnitRead_IsTheBusinessUnitByName_WithTheSharedSecureRecordFilter()
+        => DataverseContactIdentityStore.BuildBusinessUnitByNamePath("Secure Record").Should().Be(
+            "businessunits?$select=businessunitid&$filter=name eq 'Secure Record'&$top=2");
+
 }

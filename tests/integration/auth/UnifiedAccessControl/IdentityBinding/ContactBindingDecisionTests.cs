@@ -855,6 +855,73 @@ public class ContactBindingDecisionTests
         Holds(flag, Unbound(ContactA)).Should().BeFalse();
     }
 
+    // ── r3 047 fix round 1 (F-A): a single unbindable registration match is flagged by CAUSE ──────────
+
+    private static ContactBindingRow UnreadableBinding(Guid id) => new(id, 0, null, (int)IdentityPlaneMarker.Workforce);
+
+    private static readonly SystemUserReference LinkedToA = new(Guid.Parse("dddddddd-0000-4000-8000-00000000000d"), Other, ContactA);
+
+    [Theory]
+    [InlineData("bound-workforce", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("bound-external", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("bound-workforcehome", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("unreadable", IdentityCollisionReason.BindingUnreadable)]
+    [InlineData("linked", IdentityCollisionReason.LinkedToOtherUser)]
+    [InlineData("two", IdentityCollisionReason.EmailAmbiguous)]
+    public void DecideRegistrationEmail_UnbindableMatch_IsFlaggedByCause_AndOnlyTwoOrMoreAreEmailAmbiguous(
+        string shape, IdentityCollisionReason expected)
+    {
+        var rows = shape switch
+        {
+            "bound-workforce" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.Workforce) },
+            "bound-external" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.External) },
+            "bound-workforcehome" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome) },
+            "unreadable" => new[] { UnreadableBinding(ContactA) },
+            "two" => new[] { Unbound(ContactA), Unbound(ContactB) },
+            _ => new[] { Unbound(ContactA) },
+        };
+        var references = shape == "linked" ? ReferenceLookup.Of(LinkedToA) : ReferenceLookup.Of();
+
+        var decision = ContactBindingDecision.DecideRegistrationEmail(ContactLookup.Of(rows), Caller, references);
+
+        decision.Action.Should().Be(RegistrationEmailAction.Conflict);
+        decision.FlagReason.Should().Be(expected);
+        decision.FlagContactIds.Should().BeEquivalentTo(rows.Select(r => r.ContactId));
+    }
+
+    [Theory]
+    [InlineData(IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData(IdentityCollisionReason.BindingUnreadable)]
+    [InlineData(IdentityCollisionReason.LinkedToOtherUser)]
+    public void CollisionStillHolds_ASingleMatchReason_HoldsForAWorkforceHomeParty_WhileTheCauseHolds(IdentityCollisionReason reason)
+    {
+        // The registering party is a WorkforceHome identity whose home oid is never a systemuser's or the other binding's.
+        var party = Party(reason, Caller, IdentityPlaneMarker.WorkforceHome);
+        var oneCarrier = Unbound(ContactA);
+        var (flagged, refs) = reason switch
+        {
+            IdentityCollisionReason.BoundToDifferentOid => (Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome), ReferenceLookup.Of()),
+            IdentityCollisionReason.BindingUnreadable => (UnreadableBinding(ContactA), ReferenceLookup.Of()),
+            _ => (oneCarrier, ReferenceLookup.Of(LinkedToA)),
+        };
+
+        // ONE active carrier of the email: the old EmailAmbiguous reason would have been cleared here.
+        Holds(party, flagged, email: ContactLookup.Of(flagged), refs: refs)
+            .Should().BeTrue("the cause still holds, so the reconciliation job must keep the flag");
+
+        // Control: once the cause is gone it clears (the job is not made inert).
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA)))
+            .Should().BeFalse("the cause is gone");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_EmailAmbiguousForAWorkforceHomeParty_StillClearsWhenOnlyOneCarrierRemains()
+    {
+        var party = Party(IdentityCollisionReason.EmailAmbiguous, Caller, IdentityPlaneMarker.WorkforceHome);
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA), Unbound(ContactB))).Should().BeTrue();
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA))).Should().BeFalse();
+    }
+
     // ── B2 (owner round 4 item 4): the uniqueness mirror ─────────────────────────────────────────────────
 
     [Fact]

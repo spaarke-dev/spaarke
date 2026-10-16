@@ -65,6 +65,13 @@ public sealed record OwnerTeamLookup(LookupStatus Status, IReadOnlyList<Guid> Te
     public static OwnerTeamLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
 }
 
+/// <summary>ADR-028 A9 (r3 task 047): the business units carrying a name (two rows, so ambiguity is visible).</summary>
+public sealed record BusinessUnitLookup(LookupStatus Status, IReadOnlyList<Guid> BusinessUnitIds)
+{
+    /// <summary>A business-unit read that could not be read.</summary>
+    public static BusinessUnitLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
+}
+
 /// <summary>How a store write ended.</summary>
 public enum StoreWriteStatus
 {
@@ -85,6 +92,13 @@ public enum StoreWriteStatus
 
     /// <summary>Any other failure.</summary>
     Failed,
+
+    /// <summary>
+    /// Dataverse refused the write for a missing PRIVILEGE (HTTP 403, or a 400 that names a privilege): the identity's
+    /// roles do not allow it (e.g. the owner team holds no role with contact read, or the application user cannot
+    /// Assign). A permanent configuration fault — retrying changes nothing. See <see cref="DataverseContactIdentityStore.IsPermissionFault"/>.
+    /// </summary>
+    Forbidden,
 
     /// <summary>
     /// The write would put the oid into the uniqueness mirror while ANOTHER contact already holds it — Dataverse's
@@ -121,8 +135,14 @@ public enum BindingReadability
     /// <summary>Every marked row came back with no oid: the column is masked. No bind, create or link is safe.</summary>
     Masked,
 
-    /// <summary>The probe itself could not be read.</summary>
+    /// <summary>The probe itself could not be read (transient: a throttle, a 5xx, a network fault). Retryable.</summary>
     Failed,
+
+    /// <summary>
+    /// The home probe selected a column that is not provisioned here (the A9 schema is not applied). A permanent
+    /// configuration fault, not a transient read failure; only <see cref="IContactIdentityStore.ProbeHomeReadabilityAsync"/> reports it.
+    /// </summary>
+    ColumnMissing,
 }
 
 /// <summary>One page of a scan, and the continuation for the next page (null when done).</summary>
@@ -174,6 +194,13 @@ public interface IContactIdentityStore
     /// <paramref name="email"/> (owner 2026-10-15), two rows. Read-only; the registration route's licensed-user refusal.
     /// </summary>
     Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, fix round 1): the business units named <paramref name="name"/>, two rows. Read-only. The
+    /// registration create's guard that <c>ExternalAccess:CustomerBusinessUnitId</c> is not the Secure Record business unit
+    /// (the same name rule and filter as <c>RecordOwnershipResolver</c>: <c>SecureRecordOwnerTeam</c>).
+    /// </summary>
+    Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct);
 
     /// <summary>ADR-028 A9 (r3 task 047): the default (owner) team of <paramref name="businessUnitId"/>, two rows. Read-only.</summary>
     Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct);
@@ -485,6 +512,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildDefaultOwnerTeamPath(Guid businessUnitId)
         => $"teams?$select=teamid&$filter=_businessunitid_value eq {businessUnitId:D} and isdefault eq true and teamtype eq 0&$top=2";
 
+    /// <summary>The business units carrying a name, two rows (the filter is <c>SecureRecordOwnerTeam.BusinessUnitFilter</c>).</summary>
+    public static string BuildBusinessUnitByNamePath(string name)
+        => $"businessunits?$select=businessunitid&$filter={Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.BusinessUnitFilter(name)}&$top=2";
+
     /// <summary>The A9 contact probe: WorkforceHome rows with their binding and home directory.</summary>
     public static string BuildHomeContactProbePath()
         => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn},"
@@ -506,6 +537,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     {
         ArgumentNullException.ThrowIfNull(contacts);
         ArgumentNullException.ThrowIfNull(links);
+        // A missing column is a permanent fault (an operator applies the schema); any other unread status is transient.
+        if (contacts.Status == LookupStatus.ColumnMissing || links.Status == LookupStatus.ColumnMissing) return BindingReadability.ColumnMissing;
         if (contacts.Status != LookupStatus.Read || links.Status != LookupStatus.Read) return BindingReadability.Failed;
 
         if (contacts.Rows.Count > 0 && contacts.Rows.All(r => string.IsNullOrWhiteSpace(r.RawExternalTenantId)))
@@ -841,6 +874,17 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             ? LookupStatus.ColumnMissing
             : LookupStatus.Failed;
 
+    /// <summary>
+    /// True when a write refusal is a missing PRIVILEGE, not a fault that a retry can clear: HTTP 403, or a 400 whose body
+    /// names a privilege (<c>prv…</c> / "privilege") or the access-check code <c>0x80040220</c>. 429, 5xx and network
+    /// faults are NOT permission faults (they stay retryable). Pure.
+    /// </summary>
+    public static bool IsPermissionFault(HttpStatusCode status, string? body)
+        => status == HttpStatusCode.Forbidden
+           || (status == HttpStatusCode.BadRequest && body is not null
+               && (body.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+                   || body.Contains("0x80040220", StringComparison.OrdinalIgnoreCase)));
+
     /// <summary>True when a Dataverse error body says the alternate key in the URL is not defined.</summary>
     public static bool IsKeyMissing(string? body)
         => body is not null && body.Contains("key in the request URI is not valid", StringComparison.OrdinalIgnoreCase);
@@ -1037,6 +1081,21 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <inheritdoc />
+    public async Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var (status, _, body, _) = await GetAsync(BuildBusinessUnitByNamePath(name), ct).ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return BusinessUnitLookup.Failed;
+        }
+
+        var ids = Values(doc.RootElement).Select(r => GuidOf(r, "businessunitid")).Where(g => g is not null).Select(g => g!.Value).ToList();
+        return new BusinessUnitLookup(LookupStatus.Read, ids);
+    }
+
+    /// <inheritdoc />
     public async Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct)
     {
         var (cStatus, _, cBody, _) = await GetAsync(BuildHomeContactProbePath(), ct).ConfigureAwait(false);
@@ -1049,11 +1108,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         using var cDoc = cStatus == LookupStatus.Read && cBody is not null ? TryParseJson(cBody) : null;
         using var lDoc = lStatus == LookupStatus.Read && lBody is not null ? TryParseJson(lBody) : null;
         var contacts = cDoc is null
-            ? ContactLookup.Failed
+            ? (cStatus == LookupStatus.ColumnMissing ? ContactLookup.ColumnMissing : ContactLookup.Failed)
             : new ContactLookup(LookupStatus.Read,
                 Values(cDoc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList());
         var links = lDoc is null
-            ? HomeLinkLookup.Failed
+            ? (lStatus == LookupStatus.ColumnMissing ? HomeLinkLookup.ColumnMissing : HomeLinkLookup.Failed)
             : new HomeLinkLookup(LookupStatus.Read,
                 Values(lDoc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList());
         return ClassifyHomeProbe(contacts, links);
@@ -1309,6 +1368,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {Body}", method, path, (int)response.StatusCode, Trim(body));
+            if (IsPermissionFault(response.StatusCode, body))
+            {
+                return new StoreWriteResult(StoreWriteStatus.Forbidden, Error: $"{(int)response.StatusCode}: {Trim(body)}");
+            }
+
             return new StoreWriteResult(StoreWriteStatus.Failed, Error: $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

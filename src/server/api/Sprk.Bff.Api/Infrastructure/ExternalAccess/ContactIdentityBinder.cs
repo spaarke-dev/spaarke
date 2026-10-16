@@ -133,6 +133,10 @@ public sealed record InviteMarkResult(StoreWriteResult Write)
 /// <param name="Department">The form's optional department.</param>
 /// <param name="ConfirmExistingRecord">True when the person confirmed binding to an existing contact (409 first).</param>
 /// <param name="CustomerBusinessUnitId"><c>ExternalAccess:CustomerBusinessUnitId</c>; null when not configured.</param>
+/// <param name="SecureBusinessUnitName">
+/// The Secure Record business unit's name (<c>SecureRecordOwnerTeam.BusinessUnitName(configuration)</c>): the create is
+/// refused when <paramref name="CustomerBusinessUnitId"/> is that business unit.
+/// </param>
 public sealed record HomeRegistrationRequest(
     Guid HomeTenantId,
     Guid HomeObjectId,
@@ -141,7 +145,8 @@ public sealed record HomeRegistrationRequest(
     string LastName,
     string? Department,
     bool ConfirmExistingRecord,
-    Guid? CustomerBusinessUnitId);
+    Guid? CustomerBusinessUnitId,
+    string SecureBusinessUnitName);
 
 /// <summary>What a registration did.</summary>
 public enum HomeRegistrationOutcome
@@ -573,8 +578,17 @@ public sealed class ContactIdentityBinder
         // 046 review (K, carried): a masked secured column makes a registered contact or link look absent — probe first.
         var binding = await _store.ProbeBindingReadabilityAsync(ct).ConfigureAwait(false);
         var home = await _store.ProbeHomeReadabilityAsync(ct).ConfigureAwait(false);
-        if (binding is BindingReadability.Masked or BindingReadability.Failed
-            || home is BindingReadability.Masked or BindingReadability.Failed)
+        if (home == BindingReadability.ColumnMissing)
+        {
+            // Permanent: the A9 schema is not applied here. An operator fix (500 registration_environment), not a retry.
+            _logger.LogError(
+                "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): an A9 home-identity column is not provisioned. Nothing "
+                + "was bound or created. Apply scripts/Set-WorkforceHomeIdentitySchema.ps1.",
+                who, ContactBindingDecision.DenyBindingColumnMissing);
+            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyBindingColumnMissing);
+        }
+
+        if (binding == BindingReadability.Masked || home == BindingReadability.Masked)
         {
             _logger.LogError(
                 "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): binding column {Binding}, A9 columns {Home}. Nothing "
@@ -582,6 +596,16 @@ public sealed class ContactIdentityBinder
                 + "scripts/Set-WorkforceHomeIdentitySchema.ps1).",
                 who, ContactBindingDecision.DenyBindingColumnMasked, binding, home);
             return HomeRegistrationResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
+        }
+
+        if (binding == BindingReadability.Failed || home == BindingReadability.Failed)
+        {
+            // Transient (a throttle, a 5xx, a network fault): retryable, and not an FLS fault — so a warning, not an error.
+            _logger.LogWarning(
+                "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the masking probe could not be read (binding {Binding}, "
+                + "A9 columns {Home}). Nothing was bound or created; retryable.",
+                who, ContactBindingDecision.DenyContactLookupFailed, binding, home);
+            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
         }
 
         // Design §6 step 2: a licensed user's email is refused (a refusal only — never a link or a grant).
@@ -618,12 +642,15 @@ public sealed class ContactIdentityBinder
                 case RegistrationEmailAction.Conflict:
                 {
                     var flagged = decision.FlagContactIds ?? Array.Empty<Guid>();
+                    // By cause: EmailAmbiguous only for 2+ matches. A single unbindable match carries its own reason so
+                    // the reconciliation job's CollisionStillHolds keeps the flag while that cause holds.
+                    var reason = decision.FlagReason ?? IdentityCollisionReason.EmailAmbiguous;
                     var wrote = await WriteFlagsAsync(flagged, known, oid, IdentityPlaneMarker.WorkforceHome,
-                        IdentityCollisionReason.EmailAmbiguous, ct).ConfigureAwait(false);
+                        reason, ct).ConfigureAwait(false);
                     _logger.LogWarning(
                         "[ID-BIND] Registration for {Who} refused: the email matches contact(s) [{Contacts}] that cannot be "
-                        + "bound (ambiguous, bound, linked or unreadable); flagged EmailAmbiguous (wrote={Wrote})",
-                        who, string.Join(",", flagged), wrote);
+                        + "bound (ambiguous, bound, linked or unreadable); flagged {Reason} (wrote={Wrote})",
+                        who, string.Join(",", flagged), reason, wrote);
                     return new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, Wrote: wrote);
                 }
 
@@ -684,6 +711,24 @@ public sealed class ContactIdentityBinder
             return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
         }
 
+        // The customer business unit must never be the Secure Record business unit: a registrant's contact owned by a team
+        // there would be a record in the secure unit. Decided by ID (as RecordOwnershipResolver does); an unreadable or
+        // ambiguous answer refuses (fail closed); only "no such business unit in this environment" lets the create through.
+        var secure = await _store.FindBusinessUnitsByNameAsync(request.SecureBusinessUnitName, ct).ConfigureAwait(false);
+        if (secure.Status != LookupStatus.Read)
+        {
+            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+        }
+
+        if (secure.BusinessUnitIds.Count > 1 || secure.BusinessUnitIds.Contains(bu))
+        {
+            _logger.LogError(
+                "[ID-BIND] Registration for {Who} refused: ExternalAccess:CustomerBusinessUnitId {BusinessUnitId} is the Secure "
+                + "Record business unit (or that unit is ambiguous: {Count} named '{Name}'). Nothing was created.",
+                who, bu, secure.BusinessUnitIds.Count, request.SecureBusinessUnitName);
+            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+        }
+
         var teams = await _store.FindDefaultOwnerTeamsAsync(bu, ct).ConfigureAwait(false);
         if (teams.Status != LookupStatus.Read)
         {
@@ -733,6 +778,16 @@ public sealed class ContactIdentityBinder
                     "[ID-BIND] Registration for {Who} refused ({DenyCode}): the alternate key on {Mirror} is not defined. "
                     + "Apply scripts/Set-ContactIdentityBindingSchema.ps1.",
                     who, ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
+                return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+
+            case StoreWriteStatus.Forbidden:
+                // A missing privilege (the owner team holds no role with contact read, or the application user cannot
+                // Assign): permanent, an operator fix - not retryable.
+                _logger.LogError(
+                    "[ID-BIND] Registration for {Who} refused ({DenyCode}): Dataverse refused the create for a missing "
+                    + "privilege (the customer business unit's default owner team needs a role with contact read, and the BFF "
+                    + "application user needs Assign). Nothing was created.",
+                    who, ContactBindingDecision.DenyContactCreateUnavailable);
                 return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
 
             default:

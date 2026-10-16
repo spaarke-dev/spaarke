@@ -390,7 +390,8 @@ public sealed record RegistrationEmailDecision(
     RegistrationEmailAction Action,
     Guid? ContactId = null,
     string? DenyCode = null,
-    IReadOnlyList<Guid>? FlagContactIds = null);
+    IReadOnlyList<Guid>? FlagContactIds = null,
+    IdentityCollisionReason? FlagReason = null);
 
 /// <summary>A systemuser whose <c>sprk_primarycontact</c> points at a contact under consideration.</summary>
 public sealed record SystemUserReference(Guid SystemUserId, Guid? Oid, Guid LinkedContactId);
@@ -1550,14 +1551,16 @@ public static class ContactBindingDecision
     /// Design §4 "Registering to an existing contact" / §6 step 3: what the token email's ACTIVE contacts allow. Pure.
     /// <list type="bullet">
     ///   <item>No match → <see cref="RegistrationEmailAction.Create"/>.</item>
-    ///   <item>Several matches → <see cref="RegistrationEmailAction.Conflict"/> over all of them.</item>
+    ///   <item>Several matches → <see cref="RegistrationEmailAction.Conflict"/> over all of them, reason
+    ///   <see cref="IdentityCollisionReason.EmailAmbiguous"/>.</item>
     ///   <item>One match bound to <paramref name="callerOid"/> → <see cref="RegistrationEmailAction.AlreadyBoundToCaller"/>
     ///   (a concurrent registration bound or created it; the caller re-reads and never writes).</item>
     ///   <item>One match that is bound to anyone else, on any plane (External included), or whose binding cannot be read →
-    ///   <see cref="RegistrationEmailAction.Conflict"/>.</item>
+    ///   <see cref="RegistrationEmailAction.Conflict"/> by its cause: <see cref="IdentityCollisionReason.BoundToDifferentOid"/>
+    ///   or <see cref="IdentityCollisionReason.BindingUnreadable"/>.</item>
     ///   <item>One unbound match → <see cref="RegistrationEmailAction.NeedReferenceLookup"/>, then
     ///   <see cref="RegistrationEmailAction.Conflict"/> when ANY systemuser links it (E10: binding would merge two people),
-    ///   else <see cref="RegistrationEmailAction.BindExisting"/>.</item>
+    ///   (<see cref="IdentityCollisionReason.LinkedToOtherUser"/>), else <see cref="RegistrationEmailAction.BindExisting"/>.</item>
     ///   <item>A read that failed → <see cref="RegistrationEmailAction.Deny"/>.</item>
     /// </list>
     /// </summary>
@@ -1580,7 +1583,8 @@ public static class ContactBindingDecision
         if (rows.Count > 1)
         {
             return new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
-                FlagContactIds: rows.Select(r => r.ContactId).Distinct().ToList());
+                FlagContactIds: rows.Select(r => r.ContactId).Distinct().ToList(),
+                FlagReason: IdentityCollisionReason.EmailAmbiguous);
         }
 
         var row = rows[0];
@@ -1592,8 +1596,14 @@ public static class ContactBindingDecision
 
         if (binding.Kind != BindingKind.Unbound)
         {
+            // Flagged by CAUSE (not EmailAmbiguous): CollisionStillHolds keeps EmailAmbiguous only while 2+ active
+            // contacts carry the email, so a single match flagged EmailAmbiguous would be cleared by the next
+            // reconciliation run although nothing changed.
             return new RegistrationEmailDecision(RegistrationEmailAction.Conflict, row.ContactId,
-                FlagContactIds: new[] { row.ContactId });
+                FlagContactIds: new[] { row.ContactId },
+                FlagReason: binding.Kind == BindingKind.Bound
+                    ? IdentityCollisionReason.BoundToDifferentOid
+                    : IdentityCollisionReason.BindingUnreadable);
         }
 
         if (references is null)
@@ -1609,7 +1619,7 @@ public static class ContactBindingDecision
 
         return references.References.Any(r => r.LinkedContactId == row.ContactId)
             ? new RegistrationEmailDecision(RegistrationEmailAction.Conflict, row.ContactId,
-                FlagContactIds: new[] { row.ContactId })
+                FlagContactIds: new[] { row.ContactId }, FlagReason: IdentityCollisionReason.LinkedToOtherUser)
             : new RegistrationEmailDecision(RegistrationEmailAction.BindExisting, row.ContactId);
     }
 

@@ -1739,6 +1739,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeContactsAsync(homeTenantId, homeObjectId, ct);
     public Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct) => _inner.FindEnabledSystemUsersByEmailAsync(email, ct);
     public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct) => _inner.FindDefaultOwnerTeamsAsync(businessUnitId, ct);
+    public Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct) => _inner.FindBusinessUnitsByNameAsync(name, ct);
     public Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct) => _inner.ProbeHomeReadabilityAsync(ct);
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct) => _inner.BindHomeOidAsync(contactId, etag, homeTenantId, oid, ct);
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct) => _inner.FindBindIntentAsync(contactId, ct);

@@ -24,6 +24,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -107,6 +108,7 @@ public static class ExternalRegistrationEndpoints
         IWorkforcePrincipalResolver resolver,
         ContactIdentityBinder binder,
         IOptionsMonitor<ExternalAccessOptions> options,
+        IConfiguration configuration,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -187,7 +189,8 @@ public static class ExternalRegistrationEndpoints
                     request!.FirstName!.Trim(), request.LastName!.Trim(),
                     string.IsNullOrWhiteSpace(request.Department) ? null : request.Department.Trim(),
                     request.ConfirmExistingRecord == true,
-                    options.CurrentValue.CustomerBusinessUnitId),
+                    options.CurrentValue.CustomerBusinessUnitId,
+                    SecureRecordOwnerTeam.BusinessUnitName(configuration)),
                 ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

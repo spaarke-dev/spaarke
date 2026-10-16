@@ -191,6 +191,18 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>A9 (r3 task 047): the default-team read fails.</summary>
     public bool FailTeamLookup { get; set; }
 
+    /// <summary>A9 (r3 task 047, fix round 1): the home masking probe reports a column that is not provisioned.</summary>
+    public bool HomeProbeColumnMissing { get; set; }
+
+    /// <summary>A9 (r3 task 047, fix round 1): a create ends with this status instead of writing (e.g. <c>Forbidden</c>).</summary>
+    public StoreWriteStatus? CreateStatusOverride { get; set; }
+
+    /// <summary>A9 (r3 task 047, fix round 1): the business-unit-by-name read fails.</summary>
+    public bool FailBusinessUnitLookup { get; set; }
+
+    /// <summary>A9 (r3 task 047, fix round 1): business units by NAME (the Secure Record guard's read).</summary>
+    public Dictionary<string, List<Guid>> BusinessUnitsByName { get; } = new(StringComparer.Ordinal);
+
     /// <summary>A9 (r3 task 047): each business unit's default owner team(s) (<c>isdefault</c>, <c>teamtype = 0</c>).</summary>
     public Dictionary<Guid, List<Guid>> DefaultTeams { get; } = new();
 
@@ -221,6 +233,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
             MaskHomeColumns = FailHomeProbe = FailLicensedUserLookup = FailTeamLookup = false;
+            HomeProbeColumnMissing = FailBusinessUnitLookup = false;
+            CreateStatusOverride = null;
+            BusinessUnitsByName.Clear();
             DefaultTeams.Clear();
             Grants.Clear();
             InviteMarkerStatus = LookupStatus.Read;
@@ -453,6 +468,18 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    public Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("business-unit");
+            AfterRead?.Invoke("business-unit");
+            if (FailBusinessUnitLookup) return Task.FromResult(BusinessUnitLookup.Failed);
+            var ids = BusinessUnitsByName.TryGetValue(name, out var found) ? found.Take(2).ToArray() : Array.Empty<Guid>();
+            return Task.FromResult(new BusinessUnitLookup(LookupStatus.Read, ids));
+        }
+    }
+
     public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct)
     {
         lock (_gate)
@@ -471,6 +498,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         {
             Reads.Add("home-probe");
             AfterRead?.Invoke("home-probe");
+            if (HomeProbeColumnMissing) return Task.FromResult(BindingReadability.ColumnMissing);
             if (FailHomeProbe) return Task.FromResult(BindingReadability.Failed);
             var contacts = Contacts.Values
                 .Where(c => c.Plane == ContactBindingDecision.WorkforceHomePlaneValue).Take(50).Select(Row).ToArray();
@@ -619,6 +647,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
+            if (CreateStatusOverride is { } overridden) return new StoreWriteResult(overridden, Error: "injected");
             if (!KeyDefined) return new StoreWriteResult(StoreWriteStatus.KeyMissing);
             if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return DuplicateMirrorKey();
         }

@@ -141,7 +141,7 @@ The new store, payload and probe tests cannot compile against the base, because 
 
 ## Known limits / open questions
 
-1. **EmailAmbiguous flag on a single match.** The route flags one bound, linked or External match `EmailAmbiguous`, as the POML says. `CollisionStillHolds` for `EmailAmbiguous` needs more than one active email carrier, so the reconciliation job will clear that flag on its next run. Should a single-match conflict use a different reason (for example `BoundToDifferentOid` or `LinkedToOtherUser`), or should the job keep it? (open question)
+1. **EmailAmbiguous flag on a single match.** Resolved in fix round 1 (see below): a single unbindable match is flagged by its cause.
 2. **The email-claim rule.** The design (§6 line 128) says "no `email` and no `preferred_username` → `registration_email_missing`". The POML and the brief say the `email` claim only. The POML/brief rule was followed: `preferred_username` and `upn` are never read.
 3. **Reason-code strings** use the `sdap.access.` prefix (the `registration_required` precedent), for example `sdap.access.licensed_user_link_required`. SPA task 058 must match the full string.
 4. **Codes beyond the closed set, one line each:**
@@ -160,3 +160,33 @@ The new store, payload and probe tests cannot compile against the base, because 
 
 - **#1982** ("Task 154: worklist …") also edits `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`. Expect a conflict on `ExpectedEndpointFileCount` and its changelog when both merge.
 - No other open PR touches the files changed here.
+
+## Fix round 1
+
+Two adversarial passes (pass 1 and pass 2) produced these findings. All are fixed in this commit.
+
+| Id | Finding | Fix | Tests |
+|---|---|---|---|
+| F-A | A single unbindable match was flagged `EmailAmbiguous`, but `CollisionStillHolds` keeps `EmailAmbiguous` only while more than one active contact carries the email. IdentityLinkReconciliationJob therefore cleared the flag on its next run (a WorkforceHome party's home oid is never a systemuser's or another binding's oid). | `DecideRegistrationEmail` returns `FlagReason` by cause: bound to another oid on any plane = `BoundToDifferentOid`; unreadable binding = `BindingUnreadable`; linked to a systemuser = `LinkedToOtherUser`; two or more matches = `EmailAmbiguous`. The binder writes that reason. | `ContactBindingDecisionTests`: `DecideRegistrationEmail_UnbindableMatch_IsFlaggedByCause_...` (6 shapes), `CollisionStillHolds_ASingleMatchReason_HoldsForAWorkforceHomeParty_...` (3 reasons, with a clears-when-cause-gone control), `CollisionStillHolds_EmailAmbiguousForAWorkforceHomeParty_StillClearsWhenOnlyOneCarrierRemains`. Route: `UnbindableMatch_Is403RegistrationContactConflict_FlaggedByCause_...` (6 shapes, including a WorkforceHome contact bound to a different oid, which was untested). |
+| F-B | `BindingReadability.Failed` (a transient 429/5xx) mapped to `DenyBindingColumnMasked` (500 `registration_environment`, "contact your administrator", FLS error log). `ProbeHomeReadabilityAsync` folded a missing column into `Failed`. | New `BindingReadability.ColumnMissing`, reported by `ClassifyHomeProbe` / `ProbeHomeReadabilityAsync` (a missing column wins over a transient failure on the other leg). The binder maps `Failed` to `DenyContactLookupFailed` (503 `registration_unavailable`, warning log); masked stays `DenyBindingColumnMasked` and a missing column maps to `DenyBindingColumnMissing`, both 500. | Route: the old `probe-failed` case moved to `TransientProbeFailure_Is503Unavailable_Retryable_AndNeverCreates` (home and binding probe); `MaskedBindingOrMissingA9Columns_Is500Environment_AndNeverCreates` gained `home-column-missing`. Store: `ClassifyHomeProbe_...` asserts `ColumnMissing` vs `Failed`. |
+| F-C1 | A 403 (or a 400 privilege error) from Dataverse on the CREATE (owner team without a role with contact read; app user without Assign) was a 503, so callers retried a permanent fault. | New `StoreWriteStatus.Forbidden` from `DataverseContactIdentityStore.IsPermissionFault` (403, or 400 naming a privilege / `0x80040220`; 429, 5xx and network faults stay `Failed`). The binder maps it to `DenyContactCreateUnavailable` (500 `registration_environment`). | Store: `IsPermissionFault_...` (7 cases). Route: `Create_RefusedForAMissingPrivilege_Is500Environment_NotRetryable`, control `Create_FailedTransiently_StaysA503Unavailable`. |
+| F-C2 | `ExternalAccess:CustomerBusinessUnitId` could name the Secure Record business unit. | The create reads the business unit named by `SecureRecordOwnerTeam.BusinessUnitName(configuration)` (new `FindBusinessUnitsByNameAsync`, `SecureRecordOwnerTeam.BusinessUnitFilter`, top 2) and refuses by ID, as `RecordOwnershipResolver` does: the customer unit is the Secure Record unit, or the name is ambiguous = 500 `registration_owner_unconfigured`; an unreadable answer = 503; no such unit = proceeds. The check runs before the owner team is read. | Route: `CustomerBusinessUnit_IsTheSecureRecordBusinessUnit_...`, `SecureRecordBusinessUnit_Ambiguous_...`, `SecureRecordBusinessUnitRead_Failed_...`, control `CustomerBusinessUnit_DifferentFromTheSecureRecordBusinessUnit_Registers`. Store: `TheSecureBusinessUnitRead_...`. |
+| Pass 1 | Two route tests were missing. | Added `FailedLicensedUserRead_Is503Unavailable_NothingWritten` and `FailedOwnerTeamRead_Is503Unavailable_NothingCreated`. | Same. |
+
+Section 11 for the one new store method (`FindBusinessUnitsByNameAsync`). Existing: `RecordOwnershipResolver.ResolveSecureBusinessUnitAsync` and `RegistrationDataverseService.EnsureNotSecureRecordBusinessUnitAsync`, which use the SDK client and a different raw-HTTP client. Extension: neither is reachable from this store's HTTP seam without a new dependency, so the same name rule and filter (`SecureRecordOwnerTeam`) are reused through the store's own `GetAsync`. Cost of doing nothing: a registrant's contact could be owned by a team in the Secure Record business unit.
+
+Before / after (filtered run `ExternalRegistration|ContactBindingDecision|DataverseContactIdentityStore`, with the new behavior reverted in the binder, decision and `IsPermissionFault`): before, 16 failed of 275; after, 0 failed. Full filtered set (ExternalRegistration, ContactBindingDecision, IdentityLink, ContactIdentityBinder, DataverseContactIdentityStore, WorkforcePrincipalResolver): 412 passed, 0 failed. ArchTests `AuthenticationSchemeCensus|RouteAuthorizationGuard`: 93 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
+
+Not changed in this round (carried): a missing column on the BINDING probe (`ClassifyProbe`) still reads as `Failed` and so answers 503 on this route; the 046 resolver's step 1 already answers a missing A9 column before registration. A 403 on the BIND (PATCH) of an existing contact still maps to `DenyContactBindFailed` (503); the brief covers the CREATE only.
+
+## Review known limits
+
+Filed or carried from review; one line each.
+
+- K1: `removeUnverifiedEmailClaim` is not enforced in provisioning (to be filed by the main session).
+- K1: A deactivated contact does not block registration (owner decision pending).
+- K2: There is a systemuser-link race between the reference lookup and the bind.
+- K2: A pending CIAM invitee can be bound.
+- K2: Two directories with the same mail registering at the same time can create two contacts.
+- K2: Raw tid/oid appear in the shared binder flag logs and in the 046 resolver logs (to be filed).
+- K2: The only-caller ArchTest pins the interface, not the concrete store method or the generic `BindOidAsync(WorkforceHome)`.

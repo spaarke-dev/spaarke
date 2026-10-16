@@ -201,11 +201,14 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     }
 
     [Theory]
-    [InlineData("two")]
-    [InlineData("bound")]
-    [InlineData("linked")]
-    [InlineData("external")]
-    public async Task UnbindableMatch_Is403RegistrationContactConflict_Flagged_NothingBoundOrCreated(string shape)
+    [InlineData("two", IdentityCollisionReason.EmailAmbiguous)]
+    [InlineData("bound", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("linked", IdentityCollisionReason.LinkedToOtherUser)]
+    [InlineData("external", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("workforcehome-other", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("unreadable", IdentityCollisionReason.BindingUnreadable)]
+    public async Task UnbindableMatch_Is403RegistrationContactConflict_FlaggedByCause_NothingBoundOrCreated(
+        string shape, IdentityCollisionReason expectedReason)
     {
         var a = _store.AddContact(Guid.NewGuid(), email: Email);
         var flagged = new List<InMemoryContactIdentityStore.Contact> { a };
@@ -225,13 +228,26 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
                 a.Oid = a.KeyMirror = Guid.NewGuid().ToString("D");
                 a.Plane = (int)IdentityPlaneMarker.External;
                 break;
+            case "workforcehome-other":
+                // A WorkforceHome contact bound to a DIFFERENT home oid (its tenant is readable, so the probe passes).
+                a.Oid = a.KeyMirror = Guid.NewGuid().ToString("D");
+                a.Plane = (int)IdentityPlaneMarker.WorkforceHome;
+                a.ExternalTenantId = HomeTenant.ToString("D");
+                break;
+            case "unreadable":
+                // A plane marker with no oid is unreadable. A second marked contact keeps the masking probe Readable.
+                a.Oid = a.KeyMirror = null;
+                a.Plane = (int)IdentityPlaneMarker.Workforce;
+                _store.AddContact(Guid.NewGuid(), oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.Workforce,
+                    email: "someone.else@customer.example");
+                break;
         }
 
         var contactsBefore = _store.Contacts.Count;
         var response = await Post(Body(confirm: true));
 
         await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalRegistrationEndpoints.ReasonContactConflict);
-        flagged.Should().AllSatisfy(c => c.Flag!.Reason.Should().Be(IdentityCollisionReason.EmailAmbiguous));
+        flagged.Should().AllSatisfy(c => c.Flag!.Reason.Should().Be(expectedReason));
         _store.Writes.Select(w => w.Op).Should().OnlyContain(op => op == "flag");
         _store.Contacts.Count.Should().Be(contactsBefore);
         _store.ContactsBoundTo(_oid).Should().BeEmpty();
@@ -242,8 +258,8 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [Theory]
     [InlineData("binding-masked")]
     [InlineData("home-masked")]
-    [InlineData("probe-failed")]
-    public async Task UnreadableBindingOrA9Columns_Denies_AndNeverCreates(string shape)
+    [InlineData("home-column-missing")]
+    public async Task MaskedBindingOrMissingA9Columns_Is500Environment_AndNeverCreates(string shape)
     {
         // A registered WorkforceHome contact whose tenant column is masked looks unregistered to the 046 read.
         var other = AddHomeContact(Guid.NewGuid(), oid: Guid.NewGuid());
@@ -251,7 +267,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         {
             case "binding-masked": _store.MaskBindingColumn = true; break;
             case "home-masked": _store.MaskHomeColumns = true; break;
-            default: _store.FailHomeProbe = true; break;
+            default: _store.HomeProbeColumnMissing = true; break;
         }
 
         var response = await Post(Body());
@@ -259,6 +275,116 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         await ShouldBeProblem(response, HttpStatusCode.InternalServerError, ExternalRegistrationEndpoints.ErrorEnvironment);
         _store.Writes.Should().BeEmpty();
         _store.Contacts.Keys.Should().Equal(other.Id);
+    }
+
+    [Theory]
+    [InlineData("home-probe-failed")]
+    [InlineData("binding-probe-failed")]
+    public async Task TransientProbeFailure_Is503Unavailable_Retryable_AndNeverCreates(string shape)
+    {
+        var other = AddHomeContact(Guid.NewGuid(), oid: Guid.NewGuid());
+        if (shape == "home-probe-failed") _store.FailHomeProbe = true; else _store.FailProbe = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Keys.Should().Equal(other.Id);
+    }
+
+    // ── Failed reads before a create (pass 1 review) ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task FailedLicensedUserRead_Is503Unavailable_NothingWritten()
+    {
+        _store.FailLicensedUserLookup = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FailedOwnerTeamRead_Is503Unavailable_NothingCreated()
+    {
+        _store.FailTeamLookup = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    // ── The create's own faults (pass 2 K3) ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Create_RefusedForAMissingPrivilege_Is500Environment_NotRetryable()
+    {
+        _store.CreateStatusOverride = StoreWriteStatus.Forbidden;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.InternalServerError, ExternalRegistrationEndpoints.ErrorEnvironment);
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Create_FailedTransiently_StaysA503Unavailable()
+    {
+        _store.FailCreate = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerBusinessUnit_IsTheSecureRecordBusinessUnit_Is500OwnerUnconfigured_NothingCreated()
+    {
+        _store.BusinessUnitsByName["Secure Record"] = new List<Guid> { BusinessUnit };
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.InternalServerError, ExternalRegistrationEndpoints.ReasonOwnerUnconfigured);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().BeEmpty();
+        _store.Reads.Should().NotContain("owner-team", "the refusal comes before the owner team is read");
+    }
+
+    [Fact]
+    public async Task SecureRecordBusinessUnit_Ambiguous_Is500OwnerUnconfigured_NothingCreated()
+    {
+        _store.BusinessUnitsByName["Secure Record"] = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() };
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.InternalServerError, ExternalRegistrationEndpoints.ReasonOwnerUnconfigured);
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SecureRecordBusinessUnitRead_Failed_Is503Unavailable_NothingCreated()
+    {
+        _store.FailBusinessUnitLookup = true;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerBusinessUnit_DifferentFromTheSecureRecordBusinessUnit_Registers()
+    {
+        _store.BusinessUnitsByName["Secure Record"] = new List<Guid> { Guid.NewGuid() };
+
+        var response = await Post(Body());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     // ── Email and body ─────────────────────────────────────────────────────────────────────────────
