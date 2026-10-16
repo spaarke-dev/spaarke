@@ -98,7 +98,7 @@ public static class OntologyAdminAuthoringEndpoints
             OntologyAdminAuthoringOutcome.CallerUnresolved => Problem(httpContext, StatusCodes.Status403Forbidden, "Forbidden",
                 "The caller could not be resolved to a Dataverse user.", result.ReasonCode),
             OntologyAdminAuthoringOutcome.Refused => Problem(httpContext, StatusCodes.Status403Forbidden, "Forbidden",
-                "Dataverse refused this for your account. Nothing was written.", result.ReasonCode, result.PolicyId),
+                "Dataverse refused this for your account. Nothing was written.", result.ReasonCode),
             OntologyAdminAuthoringOutcome.Forbidden => Problem(httpContext, StatusCodes.Status403Forbidden, "Forbidden",
                 "Your account cannot author rules. Nothing was run.", result.ReasonCode),
             OntologyAdminAuthoringOutcome.NotFound => Problem(httpContext, StatusCodes.Status404NotFound, "Not Found",

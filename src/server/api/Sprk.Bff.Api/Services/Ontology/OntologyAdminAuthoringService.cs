@@ -798,9 +798,11 @@ public sealed partial class OntologyAdminAuthoringService
 
             if (!pointer.IsSuccess)
             {
-                _logger.LogError("Ontology authoring: policy {PolicyId} was created Off but its current version could not be set ({ErrorCode}).",
-                    policyId, pointer.ErrorCode);
-                return Fail<OntologyPolicySaved>(WriteFailure(pointer, "current version")) with { PolicyId = policyId };
+                // EVERY failure here is the "saved Off, publish a version to finish" 503 with the policy's id (review pass 2, F1-b): a
+                // refusal or an unresolved caller must not read as "nothing was written", because the policy and its version exist.
+                _logger.LogError("Ontology authoring: policy {PolicyId} was created Off but its current version could not be set ({ErrorCode}, {StatusCode}).",
+                    policyId, pointer.ErrorCode, pointer.StatusCode);
+                return Fail<OntologyPolicySaved>(Failure.Unavailable) with { PolicyId = policyId };
             }
 
             await ForgetProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, CancellationToken.None)
@@ -890,6 +892,16 @@ public sealed partial class OntologyAdminAuthoringService
                 if (previous is null)
                 {
                     // The pointer names a version the caller cannot read: nothing is written on the strength of a row we cannot see.
+                    return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
+                }
+
+                if (previous.Ended)
+                {
+                    // The current version already carries an end stamp: a concurrent publish is between its stamp and its pointer move
+                    // (or one left it so). Refused before any write (review pass 2, F1-a): stamping it again and then undoing "our" stamp
+                    // would wipe the end of a version that has really ended.
+                    _logger.LogInformation("Ontology authoring: the current version {VersionId} of policy {PolicyId} already carries an end stamp; refusing.",
+                        previous.Id, policy.Id);
                     return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
                 }
             }
@@ -1049,7 +1061,8 @@ public sealed partial class OntologyAdminAuthoringService
         }
     }
 
-    /// <summary>Where a policy's <c>sprk_currentversion</c> points, re-read as the caller: at the new version, at another, or unknown.</summary>
+    /// <summary>Where a policy's <c>sprk_currentversion</c> points, re-read as the caller: at the version asked about (<see cref="Pointer.New"/>;
+    /// the new version for a publish, the previous one for <see cref="RestorePreviousAsync"/>), at another, or unknown.</summary>
     private enum Pointer
     {
         New,
@@ -1057,7 +1070,7 @@ public sealed partial class OntologyAdminAuthoringService
         Unknown,
     }
 
-    private async Task<Pointer> PointerOfAsync(Guid policyId, Guid newVersionId)
+    private async Task<Pointer> PointerOfAsync(Guid policyId, Guid versionId)
     {
         try
         {
@@ -1067,7 +1080,7 @@ public sealed partial class OntologyAdminAuthoringService
             if (response.IsSuccess
                 && Rows(response.Body).FirstOrDefault(r => TryGuid(r, "sprk_policyid", out var id) && id == policyId) is { ValueKind: JsonValueKind.Object } row)
             {
-                return TryGuid(row, "_sprk_currentversion_value", out var current) && current == newVersionId ? Pointer.New : Pointer.Other;
+                return TryGuid(row, "_sprk_currentversion_value", out var current) && current == versionId ? Pointer.New : Pointer.Other;
             }
 
             _logger.LogWarning("Ontology authoring: the pointer of policy {PolicyId} could not be re-read ({ErrorCode}).", policyId, response.ErrorCode ?? "no-row");
@@ -1102,7 +1115,7 @@ public sealed partial class OntologyAdminAuthoringService
     {
         if (previous is not null)
         {
-            await RestorePreviousAsync(previous.Id, now).ConfigureAwait(false);
+            await RestorePreviousAsync(policyId, previous.Id, now).ConfigureAwait(false);
         }
 
         await RetireUnpublishedAsync(policyId, versionId, now).ConfigureAwait(false);
@@ -1138,9 +1151,24 @@ public sealed partial class OntologyAdminAuthoringService
         }
     }
 
-    /// <summary>Compensation: the old version's stamp is undone, but only if it is still exactly the stamp this publish wrote.</summary>
-    private async Task RestorePreviousAsync(Guid previousId, string stamp)
+    /// <summary>Compensation: the old version's stamp is undone, but only while the pointer (re-read as the caller) still names it and
+    /// only if it is still exactly the stamp this publish wrote. A version the pointer has moved away from has really ended: its stamp
+    /// stands (review pass 2, F1-a). An unreadable pointer undoes nothing on a guess.</summary>
+    private async Task RestorePreviousAsync(Guid policyId, Guid previousId, string stamp)
     {
+        // Pointer.New here means "names previousId" (PointerOfAsync compares against the id it is given).
+        switch (await PointerOfAsync(policyId, previousId).ConfigureAwait(false))
+        {
+            case Pointer.Other:
+                _logger.LogInformation("Ontology authoring: policy {PolicyId} no longer names version {VersionId}; its end stamp stands.",
+                    policyId, previousId);
+                return;
+            case Pointer.Unknown:
+                _logger.LogError("Ontology authoring: the end stamp of version {VersionId} was not undone: the pointer of policy {PolicyId} could not " +
+                    "be re-read. The nightly run reports a current version with an end stamp (EventId 50309) until it is fixed.", previousId, policyId);
+                return;
+        }
+
         try
         {
             var reread = await _user.GetAsync($"{VersionEntitySet}({previousId:D})?$select=sprk_inforceto,versionnumber", CancellationToken.None)
@@ -1459,12 +1487,13 @@ public sealed partial class OntologyAdminAuthoringService
             rowVersion));
     }
 
-    internal sealed record VersionRow(Guid Id, int Number, long? RowVersion);
+    /// <summary>A version of the policy as the caller reads it. <paramref name="Ended"/>: it carries an <c>sprk_inforceto</c>.</summary>
+    internal sealed record VersionRow(Guid Id, int Number, long? RowVersion, bool Ended);
 
     private async Task<Read<IReadOnlyList<VersionRow>>> ReadVersionsAsync(Guid policyId, CancellationToken ct)
     {
         var response = await _user.GetAsync(
-            $"{VersionEntitySet}?$select=sprk_policyversionid,sprk_versionnumber,versionnumber&$filter=_sprk_policy_value eq {policyId:D}", ct)
+            $"{VersionEntitySet}?$select=sprk_policyversionid,sprk_versionnumber,sprk_inforceto,versionnumber&$filter=_sprk_policy_value eq {policyId:D}", ct)
             .ConfigureAwait(false);
         if (!response.IsSuccess)
         {
@@ -1481,7 +1510,8 @@ public sealed partial class OntologyAdminAuthoringService
             .Select(r =>
             {
                 TryGuid(r, "sprk_policyversionid", out var id);
-                return new VersionRow(id, ReadInt(r, "sprk_versionnumber") ?? 0, ReadLong(r, "versionnumber"));
+                return new VersionRow(id, ReadInt(r, "sprk_versionnumber") ?? 0, ReadLong(r, "versionnumber"),
+                    Ended: ReadString(r, "sprk_inforceto") is { Length: > 0 });
             })
             .ToList();
         return Read<IReadOnlyList<VersionRow>>.Of(versions);

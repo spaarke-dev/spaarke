@@ -641,6 +641,36 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         _fixture.World.Writes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("200 without RolePrivileges", HttpStatusCode.ServiceUnavailable, "ontology.admin.unavailable")]
+    [InlineData("throws", HttpStatusCode.ServiceUnavailable, "ontology.admin.unavailable")]
+    [InlineData("404", HttpStatusCode.ServiceUnavailable, "ontology.admin.unavailable")]
+    [InlineData("400", HttpStatusCode.ServiceUnavailable, "ontology.admin.unavailable")]
+    [InlineData("another privilege", HttpStatusCode.Forbidden, "ontology.admin.forbidden")]
+    public async Task DryRun_EveryOtherPrivilegeAnswer_FailsClosed_AndNothingIsEvaluated(string answer, HttpStatusCode expected, string reason)
+    {
+        // Review pass 2 (uac-r2 F3): every branch of CheckAuthoringPrivilegeAsync's mapping. Only a row naming the privilege is "held".
+        _fixture.World.PrivilegeAnswer = answer switch
+        {
+            "200 without RolePrivileges" => () => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { Other = 1 })),
+            "throws" => () => throw new HttpRequestException("The connection was reset."),
+            "404" => () => DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found."),
+            "400" => () => DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest, "Bad request."),
+            _ => () => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new
+            {
+                RolePrivileges = new[] { new { Depth = "Global", PrivilegeName = "prvReadsprk_PolicyVersion" } },
+            })),
+        };
+        _fixture.Engine.Hits = [Hit(MatterA, "Alpha")];
+
+        var response = await DryRun(PolicyId);
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be(reason);
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task DryRun_AsksThePrivilegeFresh_OnEveryRequest()
     {
@@ -852,6 +882,176 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         _fixture.World.Policies[orphan].Current.Should().BeNull();
     }
 
+    // ── Review pass 2 ──────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The pointer re-read PointerOfAsync sends (distinct from the publish's first policy read, which carries the domain filter).</summary>
+    private const string PointerReread = "sprk_policies?$select=sprk_policyid,_sprk_currentversion_value&";
+
+    public static TheoryData<string> PointerWriteFailures => new()
+    {
+        DataverseUserClientErrorCodes.AccessDenied,
+        DataverseUserClientErrorCodes.OboExchangeFailed,
+    };
+
+    [Theory]
+    [MemberData(nameof(PointerWriteFailures))]
+    public async Task Save_WhenThePointerWriteIsRefusedOrTheCallerUnresolved_IsTheSavedOff503_WithThePolicyId(string error)
+    {
+        // F1-b: the policy and its first version exist, so neither "Nothing was written" nor a policy-less 403 is true.
+        (await DryRun(null, lane: "Decide")).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.OnWrite = kind => kind.StartsWith("PATCH sprk_policies(", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(error == DataverseUserClientErrorCodes.AccessDenied ? 403 : 401, error, error)
+            : null;
+
+        var response = await Save();
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        var problem = await Json(response);
+        var created = _fixture.World.Writes.Should().ContainSingle().Subject;
+        created.Kind.Should().Be("POST sprk_policies");
+        problem.GetProperty("policyId").GetGuid().Should().Be(Guid.Parse(created.Json.GetProperty("sprk_policyid").GetString()!));
+        problem.GetProperty("reasonCode").GetString().Should().Be("ontology.admin.unavailable");
+        problem.GetProperty("detail").GetString().Should().Contain("saved Off").And.NotContain("Nothing was written");
+    }
+
+    [Fact]
+    public async Task Publish_WhenAConcurrentPublishStampedTheCurrentVersion_ButHasNotMovedThePointer_Is409_AndTheEndStampStands()
+    {
+        // F1-a, the interleaving: A stamps V1 (row version 201), B reads V1 at 201 before A moves the pointer, A moves the pointer to VA.
+        // Before the fix B stamped V1 If-Match 201 (it succeeded), lost the pointer race (412) and its compensation set V1's
+        // sprk_inforceto back to null: a version that had really ended, left with no end.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        const string aStamp = "2026-10-16T09:00:00Z";
+        w.Versions[V1].InForceTo = aStamp;
+        w.Versions[V1].RowVersion = 201;
+        var va = Guid.NewGuid();
+        w.AddVersion(va, PolicyId, number: 2, inForceTo: null);
+        w.OnWrite = kind =>
+        {
+            if (kind == $"PATCH sprk_policies({PolicyId:D})" && w.Policies[PolicyId].Current == V1)
+            {
+                w.Policies[PolicyId].Current = va; // A's pointer move lands just before B's
+                w.Policies[PolicyId].RowVersion++;
+            }
+
+            return null;
+        };
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        w.Versions[V1].InForceTo.Should().NotBeNull("V1 has really ended (A published VA); its end stamp is never wiped")
+            .And.Be(aStamp, "B refuses before any write, so A's stamp is untouched");
+        w.Writes.Should().BeEmpty("the end stamp is seen on the read, before step 1");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+        w.Requests.Should().Contain(r => r.StartsWith("GET sprk_policyversions?$select=", StringComparison.Ordinal) && r.Contains("sprk_inforceto",
+            StringComparison.Ordinal), "the versions read selects sprk_inforceto");
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheOldStampLanded_ButThePointerNoLongerNamesTheOldVersion_TheCompensationLeavesItsEndStamp()
+    {
+        // F1-a, the compensation's own guard: B's stamp lands, then another writer moves the pointer (412 on B's move). V1 is no longer
+        // current, so it has ended: RestorePreviousAsync re-reads the pointer and leaves the stamp.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        var va = Guid.NewGuid();
+        w.AddVersion(va, PolicyId, number: 2, inForceTo: null);
+        w.OnWrite = kind =>
+        {
+            if (kind == $"PATCH sprk_policies({PolicyId:D})" && w.Policies[PolicyId].Current == V1)
+            {
+                w.Policies[PolicyId].Current = va;
+                w.Policies[PolicyId].RowVersion++;
+            }
+
+            return null;
+        };
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        w.Policies[PolicyId].Current.Should().Be(va);
+        w.Versions[V1].InForceTo.Should().NotBeNull("the pointer names VA, so V1 has ended and keeps its end stamp");
+        w.Versions.Values.Single(v => v.Number == 3).InForceTo.Should().NotBeNull("B's version never became current");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+        AssertVersionPatchesTouchOnlyInForceTo();
+    }
+
+    [Fact]
+    public async Task Publish_WhenThePointerMoveIs412_AndThePointerCannotBeReRead_TheOldStampIsLeft_NotUndoneOnAGuess()
+    {
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        w.BumpBeforeWrite = ("PATCH", $"sprk_policies({PolicyId:D})");
+        w.OnWrite = kind =>
+        {
+            if (kind == $"PATCH sprk_policies({PolicyId:D})") w.FailRead = PointerReread; // every re-read after the 412 fails
+            return null;
+        };
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        w.Versions[V1].InForceTo.Should().NotBeNull("an unreadable pointer undoes nothing (K2: EventId 50309 reports it)");
+        w.Versions.Values.Single(v => v.Number == 2).InForceTo.Should().BeNull("an unreadable pointer may name it: never stamped");
+        w.Requests.Should().Contain("GET " + PointerReread + $"$filter=sprk_policyid eq {PolicyId:D}");
+    }
+
+    [Fact]
+    public async Task Publish_WhenThePointerMoveThrows_AndThePointerCannotBeReRead_Is503_AndNothingIsUndone()
+    {
+        // F3-a: SettleUnknownPointerAsync's default branch.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        w.FailWrite = ("PATCH", $"sprk_policies({PolicyId:D})", false, true);
+        w.FailRead = PointerReread;
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.unavailable");
+        w.Policies[PolicyId].Current.Should().Be(V1);
+        w.Versions[V1].InForceTo.Should().NotBeNull("whether the pointer moved is unknown: the stamp is not undone on a guess");
+        w.Versions.Values.Single(v => v.Number == 2).InForceTo.Should().BeNull("it may be current: never stamped");
+        w.Writes.Select(x => x.Kind).Should().Equal("POST sprk_policyversions", $"PATCH sprk_policyversions({V1:D})");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Publish_WhenTheOldStampIs412_RetireUnpublished_NeverStampsAVersionThePointerNamesOrMayName(bool pointerNamesNew)
+    {
+        // F3-a: RetireUnpublishedAsync refuses when the pointer re-read is New or Unknown.
+        (await DryRun(PolicyId)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var w = _fixture.World;
+        w.OnWrite = kind =>
+        {
+            if (kind == $"PATCH sprk_policyversions({V1:D})")
+            {
+                w.Versions[V1].RowVersion++; // a concurrent writer: the stamp answers 412
+                if (pointerNamesNew) w.Policies[PolicyId].Current = w.Versions.Single(v => v.Value.Number == 2).Key;
+                else w.FailRead = PointerReread;
+            }
+
+            return null;
+        };
+
+        var response = await Publish(PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        w.Versions.Values.Single(v => v.Number == 2).InForceTo.Should().BeNull(
+            pointerNamesNew ? "the version that is current is never stamped" : "a version the pointer may name is never stamped");
+        w.Versions[V1].InForceTo.Should().BeNull("the 412 stamp never landed");
+        w.Writes.Select(x => x.Kind).Should().Equal("POST sprk_policyversions");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+    }
+
     // ── Authorization (NFR-10, D-29) ──────────────────────────────────────────────────────────────────────────────
 
     public static TheoryData<string, string> Routes => new()
@@ -874,6 +1074,22 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         (await ReasonOf(response)).Should().Be("sdap.access.deny.caller_unresolved");
         _fixture.World.Requests.Should().Equal("GET WhoAmI()");
         _fixture.Engine.Evaluated.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public async Task AWhoAmIDataverseRefuses_401Or403_IsTheSameSingle403_OnEveryRoute(string method, string path)
+    {
+        // Review pass 2 (F3-b): DataverseUserClient maps a 401 or 403 to AccessDenied; WhoAmI refused is the uniform caller_unresolved.
+        _fixture.World.WhoAmIError = DataverseUserClientErrorCodes.AccessDenied;
+
+        var response = await Send(method, path);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonOf(response)).Should().Be("sdap.access.deny.caller_unresolved");
+        _fixture.World.Requests.Should().Equal("GET WhoAmI()");
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty();
     }
 
     [Theory]
@@ -1073,6 +1289,16 @@ public sealed class AuthoringWorld : IDataverseUserClient
     /// <summary>A concurrent writer: bumps the row version of the named target just before this write lands (so it answers 412).</summary>
     public (string Method, string Path)? BumpBeforeWrite { get; set; }
 
+    /// <summary>Called with each write's kind ("PATCH sprk_policies(id)") before it is applied: another writer can act here (it runs
+    /// inside the world's lock), and a non-null answer is returned instead of applying the write.</summary>
+    public Func<string, DataverseUserResponse?>? OnWrite { get; set; }
+
+    /// <summary>A GET whose path starts with this fails with a 500 (every such read, until cleared).</summary>
+    public string? FailRead { get; set; }
+
+    /// <summary>When set, the privilege function answers this (or throws what it throws) instead of the role-based answer.</summary>
+    public Func<DataverseUserResponse>? PrivilegeAnswer { get; set; }
+
     public Dictionary<Guid, PolicyState> Policies { get; } = new();
     public Dictionary<Guid, VersionState> Versions { get; } = new();
     public List<SignalState> Signals { get; } = new();
@@ -1091,6 +1317,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
         AbortAfter = null;
         Aborted = false;
         BumpBeforeWrite = null;
+        OnWrite = null;
+        FailRead = null;
+        PrivilegeAnswer = null;
         Policies.Clear();
         Versions.Clear();
         Signals.Clear();
@@ -1157,10 +1386,16 @@ public sealed class AuthoringWorld : IDataverseUserClient
         {
             ThrowIfAborted(cancellationToken);
             Requests.Add("GET " + relativePath);
+            if (FailRead is { } failRead && relativePath.StartsWith(failRead, StringComparison.Ordinal))
+            {
+                return Task.FromResult(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Generic SQL error."));
+            }
+
             if (relativePath == "WhoAmI()")
             {
+                // DataverseUserClient.MapErrorCode: a 401 or 403 is AccessDenied; the OBO codes have no Dataverse status.
                 return WhoAmIError is { } error
-                    ? Task.FromResult(DataverseUserResponse.Fail(500, error, error))
+                    ? Task.FromResult(DataverseUserResponse.Fail(error == DataverseUserClientErrorCodes.AccessDenied ? 403 : 500, error, error))
                     : Ok(new { UserId = Caller.ToString("D") });
             }
 
@@ -1169,6 +1404,11 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 if (relativePath != $"systemusers({Caller:D}){PrivilegePathSuffix}")
                 {
                     throw new InvalidOperationException($"The privilege was asked about someone other than the caller: {relativePath}");
+                }
+
+                if (PrivilegeAnswer is { } answer)
+                {
+                    return Task.FromResult(answer());
                 }
 
                 if (PrivilegeError is { } privilegeError)
@@ -1234,7 +1474,11 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 return Ok(new
                 {
                     value = Versions.Where(v => v.Value.PolicyId == policy)
-                        .Select(v => new { sprk_policyversionid = v.Key.ToString("D"), sprk_versionnumber = v.Value.Number, versionnumber = v.Value.RowVersion })
+                        .Select(v => new
+                        {
+                            sprk_policyversionid = v.Key.ToString("D"), sprk_versionnumber = v.Value.Number, sprk_inforceto = v.Value.InForceTo,
+                            versionnumber = v.Value.RowVersion,
+                        })
                         .ToArray(),
                 });
             }
@@ -1291,6 +1535,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
             Requests.Add("POST " + absoluteApiPath);
             if (RefuseWrites) return Refused();
             var kind = "POST " + absoluteApiPath["/api/data/v9.2/".Length..];
+            if (OnWrite?.Invoke(kind) is { } hooked) return Task.FromResult(hooked);
             if (TryFail(kind, out var failure) && !failure.Land)
             {
                 return FailedAnswer(failure.Throw);
@@ -1357,6 +1602,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
             ThrowIfAborted(cancellationToken);
             Requests.Add("PATCH " + relativePath);
             if (RefuseWrites) return Refused();
+            if (OnWrite?.Invoke("PATCH " + relativePath) is { } hooked) return Task.FromResult(hooked);
             if (TryFail("PATCH " + relativePath, out var failure))
             {
                 if (!failure.Land)
