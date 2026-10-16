@@ -32,6 +32,12 @@ export interface WorklistRouteItem extends WorklistItem {
   resolutionType?: ResolutionType | null;
   /** Until when it is not raised again (ISO 8601); the suppressed set only. */
   suppressedUntil?: string | null;
+  /** The rule's sentence as stored on the Signal (task 154); null when the route returns none. The wizard quotes it (D-23). */
+  sentence?: string | null;
+  /** Do lane rows only (task 154): the subject's table (logical name). Null on a Decide row. */
+  subjectRecordType?: string | null;
+  /** Do lane rows only (task 154): the subject's id, with `subjectRecordType`. Null on a Decide row. */
+  subjectRecordId?: string | null;
 }
 
 /** One core record's items (or the "Not filed" items when `core` is null), in the route's order. */
@@ -47,8 +53,42 @@ export interface WorklistData {
   Do: WorklistGroupData[];
 }
 
+/** One incoming reply to an inquiry, as `GET /api/v1/inquiries/for-todo/{todoId}` returns it (newest first). */
+export interface InquiryReply {
+  communicationId: string;
+  subject: string | null;
+  /** ISO 8601. */
+  receivedOn: string | null;
+}
+
+/** The inquiry an inquiry-outcome To Do records the outcome of, with the replies the caller can read. */
+export interface InquiryForTodo {
+  serviceRequestId: string;
+  replies: InquiryReply[];
+}
+
+/** The body of `POST /api/v1/inquiries/{serviceRequestId}/disposition`. */
+export interface InquiryDispositionRequest {
+  replyCommunicationId: string;
+  /** The `sprk_servicerequest.sprk_disposition` option value (100000000..100000003). */
+  disposition: number;
+}
+
+/** The 200 body of `POST .../disposition`. */
+export interface RecordDispositionResult {
+  /** The "Record the outcome" To Do was completed server-side (false when none was found or it could not be completed). */
+  todoCompleted: boolean;
+}
+
 export interface WorklistService {
   read(set: WorklistSetName): Promise<WorklistData>;
+  /**
+   * The inquiry an inquiry-outcome To Do (D-111) records the outcome of, and its replies; `null` when the route answers 404 (the
+   * To Do is not readable, or no open outbound inquiry matches it: there is no picker). Any other failure throws `InquiryRequestError`.
+   */
+  findInquiryForTodo(todoId: string): Promise<InquiryForTodo | null>;
+  /** Records the disposition. Resolves on 200 with whether the To Do was completed; throws `InquiryRequestError` (status and reason code) otherwise. */
+  recordDisposition(serviceRequestId: string, request: InquiryDispositionRequest): Promise<RecordDispositionResult>;
 }
 
 export interface WorklistServiceOptions {
@@ -68,7 +108,20 @@ export class WorklistRequestError extends Error {
   }
 }
 
+/** A call to the inquiry routes that did not succeed. `httpStatus` is null when no answer arrived; `reasonCode` is the problem's `reasonCode`. */
+export class InquiryRequestError extends Error {
+  readonly httpStatus: number | null;
+  readonly reasonCode: string | null;
+  constructor(message: string, httpStatus: number | null, reasonCode: string | null) {
+    super(message);
+    this.name = 'InquiryRequestError';
+    this.httpStatus = httpStatus;
+    this.reasonCode = reasonCode;
+  }
+}
+
 const ROUTE = '/api/v1/signals/worklist';
+const INQUIRY_ROUTE = '/api/v1/inquiries';
 
 const WORK_TYPES: ReadonlySet<string> = new Set<WorkType>([
   'askOutsideCounsel',
@@ -113,6 +166,9 @@ function parseItem(raw: unknown, lane: WorklistLane): WorklistRouteItem | null {
     resolvedOn: text(raw.resolvedOn),
     resolutionType: resolution ?? null,
     suppressedUntil: text(raw.suppressedUntil),
+    sentence: text(raw.sentence),
+    subjectRecordType: text(raw.subjectRecordType),
+    subjectRecordId: text(raw.subjectRecordId),
   };
 }
 
@@ -172,8 +228,57 @@ export function parseWorklistResponse(
   return data;
 }
 
+function parseReply(raw: unknown): InquiryReply | null {
+  if (!isObject(raw)) return null;
+  const communicationId = text(raw.communicationId);
+  if (!communicationId) return null;
+  return { communicationId, subject: text(raw.subject), receivedOn: text(raw.receivedOn) };
+}
+
+/** The for-todo answer. Not an object with a `serviceRequestId` is not an answer (it throws): the picker must not guess an inquiry. */
+export function parseInquiryForTodo(body: unknown, httpStatus: number | null = null): InquiryForTodo {
+  const serviceRequestId = isObject(body) ? text(body.serviceRequestId) : null;
+  if (!isObject(body) || !serviceRequestId) {
+    throw new InquiryRequestError('The inquiry answer could not be read.', httpStatus, null);
+  }
+  const replies = Array.isArray(body.replies)
+    ? body.replies.map(parseReply).filter((r): r is InquiryReply => r !== null)
+    : [];
+  return { serviceRequestId, replies };
+}
+
 export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions): WorklistService {
   const root = baseUrl.replace(/\/+$/, '');
+
+  /** One inquiry-route call: the 2xx response, or an `InquiryRequestError` (a thrown `ApiError` and a returned non-2xx are both handled). */
+  async function inquiryCall(address: string, init: RequestInit): Promise<Response> {
+    let response: Response;
+    try {
+      response = await fetch(address, init);
+    } catch (err) {
+      if (isApiError(err)) {
+        const problem = problemOf(err);
+        throw new InquiryRequestError(
+          text(problem?.detail) ?? `The request failed (${err.status}).`,
+          err.status,
+          text(problem?.reasonCode)
+        );
+      }
+      throw new InquiryRequestError('The request could not be sent.', null, null);
+    }
+    if (!response.ok) {
+      let problem: unknown;
+      try {
+        problem = await response.json();
+      } catch {
+        problem = undefined;
+      }
+      const detail = isObject(problem) ? text(problem.detail) : null;
+      const reasonCode = isObject(problem) ? text(problem.reasonCode) : null;
+      throw new InquiryRequestError(detail ?? `The request failed (${response.status}).`, response.status, reasonCode);
+    }
+    return response;
+  }
 
   return {
     async read(set: WorklistSetName): Promise<WorklistData> {
@@ -211,6 +316,52 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
         throw new WorklistRequestError('The worklist answer could not be read.', response.status);
       }
       return parseWorklistResponse(body, set, response.status);
+    },
+
+    async findInquiryForTodo(todoId: string): Promise<InquiryForTodo | null> {
+      let response: Response;
+      try {
+        response = await inquiryCall(`${root}${INQUIRY_ROUTE}/for-todo/${encodeURIComponent(todoId)}`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+      } catch (err) {
+        if (err instanceof InquiryRequestError && err.httpStatus === 404) return null;
+        throw err;
+      }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new InquiryRequestError('The inquiry answer could not be read.', response.status, null);
+      }
+      return parseInquiryForTodo(body, response.status);
+    },
+
+    async recordDisposition(
+      serviceRequestId: string,
+      request: InquiryDispositionRequest
+    ): Promise<RecordDispositionResult> {
+      const response = await inquiryCall(
+        `${root}${INQUIRY_ROUTE}/${encodeURIComponent(serviceRequestId)}/disposition`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            replyCommunicationId: request.replyCommunicationId,
+            disposition: request.disposition,
+          }),
+        }
+      );
+      // The outcome is recorded (200). A body that cannot be read only means we cannot say the To Do was completed.
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return { todoCompleted: false };
+      }
+      const flag = (body as { todoCompleted?: unknown } | null)?.todoCompleted;
+      return { todoCompleted: flag === true };
     },
   };
 }
