@@ -469,6 +469,39 @@ function Test-CustomerMailboxWritePermission {
     if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
 }
 
+function Format-ExchangeError {
+    <#
+    .SYNOPSIS
+        One line for an Exchange failure: the command that threw, its message, the error id and category, and every inner
+        exception. T186 L61: the routes reported only the message, and Exchange's "A server side error has occurred …
+        Please try again after some time" named neither the cmdlet nor the cause, so H14m could not be diagnosed.
+    #>
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    if (-not $ErrorRecord) { return '(no error record)' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    # The call chain, innermost first, function names only (no paths): Exchange's generated cmdlets throw from helpers,
+    # and a script `throw` has no MyCommand, so the Verb-Noun frame is what names the cmdlet.
+    $frames = @(([string]$ErrorRecord.ScriptStackTrace -split "`n") |
+        ForEach-Object { if ($_ -match '^\s*at (?<fn>[^,]+),') { $Matches.fn.Trim() -replace '^(global|script|local|private):', '' } } |
+        Where-Object { $_ -and $_ -ne '<ScriptBlock>' } | Select-Object -First 4)
+    $command = if ($ErrorRecord.InvocationInfo -and $ErrorRecord.InvocationInfo.MyCommand) { $ErrorRecord.InvocationInfo.MyCommand.Name } else { '' }
+    if (-not $command) { $command = @($frames | Where-Object { $_ -match '^[A-Za-z]+-[A-Za-z]+$' } | Select-Object -First 1) -join '' }
+    $parts.Add(($(if ($command) { "${command}: " } else { '' }) + $ErrorRecord.Exception.Message))
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message -and $ErrorRecord.ErrorDetails.Message -ne $ErrorRecord.Exception.Message) {
+        $parts.Add("details: $($ErrorRecord.ErrorDetails.Message)")
+    }
+    $parts.Add("id: $($ErrorRecord.FullyQualifiedErrorId); category: $($ErrorRecord.CategoryInfo.Category)/$($ErrorRecord.CategoryInfo.Reason)")
+    if ($frames.Count -gt 0) { $parts.Add("at: $($frames -join ' < ')") }
+    $inner = $ErrorRecord.Exception.InnerException
+    for ($depth = 0; $inner -and $depth -lt 3; $depth++) {
+        $parts.Add("inner $($inner.GetType().Name): $($inner.Message)")
+        $inner = $inner.InnerException
+    }
+    $text = ($parts -join ' | ') -replace '\s+', ' '
+    if ($text.Length -gt 1500) { $text = $text.Substring(0, 1500) + '…' }
+    return $text
+}
+
 function Invoke-CustomerMailboxEnsure {
     <#
     .SYNOPSIS
@@ -556,4 +589,4 @@ function Get-CustomerMailboxState {
 
 Export-ModuleMember -Function Get-SidecarSettings, Test-SecretEqual, Get-ExchangeConnectParameters, Test-ApplyRequest, Test-ReadRequest,
     Test-AssigneeIs, Test-AssignmentInScope, Invoke-MailboxAccessApply, Get-MailboxAccessState,
-    Test-CustomerMailboxRequest, Invoke-CustomerMailboxEnsure, Get-CustomerMailboxState
+    Test-CustomerMailboxRequest, Invoke-CustomerMailboxEnsure, Get-CustomerMailboxState, Format-ExchangeError
