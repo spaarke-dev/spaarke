@@ -120,7 +120,7 @@ public sealed class BffDeployOptions
     /// <summary>
     /// Base URI of the `provisioning-artifacts` blob container (e.g.
     /// <c>https://{account}.blob.core.windows.net/provisioning-artifacts</c>).
-    /// Same underlying container task 116's <c>deploy-bff-api.yml</c> +
+    /// Same underlying container <c>publish-bff-artifact.yml</c> (T186 L42; task 116 had it in deploy-bff-api.yml) +
     /// task 117's <c>publish-provisioning-arm-artifacts.yml</c> both push to
     /// — naming matches <c>BicepInfraDeployOptions.ProvisioningArtifactsContainerUri</c>
     /// EXACTLY. Required — <see cref="Validate"/> throws if blank.
@@ -130,8 +130,8 @@ public sealed class BffDeployOptions
     /// <summary>
     /// Blob name of task 116's manifest — the mutable "latest" pointer
     /// <see cref="ArtifactManifestVerifier"/> reads. Defaults to
-    /// <c>latest.json</c> (matches <c>deploy-bff-api.yml</c>'s "Generate +
-    /// push latest.json manifest" step exactly).
+    /// <c>latest.json</c> (matches <c>publish-bff-artifact.yml</c>'s "Publish
+    /// (zip, versioned manifest, previous pointer, latest)" step exactly).
     /// </summary>
     public string ArtifactManifestBlobName { get; set; } = "latest.json";
 

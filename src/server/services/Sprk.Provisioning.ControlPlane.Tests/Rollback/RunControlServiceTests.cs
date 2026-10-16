@@ -90,6 +90,30 @@ public sealed class RunControlServiceTests
     }
 
     [Fact]
+    public async Task Resume_AlsoReDispatches_EveryOtherFailedHandler_WithAFreshAttempt()
+    {
+        // T186 L41: H8 failed, then H6 failed and became the current phase. Resume used to re-run H6 only; H8 never
+        // ran again and the run stalled Running.
+        var rig = new Rig();
+        var run = MakeRun(RunStatus.Failed, currentPhase: "H6");
+        run.FailedHandlers.Add("H8");
+        run.FailedHandlers.Add("H6");
+        run.HandlerRetryAttempts["H6"] = 1;
+        rig.Repo.Seed(run, "\"etag-1\"");
+
+        var result = await rig.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
+
+        var success = result.Should().BeOfType<RunResumeResult.Success>().Subject;
+        success.HandlerId.Should().Be("H6");
+        success.Attempt.Should().Be(2);
+        rig.Enqueuer.Enqueued.Select(e => (e.HandlerId, e.Attempt))
+            .Should().Equal([("H6", 2), ("H8", 1)], "the current phase first, then every other failed handler");
+        success.Run.HandlerRetryAttempts["H8"].Should().Be(1, "H8's new attempt is persisted with the Running write");
+        rig.Repo.ReplaceCalls.Should().Be(1);
+        rig.Enqueuer.StatusAtEnqueue.Should().AllBeEquivalentTo(RunStatus.Running);
+    }
+
+    [Fact]
     public async Task Resume_WritesTheRunRunning_BeforeItEnqueues()
     {
         // An envelope that reaches the dispatcher while the run is still Failed is dropped as stale.

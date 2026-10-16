@@ -367,9 +367,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
         JsonElement? evidence,
         CancellationToken cancellationToken)
     {
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         var gateEntry = new GateEntry
         {

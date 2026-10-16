@@ -18,9 +18,11 @@
 //      (RollbackTransitions.ShouldReleaseCustomerGuard(Resumable) == true, EXEC-07)
 //      or a clear-quarantine / cancel did. Another run holding it ->
 //      GuardConflict; transport failure -> GuardUnavailable.
-//   4. Bump HandlerRetryAttempts[phase], Status=Running, ErrorDetail=null,
-//      CompletedOn=null, ReplaceRunAsync(ETag).
-//   5. THEN enqueue ReconcilerEnvelopeBuilder.Build(phase, run, time, attempt).
+//   4. Bump HandlerRetryAttempts for the current phase AND every other handler in
+//      run.FailedHandlers (T186 L41: a later sibling failure used to hide an earlier one,
+//      which then never ran again), Status=Running, ErrorDetail=null, CompletedOn=null,
+//      ReplaceRunAsync(ETag).
+//   5. THEN enqueue ReconcilerEnvelopeBuilder.Build(id, run, time, attempt) for each, current phase first.
 //      If the enqueue throws, revert the run to Failed (previous ErrorDetail,
 //      CompletedOn=now, new ETag) and return EnqueueFailed.
 //   Entry-point handlers H0 / H0.5 are covered too: the reconciler never
@@ -131,10 +133,21 @@ public sealed class RunControlService : IRunControlService
                 return new RunResumeResult.GuardUnavailable(txf.Diagnostic);
         }
 
-        // Fresh MessageId: attempt = prior + 1, persisted in the same write.
-        run.HandlerRetryAttempts.TryGetValue(handlerId, out var priorAttempts);
-        var attempt = priorAttempts + 1;
-        run.HandlerRetryAttempts[handlerId] = attempt;
+        // T186 L41: re-dispatch EVERY handler whose last attempt failed, not only the current phase — a later sibling
+        // failure becomes the run's current phase and used to hide the earlier one, which then never ran again.
+        var toDispatch = new List<string> { handlerId };
+        toDispatch.AddRange(run.FailedHandlers.Where(h =>
+            !string.Equals(h, handlerId, StringComparison.Ordinal)
+            && HandlerIds.Dispatchable.Contains(h, StringComparer.Ordinal)));
+
+        // Fresh MessageId: attempt = prior + 1 for each, persisted in the same write.
+        var attempts = new List<(string HandlerId, int Attempt)>();
+        foreach (var id in toDispatch)
+        {
+            run.HandlerRetryAttempts.TryGetValue(id, out var prior);
+            attempts.Add((id, prior + 1));
+            run.HandlerRetryAttempts[id] = prior + 1;
+        }
 
         var previousErrorDetail = run.ErrorDetail;
         run.Status = RunStatus.Running;
@@ -157,27 +170,38 @@ public sealed class RunControlService : IRunControlService
             case ReplaceRunResult.NotFound:
                 return new RunResumeResult.NotFound();
             case ReplaceRunResult.Success s:
-                return await EnqueueResumedHandlerAsync(
-                    s, handlerId, attempt, previousErrorDetail, actorObjectId, cancellationToken).ConfigureAwait(false);
+                return await EnqueueResumedHandlersAsync(
+                    s, handlerId, attempts, previousErrorDetail, actorObjectId, cancellationToken).ConfigureAwait(false);
             default:
                 throw new System.Diagnostics.UnreachableException(
                     "ReplaceRunResult exhaustive union changed — update RunControlService.");
         }
     }
 
-    private async Task<RunResumeResult> EnqueueResumedHandlerAsync(
+    private async Task<RunResumeResult> EnqueueResumedHandlersAsync(
         ReplaceRunResult.Success persisted,
         string handlerId,
-        int attempt,
+        IReadOnlyList<(string HandlerId, int Attempt)> attempts,
         string? previousErrorDetail,
         string? actorObjectId,
         CancellationToken cancellationToken)
     {
         var run = persisted.Run;
+        var attempt = attempts[0].Attempt;
         try
         {
-            var envelope = ReconcilerEnvelopeBuilder.Build(handlerId, run, _timeProvider, attempt);
-            await _enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+            // The current phase first (attempts[0]), then the other failed handlers.
+            foreach (var (id, idAttempt) in attempts)
+            {
+                var envelope = ReconcilerEnvelopeBuilder.Build(id, run, _timeProvider, idAttempt);
+                await _enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(id, handlerId, StringComparison.Ordinal))
+                {
+                    _logger.LogInformation(
+                        "RunResumed (other failed handler, T186 L41): CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
+                        run.CustomerId, run.RunId, id, idAttempt);
+                }
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

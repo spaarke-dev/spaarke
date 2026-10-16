@@ -154,9 +154,19 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
 
         // Mutate + persist. Quarantine metadata populated on QuarantineRequired
         // per design.md §4C Quarantined row.
-        run.Status = targetStatus;
-        run.CurrentPhase = handlerId;
-        run.ErrorDetail = $"[{failure.RejectionCode}] {failure.Diagnostic}";
+        // T186 L41: a Failed/Quarantined outcome goes through MarkPhaseFailed, which records the handler in
+        // FailedHandlers so a later sibling failure cannot hide it from resume.
+        var errorDetail = $"[{failure.RejectionCode}] {failure.Diagnostic}";
+        if (targetStatus is RunStatus.Failed or RunStatus.Quarantined)
+        {
+            run.MarkPhaseFailed(handlerId, targetStatus, errorDetail);
+        }
+        else
+        {
+            run.Status = targetStatus;
+            run.CurrentPhase = handlerId;
+            run.ErrorDetail = errorDetail;
+        }
         var now = _timeProvider.GetUtcNow();
 
         if (failureClass == FailureClass.QuarantineRequired)

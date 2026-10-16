@@ -204,6 +204,65 @@ public sealed class ProvisioningRun
     public QuarantineInfo? Quarantine { get; set; }
 
     /// <summary>
+    /// Every handler whose last attempt failed and has not since succeeded, in failure order.
+    /// <para>
+    /// T186 L41: a run records ONE failure (<see cref="CurrentPhase"/> / <see cref="ErrorDetail"/>), so a second
+    /// failure hid the first. Live, H8 failed, then H6 (dispatched earlier) failed and became the run's failure;
+    /// resume re-ran only H6, and the reconciler kept re-sending H8's already-processed attempt, which the dispatcher
+    /// completes without invoking — the run showed Running with H8, H4b, H9 and H7 waiting forever. Resume re-dispatches
+    /// every handler listed here, and the reconciler does not re-send them (<c>DagAdvancer.ComputeReadyHandlers</c>).
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("failedHandlers")]
+    public IList<string> FailedHandlers { get; set; } = new List<string>();
+
+    /// <summary>
+    /// The run-status transition for a handler failure the run does not retry by itself: the run takes
+    /// <paramref name="status"/> (<see cref="RunStatus.Failed"/> or <see cref="RunStatus.Quarantined"/>) with
+    /// <paramref name="handlerId"/> as its current phase, and the handler is recorded in <see cref="FailedHandlers"/>
+    /// so a later failure of another handler cannot hide it (T186 L41).
+    /// <para>
+    /// A Quarantined run is never downgraded to Failed by another handler's failure (quarantine is cleared explicitly),
+    /// and a Cancelled run keeps its status; the failure is still recorded.
+    /// </para>
+    /// </summary>
+    public void MarkPhaseFailed(string handlerId, RunStatus status, string errorDetail)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+        if (status is not (RunStatus.Failed or RunStatus.Quarantined))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), status, "A handler failure leaves the run Failed or Quarantined.");
+        }
+
+        if (!FailedHandlers.Contains(handlerId, StringComparer.Ordinal))
+        {
+            FailedHandlers.Add(handlerId);
+        }
+
+        if (Status == RunStatus.Cancelled
+            || (Status == RunStatus.Quarantined && status == RunStatus.Failed
+                && !string.Equals(CurrentPhase, handlerId, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        Status = status;
+        CurrentPhase = handlerId;
+        ErrorDetail = errorDetail;
+    }
+
+    private void RemoveFailedHandler(string handlerId)
+    {
+        for (var i = FailedHandlers.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(FailedHandlers[i], handlerId, StringComparison.Ordinal))
+            {
+                FailedHandlers.RemoveAt(i);
+            }
+        }
+    }
+
+    /// <summary>
     /// The run-status transition every handler applies when it succeeds: the run is <see cref="RunStatus.Running"/>
     /// with <paramref name="handlerId"/> as its current phase, so the reconciler fans out.
     /// <para>
@@ -218,6 +277,8 @@ public sealed class ProvisioningRun
     public void MarkPhaseSucceeded(string handlerId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+
+        RemoveFailedHandler(handlerId);
 
         if (Status == RunStatus.Cancelled)
         {

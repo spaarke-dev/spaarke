@@ -184,6 +184,19 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
+    public void ComputeReadyHandlers_SkipsAHandlerWhoseLastAttemptFailed()
+    {
+        // T186 L41: re-sending a failed handler's processed attempt can never run it; only resume re-dispatches it.
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        run.FailedHandlers.Add("H8");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().NotContain("H8");
+        ready.Should().Contain("H10", "the sibling branches still fan out");
+    }
+
+    [Fact]
     public void ComputeReadyHandlers_AfterH3AndH4b_H9StillWaitsForH6()
     {
         // T218b: H9 also waits for H6 — on an upgrade run the new BFF must not start against the old schema.

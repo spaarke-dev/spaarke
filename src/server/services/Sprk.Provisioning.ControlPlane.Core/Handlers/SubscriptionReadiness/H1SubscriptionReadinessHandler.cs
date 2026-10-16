@@ -551,9 +551,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
         JsonElement? evidence,
         CancellationToken cancellationToken)
     {
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         // Gate state — one entry per H1 failure. Verifier is H1; state is
         // Pending (external precondition to resolve). Evidence carries the

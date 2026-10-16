@@ -399,6 +399,23 @@ public sealed class HandlerOutcomeApplierTests
                      "(the resume path still targets the SAME failed runId without a guard check).");
     }
 
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_ASecondFailure_KeepsTheFirstFailedHandlerOnRecord()
+    {
+        // T186 L41: H8 failed, then H6 failed and became the run's failure; resume must still find H8.
+        var sut = BuildSut(out _, classifier: new StubFailureClassifier(FailureClass.Resumable));
+        var run = MakeRun(RunStatus.Running, "H0", "H1");
+
+        await sut.ApplyHandlerOutcomeAsync(run, "etag-1",
+            new HandlerResult.Failure(FailureClass.Resumable, "spe-recorded-container-unreadable", "400"), "H8", CancellationToken.None);
+        await sut.ApplyHandlerOutcomeAsync(run, "etag-2",
+            new HandlerResult.Failure(FailureClass.Resumable, "import-invocation-failed", "statuscode 31"), "H6", CancellationToken.None);
+
+        run.Status.Should().Be(RunStatus.Failed);
+        run.CurrentPhase.Should().Be("H6");
+        run.FailedHandlers.Should().Equal("H8", "H6");
+    }
+
     // -----------------------------------------------------------------------
     // Helpers + test doubles
     // -----------------------------------------------------------------------

@@ -222,6 +222,13 @@ public sealed class DagAdvancer : IDagAdvancer
             {
                 continue; // Already done.
             }
+            if (run.FailedHandlers.Contains(handler, StringComparer.Ordinal))
+            {
+                // T186 L41: its last attempt failed. Re-sending that attempt's envelope can never run it (Service Bus
+                // drops the duplicate MessageId; the dispatcher's processed-marker completes it without invoking) —
+                // only resume / gate-advance re-dispatch it, with a new attempt.
+                continue;
+            }
             // Handler is ready when every dep is in completedPhases.
             // Uses .All() rather than early-exit for readability at this
             // small (max ~6-per-handler) dep count.
