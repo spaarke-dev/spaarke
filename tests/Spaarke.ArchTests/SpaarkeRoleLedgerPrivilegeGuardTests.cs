@@ -84,16 +84,29 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
               </RolePrivileges>
             </Role>
             """;
-        const string adminRole = """
-            <Role id="{00000000-0000-0000-0000-000000000003}" name="Spaarke Ontology Administrator">
+        // Console User is the role the Signal Write rule fires on, so the look-alike names must sit HERE to prove the match is
+        // exact: a StartsWith / Contains / EndsWith matcher would report them, an Ordinal equality does not.
+        const string consoleUserRole = """
+            <Role id="{00000000-0000-0000-0000-000000000003}" name="Spaarke Console User">
               <RolePrivileges>
                 <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
                 <RolePrivilege name="prvWritesprk_SignalExtra" level="Deep" />
+                <RolePrivilege name="prvAppendTosprk_Signal" level="Deep" />
+                <RolePrivilege name="prvReadsprk_Signal" level="Deep" />
+              </RolePrivileges>
+            </Role>
+            """;
+        // Not Console User, so its Signal Write is not this guard's concern (D-17 names Console User only).
+        const string adminRole = """
+            <Role id="{00000000-0000-0000-0000-000000000004}" name="Spaarke Ontology Administrator">
+              <RolePrivileges>
+                <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
                 <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
               </RolePrivileges>
             </Role>
             """;
 
+        Assert.Empty(Violations(consoleUserRole));
         Assert.Empty(Violations(writerRole));
         Assert.Empty(Violations(adminRole));
     }

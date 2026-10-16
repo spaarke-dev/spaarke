@@ -1,7 +1,7 @@
 # Task 049 role-removal evidence (whatif)
 
 - Environment: https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
-- Run (UTC): 20261016T145219Z
+- Run (UTC): 20261016T154431Z
 - Operator systemuserid: 1d02f31c-1872-f011-b4cb-7c1e52671ad0
 - Mode: whatif - NOTHING WAS CHANGED IN DATAVERSE
 - Script: scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1
@@ -13,67 +13,50 @@ Environment : https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
 Operator    : systemuserid 1d02f31c-1872-f011-b4cb-7c1e52671ad0
 Mode        : WHATIF (no writes)
 
-BEFORE: every business-unit copy (RetrieveRolePrivilegesRole)
+BEFORE: every business-unit copy (RetrieveRolePrivilegesRole; an inherited copy reports its root set)
   Spaarke Ontology Administrator: 6 copies
-    Spaarke                    (root)     id=2f2b2137-bfbe-f111-aaaf-0022482913fc  privileges=38
-    Secure Record                         id=efca5b32-7a2c-4e2b-a9d6-c6803b13912b  privileges=38
-    Spaarke Business Unit 1               id=4f6a91ff-6ace-4efa-9e94-795c96929230  privileges=38
-    Spaarke Demo                          id=d785bc47-4c32-48a0-9384-dbd691f4820d  privileges=38
-    Spaarke Dev 1                         id=675098f9-43b0-4090-899c-b418143d9644  privileges=38
-    Spaarke Test 1                        id=2c4541b2-ff50-4277-9ab0-aef18f87d309  privileges=38
+    Spaarke                    (root)      id=2f2b2137-bfbe-f111-aaaf-0022482913fc  privileges=38
+    Secure Record              (inherited) id=efca5b32-7a2c-4e2b-a9d6-c6803b13912b  privileges=38
+    Spaarke Business Unit 1    (inherited) id=4f6a91ff-6ace-4efa-9e94-795c96929230  privileges=38
+    Spaarke Demo               (inherited) id=d785bc47-4c32-48a0-9384-dbd691f4820d  privileges=38
+    Spaarke Dev 1              (inherited) id=675098f9-43b0-4090-899c-b418143d9644  privileges=38
+    Spaarke Test 1             (inherited) id=2c4541b2-ff50-4277-9ab0-aef18f87d309  privileges=38
   Spaarke Console User: 6 copies
-    Spaarke                    (root)     id=51c924e2-bdbe-f111-a05b-3833c5e9614d  privileges=23
-    Secure Record                         id=fc78e729-b316-4bb7-a133-00fee13d7765  privileges=23
-    Spaarke Business Unit 1               id=ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e  privileges=23
-    Spaarke Demo                          id=e54fe91e-2e59-4588-ab03-8e7c8b51be53  privileges=23
-    Spaarke Dev 1                         id=8d0e14a1-ceb8-4d27-a73e-888db5b21fe3  privileges=23
-    Spaarke Test 1                        id=a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7  privileges=23
+    Spaarke                    (root)      id=51c924e2-bdbe-f111-a05b-3833c5e9614d  privileges=23
+    Secure Record              (inherited) id=fc78e729-b316-4bb7-a133-00fee13d7765  privileges=23
+    Spaarke Business Unit 1    (inherited) id=ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e  privileges=23
+    Spaarke Demo               (inherited) id=e54fe91e-2e59-4588-ab03-8e7c8b51be53  privileges=23
+    Spaarke Dev 1              (inherited) id=8d0e14a1-ceb8-4d27-a73e-888db5b21fe3  privileges=23
+    Spaarke Test 1             (inherited) id=a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7  privileges=23
   Spaarke Ontology Service: 6 copies
-    Spaarke                    (root)     id=b1fb7ee0-bfbe-f111-aaaf-0022482913fc  privileges=50
-    Secure Record                         id=24d27647-4971-4020-87f3-404a621c24ff  privileges=50
-    Spaarke Business Unit 1               id=0d5642b7-8d9d-42e6-8450-357f2ec4e245  privileges=50
-    Spaarke Demo                          id=8383cb8b-43f7-4f28-ac41-63c20b914d81  privileges=50
-    Spaarke Dev 1                         id=2347fdba-0fee-422f-839b-7bdc5b4aff88  privileges=50
-    Spaarke Test 1                        id=074df1b9-0c1f-4b1f-bba4-ed5e7e226b5b  privileges=50
+    Spaarke                    (root)      id=b1fb7ee0-bfbe-f111-aaaf-0022482913fc  privileges=50
+    Secure Record              (inherited) id=24d27647-4971-4020-87f3-404a621c24ff  privileges=50
+    Spaarke Business Unit 1    (inherited) id=0d5642b7-8d9d-42e6-8450-357f2ec4e245  privileges=50
+    Spaarke Demo               (inherited) id=8383cb8b-43f7-4f28-ac41-63c20b914d81  privileges=50
+    Spaarke Dev 1              (inherited) id=2347fdba-0fee-422f-839b-7bdc5b4aff88  privileges=50
+    Spaarke Test 1             (inherited) id=074df1b9-0c1f-4b1f-bba4-ed5e7e226b5b  privileges=50
 
-PLAN: 18 RemovePrivilegeRole call(s); order is the two Decision Record Create removals, then the Signal Write (K-A)
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Spaarke, root copy] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Secure Record] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Spaarke Business Unit 1] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Spaarke Demo] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Spaarke Dev 1] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [Spaarke Test 1] D-147
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Spaarke, root copy] D-62
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Secure Record] D-62
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Spaarke Business Unit 1] D-62
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Spaarke Demo] D-62
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Spaarke Dev 1] D-62
-  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [Spaarke Test 1] D-62
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Spaarke, root copy] D-17
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Secure Record] D-17
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Spaarke Business Unit 1] D-17
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Spaarke Demo] D-17
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Spaarke Dev 1] D-17
-  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [Spaarke Test 1] D-17
+PLAN: 3 RemovePrivilegeRole call(s), ROOT roles only; order is the two Decision Record Create removals, then the Signal Write (K-A)
+  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Ontology Administrator [root copy, BU Spaarke, id 2f2b2137-bfbe-f111-aaaf-0022482913fc] D-147
+  remove prvCreatesprk_DecisionRecord   (Deep) from Spaarke Console User [root copy, BU Spaarke, id 51c924e2-bdbe-f111-a05b-3833c5e9614d] D-62
+  remove prvWritesprk_Signal            (Deep) from Spaarke Console User [root copy, BU Spaarke, id 51c924e2-bdbe-f111-a05b-3833c5e9614d] D-17
+K-A: Console User Create on sprk_decisionrecord is still held (removed first in this run); its Signal Write is removed only once that Create is gone.
 
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Spaarke' (2f2b2137-bfbe-f111-aaaf-0022482913fc)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Secure Record' (efca5b32-7a2c-4e2b-a9d6-c6803b13912b)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Spaarke Business Unit 1' (4f6a91ff-6ace-4efa-9e94-795c96929230)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Spaarke Demo' (d785bc47-4c32-48a0-9384-dbd691f4820d)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Spaarke Dev 1' (675098f9-43b0-4090-899c-b418143d9644)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Ontology Administrator' copy in BU 'Spaarke Test 1' (2c4541b2-ff50-4277-9ab0-aef18f87d309)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Spaarke' (51c924e2-bdbe-f111-a05b-3833c5e9614d)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Secure Record' (fc78e729-b316-4bb7-a133-00fee13d7765)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Spaarke Business Unit 1' (ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Spaarke Demo' (e54fe91e-2e59-4588-ab03-8e7c8b51be53)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Spaarke Dev 1' (8d0e14a1-ceb8-4d27-a73e-888db5b21fe3)
-  whatif: would remove prvCreatesprk_DecisionRecord from role 'Spaarke Console User' copy in BU 'Spaarke Test 1' (a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Spaarke' (51c924e2-bdbe-f111-a05b-3833c5e9614d)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Secure Record' (fc78e729-b316-4bb7-a133-00fee13d7765)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Spaarke Business Unit 1' (ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Spaarke Demo' (e54fe91e-2e59-4588-ab03-8e7c8b51be53)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Spaarke Dev 1' (8d0e14a1-ceb8-4d27-a73e-888db5b21fe3)
-  whatif: would remove prvWritesprk_Signal from role 'Spaarke Console User' copy in BU 'Spaarke Test 1' (a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7)
+  declined/whatif: would remove prvCreatesprk_DecisionRecord from ROOT role 'Spaarke Ontology Administrator' (BU 'Spaarke', 2f2b2137-bfbe-f111-aaaf-0022482913fc)
+  declined/whatif: would remove prvCreatesprk_DecisionRecord from ROOT role 'Spaarke Console User' (BU 'Spaarke', 51c924e2-bdbe-f111-a05b-3833c5e9614d)
+  declined/whatif: would remove prvWritesprk_Signal from ROOT role 'Spaarke Console User' (BU 'Spaarke', 51c924e2-bdbe-f111-a05b-3833c5e9614d)
+
+INHERITED COPIES (read-back only; the script never edits a copy): each must match its root for the privileges below
+  Spaarke Ontology Administrator   Secure Record            matches root
+  Spaarke Ontology Administrator   Spaarke Business Unit 1  matches root
+  Spaarke Ontology Administrator   Spaarke Demo             matches root
+  Spaarke Ontology Administrator   Spaarke Dev 1            matches root
+  Spaarke Ontology Administrator   Spaarke Test 1           matches root
+  Spaarke Console User             Secure Record            matches root
+  Spaarke Console User             Spaarke Business Unit 1  matches root
+  Spaarke Console User             Spaarke Demo             matches root
+  Spaarke Console User             Spaarke Dev 1            matches root
+  Spaarke Console User             Spaarke Test 1           matches root
 
 UNION OF ROLES (NFR-11), PROJECTED: the live state with the planned removals taken out
 
@@ -114,10 +97,12 @@ UNION OF ROLES (NFR-11), PROJECTED: the live state with the planned removals tak
     Spaarke Ontology Service           spaarke-service  Global  humans=0 apps=2 teams=0 (humans via teams: 0)
 
 ASSERTIONS
-  PASS A1   Write/Delete on sprk_decisionrecord is held only by platform and admin roles; platform roles have no human member
+  PASS A1   Write/Delete on sprk_decisionrecord is held only by platform and admin roles; platform roles have no human member; every team membership was read
   PASS A2   Create on sprk_decisionrecord is held only by platform roles, admin roles and Spaarke Ontology Service
   PASS A3   Spaarke Console User does not hold Write on sprk_signal
   PASS A4   Control: Spaarke Ontology Service still holds Write on sprk_signal and Create on sprk_decisionrecord
+  PASS A5   Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (one named waiver)
+       Spaarke Ontology Administrator (Deep): WAIVED (owner question open: Ontology Administrator Signal Write)
 
 FINDING (not an assertion): non-platform, non-admin, non-writer roles that still hold Write on sprk_signal
   Spaarke Ontology Administrator (Deep); human members: Ralph Schroeder <ralph.schroeder@spaarke.com>
@@ -949,7 +934,7 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
 }
 ```
 
-## PLAN or APPLIED removals
+## PLAN (root roles only)
 
 ```json
 [
@@ -964,56 +949,6 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
     "Decision": "D-147"
   },
   {
-    "Role": "Spaarke Ontology Administrator",
-    "RoleId": "efca5b32-7a2c-4e2b-a9d6-c6803b13912b",
-    "BuName": "Secure Record",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-147"
-  },
-  {
-    "Role": "Spaarke Ontology Administrator",
-    "RoleId": "4f6a91ff-6ace-4efa-9e94-795c96929230",
-    "BuName": "Spaarke Business Unit 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-147"
-  },
-  {
-    "Role": "Spaarke Ontology Administrator",
-    "RoleId": "d785bc47-4c32-48a0-9384-dbd691f4820d",
-    "BuName": "Spaarke Demo",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-147"
-  },
-  {
-    "Role": "Spaarke Ontology Administrator",
-    "RoleId": "675098f9-43b0-4090-899c-b418143d9644",
-    "BuName": "Spaarke Dev 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-147"
-  },
-  {
-    "Role": "Spaarke Ontology Administrator",
-    "RoleId": "2c4541b2-ff50-4277-9ab0-aef18f87d309",
-    "BuName": "Spaarke Test 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-147"
-  },
-  {
     "Role": "Spaarke Console User",
     "RoleId": "51c924e2-bdbe-f111-a05b-3833c5e9614d",
     "BuName": "Spaarke",
@@ -1025,115 +960,21 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
   },
   {
     "Role": "Spaarke Console User",
-    "RoleId": "fc78e729-b316-4bb7-a133-00fee13d7765",
-    "BuName": "Secure Record",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-62"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e",
-    "BuName": "Spaarke Business Unit 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-62"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "e54fe91e-2e59-4588-ab03-8e7c8b51be53",
-    "BuName": "Spaarke Demo",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-62"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "8d0e14a1-ceb8-4d27-a73e-888db5b21fe3",
-    "BuName": "Spaarke Dev 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-62"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7",
-    "BuName": "Spaarke Test 1",
-    "IsRoot": false,
-    "Privilege": "prvCreatesprk_DecisionRecord",
-    "PrivilegeId": "38366142-e133-4978-9a46-e6d1d598ce1f",
-    "Depth": "Deep",
-    "Decision": "D-62"
-  },
-  {
-    "Role": "Spaarke Console User",
     "RoleId": "51c924e2-bdbe-f111-a05b-3833c5e9614d",
     "BuName": "Spaarke",
     "IsRoot": true,
-    "Privilege": "prvWritesprk_Signal",
-    "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
-    "Depth": "Deep",
-    "Decision": "D-17"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "fc78e729-b316-4bb7-a133-00fee13d7765",
-    "BuName": "Secure Record",
-    "IsRoot": false,
-    "Privilege": "prvWritesprk_Signal",
-    "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
-    "Depth": "Deep",
-    "Decision": "D-17"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "ac932c91-a3f3-463b-b6f1-bfdb1e2bf96e",
-    "BuName": "Spaarke Business Unit 1",
-    "IsRoot": false,
-    "Privilege": "prvWritesprk_Signal",
-    "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
-    "Depth": "Deep",
-    "Decision": "D-17"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "e54fe91e-2e59-4588-ab03-8e7c8b51be53",
-    "BuName": "Spaarke Demo",
-    "IsRoot": false,
-    "Privilege": "prvWritesprk_Signal",
-    "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
-    "Depth": "Deep",
-    "Decision": "D-17"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "8d0e14a1-ceb8-4d27-a73e-888db5b21fe3",
-    "BuName": "Spaarke Dev 1",
-    "IsRoot": false,
-    "Privilege": "prvWritesprk_Signal",
-    "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
-    "Depth": "Deep",
-    "Decision": "D-17"
-  },
-  {
-    "Role": "Spaarke Console User",
-    "RoleId": "a30b4998-b9c4-4b1b-af80-e0fcfd38b7e7",
-    "BuName": "Spaarke Test 1",
-    "IsRoot": false,
     "Privilege": "prvWritesprk_Signal",
     "PrivilegeId": "8df17c8f-8796-4e7c-9d32-3c0d7c9cd082",
     "Depth": "Deep",
     "Decision": "D-17"
   }
 ]
+```
+
+## Removals actually made (RemovePrivilegeRole calls that returned)
+
+```json
+
 ```
 
 ## Union of roles
@@ -1158,7 +999,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "Teams": [
           "Spaarke Demo"
         ],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1173,7 +1015,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1188,7 +1031,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 14,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     }
   ],
@@ -1210,7 +1054,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "Teams": [
           "Spaarke Demo"
         ],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1225,7 +1070,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1240,7 +1086,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 8,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     }
   ],
@@ -1262,7 +1109,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "Teams": [
           "Spaarke Demo"
         ],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1277,7 +1125,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1292,7 +1141,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 14,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1307,7 +1157,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     }
   ],
@@ -1329,7 +1180,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "Teams": [
           "Spaarke Demo"
         ],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1344,7 +1196,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1359,7 +1212,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 14,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1376,7 +1230,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 0,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     },
     {
@@ -1391,7 +1246,8 @@ Nothing was changed in Dataverse. The assertions above are PROJECTED; re-run wit
         "DisabledHumans": 0,
         "AppUsers": 2,
         "Teams": [],
-        "HumansViaTeams": 0
+        "HumansViaTeams": 0,
+        "TeamReadFailures": []
       }
     }
   ]
