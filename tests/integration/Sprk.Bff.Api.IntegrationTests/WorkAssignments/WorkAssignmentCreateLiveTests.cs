@@ -416,7 +416,7 @@ public sealed class WorkAssignmentCreateLiveTests
         }
     }
 
-    private static async Task<HttpClient> DataverseClientAsync(string url, TokenCredential credential)
+    internal static async Task<HttpClient> DataverseClientAsync(string url, TokenCredential credential)
     {
         var token = await credential.GetTokenAsync(new TokenRequestContext(new[] { $"{url.TrimEnd('/')}/.default" }), default);
         var client = new HttpClient { BaseAddress = new Uri($"{url.TrimEnd('/')}/api/data/v9.2/") };
@@ -426,7 +426,8 @@ public sealed class WorkAssignmentCreateLiveTests
     }
 
     /// <summary>The BFF host with the production child-records route bound to the real environment.</summary>
-    private sealed class LiveWorkAssignmentFactory : DataverseIntegrationTestFixture
+    /// <remarks>Internal (ontology task 126): <c>BusinessOwnedAppendToLiveTests</c> drives the same route over it.</remarks>
+    internal sealed class LiveWorkAssignmentFactory : DataverseIntegrationTestFixture
     {
         private readonly TokenCredential _credential;
         private readonly ITestOutputHelper _out;
@@ -459,12 +460,17 @@ public sealed class WorkAssignmentCreateLiveTests
         /// <summary>That user's real Entra object id — the inbound <c>oid</c> claim.</summary>
         public string? CallerObjectId { get; private set; }
 
+        /// <summary>That user's business unit — what WhoAmI under their own token reports (task 126).</summary>
+        public Guid? CallerBusinessUnitId { get; private set; }
+
         public async Task ActAsAsync(Guid systemUserId)
         {
             OperatorSystemUserId ??= (await _metadata.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
-            var user = await _metadata.GetFromJsonAsync<JsonElement>($"systemusers({systemUserId})?$select=azureactivedirectoryobjectid");
+            var user = await _metadata.GetFromJsonAsync<JsonElement>(
+                $"systemusers({systemUserId})?$select=azureactivedirectoryobjectid,_businessunitid_value");
             CallerSystemUserId = systemUserId;
             CallerObjectId = user.GetProperty("azureactivedirectoryobjectid").GetString();
+            CallerBusinessUnitId = user.GetProperty("_businessunitid_value").GetGuid();
             _out.WriteLine($"acting as systemuser {systemUserId} (oid {CallerObjectId})");
         }
 
@@ -538,7 +544,11 @@ public sealed class WorkAssignmentCreateLiveTests
             {
                 factory.Trace($"    as-caller GET WhoAmI() -> {caller} (the acting user; substitution 2)");
                 return Task.FromResult(DataverseUserResponse.Ok(200,
-                    JsonSerializer.SerializeToElement(new { UserId = caller.ToString("D") })));
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        UserId = caller.ToString("D"),
+                        BusinessUnitId = factory.CallerBusinessUnitId?.ToString("D"), // task 126: as the user's own WhoAmI reports it
+                    })));
             }
 
             return SendAsync(HttpMethod.Get, $"/api/data/v9.2/{relativePath.TrimStart('/')}", null, cancellationToken);
