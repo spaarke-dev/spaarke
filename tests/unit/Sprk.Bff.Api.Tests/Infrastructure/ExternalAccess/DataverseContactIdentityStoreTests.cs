@@ -577,6 +577,51 @@ public class DataverseContactIdentityStoreTests
         http.Requests.Should().ContainSingle().Which.Body.Should().Contain("\"sprk_externalinvitecodehash\":null");
     }
 
+    // ── #2005 K1: the invite mark is never unconditional ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// #2005 K1: without a row version (null, empty or <c>*</c>) the marker-and-hash write is refused before any request:
+    /// <c>If-Match: *</c> would land on a contact a workforce sign-in bound since it was read. MUTATION PROOF: the former
+    /// <c>?? "*"</c> fallback sends a request and fails this test.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    public async Task TheInviteMark_WithoutARowVersion_SendsNothing(string? etag)
+    {
+        var requests = 0;
+        var store = new DataverseContactIdentityStore(
+            new CountingHttpClientFactory(() => requests++),
+            _ => { requests++; throw new InvalidOperationException("no request may be made"); },
+            "https://org.test.invalid",
+            NullLogger.Instance);
+
+        var write = await store.MarkInvitedAsync(IntentContact, etag, DateTimeOffset.UtcNow, StoredHash, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Failed);
+        write.Error.Should().Be("no row version for the invite mark");
+        requests.Should().Be(0);
+    }
+
+    /// <summary>#2005 K1: with a row version the mark is ONE PATCH conditional on exactly that version, never <c>*</c>.</summary>
+    [Fact]
+    public async Task TheInviteMark_IsConditionalOnTheRowVersion_NeverStar()
+    {
+        var http = new ScriptedHttp((HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().MarkInvitedAsync(IntentContact, "W/\"7\"", DateTimeOffset.UtcNow, StoredHash,
+            CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        var request = http.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Patch);
+        request.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+        request.IfMatch.Should().Be("W/\"7\"").And.NotBe("*");
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(request.Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalinvitedon", "sprk_externalinvitecodehash");
+    }
+
     /// <summary>Answers each request with the next scripted response and records what was sent.</summary>
     private sealed class ScriptedHttp(params (HttpStatusCode Code, string? Body)[] responses) : IHttpClientFactory
     {

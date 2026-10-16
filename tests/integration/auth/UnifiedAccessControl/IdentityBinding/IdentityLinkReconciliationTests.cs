@@ -523,6 +523,33 @@ public class IdentityLinkReconciliationTests
         AssertBoundOnce(contact, oid, hashColumnProvisioned);
     }
 
+    /// <summary>
+    /// #2005 K2: the job's before/after change log (what a report-only run lists) says the bind also clears the invite-code
+    /// hash, so a dry run does not under-report the write. The hash value itself is never logged.
+    /// </summary>
+    [Theory]
+    [InlineData(false)] // BindByEmail
+    [InlineData(true)]  // BindLinkedContact (L12)
+    public async Task TheChangeLog_OfAWorkforceBind_SaysTheInviteCodeHashIsCleared_NeverItsValue(bool linked)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var stored = InviteCode.Create(contact).StoredValue;
+        _store.AddContact(contact, "dry.run@spaarke.com", inviteCodeHash: stored);
+        _store.AddSystemUser(user, oid, "dry.run@spaarke.com", primaryContactId: linked ? contact : null);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: false, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(linked ? SystemUserLinkOutcome.BoundLinkedContact : SystemUserLinkOutcome.BoundAndLinked);
+        var bind = outcome.Changes.Should().ContainSingle(c => c.Entity == "contact").Subject;
+        bind.After.Should().Be(
+            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} sprk_externalinvitecodehash=(cleared)");
+        outcome.Changes.Should().AllSatisfy(c => (c.Before + c.After).Should().NotContain(stored));
+        _store.Writes.Should().BeEmpty("a dry run writes nothing");
+        _store.Contacts[contact].InviteCodeHash.Should().Be(stored);
+    }
+
     private void AssertBoundOnce(Guid contact, Guid oid, bool consumed)
     {
         _store.Writes.Where(w => w.Op == "bind").Should().ContainSingle().Which.Should().Be(("bind", (Guid?)contact,

@@ -355,6 +355,18 @@ public sealed class ExternalInviteService
         var mark = await binder.MarkInviteSentAsync(contactId, etag, ct);
         var markerLanded = mark.Status == StoreWriteStatus.Written;
 
+        // #2005: the contact had no row version (this invite created it) and its re-read found it bound, linked to an
+        // internal user, deactivated or unreadable meanwhile (or could not be read), so nothing was marked. It is answered as
+        // an invite that resolved to that contact is: the same refusal, flag and reason code, or the same lookup-failure 503.
+        // Anything else falls to the marker-not-written 503 below.
+        if (mark.Reread is { } reread)
+        {
+            if (NotProvisionable(reread, request.Email, logger) is { } refused)
+                return refused;
+            if (reread.Action == InviteContactAction.AlreadyProvisioned)
+                return new ProvisionOutcome(contactId, AlreadyProvisionedStatus);
+        }
+
         // Task 185: the link both invite emails open. It carries the one-time code only when the marker and its hash landed
         // (a new-account invite on a stamp without the columns binds in this request and needs none). Never logged.
         var inviteUrl = BuildInviteLink(portalUrl, customerKey, mark.InviteCode)!;

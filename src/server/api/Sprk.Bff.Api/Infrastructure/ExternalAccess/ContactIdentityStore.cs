@@ -146,8 +146,9 @@ public interface IContactIdentityStore
     /// Tasks 184 and 185 — writes the pending-invite marker (<c>sprk_externalinvitedon</c> = <paramref name="invitedOn"/>,
     /// UTC) AND the new invite's stored code hash (<c>sprk_externalinvitecodehash</c> = <paramref name="inviteCodeHash"/>)
     /// onto an existing contact in ONE request, so a re-invite replaces both together. Conditional on
-    /// <paramref name="etag"/> when there is one (else <c>If-Match: *</c>, so the PATCH never creates a row). Writes nothing
-    /// else. <see cref="StoreWriteStatus.ColumnMissing"/> when either column is not provisioned here.
+    /// <paramref name="etag"/> (never <c>*</c>; no row version, no write — #2005: a contact bound since it was read must
+    /// never receive a marker or a hash). Writes nothing else. <see cref="StoreWriteStatus.ColumnMissing"/> when either
+    /// column is not provisioned here.
     /// </summary>
     Task<StoreWriteResult> MarkInvitedAsync(
         Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct);
@@ -761,8 +762,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public Task<StoreWriteResult> MarkInvitedAsync(
         Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
-        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash),
-            ("If-Match", RowVersionPrecondition(etag) ?? "*"), ct, missingColumns: InviteMarkerColumns);
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash),
+                ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
+            : Task.FromResult(NoRowVersion("invite mark", contactId));
 
     /// <summary>The masking verdict over the probe's rows. Pure.</summary>
     public static BindingReadability ClassifyProbe(ContactLookup probe)

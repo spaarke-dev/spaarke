@@ -372,9 +372,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'."));
             }
 
-            // If-Match: the version when given, "*" otherwise — a missing row is 404, never created.
+            // Mirrors DataverseContactIdentityStore (#2005): no row version, no write — never If-Match: *.
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                Writes.Add(("refused-unversioned-invite-marker", contactId, string.Empty));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the invite mark"));
+            }
+
             if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
-            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is not null && !VersionMatches(etag, c.Version))
+            if (!VersionMatches(etag, c.Version))
             {
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
             }

@@ -122,6 +122,14 @@ public sealed record InviteMarkResult(StoreWriteResult Write)
     /// <see cref="object.ToString"/> of this record never prints it (CLAUDE.md §9).
     /// </summary>
     internal string? InviteCode { get; init; }
+
+    /// <summary>
+    /// #2005 — set only when the contact had no row version (one the invite just created) and its re-read refused the mark:
+    /// the invite decision over that row (<see cref="InviteContactAction.Refuse"/>, <see cref="InviteContactAction.Fail"/>,
+    /// <see cref="InviteContactAction.AlreadyProvisioned"/>, or any other action that is not an active, unbound contact).
+    /// Nothing was written.
+    /// </summary>
+    public InviteContactResolution? Reread { get; init; }
 }
 
 /// <summary>Runs the binding decision and performs its writes. See the file header.</summary>
@@ -349,6 +357,15 @@ public sealed class ContactIdentityBinder
             null, Array.Empty<Guid>(), Array.Empty<IdentityChange>(), applyWrites);
     }
 
+    /// <summary>
+    /// The job's change-log entry for a workforce bind onto <paramref name="contactId"/>. #2005: the bind also clears any
+    /// pending invite-code hash, so the entry says so (a dry run must not under-report the write); the hash is never logged.
+    /// </summary>
+    private static IdentityChange WorkforceBindChange(Guid contactId, Guid oid)
+        => new("contact", contactId, "sprk_externalobjectid=(null) sprk_identityplane=(null)",
+            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} "
+            + $"{ContactBindingDecision.ExternalInviteCodeHashColumn}=(cleared)");
+
     // ── Invite ────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -361,6 +378,15 @@ public sealed class ContactIdentityBinder
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
 
         var emailLookup = await _store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
+        return await DecideInviteContactAsync(emailLookup, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The invite decision over <paramref name="emailLookup"/> (the email lookup, or #2005's re-read of one contact): the
+    /// reference lookup when it needs one, and the flag and the warning on a refusal.
+    /// </summary>
+    private async Task<InviteContactResolution> DecideInviteContactAsync(ContactLookup emailLookup, CancellationToken ct)
+    {
         var decision = ContactBindingDecision.DecideInvite(emailLookup);
         if (decision.Action == InviteContactAction.NeedReferenceLookup && decision.ContactId is { } candidate)
         {
@@ -447,6 +473,29 @@ public sealed class ContactIdentityBinder
     /// </returns>
     public async Task<InviteMarkResult> MarkInviteSentAsync(Guid contactId, string? etag, CancellationToken ct)
     {
+        if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+        {
+            // #2005: no row version (a contact this invite just created). A workforce sign-in may have email-bound it since
+            // (that plane reads no invite marker), so the marker and hash are never written under "*": the contact is
+            // re-read and judged by the invite's own rules, and marked only while it is an active, unbound contact no
+            // internal user links to, under that read's version. Anything else, a read fault included, writes nothing.
+            var lookup = await _store.GetContactAsync(contactId, ct).ConfigureAwait(false);
+            var reread = await DecideInviteContactAsync(lookup, ct).ConfigureAwait(false);
+            if (reread.Action != InviteContactAction.ProvisionExisting || reread.ContactId != contactId
+                || DataverseContactIdentityStore.RowVersionPrecondition(reread.ETag) is null)
+            {
+                _logger.LogWarning(
+                    "[ID-BIND] Pending-invite marker on contact {ContactId} not written: on re-read it is not an active, "
+                    + "unbound contact ({Action}, {ReasonCode})", contactId, reread.Action, reread.ReasonCode);
+                return new InviteMarkResult(new StoreWriteResult(
+                    reread.Action == InviteContactAction.Fail ? StoreWriteStatus.Failed : StoreWriteStatus.PreconditionFailed,
+                    Error: "the invited contact is no longer an active, unbound contact"))
+                { Reread = reread };
+            }
+
+            etag = reread.ETag;
+        }
+
         var (code, storedValue) = InviteCode.Create(contactId);
         var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), storedValue, ct).ConfigureAwait(false);
         if (write.Status == StoreWriteStatus.ColumnMissing)
@@ -736,8 +785,7 @@ public sealed class ContactIdentityBinder
             case BindingAction.BindLinkedContact:
             {
                 var target = decision.ContactId!.Value;
-                changes.Add(new IdentityChange("contact", target, "sprk_externalobjectid=(null) sprk_identityplane=(null)",
-                    $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
+                changes.Add(WorkforceBindChange(target, request.CallerOid));
                 if (!applyWrites)
                 {
                     return Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null, none, changes, false);
@@ -784,8 +832,7 @@ public sealed class ContactIdentityBinder
             case BindingAction.BindByEmail:
             {
                 var target = decision.ContactId!.Value;
-                changes.Add(new IdentityChange("contact", target, "sprk_externalobjectid=(null) sprk_identityplane=(null)",
-                    $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
+                changes.Add(WorkforceBindChange(target, request.CallerOid));
                 changes.Add(LinkChange(suid, target));
                 if (!applyWrites)
                 {
