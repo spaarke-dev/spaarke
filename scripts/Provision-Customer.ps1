@@ -1025,7 +1025,7 @@ function Invoke-Step8_SetDataverseEnvVars {
         try {
             # 1. Find the environment variable definition by schema name
             $filter = "schemaname eq '$varName'"
-            $defUrl = "$dataverseUrl/api/data/v9.2/environmentvariabledefinitions?`$filter=$filter&`$expand=environmentvariablevalues(`$select=environmentvariablevalueid,value)&`$select=environmentvariabledefinitionid,schemaname,defaultvalue"
+            $defUrl = "$dataverseUrl/api/data/v9.2/environmentvariabledefinitions?`$filter=$filter&`$expand=environmentvariabledefinition_environmentvariablevalue(`$select=environmentvariablevalueid,value)&`$select=environmentvariabledefinitionid,schemaname,defaultvalue"
 
             $defResponse = Invoke-RestMethod -Uri $defUrl -Headers $dvHeaders -Method Get -ErrorAction Stop
 
@@ -1039,9 +1039,12 @@ function Invoke-Step8_SetDataverseEnvVars {
             $definitionId = $definition.environmentvariabledefinitionid
 
             # 2. Check for existing value record
-            if ($definition.environmentvariablevalues -and $definition.environmentvariablevalues.Count -gt 0) {
+            # T186 L38: the navigation property is environmentvariabledefinition_environmentvariablevalue
+            # ('environmentvariablevalues' is the entity-set name; as an $expand Dataverse answers 400).
+            $existingValues = $definition.environmentvariabledefinition_environmentvariablevalue
+            if ($existingValues -and $existingValues.Count -gt 0) {
                 # Update existing value record
-                $valueId = $definition.environmentvariablevalues[0].environmentvariablevalueid
+                $valueId = $existingValues[0].environmentvariablevalueid
                 $updateBody = @{ value = $varValue } | ConvertTo-Json
 
                 Invoke-RestMethod `

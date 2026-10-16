@@ -125,17 +125,17 @@ public sealed class DataverseWebApiRootBusinessUnitReader : IDataverseRootBusine
             $"schemaname eq '{EnvVarValues.H7DataverseEnvVarValuesHandler.SharePointEmbeddedContainerIdSchemaName}'");
         using var doc = await GetAsync(environmentUrl, tenantId,
             $"/api/data/v9.2/environmentvariabledefinitions?$filter={filter}" +
-            "&$expand=environmentvariablevalues($select=value)&$select=schemaname",
+            $"&$expand={EnvVarValues.DataverseWebApiEnvVarValuesWriter.ValuesNavigationProperty}($select=value)&$select=schemaname",
             "GET environmentvariabledefinitions (sprk_SharePointEmbeddedContainerId)", cancellationToken).ConfigureAwait(false);
 
         var values = new List<string>();
         foreach (var definition in doc.RootElement.GetProperty("value").EnumerateArray())
         {
-            if (!definition.TryGetProperty("environmentvariablevalues", out var rows) || rows.ValueKind != JsonValueKind.Array)
+            if (!definition.TryGetProperty(EnvVarValues.DataverseWebApiEnvVarValuesWriter.ValuesNavigationProperty, out var rows) || rows.ValueKind != JsonValueKind.Array)
             {
                 // The expand did not come back: no verdict — never read as "no container" (H8 would create a second one).
                 throw new InvalidOperationException(
-                    "GET environmentvariabledefinitions returned the definition without its environmentvariablevalues.");
+                    "GET environmentvariabledefinitions returned the definition without its values (environmentvariabledefinition_environmentvariablevalue).");
             }
             foreach (var row in rows.EnumerateArray())
             {

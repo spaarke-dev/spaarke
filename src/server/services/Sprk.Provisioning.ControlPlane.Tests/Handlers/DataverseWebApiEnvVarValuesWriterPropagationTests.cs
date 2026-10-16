@@ -160,6 +160,40 @@ public sealed class DataverseWebApiEnvVarValuesWriterPropagationTests
 
     // ---------- helpers ----------
 
+    // ---------- T186 L38: the definition -> values navigation property ----------
+
+    [Fact]
+    public async Task L38_DefinitionLookup_ExpandsTheRealNavigationProperty()
+    {
+        var dataverse = new Dataverse();
+
+        await NewWriter(dataverse, Propagation(TimeSpan.Zero)).WriteAsync(Request(), CancellationToken.None);
+
+        var lookup = dataverse.Requests.First(r => r.Method == HttpMethod.Get && r.Path.StartsWith("/environmentvariabledefinitions", StringComparison.Ordinal));
+        lookup.Path.Should().Contain("$expand=environmentvariabledefinition_environmentvariablevalue(",
+            "Dataverse answers 400 to $expand=environmentvariablevalues (the entity-set name), verified live on spaarke-acme");
+        lookup.Path.Should().NotContain("$expand=environmentvariablevalues(");
+    }
+
+    [Fact]
+    public async Task L38_AnExistingValueUnderTheNavigationProperty_IsPatched_NotDuplicated()
+    {
+        const string ValueId = "e5e5e5e5-0000-0000-0000-000000000001";
+        var dataverse = new Dataverse
+        {
+            Rewrite = (method, path) => method == HttpMethod.Get && path.StartsWith("/environmentvariabledefinitions", StringComparison.Ordinal)
+                ? Json($$"""{"value":[{"environmentvariabledefinitionid":"{{DefinitionId}}","schemaname":"sprk_TestVariable","environmentvariabledefinition_environmentvariablevalue":[{"environmentvariablevalueid":"{{ValueId}}","value":"old"}]}]}""")
+                : null,
+        };
+
+        var outcome = await NewWriter(dataverse, Propagation(TimeSpan.Zero)).WriteAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<EnvVarValuesWriteOutcome.Success>();
+        dataverse.Requests.Should().Contain(r => r.Method == HttpMethod.Patch && r.Path == $"/environmentvariablevalues({ValueId})");
+        dataverse.Requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Path == "/environmentvariablevalues",
+            "a value that already exists is updated, never created a second time");
+    }
+
     private static DataverseWebApiEnvVarValuesWriter NewWriter(
         Dataverse dataverse, WorkerCredentialSelectionOptions credentials, TokenCredential? credential = null)
         => new(

@@ -60,6 +60,13 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 /// </summary>
 public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 {
+    /// <summary>
+    /// The collection-valued navigation property from <c>environmentvariabledefinition</c> to its values. T186 L38: it is
+    /// NOT <c>environmentvariablevalues</c> (that is the entity-set name) — Dataverse answers 400 "Could not find a
+    /// property named 'environmentvariablevalues'" (verified live on spaarke-acme, 2026-10-16).
+    /// </summary>
+    internal const string ValuesNavigationProperty = "environmentvariabledefinition_environmentvariablevalue";
+
     /// <summary>Named HttpClient for outbound Dataverse Web API calls.</summary>
     public const string HttpClientName = "H7.DataverseWebApiEnvVarValuesWriter";
 
@@ -483,7 +490,7 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         var filter = Uri.EscapeDataString($"schemaname eq '{schemaName}'");
         var defUri = new Uri(envUri,
             $"/api/data/v9.2/environmentvariabledefinitions?$filter={filter}" +
-            "&$expand=environmentvariablevalues($select=environmentvariablevalueid,value)" +
+            $"&$expand={ValuesNavigationProperty}($select=environmentvariablevalueid,value)" +
             "&$select=environmentvariabledefinitionid,schemaname,defaultvalue");
 
         JsonDocument defDoc;
@@ -534,7 +541,7 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 
             var definition = valueArray[0];
             var definitionId = definition.GetProperty("environmentvariabledefinitionid").GetString()!;
-            var hasExistingValue = definition.TryGetProperty("environmentvariablevalues", out var existingValues)
+            var hasExistingValue = definition.TryGetProperty(ValuesNavigationProperty, out var existingValues)
                 && existingValues.ValueKind == JsonValueKind.Array
                 && existingValues.GetArrayLength() > 0;
 
