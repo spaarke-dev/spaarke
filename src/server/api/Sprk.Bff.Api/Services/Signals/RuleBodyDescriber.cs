@@ -4,8 +4,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
 

@@ -4,7 +4,7 @@
     <title>Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal</title>
     <phase>3 Rules (WP3) — wave W3-1</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-class fail-closed guard (MUST "refuse unknown rule types fail-closed in every consumer") in ontology-owned code the nightly Signal job and the describer depend on.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -130,7 +130,10 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>071 consumes the parsed definitions and fact-field sets; 073 adds consequence checks to the billing save path and gate; 076 publish calls ValidateForSave. With values 100000003 onward in FR-24 order, catalogue position N (FR-26 "1, 2, 6-10") equals option value 100000002 plus N; pin it in a test.</notes>
+  <notes>071 consumes the parsed definitions and fact-field sets; 073 adds consequence checks to the billing save path and gate; 076 publish calls ValidateForSave. With values 100000003 onward in FR-24 order, catalogue position N (FR-26 "1, 2, 6-10") equals option value 100000002 plus N; pin it in a test.
+
+Completed 2026-10-16 (details: projects/ebilling-r1/notes/070-billing-rule-type-catalogue.md). 11 billing members 100000003-100000013 in FR-24 order, applied to dev by scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1 (WhatIf, run, idempotent re-run, verified by metadata read). Billing gate PolicyVersionValidator.TryPrepareBillingRule (ArchTest-guarded); Ontology gate, compiler and describer refuse billing / unknown types; Signals readers use the sprk_domain allowlist in the query and per row. Seeding proof recorded for all 9 guards. Publish delta vs fresh master +0.147 MB (37.303 MB). OPEN: (1) Entity.xml escalation not answered - solution source still has only the 3 Ontology options (recommend option a); (2) ontology-r1 review not yet recorded; (3) adversarial-reviewer not run (subagent cap full). Deviation: RuleDomain.cs sits in Services/Signals/, not Billing/. D-89: no conflict (eligibility is 073's; D-89 holds type 1 via the confidence cap). Two existing closed-set pins now pin the Ontology domain only.
+rework: none task 070</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
