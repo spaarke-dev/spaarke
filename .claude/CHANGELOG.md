@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — CI polling with `gh --jq`; lint hook skips the `python3` Store stub
+
+A `/worktree-sync` CI wait failed silently. The agent piped `gh pr checks` into `jq`, which is not installed in Git Bash here. The loop read the empty result as "pending" and used up its 30-minute window without reading a check.
+
+- **`worktree-sync` skill** Step 4: exact poll commands using gh's built-in `--jq` (pending count, failures with links), a note that plain `jq` is absent, and fail-fast when the gh command errors or prints nothing.
+- **`devops-project-start` skill** Step 1: same fix for its `gh project item-list | jq` example.
+- **`scripts/quality/post-edit-lint.sh`**: both Python lookups (file-path parse, findings report) now prefer `python` and skip the `…/WindowsApps/python3` alias stub. That stub spun at 100% CPU on 2026-10-13 and again on 2026-10-15, when another session's `python3 -` call ran for 76 minutes.
+
+---
 ###### 2026-10-15 — Fluent dialogs hidden from role queries in jsdom (FAILURE-MODES G-21)
 
 Nightly quality alert #1906: three client-test packages failed because jsdom left Fluent's `DialogSurface` `aria-hidden`, so Testing Library role queries could not find the dialog's contents. The fixes shipped in PR #1925.
