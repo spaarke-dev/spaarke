@@ -96,6 +96,18 @@ export interface IAccessGrantRecord {
 }
 
 /**
+ * What {@link IAccessGrantModalProps.fetchExistingGrants} may resolve to when its source caps the list
+ * (unified-access-control-r2 task 099a): `GET /api/v1/external-access/record-grants` lists at most its cap and says
+ * `truncated: true` past it. Current Access then states that only part of the list is shown (NFR-03 — a cap stated,
+ * never a silent under-listing).
+ */
+export interface IExistingGrantsRead {
+  grants: IAccessGrantRecord[];
+  /** The source listed only the first `grants.length` of the record's grants. */
+  truncated: boolean;
+}
+
+/**
  * One No Access entry covering the record, as task 064's `GET /api/v1/records/{table}/{id}/no-access` returns it to a
  * caller with Write (unified-access-control-r2 task 067). The contract is frozen in
  * `projects/unified-access-control-r2/notes/phase4-access-report-contract.md`. Read-only here: walls are authored in
@@ -286,8 +298,11 @@ export interface IAccessGrantModalProps {
    * source). Called once when the modal opens. */
   fetchCandidates: () => Promise<IAccessGrantCandidate[]>;
   /** Loads the record's existing active grants. Called when the modal opens
-   * and re-called after every successful grant/revoke to refresh the list. */
-  fetchExistingGrants: () => Promise<IAccessGrantRecord[]>;
+   * and re-called after every successful grant/revoke to refresh the list.
+   * Task 099a: a host whose source caps the list resolves to
+   * {@link IExistingGrantsRead} so a partial list is stated, never silent
+   * (NFR-03); a plain array means the whole list. */
+  fetchExistingGrants: () => Promise<IAccessGrantRecord[] | IExistingGrantsRead>;
   /** Loads the record's STANDING-grant members — contacts whose global
    * `sprk_standinggrant` flag is set AND who hold an access-conferring role on
    * THIS record (the host intersects the standing flag with the record's

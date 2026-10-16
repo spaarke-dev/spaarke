@@ -1001,8 +1001,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
   // Task 099a: set when the record's grants could not be read — Current Access then shows this message (the server's
-  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants".
-  const [currentAccessError, setCurrentAccessError] = React.useState<string | null>(null);
+  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants". `denied`: the read was refused by
+  // the delegation/sign-in rule, which the deny banner already explains — the section says only that it is not shown.
+  const [currentAccessError, setCurrentAccessError] = React.useState<
+    { kind: 'failed'; text: string } | { kind: 'denied' } | null
+  >(null);
+  // Task 099a (verifier F2): the host's source listed only part of the record's grants (its cap) — stated, never silent.
+  // Holds how many it listed; null when the list is whole.
+  const [grantsTruncatedAt, setGrantsTruncatedAt] = React.useState<number | null>(null);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -1231,7 +1237,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // Task 099a: the grants read's own failure, kept apart from the others so Current Access can say what failed.
     let grantsReadFailure: { err: unknown } | null = null;
     try {
-      const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
+      const [candidateList, grantsRead, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
         await Promise.all([
           fetchCandidates(),
           fetchExistingGrants().catch(err => {
@@ -1261,6 +1267,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           fetchNoAccess(),
         ]);
       if (!isCurrent()) return;
+      // Task 099a: a capped source says so (`{ grants, truncated }`); a plain array is the whole list.
+      const grantList = Array.isArray(grantsRead) ? grantsRead : grantsRead.grants;
       const noAccess = noAccessRead.section;
       // Task 174: the effective access the gate and the "No effect" marks use (null: the host's values alone).
       setServerAccess(noAccessRead.access);
@@ -1271,11 +1279,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // and stays revocable. User-share rows key on a DIFFERENT id space
       // (systemUserId, reusing the `contactId` field per the doc comment
       // above) so they never collide with contact-keyed rows.
-      const grantedContactIds = new Set(grantList.map(g => g.contactId));
-      const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
+      // Task 099a (verifier F1): only a grant that still CONFERS hides the contact's standing row. A lapsed grant confers
+      // nothing, while the standing row still does (the server's union, AccessibleRecordSetService.ComposeForContactAsync),
+      // so both are listed — the lapsed one marked Expired, the standing one as live access.
+      const liveGrantContactIds = new Set(grantList.filter(g => !g.isExpired).map(g => g.contactId));
+      const standingOnly = standingList.filter(s => !liveGrantContactIds.has(s.contactId));
       const currentAccess = [...grantList, ...standingOnly, ...userShareList];
       setExistingGrants(currentAccess);
       setCurrentAccessError(null);
+      setGrantsTruncatedAt(!Array.isArray(grantsRead) && grantsRead.truncated === true ? grantList.length : null);
 
       // Task 067: an organization wall in force walls off the organization's people, so the contacts in Current Access
       // are checked against it — only when such a wall exists and there are contacts to check.
@@ -1310,7 +1322,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setOrgWallCheck(orgCheck);
       // Exclude both explicitly-granted AND standing members from the
       // candidate-approve list (they already have access).
-      const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
+      // Task 099a: a LAPSED grant's contact is excluded too — they are listed once, in Current Access, as Expired and
+      // revocable. Re-adding them (the contact lookup) restores that same row on the server (owner round 80 / task 113),
+      // so they are not offered as a fresh candidate beside it.
+      const currentAccessContactIds = new Set([
+        ...grantList.map(g => g.contactId),
+        ...standingOnly.map(s => s.contactId),
+      ]);
       // Task 142: a contact the server already SUGGESTS (a secure record) is offered once — in Suggested Access,
       // with Grant / Dismiss — not a second time as a role-based candidate.
       const suggestedContactIds = new Set(
@@ -1323,14 +1341,32 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSecureOwnerInfo(ownerInfo);
     } catch (err) {
       if (!isCurrent()) return;
-      setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
       // Task 099a: Current Access is never shown as "No active grants" when it was not read. The server's ProblemDetails
       // `detail` is shown verbatim (rendered as text); any other failure gets the generic sentence.
-      const failure: unknown = grantsReadFailure !== null ? (grantsReadFailure as { err: unknown }).err : err;
+      const grantsErr: unknown = grantsReadFailure !== null ? (grantsReadFailure as { err: unknown }).err : undefined;
+      const failure: unknown = grantsReadFailure !== null ? grantsErr : err;
+      // Verifier F1 (low): one failure, one message. A grants read refused by the delegation/sign-in rule is the deny
+      // banner's state (every write blocked, as for /user-shares); any other grants failure is explained by the
+      // section's own error. The generic notice is kept only for a failure of something else.
+      const grantsDeny =
+        grantsReadFailure !== null
+          ? splitAccessFailure(AccessGrantModalApiError.fromThrown(grantsErr) ?? grantsErr).deny
+          : null;
+      if (grantsDeny) setAccessDenyState(grantsDeny);
+      if (grantsReadFailure === null || err !== grantsErr) {
+        setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
+      }
       const detail: unknown = problemOf(failure)?.detail;
       setCurrentAccessError(
-        typeof detail === 'string' && detail.trim() !== '' ? detail.trim() : CURRENT_ACCESS_READ_FAILED_MESSAGE
+        grantsDeny
+          ? { kind: 'denied' }
+          : {
+              kind: 'failed',
+              text:
+                typeof detail === 'string' && detail.trim() !== '' ? detail.trim() : CURRENT_ACCESS_READ_FAILED_MESSAGE,
+            }
       );
+      setGrantsTruncatedAt(null);
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
       setServerAccess(null);
@@ -2347,12 +2383,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
                   <Text className={styles.sectionTitle}>Current Access</Text>
                   <div className={styles.listArea}>
-                    {currentAccessError !== null ? (
+                    {/* Task 099a (verifier F2): a capped list says it is partial (NFR-03). */}
+                    {currentAccessError === null && grantsTruncatedAt !== null && (
+                      <MessageBar intent="warning" data-testid="current-access-truncated">
+                        <MessageBarBody>Only the first {grantsTruncatedAt} grants are shown.</MessageBarBody>
+                      </MessageBar>
+                    )}
+                    {currentAccessError?.kind === 'denied' ? (
+                      // Task 099a: refused by the rule the deny banner above states — not repeated here, and never
+                      // "No active grants".
+                      <Text className={styles.emptyState} data-testid="current-access-not-shown">
+                        Not shown.
+                      </Text>
+                    ) : currentAccessError?.kind === 'failed' ? (
                       // Task 099a: the read failed — say so (the server's own sentence), never "No active grants".
                       <MessageBar intent="error" data-testid="current-access-error">
                         <MessageBarBody>
                           <MessageBarTitle>Current Access unavailable</MessageBarTitle>
-                          {currentAccessError}
+                          {currentAccessError.text}
                         </MessageBarBody>
                       </MessageBar>
                     ) : existingGrants.length === 0 ? (
@@ -2380,7 +2428,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           ? null
                           : suppressionFor(rowKind, accessPermissionState, isSecureRecord);
                         const levelClassName = vetoReason ? styles.vetoedLevel : undefined;
-                        const levelAppearance = vetoReason || suppressedReason ? 'outline' : 'tint';
+                        // Task 099a: a lapsed grant confers nothing, so its level is outlined like any row without effect.
+                        const levelAppearance = vetoReason || suppressedReason || grant.isExpired ? 'outline' : 'tint';
                         const rowKey = grant.accessRecordId
                           ? grant.accessRecordId
                           : isInherited
@@ -2392,7 +2441,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           <div
                             className={styles.row}
                             key={rowKey}
-                            data-access-state={vetoReason ? 'vetoed' : suppressedReason ? 'suppressed' : 'active'}
+                            data-access-state={
+                              vetoReason
+                                ? 'vetoed'
+                                : grant.isExpired
+                                  ? 'expired'
+                                  : suppressedReason
+                                    ? 'suppressed'
+                                    : 'active'
+                            }
                           >
                             <div className={styles.rowMain}>
                               {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6).

@@ -123,6 +123,12 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.49 (task 099a review round 1): `fetchExistingGrants` returns `{ grants, truncated }`, so a list the server capped
+ *   is stated in Current Access ("Only the first N grants are shown.") instead of only reaching the console. The bundled
+ *   modal also lists a contact's standing row beside their lapsed grant (the lapsed row no longer hides it), outlines
+ *   and marks the lapsed row `expired`, and shows one message per failed grants read (the deny banner for a 403, the
+ *   section's own error otherwise).
+ *
  * v1.0.48 (task 099a, unified-access-control-r2 — #1010(a)): Current Access reads the record's grants from the BFF
  *   (`GET /api/v1/external-access/record-grants`, gated by the delegation rule) instead of `context.webAPI` — a
  *   Write-holder in a child business unit saw none of the root-owned grant rows. A failed read now reaches the modal,
@@ -254,6 +260,7 @@ import {
   AccessGrantModal,
   type IAccessGrantCandidate,
   type IAccessGrantRecord,
+  type IExistingGrantsRead,
   type IContactSearchResult,
   type IOrganizationPick,
   type IUserPick,
@@ -1154,10 +1161,13 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * and this method lets it propagate: the modal shows the server's `detail` as Current Access's error state. Through
    * v1.0.38 a failed read returned `[]`, which the dialog rendered as "No active grants". An answer naming a different
    * record (the form rebound mid-flight) is refused the same way, never shown as this record's grants.
+   *
+   * A CAP IS STATED. The server lists at most its cap and says `truncated: true` past it; that flag is returned with the
+   * grants, and the modal says Current Access is partial (NFR-03 — never a silent under-listing; v1.0.49).
    */
-  private fetchExistingGrants = async (): Promise<IAccessGrantRecord[]> => {
+  private fetchExistingGrants = async (): Promise<IExistingGrantsRead> => {
     const recordId = this.getRecordId();
-    if (!recordId) return [];
+    if (!recordId) return { grants: [], truncated: false };
 
     const recordType = this.resolveGrantRoot().recordType;
     const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
@@ -1170,11 +1180,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     if (!Array.isArray(body.grants)) {
       throw new Error('The access list for this record could not be read (unexpected answer from the server).');
     }
-    if (body.truncated === true) {
-      console.warn(`[TrackingFieldTrio] Current Access for ${recordType} ${recordId} lists only part of its grants (server cap).`);
-    }
-
-    return (body.grants as IRecordGrantDto[]).map(g => {
+    const grants = (body.grants as IRecordGrantDto[]).map(g => {
       const contactId = g.contactId ?? '';
       const organizationId = g.organizationId ?? '';
       // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
@@ -1198,6 +1204,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
     });
+    return { grants, truncated: body.truncated === true };
   };
 
   /** Named-contact person-picker search (host-context, single-entity, capped
@@ -1517,7 +1524,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.48 • Built 2026-10-16',
+      versionText: 'v1.0.49 • Built 2026-10-16',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
