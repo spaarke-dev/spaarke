@@ -249,6 +249,11 @@ public sealed class OntologyAdminAuthoringLiveTests
         var leaks = new List<string>();
         var policies = (await dv.GetFromJsonAsync<JsonElement>($"sprk_policies?$select=sprk_policyid&$filter=sprk_policycode eq '{code}'"))
             .GetProperty("value").EnumerateArray().Select(p => p.GetProperty("sprk_policyid").GetGuid()).ToList();
+        // Turned Off FIRST, every one of them: if a delete below then fails, the leaked rule is Off and the nightly job never fires it on
+        // a real matter (review pass 2).
+        foreach (var policy in policies)
+            leaks.AddRange(await DisableAsync(dv, policy));
+
         foreach (var policy in policies)
         {
             var versions = (await dv.GetFromJsonAsync<JsonElement>($"sprk_policyversions?$select=sprk_policyversionid&$filter=_sprk_policy_value eq {policy:D}"))
@@ -270,6 +275,25 @@ public sealed class OntologyAdminAuthoringLiveTests
         _out.WriteLine($"cleanup {code}: {policies.Count} policies; leaks = [{string.Join("; ", leaks)}]; ZZ-101 policies remaining = {remaining}");
         leaks.Should().BeEmpty("every zz-101 row is removed");
         remaining.Should().Be(0, "no zz-101 policy is left behind");
+    }
+
+    /// <summary>PATCH sprk_enabled=false. If-Match * makes it an update only: it never creates a row that is already gone.</summary>
+    private static async Task<List<string>> DisableAsync(HttpClient dv, Guid policy)
+    {
+        var path = $"sprk_policies({policy:D})";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Patch, path) { Content = JsonContent.Create(new { sprk_enabled = false }) };
+            request.Headers.TryAddWithoutValidation("If-Match", "*");
+            using var r = await dv.SendAsync(request);
+            return r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.NotFound
+                ? new List<string>()
+                : new List<string> { $"{path} (turn Off): HTTP {(int)r.StatusCode}" };
+        }
+        catch (Exception ex)
+        {
+            return new List<string> { $"{path} (turn Off): {ex.Message}" };
+        }
     }
 
     private static async Task<List<string>> DeleteAsync(HttpClient dv, string path)
