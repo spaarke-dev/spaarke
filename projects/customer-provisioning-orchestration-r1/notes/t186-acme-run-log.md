@@ -180,4 +180,6 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | 01:47–01:55 UTC | Run `Running`, nothing progressing: H8 never re-ran; the reconciler re-sent its processed attempt every 5 s | **L41** |
 | 01:55:23 UTC | `POST …/gates/h8-spe-recorded-container-unreadable/advance` | **202** → **H8 ✓** (root container bound; first live H8 pass) and **H4b ✓** |
 | ≈01:56 UTC | H9 → **Failed** `artifact-manifest-rejected` (no `latest.json`) | **L42**. Nothing deployed |
+| ≈02:05 UTC | L41 committed (`92e6b864b`); dev control plane redeploy started. PR #2000 merged (`879a0a1ea`, every check terminal and green) | — |
+| 02:11:53 UTC | `publish-bff-artifact.yml` run 38838903108 (`publish=true`, master `879a0a1`) ✓ — `latest.json` → `bff-api-2026.10.16-2.zip` (36,622,276 bytes); gates r3 analyzers / god-class / ArchTests / naming Passed, Graph app-role parity Skipped (H9 accepts Skipped) | First published customer BFF artifact |
 | ≈19:30 UTC | External-access R3 deployed spaarke-bff-dev `1.0.0+e276357a7` (source `c20bff283`, which contains #1901 `98c5962d7`), with owner OK. | The identity-link reconciliation job now skips the ACME in-progress registry row, so its per-run failure logs should stop. Not a provisioning action. |
