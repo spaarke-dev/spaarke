@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-15 (main session, master merged; 155 in review). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-16 ~02:45Z (main session; 055 deployed, worklist unreachable → task 156 running). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-145; D-144 amended). Deferred work: one self-contained GitHub issue per item,
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-147). Deferred work: one self-contained GitHub issue per item,
 > label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-103**).
 > Sub-agents never edit this file.
 
@@ -11,37 +11,42 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 055 prep. Master `44b6a72c1` has all ontology work through 155 (#1989, #1996). Console built from master in worktree `C:\wts-055` (detached at `44b6a72c1`). |
-| **Blocker** | Waiting for R3 to confirm the dev BFF is live on `eb5ba4011` (R3 + master `7315b3e85`; owner-approved plan (a); live `e276357a7` is its ancestor). Ontology does not touch the BFF. |
-| **Next Action** | After R3 confirms (version + healthz): (1) notify word-add-in + uac-r2 (before); (2) D-146: PATCH `sprk_enabled=true` on policies 6101-6104 + `4d204810…`, trigger `POST /api/admin/jobs/signal-reevaluation/trigger` (token `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`), read history; (3) grid config from `C:\wts-055`: `-Verify` showed DRIFT, `-WhatIf` = one UPDATE of row `…5010`; apply, then `-Verify -RequireRow`; (4) `pwsh scripts/Deploy-SpaarkeAi.ps1` from `C:\wts-055` (publishes only `sprk_spaarkeai`, D-83 ok); (5) 055 real-data checks (owner in the browser) + notify after; (6) 144/148 report-only pass → uac-r2 → writes; then 049. |
+| **Task** | 156 — make the worklist reachable in the Console (section shim + "Worklist" `sprk_workspacelayout` row). Gates 055's browser check. |
+| **Status** | Implementer (sonnet/high) running in `C:\wts-156`, branch `task/ontology-156-worklist-reachable`; it opens a PR into `docs/ontology-platform-design` and does not merge. |
+| **Next Action** | On its report: independent review → fix round → re-check → merge (`merge-when-green3.sh`, run_in_background) → docs→master PR → update `C:\wts-055` to new master, rebuild Console, before-notices (word-add-in, R3, uac-r2), `pwsh scripts/Deploy-SpaarkeAi.ps1`, hash check, after-notices → run `scripts/seed-worklist-workspace-layout.ps1 -WhatIf` then for real on dev → owner browser check (below). |
 
 ## Lanes in flight
 
-None. 155 merged (#1990, `493bb8a49`); going to master in a docs→master PR for the 055 Console deploy.
+- 156 (above). Nothing else.
 
-## Dev state (spaarke-bff-dev)
+## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- Runs R3's `1.0.0+e276357a7` (src `c20bff283` = R3 + master `98c5962d7`). It has our `f292ad119`, not #1907 or later.
-- **Writes stay OFF** for 144 (`CoreAncestor__StampReconciliation__ReportOnlyTables`) and 148 (`Ontology__TodoAssigneeOwner__WritesEnabled`). Order: one report-only pass of both, then uac-r2 CLEAN, then `ReportOnlyTables=","` and `WritesEnabled=true`. Notify word-add-in, R3 and uac-r2 before and after each restart.
-- 0 Signals, 1 DR (another lane's); all five policies disabled.
+- BFF `1.0.0+eb5ba4011` (R3 + master `7315b3e85`), deployed by R3. Ontology does not deploy the BFF.
+- Console (`sprk_spaarkeai`) live from master `44b6a72c1`, 01:56:32Z, hash `0470e7f1…f23f2`. The worklist widget is in the bundle but no dropdown entry reaches it (task 156).
+- Grid config row `…5010` in sync.
+- D-146: five policies enabled; manual evaluator pass 01:56Z wrote 87 Signals (Open task 21, To Do 43, WA 19, Decide 4, Coming due 0), all team-owned.
+- 144/148 writes ON since 02:26:42Z (D-138 + owner "yes approve"). 144 repaired 50 at 02:30, then 0 stale of 130 at 02:35; 148 0 stale. Nightly evaluator 02:30: 87 unchanged, 0 written. Notices sent to R3, word-add-in, uac-r2.
 
-## Next, in order
+## 055 owner browser check (after 156 deploy)
 
-1. 155 review → merge.
-2. 055 deploy (coordinated with R3, above).
-3. D-146 policies on (after R3's BFF) → evaluator pass → 144/148 report-only pass → uac-r2 → writes.
-4. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), close #1882.
-5. 049 (with the DR Create removal if approved), 062, 063, 064, 105, 045, 104.
-6. ebilling: their ConsoleKit PR plus 070, 013, 015, 026, 050, 074 come to us for review.
+Open https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai → workspace dropdown → Worklist. Check: both lanes render; one full review (Send budget inquiry with recipient = self, Revise budget, Next step Add To Do); network log; no console errors; Daily Briefing still fine. Then the main session verifies the DR, budget revision, To Do and Signal = Acted in Dataverse, marks 055 done and updates `notes/deploy-log.md`.
+
+## Next, in order (after 055)
+
+1. 049 (Signal Write + DR Create removals from users and Ontology Administrator, D-147; PR to uac-r2 first).
+2. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), close #1882.
+3. 062, 063, 064, 105, 045, 104.
+4. ebilling: their ConsoleKit PR plus 070, 013, 015, 026, 050, 074 come to us for review.
 
 ## Promises to peers
 
-- **uac-r2:** notify before/after the 055 deploy; they run the ledger follow-up on master.
-- **R3:** do not touch the dev BFF until their plan is agreed; message before the 144/148 app-setting restarts.
+- **R3** owns the dev BFF line: message first for any BFF change; `git merge-base --is-ancestor <live> <deploy>` before any deploy. R3 asked how to read ProductVersion (asked them back).
+- **word-add-in** (owner UAT on the Console): before/after notices with start/finish times for any Console or BFF change.
+- **uac-r2:** notify before/after deploys; PR for 049 before the live role removal.
 
 ## Open owner questions
 
-- None. Answered 2026-10-15: D-146 (enable the five dev policies after R3's BFF is live, then one manual `signal-reevaluation` pass) and D-147 (049 also removes DR Create from Ontology Administrator).
+- None.
 
 ## Peers (current session names)
 
