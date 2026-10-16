@@ -256,11 +256,14 @@ MERGE STRATEGY — PULL REQUEST ONLY. Direct pushes to master DO NOT WORK on thi
     #    out the whole window without ever reading a check (it once used up a 30-minute window
     #    this way). `gh … --jq` uses gh's built-in jq and needs nothing installed.
     gh pr checks {pr} --json name,bucket --jq '[.[] | select(.bucket=="pending")] | length'   # pending count
-    gh pr checks {pr} --json name,bucket,link --jq '.[] | select(.bucket=="fail") | .name + "  " + .link'   # failures
-    #    Fail fast: if the gh command itself exits non-zero or prints nothing, STOP and report.
-    #    Do not count a parse error as "pending" and keep waiting. (Before CI registers, gh pr
-    #    checks reports "no checks reported"; that is not green either.)
-  fails = checks where bucket == "fail"
+    gh pr checks {pr} --json name,bucket,link --jq '.[] | select(.bucket=="fail" or .bucket=="cancel") | .name + "  " + .link'   # failures
+    #    The pending count ALWAYS prints a number (with --json, a pending PR exits 0, not 8).
+    #    If that command prints nothing or exits non-zero, it is a parse/tool failure: STOP and
+    #    report; do not count it as "still pending" and keep waiting.
+    #    One exception: exit 1 with "no checks reported" in the first ~2 minutes after
+    #    `gh pr create` means CI has not registered yet. Wait and retry, but never read it as green.
+    #    The failures command prints NOTHING when nothing failed. That is the normal green result.
+  fails = checks where bucket == "fail" or bucket == "cancel"
   IF fails is non-empty:
     REPORT the failing job names + log URLs
     STOP — diagnose. Do NOT merge because "only Router is required".

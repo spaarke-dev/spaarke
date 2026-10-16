@@ -11,8 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 A `/worktree-sync` CI wait failed silently. The agent piped `gh pr checks` into `jq`, which is not installed in Git Bash here. The loop read the empty result as "pending" and used up its 30-minute window without reading a check.
 
-- **`worktree-sync` skill** Step 4: exact poll commands using gh's built-in `--jq` (pending count, failures with links), a note that plain `jq` is absent, and fail-fast when the gh command errors or prints nothing.
-- **`devops-project-start` skill** Step 1: same fix for its `gh project item-list | jq` example.
+- **`worktree-sync` skill** Step 4: exact poll commands using gh's built-in `--jq` (pending count; failures including cancelled checks, with links), a note that plain `jq` is absent, and fail-fast when the pending count errors or prints nothing (except "no checks reported" just after the PR opens).
+- **`devops-project-start` skill** Step 1: same fix for its `gh project item-list | jq` example, plus `--limit 1000` (the default 30 items would miss most issues).
 - **`scripts/quality/post-edit-lint.sh`**: both Python lookups (file-path parse, findings report) now prefer `python` and skip the `…/WindowsApps/python3` alias stub. That stub spun at 100% CPU on 2026-10-13 and again on 2026-10-15, when another session's `python3 -` call ran for 76 minutes.
 
 ---
