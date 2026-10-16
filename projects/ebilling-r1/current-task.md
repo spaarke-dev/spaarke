@@ -11,8 +11,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done (37/79): 001-005, 010-014, 016-025, 027-029, 040-048, 078, 106, 108, 109. WIP: 054 (new, D-93; opus agent), 107 (sonnet agent), 070 (merged incl. fix-round-1 be28df779; held for ontology-r1 review). ADR-010 ceiling 165; route ledger file count 130 |
-| **Step** | Agents: 054, 107; adversarial reviewers: 044 (second pass, auth), 106+048. Next: 026 after 054 (both touch SpaarkeMaster source, serial) |
+| **Task** | Parallel mode. Done (37/79): 001-005, 010-014, 016-025, 027-029, 040-048, 078, 106, 108, 109. WIP: 054 (opus agent; also fixes 048 confirm race via If-Match), 107 (merged; fix-round-1 agent: truncated/cap/crowding leaks + same leak in 106 AllExamined + shared caller-Read helper), 070 (merged incl. fix-round-1; held for ontology-r1 review). ADR-010 ceiling 165; route ledger 131 |
+| **Step** | Waiting on 054 and 107 fix-round-1. Then: 026 (serial, SpaarkeMaster source), 015 (owner OK). 044 fix-round-2 merged (f68d26b73). Last verified: build clean, 3556 targeted tests + 1056 ArchTests green after 107 merge |
 | **Pending relay** | Tell ontology-r1 (session closed when tried) that the owner approved D-92 (their D-138 question); collect their 070 review (Q1 throw vs failed result) |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | As each agent reports: cherry-pick its commits onto work/ebilling-r1 (conflicts on FinanceModule.cs / ADR010_DITests.cs: keep both sides, sum the ceiling), amend trailers to Opus 5.5 with hooks, mark ✅ in TASK-INDEX, run the build + targeted Finance tests + ArchTests. Then 107 and 026 (serial, opus), then 015 (needs owner OK, destructive) |
