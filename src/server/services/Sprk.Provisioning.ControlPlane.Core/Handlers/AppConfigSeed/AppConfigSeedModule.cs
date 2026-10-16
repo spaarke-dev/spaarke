@@ -11,7 +11,8 @@
 //     disk-path options (PwshExecutable, ScriptsDirectory, ManifestPath,
 //     SeederTimeout, *ScriptFileName): nothing read them but H12b's manifest
 //     hash, which now comes from H12a's ISeedManifestReader (embedded).
-//   - Register the four IAppConfigSeeder instances. Task 151 (Wave G-5)
+//   - Register the five IAppConfigSeeder instances (T186 L54 added the
+//     record-type seeder, registered first). Task 151 (Wave G-5)
 //     ported two of the four from PowerShellAppConfigSeeder shell-outs to
 //     direct Dataverse Web API calls: DataverseWebApiDataGridSeeder +
 //     DataverseWebApiWorkspaceLayoutSeeder. Task 152 (Wave G-5 Batch G-5B)
@@ -63,7 +64,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 
 /// <summary>
-/// DI registration for the H12b app-config seed handler + its four
+/// DI registration for the H12b app-config seed handler + its five
 /// per-scope <see cref="IAppConfigSeeder"/> dependencies. Composed behind a
 /// single <see cref="AddH12bAppConfigSeedHandler"/> extension method to
 /// minimize Program.cs edit surface (one new line) + avoid merge-conflict
@@ -76,7 +77,7 @@ public static class AppConfigSeedModule
     public const string ConfigSection = "AppConfigSeed";
 
     /// <summary>
-    /// Registers <see cref="H12bAppConfigSeedHandler"/> + its four
+    /// Registers <see cref="H12bAppConfigSeedHandler"/> + its five
     /// <see cref="IAppConfigSeeder"/> dependencies with the DI container.
     /// </summary>
     /// <param name="services">Service collection.</param>
@@ -102,7 +103,7 @@ public static class AppConfigSeedModule
             }, "AppConfigSeed options failed validation — see inner exception (Validate throws).")
             .ValidateOnStart();
 
-        // Four seeder registrations — kept explicit (rather than reflection
+        // Five seeder registrations — kept explicit (rather than reflection
         // / attribute-scanning) so the compile-time diff is visible: a new
         // scope is a new line here + a new AppConfigSeedScopes const.
         //
@@ -111,6 +112,14 @@ public static class AppConfigSeedModule
         // IEnumerable<IAppConfigSeeder> resolution; the handler's aggregation
         // logic does not depend on order but the operator-visible outcome
         // ordering follows this list.
+
+        // (0) Record types — T186 L54. FIRST: field-mapping (3) binds its profiles to
+        // these sprk_recordtype_ref rows, and a new stamp has none until this runs.
+        services.AddHttpClient(DataverseWebApiRecordTypeSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiRecordTypeSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiRecordTypeSeeder.HttpClientName),
+            options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiRecordTypeSeeder>>()));
 
         // (1) DataGrid — task 151 (Wave G-5) ported from PowerShellAppConfigSeeder
         // (shell-out to scripts/seed-reconciliation-gridconfig.ps1, now

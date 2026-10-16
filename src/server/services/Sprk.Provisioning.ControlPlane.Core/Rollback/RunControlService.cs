@@ -22,6 +22,8 @@
 //      run.FailedHandlers (T186 L41: a later sibling failure used to hide an earlier one,
 //      which then never ran again), Status=Running, ErrorDetail=null, CompletedOn=null,
 //      ReplaceRunAsync(ETag).
+//      The first resume after a clear-quarantine also adds every DAG-ready handler (T186 L55) and stamps
+//      Quarantine.ResumedAt.
 //   5. THEN enqueue ReconcilerEnvelopeBuilder.Build(id, run, time, attempt) for each, current phase first.
 //      If the enqueue throws, revert the run to Failed (previous ErrorDetail,
 //      CompletedOn=now, new ETag) and return EnqueueFailed.
@@ -48,6 +50,9 @@ namespace Sprk.Provisioning.ControlPlane.Rollback;
 /// <inheritdoc/>
 public sealed class RunControlService : IRunControlService
 {
+    // Stateless (the DAG is static data); not injected because the API host does not register the reconciler.
+    private static readonly DagAdvancer ReadyHandlers = new();
+
     private readonly IProvisioningRunRepository _repository;
     private readonly ICustomerRunGuard _customerRunGuard;
     private readonly IHandlerEnqueuer _enqueuer;
@@ -140,6 +145,28 @@ public sealed class RunControlService : IRunControlService
             !string.Equals(h, handlerId, StringComparison.Ordinal)
             && HandlerIds.Dispatchable.Contains(h, StringComparer.Ordinal)));
 
+        // T186 L55: while the run was Quarantined the dispatcher completed every arriving envelope without running it
+        // (a quarantined run is terminal to it). A sibling dispatched alongside the quarantining handler — H12b next to
+        // H12a — was lost that way, and the reconciler's re-sends reuse its MessageId, which Service Bus duplicate
+        // detection drops for an hour. So the first resume after a clear also re-dispatches every ready handler with a
+        // fresh attempt. Only that resume: a plain Failed run invokes its envelopes, and a ready handler may still be
+        // running (a long H6 import) — re-sending it then would start a second copy.
+        var previousQuarantineResumedAt = run.Quarantine?.ResumedAt;
+        if (run.Quarantine is { State: QuarantineState.Cleared, ResumedAt: null } clearedQuarantine)
+        {
+            var statusBefore = run.Status;
+            run.Status = RunStatus.Running; // ComputeReadyHandlers returns nothing for a Failed run
+            foreach (var ready in ReadyHandlers.ComputeReadyHandlers(run))
+            {
+                if (!toDispatch.Contains(ready, StringComparer.Ordinal))
+                {
+                    toDispatch.Add(ready);
+                }
+            }
+            run.Status = statusBefore;
+            clearedQuarantine.ResumedAt = _timeProvider.GetUtcNow();
+        }
+
         // Fresh MessageId: attempt = prior + 1 for each, persisted in the same write.
         var attempts = new List<(string HandlerId, int Attempt)>();
         foreach (var id in toDispatch)
@@ -172,7 +199,7 @@ public sealed class RunControlService : IRunControlService
                 return new RunResumeResult.NotFound();
             case ReplaceRunResult.Success s:
                 return await EnqueueResumedHandlersAsync(
-                    s, handlerId, attempts, previousErrorDetail, actorObjectId, cancellationToken).ConfigureAwait(false);
+                    s, handlerId, attempts, previousErrorDetail, previousQuarantineResumedAt, actorObjectId, cancellationToken).ConfigureAwait(false);
             default:
                 throw new System.Diagnostics.UnreachableException(
                     "ReplaceRunResult exhaustive union changed — update RunControlService.");
@@ -184,6 +211,7 @@ public sealed class RunControlService : IRunControlService
         string handlerId,
         IReadOnlyList<(string HandlerId, int Attempt)> attempts,
         string? previousErrorDetail,
+        DateTimeOffset? previousQuarantineResumedAt,
         string? actorObjectId,
         CancellationToken cancellationToken)
     {
@@ -199,7 +227,7 @@ public sealed class RunControlService : IRunControlService
                 if (!string.Equals(id, handlerId, StringComparison.Ordinal))
                 {
                     _logger.LogInformation(
-                        "RunResumed (other failed handler, T186 L41): CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
+                        "RunResumed (other failed or ready handler, T186 L41/L55): CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
                         run.CustomerId, run.RunId, id, idAttempt);
                 }
             }
@@ -214,6 +242,10 @@ public sealed class RunControlService : IRunControlService
                 ex,
                 "RunResume: enqueue failed — reverting run to Failed. CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
                 run.CustomerId, run.RunId, handlerId, attempt);
+            if (run.Quarantine is not null)
+            {
+                run.Quarantine.ResumedAt = previousQuarantineResumedAt; // the next resume must still re-dispatch the ready handlers
+            }
             await RevertToFailedAsync(run, persisted.ETag, previousErrorDetail, cancellationToken).ConfigureAwait(false);
             return new RunResumeResult.EnqueueFailed($"{ex.GetType().Name}: {ex.Message}");
         }

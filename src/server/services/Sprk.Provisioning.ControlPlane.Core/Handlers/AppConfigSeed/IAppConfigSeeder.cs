@@ -101,6 +101,13 @@ public sealed record AppConfigSeedInput(
 public static class AppConfigSeedScopes
 {
     /// <summary>
+    /// Platform record-type registry (<c>sprk_recordtype_ref</c>). Seeded by
+    /// <see cref="DataverseWebApiRecordTypeSeeder"/> before field-mapping, whose
+    /// profiles bind to these rows (T186 L54).
+    /// </summary>
+    public const string RecordType = "record-type";
+
+    /// <summary>
     /// DataGrid configurations (<c>sprk_gridconfiguration</c>). Wraps
     /// <c>scripts/seed-reconciliation-gridconfig.ps1</c>. See task 004
     /// §4b row 10 for the drift-resolution rationale.

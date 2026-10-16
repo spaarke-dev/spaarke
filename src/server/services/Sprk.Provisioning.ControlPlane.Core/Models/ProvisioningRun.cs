@@ -440,6 +440,15 @@ public sealed class QuarantineInfo
     [JsonPropertyName("clearedAt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? ClearedAt { get; set; }
+
+    /// <summary>
+    /// UTC timestamp of the first resume after the clear (T186 L55). That resume also re-dispatches every ready
+    /// handler, because the dispatcher completed their envelopes without running them while the run was quarantined;
+    /// later resumes do not.
+    /// </summary>
+    [JsonPropertyName("resumedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ResumedAt { get; set; }
 }
 
 /// <summary>

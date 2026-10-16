@@ -565,6 +565,77 @@ public sealed class RunControlServiceTests
             : null,
     };
 
+    // T186 L55: H11 done, H12a quarantined the run; H12b (dispatched with H12a) arrived while it was Quarantined and
+    // the dispatcher completed it without running it.
+    private static ProvisioningRun MakeClearedQuarantineRun(DateTimeOffset? resumedAt)
+    {
+        var run = MakeRun(RunStatus.Failed, currentPhase: "H12a");
+        foreach (var done in new[] { "H0", "H1", "H2a", "H2b", "H3", "H4", "H4b", "H5", "H6", "H7", "H7b", "H8", "H9", "H10", "H11" })
+        {
+            run.CompletedPhases.Add(new CompletedPhase { Phase = done, CompletedAt = FrozenNow, IdempotencyKey = done, JobId = done });
+        }
+        run.FailedHandlers.Add("H12a");
+        run.HandlerRetryAttempts["H12a"] = 1;
+        run.Quarantine = new QuarantineInfo
+        {
+            State = QuarantineState.Cleared,
+            Reason = "seed write failed",
+            QuarantinedByHandler = "H12a",
+            QuarantinedAt = FrozenNow.AddMinutes(-30),
+            ClearedBy = TestActorOid,
+            ClearedAt = FrozenNow.AddMinutes(-1),
+            ResumedAt = resumedAt,
+        };
+        return run;
+    }
+
+    [Fact]
+    public async Task T186_L55_FirstResumeAfterAClearedQuarantine_AlsoReDispatchesTheReadySiblingWithAFreshAttempt()
+    {
+        var rig = new Rig();
+        rig.Repo.Seed(MakeClearedQuarantineRun(resumedAt: null), "\"etag-1\"");
+
+        var result = await rig.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
+
+        var success = result.Should().BeOfType<RunResumeResult.Success>().Subject;
+        rig.Enqueuer.Enqueued.Select(e => (e.HandlerId, e.Attempt))
+            .Should().Equal([("H12a", 2), ("H12b", 1)], "H12b's attempt 0 was swallowed; its re-send needs a MessageId Service Bus has not seen");
+        success.Run.HandlerRetryAttempts["H12b"].Should().Be(1);
+        success.Run.Quarantine!.ResumedAt.Should().Be(FrozenNow);
+        rig.Repo.ReplaceCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task T186_L55_LaterResume_AndAPlainFailedResume_DoNotReDispatchReadyHandlers()
+    {
+        // A ready handler may still be running (a long H6 import); only the post-quarantine resume re-sends them.
+        var already = new Rig();
+        already.Repo.Seed(MakeClearedQuarantineRun(resumedAt: FrozenNow.AddMinutes(-5)), "\"etag-1\"");
+        await already.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
+        already.Enqueuer.Enqueued.Select(e => e.HandlerId).Should().Equal("H12a");
+
+        var plain = new Rig();
+        var run = MakeClearedQuarantineRun(resumedAt: null);
+        run.Quarantine = null;
+        plain.Repo.Seed(run, "\"etag-1\"");
+        await plain.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
+        plain.Enqueuer.Enqueued.Select(e => e.HandlerId).Should().Equal("H12a");
+    }
+
+    [Fact]
+    public async Task T186_L55_EnqueueThrows_TheRevertKeepsTheReadyHandlersOwedToTheNextResume()
+    {
+        var rig = new Rig();
+        rig.Repo.Seed(MakeClearedQuarantineRun(resumedAt: null), "\"etag-1\"");
+        rig.Enqueuer.Failure = new InvalidOperationException("service bus unavailable");
+
+        await rig.Sut.ResumeAsync(TestCustomerId, TestRunId, TestActorOid, default);
+
+        var stored = (await rig.Repo.ReadRunAsync(TestCustomerId, TestRunId, default))!.Run;
+        stored.Status.Should().Be(RunStatus.Failed);
+        stored.Quarantine!.ResumedAt.Should().BeNull();
+    }
+
     private static ProvisioningRun MakeGatedRun(string gateId, GateState gateState, string? verifier)
     {
         var run = MakeRun(RunStatus.WaitingOnGate, currentPhase: "H0.5");
