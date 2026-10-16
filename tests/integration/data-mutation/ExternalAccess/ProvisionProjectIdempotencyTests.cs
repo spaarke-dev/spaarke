@@ -1,8 +1,14 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Xunit;
 
@@ -443,38 +449,46 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
 
     /// <summary>
     /// #1755: Step 7's own bound. A record write that never answers is a failure like any other: non-2xx, and the error
-    /// log and the problem both name the container, so the orphan is never silent.
+    /// log and the problem both name the container, so the orphan is never silent. The bound runs on the host's
+    /// <see cref="TimeProvider"/>: this test holds the write open and advances a fake clock past it, so nothing waits on the
+    /// wall clock and no process-wide state is changed.
     /// </summary>
     [Fact]
     public async Task ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
-        _fixture.OnContainerRecord = ct => Task.Delay(TimeSpan.FromSeconds(10), ct);
-        var bound = ProvisionProjectEndpoint.ContainerRecordTimeout;
-        ProvisionProjectEndpoint.ContainerRecordTimeout = TimeSpan.FromMilliseconds(500);
-        try
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.OnContainerRecord = ct =>
         {
-            using var client = _fixture.CreateEntitledClient();
-
-            var response = await ProvisionAsync(client, projectId);
-
-            response.IsSuccessStatusCode.Should().BeFalse("a record write that timed out recorded nothing");
-            (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
-            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            problem.RootElement.GetProperty("speContainerId").GetString()
-                .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
-            _fixture.Logs.Entries.Should().Contain(e =>
-                e.Level == LogLevel.Error
-                && e.Message.Contains(ProvisionProjectTestFixture.ProvisionedContainerId)
-                && e.Message.Contains(projectId.ToString()),
-                "the orphaned container's id is logged for the operator who reconciles it");
-            _fixture.ContainerIdOf(projectId).Should().NotBe(ProvisionProjectTestFixture.ProvisionedContainerId);
-        }
-        finally
+            holding.TrySetResult();
+            return Task.Delay(Timeout.InfiniteTimeSpan, ct); // the PATCH never answers; only its token ends it
+        };
+        await using var host = _fixture.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
         {
-            ProvisionProjectEndpoint.ContainerRecordTimeout = bound;
-        }
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(clock);
+        }));
+        using var client = host.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "provision-test-token");
+
+        var pending = ProvisionAsync(client, projectId);
+        await holding.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        clock.Advance(ProvisionProjectEndpoint.ContainerRecordTimeout + TimeSpan.FromSeconds(1));
+        var response = await pending.WaitAsync(TimeSpan.FromSeconds(30));
+
+        response.IsSuccessStatusCode.Should().BeFalse("a record write that timed out recorded nothing");
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("speContainerId").GetString()
+            .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Error
+            && e.Message.Contains(ProvisionProjectTestFixture.ProvisionedContainerId)
+            && e.Message.Contains(projectId.ToString()),
+            "the orphaned container's id is logged for the operator who reconciles it");
+        _fixture.ContainerIdOf(projectId).Should().NotBe(ProvisionProjectTestFixture.ProvisionedContainerId);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

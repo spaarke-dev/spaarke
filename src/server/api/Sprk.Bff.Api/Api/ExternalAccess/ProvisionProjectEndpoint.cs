@@ -176,10 +176,10 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// Bounds Step 7, the write that records the container Step 6 created (#1755). It runs on its own token with this
     /// timeout, never the request's: a client disconnect there used to leave an empty container no record names, and the
-    /// next call made another. The same bound as <see cref="ContainerOperations.UncancellableStepTimeout"/>. Settable for
-    /// tests only.
+    /// next call made another. The same bound as <see cref="ContainerOperations.UncancellableStepTimeout"/>, measured on the
+    /// host's <see cref="TimeProvider"/> so a test advances it instead of waiting.
     /// </summary>
-    internal static TimeSpan ContainerRecordTimeout { get; set; } = TimeSpan.FromSeconds(90);
+    internal static readonly TimeSpan ContainerRecordTimeout = TimeSpan.FromSeconds(90);
 
     // ── Reason codes (ProblemDetails extensions["reasonCode"]) ───────────────
     //
@@ -1278,7 +1278,8 @@ public static class ProvisionProjectEndpoint
         // failure like any other, and the catch below names the container.
         try
         {
-            using var record = new CancellationTokenSource(ContainerRecordTimeout);
+            var clock = httpContext?.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+            using var record = new CancellationTokenSource(ContainerRecordTimeout, clock);
             await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, record.Token);
         }
         catch (Exception ex)
