@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -88,6 +89,10 @@ public static class FinanceModule
         services.AddScoped<ICodeSetSuggestionProvider, NoCodeSetSuggestionProvider>();
         services.AddScoped<CodeSetResolver>();
         services.AddScoped<ILineCodingService, LineCodingService>();
+        // Tracking numbers (ebilling-r1 task 045, FR-10, D-37, ADR-002): the single server-side owner of a submission's
+        // {firm invoice number}.{n} and sprk_submissionsequence, made unique by the (firm, tracking number) alternate key with a
+        // bounded retry. Scoped (takes the scoped IGenericEntityService), unconditional (flag rule above). Callers: 044, 049, 104.
+        services.AddScoped<ITrackingNumberAllocator, TrackingNumberAllocator>();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)

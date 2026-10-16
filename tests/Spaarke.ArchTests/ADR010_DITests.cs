@@ -360,7 +360,16 @@ public class ADR010_DITests
         // CodeSetResolver, and lets the resolver's tests fake the proposal. It has one implementation today (the Null-Object default,
         // ADR-032) and gains the second in 048; if 048 does not, collapse it into the resolver and drop this back.
         // Measured: master + the earlier eBilling tasks = 163 (after 046), this task adds exactly these two.
-        const int knownOneToOneCeiling = 165;
+        // ───────── Ceiling raised 165 → 166, 2026-10-16 (ebilling-r1 task 045) ─────────
+        // ITrackingNumberAllocator -> TrackingNumberAllocator. SEAM JUSTIFICATION: it is the single server-side owner of a submission's
+        // {firm invoice number}.{n} (FR-10, D-37, ADR-002) and the module boundary of three later callers: the submission operation (044,
+        // number typed at intake), the submission job (049, number read from the PDF) and resubmission after Return to Firm (104). Each of
+        // their tests must prove what the caller does with every outcome (Allocated, AlreadyAllocated, Refused with ebilling.tracking.unavailable)
+        // by feeding it that TrackingNumberResult through a Moq double; without the interface each would stand up the Dataverse
+        // highest-sequence read, the alternate-key retry and its faults behind a concrete. One implementation, so a 1:1 mapping, accepted on
+        // the same grounds as IInvoiceLifecycleService above. Falsifiable: if neither 044 nor 049 fakes it by 049, register the concrete and
+        // drop this back to 162.
+        const int knownOneToOneCeiling = 166;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
