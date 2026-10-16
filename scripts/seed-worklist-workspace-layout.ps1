@@ -11,7 +11,8 @@
   mounts the `worklist` section (worklist.registration.ts). Copy of
   seed-reconciliation-workspace-layout.ps1 (same row shape, same system flags).
 
-  Idempotent by sprk_name (skips if the row exists). Requires the `worklist` LegalWorkspace
+  Idempotent by sprk_name AND sprk_issystem=true (skips if the system row exists; a user-owned layout that
+  happens to be named "Worklist" does not satisfy it, same filter as Deploy-SystemWorkspaceLayouts.ps1). Requires the `worklist` LegalWorkspace
   section to be deployed (SpaarkeAi/LegalWorkspace bundle) for the layout to render content -- the
   row can be seeded independently.
 
@@ -38,7 +39,7 @@ $headers = @{
 }
 
 $name = 'Worklist'
-$existing = Invoke-RestMethod -Method Get -Headers $headers -Uri "$api/sprk_workspacelayouts?`$filter=sprk_name eq '$name'&`$select=sprk_workspacelayoutid,sprk_name"
+$existing = Invoke-RestMethod -Method Get -Headers $headers -Uri "$api/sprk_workspacelayouts?`$filter=sprk_name eq '$name' and sprk_issystem eq true&`$select=sprk_workspacelayoutid,sprk_name"
 if ($existing.value.Count -gt 0) {
   Write-Host "SKIP (exists): $name -> $($existing.value[0].sprk_workspacelayoutid)"
   return

@@ -5,10 +5,12 @@
  * Console's workspace dropdown (the `sprk_workspacelayout` "Worklist" row mounts the `worklist` section by id):
  *   1. The registration is `worklist` / "Worklist" and its factory yields a content section.
  *   2. The section renders the shared `WorklistWidget` with a service built by `createWorklistService` from LegalWorkspace's
- *      `authenticatedFetch` and `getBffBaseUrl()` (D-15) - the Signal read route, nothing else - and with `launchDecisionWizard`
- *      as the wizard launcher (D-26: in-app host, never navigateTo / WizardModal).
- *   3. Negative: the shim reads no `sprk_signal` / `sprk_decisionrecord` through Xrm or Dataverse (statically, and at runtime with an
- *      Xrm present).
+ *      `authenticatedFetch` and `getBffBaseUrl()` (D-15), and with `launchDecisionWizard` as the wizard launcher (D-26: in-app host).
+ *   3. The widget's `lookup` slot (the wizard's Person / Lookup search - without it Revise budget / Reassign / Add To Do / Assign Work
+ *      cannot be completed) and `aggregateRow` slot (task 054's card, opening the Email Review tab on the pane bus) are filled as the
+ *      direct widget fills them; with no Xrm `lookup` is undefined and the section still renders.
+ *   4. Negative: the shim never reads `sprk_signal` / `sprk_decisionrecord` (D-15), statically and at runtime. Other Dataverse reads
+ *      (the lookup's contacts / budgets / organizations) are allowed.
  *
  * This test lives in this package because LegalWorkspace has no Jest setup and this package already imports its sources
  * (see `legalWorkspaceSectionRegistry.test.ts`, which also covers "the registry includes `worklist`").
@@ -21,6 +23,9 @@ import * as path from 'path';
 import * as React from 'react';
 import { render } from '@testing-library/react';
 
+const mockDispatch = jest.fn();
+const mockLookup = jest.fn();
+
 jest.mock('@spaarke/ui-components', () => {
   const actual = jest.requireActual('@spaarke/ui-components');
   return {
@@ -30,6 +35,16 @@ jest.mock('@spaarke/ui-components', () => {
     launchDecisionWizard: jest.fn(),
   };
 });
+jest.mock('@spaarke/ai-widgets', () => ({
+  createWorklistLookup: jest.fn(() => mockLookup),
+  useOptionalDispatchPaneEvent: () => mockDispatch,
+}));
+// `virtual`: this package does not depend on communication-components by name (the shim resolves it from LegalWorkspace's node_modules).
+jest.mock(
+  '@spaarke/communication-components',
+  () => ({ ReconciliationAggregateCard: jest.fn(() => null) }),
+  { virtual: true }
+);
 jest.mock('../../../../solutions/LegalWorkspace/src/services/authInit', () => ({
   authenticatedFetch: jest.fn(),
 }));
@@ -39,6 +54,7 @@ jest.mock('../../../../solutions/LegalWorkspace/src/config/runtimeConfig', () =>
 
 import { WorklistWidget, createWorklistService, launchDecisionWizard } from '@spaarke/ui-components';
 import type { SectionFactoryContext } from '@spaarke/ui-components';
+import { createWorklistLookup } from '@spaarke/ai-widgets';
 import { worklistRegistration } from '../../../../solutions/LegalWorkspace/src/sections/worklist.registration';
 import { authenticatedFetch } from '../../../../solutions/LegalWorkspace/src/services/authInit';
 
@@ -49,6 +65,7 @@ const SHIM_PATH = path.resolve(
 
 const widgetMock = WorklistWidget as unknown as jest.Mock;
 const serviceMock = createWorklistService as unknown as jest.Mock;
+const lookupFactoryMock = createWorklistLookup as unknown as jest.Mock;
 
 /** The shim's code with block and line comments removed, so prose in the docblock cannot satisfy or fail a code check. */
 const shimCode = (): string =>
@@ -63,10 +80,24 @@ const mountSection = () => {
   return render(React.createElement(React.Fragment, null, config.renderContent()));
 };
 
+/** Run `body` with `window.Xrm` set to a fake whose WebApi spy is passed in; always cleans up. */
+const withXrm = (body: (retrieve: jest.Mock) => void) => {
+  const retrieve = jest.fn().mockResolvedValue({ entities: [] });
+  const w = window as unknown as { Xrm?: unknown };
+  w.Xrm = { WebApi: { retrieveMultipleRecords: retrieve, retrieveRecord: retrieve } };
+  try {
+    body(retrieve);
+  } finally {
+    delete w.Xrm;
+  }
+};
+
 describe('worklist section shim (task 156)', () => {
   beforeEach(() => {
     widgetMock.mockClear();
     serviceMock.mockClear();
+    lookupFactoryMock.mockClear();
+    mockDispatch.mockClear();
   });
 
   test('registers the `worklist` section labelled "Worklist"', () => {
@@ -92,21 +123,49 @@ describe('worklist section shim (task 156)', () => {
     expect(widgetMock.mock.calls[0][0].launchWizard).toBe(launchDecisionWizard);
   });
 
-  test('negative: reads no sprk_signal / sprk_decisionrecord through Xrm or Dataverse (static)', () => {
-    const code = shimCode();
-    expect(code).not.toMatch(/sprk_signal|sprk_decisionrecord/i);
-    expect(code).not.toMatch(/\bXrm\b|getXrm|XrmDataverseClient|WebApi|retrieveMultipleRecords/);
+  test('with Xrm: WorklistWidget gets the wizard lookup and the aggregate row', () => {
+    withXrm(retrieve => {
+      mountSection();
+      const props = widgetMock.mock.calls[0][0];
+      expect(lookupFactoryMock).toHaveBeenCalledTimes(1);
+      expect(lookupFactoryMock.mock.calls[0][0].retrieveMultipleRecords).toBe(retrieve);
+      expect(props.lookup).toBe(mockLookup);
+      expect(props.aggregateRow).toBeDefined();
+      expect(props.aggregateRow.props.dataverseClient).toBeDefined();
+    });
   });
 
-  test('negative: reads no sprk_signal / sprk_decisionrecord through Xrm or Dataverse (runtime, Xrm present)', () => {
-    const retrieveMultipleRecords = jest.fn();
-    const w = window as unknown as { Xrm?: unknown };
-    w.Xrm = { WebApi: { retrieveMultipleRecords, retrieveRecord: retrieveMultipleRecords } };
-    try {
+  test('aggregate row opens the Email Review tab through the pane bus', () => {
+    withXrm(() => {
       mountSection();
-      expect(retrieveMultipleRecords).not.toHaveBeenCalled();
-    } finally {
-      delete w.Xrm;
-    }
+      widgetMock.mock.calls[0][0].aggregateRow.props.onOpen();
+      expect(mockDispatch).toHaveBeenCalledWith('workspace', {
+        type: 'widget_load',
+        widgetType: 'communications-reconciliation',
+      });
+    });
+  });
+
+  test('without Xrm: lookup is undefined and the section still renders', () => {
+    const { getByTestId } = mountSection();
+    expect(getByTestId('worklist-section-host')).toBeInTheDocument();
+    const props = widgetMock.mock.calls[0][0];
+    expect(props.lookup).toBeUndefined();
+    expect(lookupFactoryMock).not.toHaveBeenCalled();
+    expect(props.aggregateRow.props.dataverseClient).toBeUndefined();
+  });
+
+  test('negative: never reads sprk_signal / sprk_decisionrecord (static)', () => {
+    expect(shimCode()).not.toMatch(/sprk_signal|sprk_decisionrecord/i);
+  });
+
+  test('negative: never reads sprk_signal / sprk_decisionrecord (runtime, Xrm present)', () => {
+    withXrm(retrieve => {
+      mountSection();
+      widgetMock.mock.calls[0][0].aggregateRow.props.onOpen();
+      const entities = retrieve.mock.calls.map(call => String(call[0]).toLowerCase());
+      expect(entities).not.toContain('sprk_signal');
+      expect(entities).not.toContain('sprk_decisionrecord');
+    });
   });
 });

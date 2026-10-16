@@ -11,8 +11,9 @@
  *
  * Renders the SAME shared `WorklistWidget` (`@spaarke/ui-components`) as the direct widget
  * `WorklistWorkspaceWidget`, with a service from `createWorklistService({ fetch, baseUrl })` (D-15): the
- * Signal read route over LegalWorkspace's `authenticatedFetch` and `getBffBaseUrl()`. This shim reads no
- * `sprk_signal` / `sprk_decisionrecord` row through Xrm or Dataverse.
+ * Signal read route over LegalWorkspace's `authenticatedFetch` and `getBffBaseUrl()`. The lanes come from
+ * that route and nowhere else: this shim never reads a `sprk_signal` or `sprk_decisionrecord` row, through
+ * Xrm or Dataverse.
  *
  * Why the shim builds the service itself instead of reusing `WorklistWorkspaceWidget`: that widget reads
  * its fetch and base URL from `useAiSession()`, which THROWS outside an `AiSessionProvider`. The provider
@@ -26,8 +27,15 @@
  * `DecisionWizardHost`) the launcher returns its own `{ opened: false, reason: 'no-host' }` result and the
  * widget shows its notice; no host is added here.
  *
- * The direct widget's optional slots (`lookup`, `aggregateRow`) are Xrm/pane-bus backed and are not wired
- * in this shim; the worklist lanes and the decision wizard launch are fully served by the BFF route.
+ * The widget's two optional slots are filled as the direct widget fills them (`WorklistWorkspaceWidget`):
+ *   - `lookup` - `createWorklistLookup(Xrm.WebApi)`, the decision wizard's Person / Lookup search. The
+ *     `DecisionWizardHost` has no lookup of its own, so without it Revise budget, Reassign, Add To Do and
+ *     Assign Work (required Lookup / Person fields) cannot be completed. It queries contacts, `sprk_budget`
+ *     and `sprk_organization` (allowed by D-15, which bars only Signal / Decision Record reads). Undefined
+ *     when there is no Xrm (the wizard's searches then find nothing).
+ *   - `aggregateRow` - task 054's `ReconciliationAggregateCard`; "Open Email Review" dispatches `widget_load`
+ *     for the reconciliation tab on the PaneEventBus the Console mounts above the embedded workspace
+ *     (a no-op where there is no bus, e.g. the standalone page, via `useOptionalDispatchPaneEvent`).
  *
  * Declared `React.FC` with `React.createElement` per this directory's `.ts`-not-`.tsx` convention
  * (esbuild does not parse JSX in `.ts`).
@@ -37,6 +45,7 @@
  */
 
 import * as React from "react";
+import { tokens } from "@fluentui/react-components";
 import { TaskListSquareLtrRegular } from "@fluentui/react-icons";
 import type {
   SectionRegistration,
@@ -45,23 +54,51 @@ import type {
 } from "@spaarke/ui-components";
 import {
   WorklistWidget,
+  XrmDataverseClient,
   createWorklistService,
+  getXrm,
   launchDecisionWizard,
 } from "@spaarke/ui-components";
+import {
+  createWorklistLookup,
+  useOptionalDispatchPaneEvent,
+  type WorklistLookupDataSource,
+} from "@spaarke/ai-widgets";
+import { ReconciliationAggregateCard } from "@spaarke/communication-components";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import { authenticatedFetch } from "../services/authInit";
 
+// The registered type string of the Email Review (reconciliation) tab the aggregate card opens - the value of
+// `RECONCILIATION_WIDGET_TYPE` in `@spaarke/ai-widgets` `WorklistWorkspaceWidget.tsx` (not exported from the package index).
+const RECONCILIATION_WIDGET_TYPE = "communications-reconciliation";
+
 // ---------------------------------------------------------------------------
-// WorklistSectionMount — builds the BFF-route service and renders the shared
-// widget. Scrolls as a whole (a document-like page, not a bounded grid), the
-// same host styling the direct widget uses.
+// WorklistSectionMount - builds the BFF-route service, fills the lookup and
+// aggregate-row slots as the direct widget does, and renders the shared widget.
 // ---------------------------------------------------------------------------
 const WorklistSectionMount: React.FC = () => {
   const service = React.useMemo(
     () => createWorklistService({ fetch: authenticatedFetch, baseUrl: getBffBaseUrl() }),
     [],
   );
+  const dispatch = useOptionalDispatchPaneEvent();
 
+  // Without Xrm (a non-MDA dev shell) the wizard's searches find nothing, and the aggregate card reports its count as Missing.
+  const webApi = React.useMemo(() => getXrm()?.WebApi as WorklistLookupDataSource | undefined, []);
+  const lookup = React.useMemo(() => (webApi ? createWorklistLookup(webApi) : undefined), [webApi]);
+  const dataverseClient = React.useMemo(() => (webApi ? new XrmDataverseClient() : undefined), [webApi]);
+
+  const openEmailReview = React.useCallback(() => {
+    dispatch("workspace", { type: "widget_load", widgetType: RECONCILIATION_WIDGET_TYPE });
+  }, [dispatch]);
+
+  const aggregateRow = React.useMemo(
+    () => React.createElement(ReconciliationAggregateCard, { dataverseClient, onOpen: openEmailReview }),
+    [dataverseClient, openEmailReview],
+  );
+
+  // The Console's workspace tab scrolls as a whole; the worklist is a document-like page, so the host only pads it
+  // (the same padding the direct widget uses).
   return React.createElement(
     "div",
     {
@@ -70,10 +107,13 @@ const WorklistSectionMount: React.FC = () => {
         width: "100%",
         minWidth: 0,
         boxSizing: "border-box",
-        overflowY: "auto",
+        paddingTop: tokens.spacingVerticalM,
+        paddingBottom: tokens.spacingVerticalM,
+        paddingLeft: tokens.spacingHorizontalL,
+        paddingRight: tokens.spacingHorizontalL,
       },
     },
-    React.createElement(WorklistWidget, { service, launchWizard: launchDecisionWizard }),
+    React.createElement(WorklistWidget, { service, lookup, aggregateRow, launchWizard: launchDecisionWizard }),
   );
 };
 
