@@ -48,6 +48,8 @@ import {
   getWorkspaceWidgetMetadata,
   useAiSession,
   CreateAnalysisWizardWidget,
+  whenOntologyAdminGateSettled,
+  resolveRestorableWorkspaceWidget,
 } from '@spaarke/ai-widgets';
 import type {
   WorkspacePaneEvent,
@@ -899,6 +901,14 @@ export function WorkspacePane(): React.JSX.Element {
     (async () => {
       let restoredFromServer = false;
 
+      // Ontology task 104 (D-22): the 'ontology-admin' tab is registered only after the capability probe answers
+      // (main.tsx step 2b). Wait for it (bounded, ONTOLOGY_ADMIN_GATE_RESTORE_WAIT_MS) so a persisted admin tab
+      // resolves to the real widget, not the unknown-type fallback. Restore resolves through
+      // resolveRestorableWorkspaceWidget, which skips a persisted admin tab the gate has not made available.
+      await whenOntologyAdminGateSettled();
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- set by the effect cleanup during the await; TS cannot see the write
+      if (cancelled) return;
+
       if (chatSessionId) {
         try {
           const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
@@ -911,7 +921,7 @@ export function WorkspacePane(): React.JSX.Element {
           const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
           if (cancelled) return;
 
-          await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
+          await managerRef.current.restoreFromPersistence(snapshot, resolveRestorableWorkspaceWidget);
           if (cancelled) return;
 
           // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
@@ -936,7 +946,7 @@ export function WorkspacePane(): React.JSX.Element {
       if (!cancelled && !restoredFromServer && tabAnchorKey) {
         const localSnapshot = readLocalTabSnapshot(tabAnchorKey);
         if (localSnapshot) {
-          await managerRef.current.restoreFromPersistence(localSnapshot, resolveWorkspaceWidget);
+          await managerRef.current.restoreFromPersistence(localSnapshot, resolveRestorableWorkspaceWidget);
         }
       }
 
