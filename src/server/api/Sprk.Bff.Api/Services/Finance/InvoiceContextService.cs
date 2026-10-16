@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -630,7 +629,13 @@ public sealed class InvoiceContextService
             await Task.WhenAll(rosterTask, ratesTask, previousTask);
 
             roster = await rosterTask;
-            rateRows = await ratesTask;
+            var (rates, ratesComplete) = await ratesTask;
+            if (!ratesComplete)
+            {
+                return ContextSection<RateHistoryContext>.Unavailable(CodeRateTooLarge, "This firm's rate cards are too large to summarise its rate history.");
+            }
+
+            rateRows = rates;
             var (previous, previousComplete) = await previousTask;
             if (!previousComplete)
             {
@@ -661,9 +666,12 @@ public sealed class InvoiceContextService
 
         foreach (var group in lines
                      .Where(l => l.TimekeeperId is null && !string.IsNullOrWhiteSpace(l.AsBilled))
-                     .GroupBy(l => string.Join(' ', l.AsBilled!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)), StringComparer.OrdinalIgnoreCase))
+                     .Select(l => (Name: string.Join(' ', l.AsBilled!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)), Line: l))
+                     .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
         {
-            entries.Add(new TimekeeperRateHistory(null, group.Key, [], BilledRates(group.Select(l => (l.Rate, l.Date))), []));
+            // The ordinal-smallest spelling, so the display name does not depend on the order Dataverse returned the lines in.
+            var name = group.Select(x => x.Name).OrderBy(n => n, StringComparer.Ordinal).First();
+            entries.Add(new TimekeeperRateHistory(null, name, [], BilledRates(group.Select(x => (x.Line.Rate, x.Line.Date))), []));
         }
 
         var ordered = entries
@@ -692,7 +700,7 @@ public sealed class InvoiceContextService
             r => (Name: r.GetAttributeValue<string?>("sprk_name"), Classification: r.GetAttributeValue<OptionSetValue>("sprk_classification")?.Value));
     }
 
-    private async Task<List<Entity>> ReadApprovedRatesAsync(Guid firmId, CoreRecordReference core, IReadOnlyList<Guid> timekeeperIds, CancellationToken ct)
+    private async Task<(List<Entity> Rows, bool Complete)> ReadApprovedRatesAsync(Guid firmId, CoreRecordReference core, IReadOnlyList<Guid> timekeeperIds, CancellationToken ct)
     {
         // Task 046's query: active rates of the firm's Published cards, firm-wide cards plus cards scoped to this core record. All periods.
         var query = InvoiceResolutionService.BuildRateQuery(firmId, core, AllPeriodsFrom, AllPeriodsTo);
@@ -704,8 +712,7 @@ public sealed class InvoiceContextService
         either.AddCondition("sprk_timekeeper", ConditionOperator.Null);
         query.Criteria.AddFilter(either);
 
-        var (rows, _) = await ReadPagedAsync(query, ct);
-        return rows;
+        return await ReadPagedAsync(query, ct);
     }
 
     private async Task<(List<Entity> Rows, bool Complete)> ReadPreviousLinesAsync(

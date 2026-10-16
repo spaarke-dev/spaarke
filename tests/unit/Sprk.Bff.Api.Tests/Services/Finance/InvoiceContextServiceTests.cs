@@ -747,6 +747,21 @@ public class InvoiceContextServiceTests
     }
 
     [Fact]
+    public async Task ARateCardReadTooLargeToPage_IsReported_NotSummarisedFromAPartialRead()
+    {
+        var h = FullFixture();
+        h.Intercept = (kind, _, _) => kind == Kind.Rates
+            ? Task.FromResult(new EntityCollection(h.RateRows) { MoreRecords = true, PagingCookie = "c" })
+            : null;
+
+        var context = (await h.Service().GetAsync(InvoiceId))!;
+
+        context.RateHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateTooLarge);
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Available);
+    }
+
+    [Fact]
     public async Task SameData_GivesTheSameResponse()
     {
         var first = JsonSerializer.Serialize(await FullFixture().Service().GetAsync(InvoiceId));
