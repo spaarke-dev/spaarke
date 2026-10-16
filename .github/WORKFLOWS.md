@@ -12,7 +12,8 @@ This document is the operator-facing index of every workflow in `.github/workflo
 | Workflow | Purpose | Triggers | Owner | SLA |
 |---|---|---|---|---|
 | `adr-audit.yml` | Weekly ADR-compliance audit; opens/updates tracking issue | `schedule` (Monday 09:00 UTC), `workflow_dispatch` | DevOps | Best-effort weekly |
-| `deploy-bff-api.yml` | Build + test + deploy BFF API to Azure App Service via staging slot + swap | `push` on master (`src/server/api/**`), `workflow_dispatch` | Platform | Same-day deploy |
+| `deploy-bff-api.yml` | Build + test + deploy the platform BFF API to Azure App Service via staging slot + swap | `workflow_dispatch` only (the `push` trigger was removed 2026-08-11; BFF deploys are operator-driven) | Platform | Same-day deploy |
+| `publish-bff-artifact.yml` (added 2026-10-16) | Build the BFF, run the r3 gates and publish `bff-api-{buildId}.zip` + `latest.json` to `provisioning-artifacts` for H9 (customer stamps). **Deploys nothing**; the only producer of H9's artifact | `workflow_dispatch` (`publish` input, dry run by default; publish from master only), `pull_request` on its own file (dry run) | Platform | Before a provisioning run that deploys a new BFF |
 | `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | Lint every Bicep file + compile `customer.bicep` and the remaining `stacks/*.bicep`. **Deploys nothing** — customer stamps are deployed only by the L2 control plane (H2a) | `pull_request` + `push` on master (`infrastructure/bicep/**`), `workflow_dispatch` (no inputs) | Platform | Per-PR (validation only) |
 | `deploy-office-addins.yml` | Build + deploy Office Add-ins to Azure Static Web App | `push` on master (`src/client/office-addins/**`), `workflow_dispatch` | Apps | Same-day deploy |
 | `deploy-promote.yml` | Multi-stage promotion dev→staging→prod with smoke tests + manual gate | `workflow_dispatch` only (downloads `deployment-packages` from a `ci-standalone-checks.yml` run) | Platform | Manual + ~10 min |
@@ -53,8 +54,16 @@ It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `p
 ### deploy-bff-api.yml
 
 - **Purpose**: Build → test → deploy to Azure App Service staging slot → `/healthz` verify → swap to production → re-verify → rollback (swap-back) on failure. Concurrency-locked per environment. Preserves ADR-029 hash-verify + slot-swap rollback (per D-04 ledger).
-- **Triggers**: `push` on master with paths under `src/server/api/**`; `workflow_dispatch` (env input: `dev` or `production`).
+- **Triggers**: `workflow_dispatch` only (env input: `dev` or `production`). The `push` trigger was removed 2026-08-11 (dotnet-10-upgrade-r1): CI never auto-deploys on merge.
+- **Not this workflow**: the customer-stamp BFF artifact H9 deploys — see `publish-bff-artifact.yml` (its publish steps lived here until T186 L42).
 - **Common failures**: `dotnet test` step (unit test breakage), Azure OIDC login (expired federated credential), `/healthz` returning non-200 at staging slot.
+- **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
+
+### publish-bff-artifact.yml
+
+- **Purpose**: the one producer of the BFF artifact provisioning handler H9 deploys to a customer stamp. Builds and publishes `Sprk.Bff.Api` (Release), runs the r3 gates (god-class ratchet, tenant-isolation ArchTests, naming conformance; analyzers-as-errors via the build) and writes the manifest `latest.json` in the shape H9's `ArtifactManifestVerifier` reads. A red gate fails the run before anything is uploaded. With `publish: true` (master only) it uploads the zip (metadata `sourcesha`), a versioned `bff-api-{buildId}-{attempt}.json`, keeps the replaced manifest as `latest.previous.json` (rollback: copy it over `latest.json`) and reads `latest.json` back. Deploys nothing.
+- **Triggers**: `workflow_dispatch` with `publish` (default false = dry run); `pull_request` touching the workflow file (dry run).
+- **Common failures**: a red gate (fix on master and re-run); OIDC login (the federated subject trusts `refs/heads/master` only); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` unset.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### deploy-infrastructure.yml
