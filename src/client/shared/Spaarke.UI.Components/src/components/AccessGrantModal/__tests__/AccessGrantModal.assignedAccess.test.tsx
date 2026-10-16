@@ -12,6 +12,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import {
   AccessGrantModal,
@@ -27,7 +28,11 @@ const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme
 
 function json(body: unknown, ok = true, status = ok ? 200 : 500): Response {
   // A BFF ProblemDetails always carries `status`.
-  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
+  return {
+    ok,
+    status,
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
+  } as unknown as Response;
 }
 
 const PENDING_CONTACT: IAssignedAccessEntry = {
@@ -315,8 +320,7 @@ describe('AccessGrantModal — removing an automatic grant that a read-time term
     await screen.findByText(/Automatic — Assigned Attorney 1/);
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
     expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-    const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-    fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+    await confirmRevoke(); // G-21-safe: clicks Revoke inside the confirm dialog
 
     expect(
       await screen.findByText(/Revoked Sam Standing's grant\. Sam Standing still reaches this record/)

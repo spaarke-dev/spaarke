@@ -11,7 +11,7 @@ last-reviewed: 2026-06-23
 
 > **Category**: DevOps / Portfolio
 > **Tier**: Component, but **LOAD-BEARING** — the one canonical bridge from a Project Issue to a local worktree (D-13)
-> **Last Reviewed**: 2026-06-23
+> **Last Reviewed**: 2026-10-15
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ Idempotency: if `projects/{slug}-r1/` already exists AND `Worktree Path` field i
 
 ```bash
 gh issue view <#N> --json title,body,labels,number,url
-gh project item-list 2 --owner spaarke-dev --format json | jq '... select(item by Issue #)'
+gh project item-list 2 --owner spaarke-dev --format json --limit 1000 --jq '.items[] | select(.content.number == <N>)'   # gh's built-in --jq (plain `jq` is not installed in Git Bash here); --limit is required: the default is 30 items and the board has 500+
 ```
 
 Extract from Issue:

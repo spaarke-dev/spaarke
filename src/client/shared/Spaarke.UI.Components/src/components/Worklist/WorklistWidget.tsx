@@ -14,6 +14,10 @@
  *    ordering the list (W-10). What it may say (never an item that is not on the list) is the narrative's own contract (task 062).
  *  - `lookup` - the wizard's search for Person / Lookup fields.
  *
+ * The inquiry-outcome To Do (D-111, task 155): opening a Do row whose subject is a To Do first asks the BFF whether that To Do records
+ * the outcome of an open inquiry. If so the disposition picker opens (the reply, the four outcomes) instead of the wizard, and a
+ * recorded outcome reads the lanes again. Any other row opens the wizard at once, with no lookup. The widget still reads no Dataverse.
+ *
  * Task: spaarke-ontology-platform-r1, task 059. Fluent v9 tokens only (ADR-021). No React 18-only API (shared with PCF hosts).
  */
 
@@ -39,7 +43,20 @@ import { useWorklistData } from './useWorklistData';
 import { WorklistDisclosures } from './WorklistDisclosures';
 import type { DisclosureSetName } from './WorklistDisclosures';
 import { WorklistLanePanel } from './WorklistLanePanel';
-import type { WorklistService, WorklistSetName } from './worklistService';
+import { InquiryDispositionPicker } from './InquiryDispositionPicker';
+import {
+  INQUIRY_LOOKUP_FAILED,
+  OUTCOME_RECORDED_TODO_DONE,
+  OUTCOME_RECORDED_TODO_OPEN,
+  inquiryTodoIdOf,
+} from './inquiryDisposition';
+import type {
+  InquiryForTodo,
+  WorklistGroupData,
+  WorklistRouteItem,
+  WorklistService,
+  WorklistSetName,
+} from './worklistService';
 import { buildLaneView } from './worklistView';
 import { buildWizardItem } from './worklistWizardItem';
 
@@ -83,6 +100,21 @@ const useStyles = makeStyles({
   center: { display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXXL },
 });
 
+/** The picker being shown: the line that was opened, the inquiry its To Do records the outcome of, and the subject's name. */
+interface PickerState {
+  event: OpenItemEvent;
+  /** The To Do the picker was opened from. */
+  todoId: string;
+  inquiry: InquiryForTodo;
+  subjectName: string | null;
+}
+
+/** A notice above the lanes: a warning (something did not open) or plain information (something was recorded). */
+interface Notice {
+  text: string;
+  intent: 'warning' | 'info';
+}
+
 const coreRef = (core: { recordType: string; recordId: string } | null) =>
   core ? { recordType: core.recordType, recordId: core.recordId } : null;
 
@@ -100,7 +132,24 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
 
   // Component state only: nothing here is stored, so a reload opens with every filter off.
   const [filters, setFilters] = React.useState<Record<WorklistLane, LaneFilterKey>>({ Decide: 'all', Do: 'all' });
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
+  const [picker, setPicker] = React.useState<PickerState | null>(null);
+  // Every open takes the next sequence number; a lookup that returns after a later open is stale and is dropped, so a slow lookup can
+  // never put a picker on top of the wizard (or the picker of another To Do) the person opened since. `pendingTodoId` is the To Do whose
+  // lookup is the latest in flight (a second click on it is ignored). An object, not a `let`: set across an await, which control-flow
+  // narrowing cannot follow. `mounted` stops state being set after the widget has gone.
+  const opens = React.useRef({ seq: 0, pendingTodoId: null as string | null, mounted: true });
+  React.useEffect(() => {
+    const state = opens.current;
+    state.mounted = true;
+    return () => {
+      state.mounted = false;
+    };
+  }, []);
+  // To Dos whose outcome was recorded in this widget instance, with the notice each one was told. The server completes the To Do but leaves its Signal open until the
+  // nightly job, so the row stays; opening it again would show a picker or wizard for finished work. Stopgap: #1991 (DI-101) closes
+  // the Signal in the same call, after which the row leaves the list on the reload and this set and its notice go.
+  const recordedTodos = React.useRef(new Map<string, Notice>());
 
   // "Today" moves forward each time the lanes are read again.
   const lanesData = sets.lanes.data;
@@ -128,29 +177,38 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     });
   }, [views.Decide.filterKey, views.Do.filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // One Signal in one set, with its group; every read of an item (the loader, the picker check) goes through here.
+  const findItem = React.useCallback(
+    (source: WorklistSetName, signalId: string): { item: WorklistRouteItem; group: WorklistGroupData } | null => {
+      const data = latest.current[source].data;
+      if (data) {
+        for (const lane of LANES) {
+          for (const group of data[lane]) {
+            const item = group.items.find(i => i.signalId === signalId);
+            if (item) return { item, group };
+          }
+        }
+      }
+      return null;
+    },
+    [latest]
+  );
+
   // The loader is tied to the set the user launched from: a line in Closed today must open that set's (resolved, read-only) copy
   // even when a stale copy of the same Signal is still in the lanes (a refresh after a decision can leave one behind). The wizard
   // only asks for ids of the list it was given, so reading the source set alone is enough.
   const loaderFor = React.useCallback(
     (source: WorklistSetName): DecisionItemLoader =>
       async signalId => {
-        const data = latest.current[source].data;
-        if (data) {
-          for (const lane of LANES) {
-            for (const group of data[lane]) {
-              const item = group.items.find(i => i.signalId === signalId);
-              if (item) return buildWizardItem({ item, group, set: source, today: new Date() });
-            }
-          }
-        }
+        const found = findItem(source, signalId);
+        if (found) return buildWizardItem({ item: found.item, group: found.group, set: source, today: new Date() });
         throw new Error('This item is no longer on the list. Close the wizard and refresh the worklist.');
       },
-    [latest]
+    [findItem]
   );
 
-  const openWizard = React.useCallback(
+  const launchFor = React.useCallback(
     async (event: OpenItemEvent, sourceSet: WorklistSetName) => {
-      setNotice(null);
       // An object, not a `let`: the flag is set inside a callback, which control-flow narrowing cannot see.
       const outcome = { recorded: false };
       try {
@@ -163,15 +221,62 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           },
         });
         if (!result.opened && result.reason === 'no-host') {
-          setNotice('The decision wizard is not available in this view.');
+          if (opens.current.mounted) {
+            setNotice({ text: 'The decision wizard is not available in this view.', intent: 'warning' });
+          }
         }
       } catch {
-        setNotice('The decision wizard could not be opened.');
+        if (opens.current.mounted) setNotice({ text: 'The decision wizard could not be opened.', intent: 'warning' });
       }
       // What was recorded has left the lanes: read them again once the wizard is closed.
-      if (outcome.recorded) reload();
+      if (outcome.recorded && opens.current.mounted) reload();
     },
     [launchWizard, loaderFor, lookup, reload]
+  );
+
+  // A Do row whose subject is a To Do may be an inquiry-outcome To Do (D-111): ask the BFF first. Only the lanes can hold one (a closed
+  // copy has nothing left to record). 404 / not an inquiry opens the wizard as for any row; a failed lookup opens nothing, because
+  // the To Do might be an inquiry's and the wizard cannot complete one (the server refuses mark-complete while the inquiry is open).
+  const openWizard = React.useCallback(
+    async (event: OpenItemEvent, sourceSet: WorklistSetName) => {
+      const state = opens.current;
+      const found = sourceSet === 'lanes' ? findItem('lanes', event.itemId) : null;
+      const todoId = found ? inquiryTodoIdOf(found.item) : null;
+      // A second click on the To Do whose lookup is running changes nothing. A click on any other row is a new open (below).
+      if (todoId && state.pendingTodoId === todoId) return;
+
+      // This open supersedes any lookup still in flight: that lookup's answer will find a newer number and be dropped.
+      state.seq += 1;
+      const seq = state.seq;
+      state.pendingTodoId = null;
+      setNotice(null);
+
+      if (found && todoId) {
+        const recorded = recordedTodos.current.get(todoId);
+        if (recorded) {
+          setNotice(recorded);
+          return;
+        }
+        state.pendingTodoId = todoId;
+        let inquiry: InquiryForTodo | null;
+        try {
+          inquiry = await service.findInquiryForTodo(todoId);
+        } catch {
+          if (state.seq === seq && state.mounted) setNotice({ text: INQUIRY_LOOKUP_FAILED, intent: 'warning' });
+          return;
+        } finally {
+          if (state.seq === seq) state.pendingTodoId = null;
+        }
+        // Superseded by a later open (or the widget is gone): no picker, no wizard.
+        if (state.seq !== seq || !state.mounted) return;
+        if (inquiry) {
+          setPicker({ event, todoId, inquiry, subjectName: found.item.subjectName ?? null });
+          return;
+        }
+      }
+      await launchFor(event, sourceSet);
+    },
+    [findItem, launchFor, service]
   );
 
   const startLane = (lane: WorklistLane) => {
@@ -239,8 +344,8 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
         </MessageBar>
       )}
       {notice && (
-        <MessageBar intent="warning" data-testid="worklist-notice">
-          <MessageBarBody>{notice}</MessageBarBody>
+        <MessageBar intent={notice.intent} data-testid="worklist-notice">
+          <MessageBarBody>{notice.text}</MessageBarBody>
         </MessageBar>
       )}
 
@@ -267,6 +372,33 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           aggregateRow={lane === 'Do' ? aggregateRow : undefined}
         />
       ))}
+
+      {picker && (
+        <InquiryDispositionPicker
+          inquiry={picker.inquiry}
+          subjectName={picker.subjectName}
+          service={service}
+          onRecorded={result => {
+            const told: Notice = result.todoCompleted
+              ? { text: OUTCOME_RECORDED_TODO_DONE, intent: 'info' }
+              : { text: OUTCOME_RECORDED_TODO_OPEN, intent: 'warning' };
+            recordedTodos.current.set(picker.todoId, told);
+            setPicker(null);
+            setNotice(told);
+            reload();
+          }}
+          onAlreadyResolved={() => {
+            setPicker(null);
+            reload();
+          }}
+          onCancel={() => setPicker(null)}
+          onOpenWizard={() => {
+            const { event } = picker;
+            setPicker(null);
+            void launchFor(event, 'lanes');
+          }}
+        />
+      )}
 
       <WorklistDisclosures
         sets={{

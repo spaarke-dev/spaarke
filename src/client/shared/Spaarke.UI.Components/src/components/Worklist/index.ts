@@ -15,6 +15,10 @@ export { WorklistWidget } from './WorklistWidget';
 export type { WorklistWidgetProps } from './WorklistWidget';
 export { WorklistRequestError, createWorklistService, parseWorklistResponse } from './worklistService';
 export type {
+  InquiryDispositionRequest,
+  InquiryForTodo,
+  InquiryReply,
+  RecordDispositionResult,
   WorklistData,
   WorklistGroupData,
   WorklistRouteItem,
