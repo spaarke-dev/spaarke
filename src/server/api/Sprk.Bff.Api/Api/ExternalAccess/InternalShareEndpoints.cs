@@ -590,8 +590,9 @@ public static class InternalShareEndpoints
     /// held none (nothing was written). 400 for a missing record or user. 404 for an unknown user. 409 when the record is
     /// secure and this user is the last one who can open it (task 139, S5), or when another access change holds the
     /// record's removal lease (task 114: <c>record_busy</c> — the lease task 143's enforcer and the Restricted remover
-    /// take). 500 when the user or the shares could not be read (nothing was written), or when the removal could not be
-    /// confirmed.
+    /// take). 500 when the user, the shares or the record's owner could not be read (nothing was written), or when the
+    /// removal could not be confirmed. The owner's OWN share is revoked as the owner (#1620): Dataverse refuses that one
+    /// app-only.
     /// </returns>
     internal static async Task<IResult> UnshareAsync(
         UnshareRecordWithUserRequest request,
@@ -735,6 +736,24 @@ public static class InternalShareEndpoints
             return lastReader;
         }
 
+        // ── #1620: the record's CURRENT owner, read before anything is written. Dataverse refuses an app-only revoke of the
+        //    owning user's own share (0x80040223), so the revoke below names the owner and the seam sends THAT revoke as the
+        //    owner. Unknown is a refusal (fail closed) — never a fall-back to the app-only revoke ──
+        DataversePrincipalRef owner;
+        try
+        {
+            owner = await ReadRecordOwnerAsync(dataverseClient, root, ct)
+                    ?? throw new InvalidOperationException("The record was read with neither an owning user nor an owning team.");
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[USER-SHARE] Could not read the owner of {RootType} {RootId} (caller {CallerOid}). Nothing was removed.",
+                root.Type, root.Id, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotUnsharedTitle, ReadFailedReasonCode,
+                "Who owns this record could not be read, so no share was removed. Try again.");
+        }
+
         // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
         // this user on this record become Declined, so no trigger shares again while the assignment persists; the same marker
         // records the removal of a share a secure parent passed on (task 158, owner round 30). Ledger-only and never thrown.
@@ -755,7 +774,7 @@ public static class InternalShareEndpoints
         var confirmed = false;
         try
         {
-            await recordShare.RevokeAccessAsync(entitySet, root.Id, DataversePrincipalRef.User(systemUserId), ct);
+            await recordShare.RevokeAccessAsync(entitySet, root.Id, DataversePrincipalRef.User(systemUserId), owner, ct);
             remaining = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
             confirmed = remaining == 0;
         }
@@ -1240,6 +1259,29 @@ public static class InternalShareEndpoints
         return shares
             .Where(s => s.Principal == principal)
             .Aggregate(0, (mask, s) => mask | s.AccessRightsMask);
+    }
+
+    /// <summary>The owner columns <see cref="ReadRecordOwnerAsync"/> selects.</summary>
+    internal const string RecordOwnerSelect = "_owninguser_value,_owningteam_value";
+
+    /// <summary>
+    /// The record's CURRENT owner — its owning user, else its owning team — or <c>null</c> when the read returned no row
+    /// or neither owner column (#1620: what the owner-aware revoke needs). Exceptions propagate.
+    /// </summary>
+    private static async Task<DataversePrincipalRef?> ReadRecordOwnerAsync(
+        DataverseWebApiClient dataverseClient, GrantExternalAccessEndpoint.GrantRootResolution root, CancellationToken ct)
+    {
+        var rows = await dataverseClient.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
+            ExternalGrantRoot.BindFor(root.Type).EntitySet,
+            filter: $"{ExternalGrantRoot.LogicalNameFor(root.Type)}id eq {root.Id}",
+            select: RecordOwnerSelect,
+            top: 1,
+            cancellationToken: ct);
+
+        var row = rows.FirstOrDefault();
+        return row?._owninguser_value is { } user && user != Guid.Empty ? DataversePrincipalRef.User(user)
+            : row?._owningteam_value is { } team && team != Guid.Empty ? DataversePrincipalRef.Team(team)
+            : null;
     }
 
     /// <summary>The user's row, or <c>null</c> when no system user has the id. Exceptions propagate.</summary>

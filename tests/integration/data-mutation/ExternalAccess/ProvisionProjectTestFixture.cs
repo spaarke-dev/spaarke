@@ -634,11 +634,11 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         Guid? createdBy = null, Guid? createdByPerson = null)
         => Seed(MatterEntitySet, matterId, owningTeamId, containerId, null, isSecure, null, null, createdBy, createdByPerson);
 
-    /// <summary>Seeds a work-assignment row (task 144; creator columns task 133 b2).</summary>
+    /// <summary>Seeds a work-assignment row (task 144; creator columns task 133 b2; #1620: a named owning user).</summary>
     public void SeedWorkAssignment(
         Guid workAssignmentId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true,
-        Guid? createdBy = null, Guid? createdByPerson = null)
-        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null, null,
+        Guid? createdBy = null, Guid? createdByPerson = null, Guid? owningUserId = null)
+        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null, owningUserId,
             createdBy, createdByPerson);
 
     private void Seed(
