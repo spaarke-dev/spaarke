@@ -913,7 +913,7 @@ public record ChannelItemDto
 
 /// <summary>
 /// Deterministically-computed ground-truth facts for the TL;DR LLM call (R5 task 013, FR-A4).
-/// Every field is computed in C# from source records — the LLM composes prose and prioritizes
+/// Every field is computed in C# from source records — the LLM composes prose
 /// OVER these facts; it must never invent a count, date, or name absent from this payload. This
 /// IS the input payload the TL;DR call receives (replaces the earlier raw
 /// categories/priorityItems/channels dump — see <see

@@ -18,7 +18,7 @@
 
   "instruction": {
     "role": "notification summarizer",
-    "task": "Generate a TL;DR summary of the user's daily notification briefing. The structured input below (## Input) contains DETERMINISTICALLY-COMPUTED ground-truth facts assembled by the platform — totalNotificationCount, categoryCounts[], priorityItemCount, keyDates[] (recordName + date), and recordNames[] (the exact set of record names you may reference). Your job is ONLY to compose prose and prioritize over these provided facts: write a one-sentence overall summary and 2-4 short key-takeaway bullets that SUMMARISE the volume (how many, in which categories), plus the integer counts. Do NOT list individual items and do NOT choose, rank or recommend which item or action comes first: ordering and priority are computed by the platform, never by you. You are a writer, not a counter — every number, date, and name you use MUST come verbatim from the input; you must never count, calculate, estimate, or invent one yourself.",
+    "task": "Generate a TL;DR summary of the user's daily notification briefing. The structured input below (## Input) contains DETERMINISTICALLY-COMPUTED ground-truth facts assembled by the platform — totalNotificationCount, categoryCounts[], priorityItemCount, keyDates[] (recordName + date), and recordNames[] (the exact set of record names you may reference). Your job is ONLY to compose prose over these provided facts: write a one-sentence overall summary and 2-4 short key-takeaway bullets that SUMMARISE the volume (how many, in which categories), plus the integer counts. Do NOT list individual items and do NOT choose, rank or recommend which item or action comes first: ordering and priority are computed by the platform, never by you. You are a writer, not a counter — every number, date, and name you use MUST come verbatim from the input; you must never count, calculate, estimate, or invent one yourself.",
     "constraints": [
       "R5 GROUNDING RULE: use ONLY the counts in totalNotificationCount/categoryCounts/priorityItemCount, the dates in keyDates[], and the names in recordNames[]. Do not compute, estimate, or infer any count, date, or name that is not literally present in one of these fields.",
       "Introduce NO fact of your own. If you want to reference a record, category, or date not present in the input, omit it instead — do not approximate or generalize into a fabricated specific.",
@@ -48,13 +48,13 @@
       {
         "name": "summary",
         "type": "string",
-        "description": "One-sentence overall summary of the day's notifications. Must reference only entities present in the input. Example shape (do NOT use these names): '<N> notifications across <M> categories, with focus on <category-name> activity.'",
+        "description": "One-sentence overall summary of the day's notifications. Must reference only entities present in the input. Example shape (do NOT use these names): '<N> notifications across <M> categories, <K> of them in <category-name>.'",
         "maxLength": 300
       },
       {
         "name": "keyTakeaways",
         "type": "array",
-        "description": "Array of 2-4 short bullet strings highlighting the most important takeaways. Each bullet is a single sentence. Use entity names from the input verbatim. Empty array if no notifications.",
+        "description": "Array of 2-4 short bullet strings that summarise the volume per category, in the order the categories appear in the input. Each bullet is a single sentence. Use entity names from the input verbatim. Empty array if no notifications.",
         "maxLength": 4
       },
       {
@@ -79,7 +79,7 @@
         "summary": "5 notifications across 2 categories, with 1 priority item on <matter-name-1>.",
         "keyTakeaways": [
           "3 items in <category-A>; 2 items in <category-B>.",
-          "Priority item on <matter-name-1> needs attention."
+          "1 priority item, on <matter-name-1>."
         ],
         "categoryCount": 2,
         "priorityItemCount": 1

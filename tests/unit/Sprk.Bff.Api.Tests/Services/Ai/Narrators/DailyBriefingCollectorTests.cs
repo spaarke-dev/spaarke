@@ -1263,13 +1263,30 @@ public sealed class DailyBriefingMonitoredSubscriptionTests
 
         var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, recencyHours: 120, Now);
 
-        result.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryName).Which.Count.Should().Be(2);
+        result.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120)).Which.Count.Should().Be(2);
         result.TotalNotificationCount.Should().Be(1, "a monitored record that changed is usually already counted in its own channel");
-        result.TldrFacts!.CategoryCounts.Should().Contain(c => c.Name == DailyBriefingCollector.MonitoredCategoryName && c.Count == 2);
+        result.TldrFacts!.CategoryCounts.Should().Contain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120) && c.Count == 2);
         result.TldrFacts.RecordNames.Should().NotContain(new[] { "Monitored and changed", "Monitored and flagged" });
         result.Channels.Should().BeEmpty("a subscription count adds no list of items");
         result.PriorityItems.Should().BeEmpty();
         result.FailedChannels.Should().Equal("documents");
+    }
+
+    [Theory]
+    [InlineData(120, "Monitored records changed in the last 120 hours")]
+    [InlineData(48, "Monitored records changed in the last 48 hours")]
+    [InlineData(1, "Monitored records changed in the last 1 hour")]
+    public void WithMonitoredSubscription_LabelStatesTheRecencyWindowTheCountWasTakenWith(int recencyHours, string expectedLabel)
+    {
+        var flagged = new HighPriorityCollection(
+            [Item("Monitored and changed", monitor: true, highPriority: false, Now.AddMinutes(-10))],
+            []);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, recencyHours, Now);
+
+        var category = result.Categories.Should().ContainSingle(c => c.Name == expectedLabel).Subject;
+        category.Count.Should().Be(1);
+        category.Name.Should().NotBe("Monitored records", "the count is records changed in a window, never a total");
     }
 
     [Fact]
@@ -1280,7 +1297,7 @@ public sealed class DailyBriefingMonitoredSubscriptionTests
         var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
 
         result.Should().BeEquivalentTo(Request(), "sprk_highpriority is the worklist read route's second rank key, not a Know subscription");
-        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryName);
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120));
     }
 
     [Fact]
@@ -1290,7 +1307,7 @@ public sealed class DailyBriefingMonitoredSubscriptionTests
 
         var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
 
-        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryName);
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120));
     }
 
     [Fact]
@@ -1303,6 +1320,6 @@ public sealed class DailyBriefingMonitoredSubscriptionTests
         var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
 
         result.FailedChannels.Should().Equal("documents", DailyBriefingCollector.ChannelMonitored);
-        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryName, "an undercount would be a claim the read does not support");
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120), "an undercount would be a claim the read does not support");
     }
 }

@@ -209,7 +209,7 @@ public sealed class DailyBriefingCompositeServiceTests
         var args = _workflow.Executions.Single().ArgumentsJson;
         var sent = JsonSerializer.Deserialize<DailyBriefingNarrateRequest>(args, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         // Default recency window is 120 hours: Acme and Beta changed inside it, Gamma did not, Delta is not monitored.
-        sent.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryName).Which.Count.Should().Be(2);
+        sent.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120)).Which.Count.Should().Be(2);
         sent.TotalNotificationCount.Should().Be(BuildRequest().TotalNotificationCount, "a monitored record is a subscription, not an extra notification");
         args.Should().NotContain("Acme").And.NotContain("Beta").And.NotContain("Gamma").And.NotContain("Delta");
     }

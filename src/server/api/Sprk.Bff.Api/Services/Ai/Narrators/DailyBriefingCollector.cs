@@ -179,8 +179,13 @@ public class DailyBriefingCollector : ICodedWorkflow
     internal const string ChannelTodos = "to-dos";
     /// <summary>The failed-channel code for the monitored-records subscription count (task 062); not a channel of items.</summary>
     internal const string ChannelMonitored = "monitored";
-    /// <summary>The category the narrative counts monitored records with recent activity under (task 062, BR-3).</summary>
-    internal const string MonitoredCategoryName = "Monitored records";
+    /// <summary>
+    /// The category the narrative counts monitored records with recent activity under (task 062, BR-3). The count is the monitored
+    /// records MODIFIED WITHIN the recency window, not the number of records the user monitors, so the label says so with the real
+    /// window (<paramref name="recencyHours"/> is the setting the count was taken with) and the narrative cannot read it as a total.
+    /// </summary>
+    internal static string MonitoredCategoryLabel(int recencyHours) =>
+        $"Monitored records changed in the last {recencyHours} {(recencyHours == 1 ? "hour" : "hours")}";
 
     // Per-channel row caps (defensive — large result sets degrade narrator quality
     // before they cost LLM tokens). Operator may tune later via config table (deferred
@@ -1485,7 +1490,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         var withCategory = request with
         {
             Categories = request.Categories
-                .Append(new NotificationCategoryDto { Name = MonitoredCategoryName, Count = changed, UnreadCount = changed })
+                .Append(new NotificationCategoryDto { Name = MonitoredCategoryLabel(recencyHours), Count = changed, UnreadCount = changed })
                 .ToArray(),
         };
         return withCategory with { TldrFacts = BuildTldrFacts(withCategory) };
