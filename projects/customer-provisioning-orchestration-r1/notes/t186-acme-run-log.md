@@ -207,4 +207,9 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | ≈03:25 UTC | L47 + L48 committed (`34991f67e`) and deployed | — |
 | 03:27:32 UTC | `POST …/resume` | **202** |
 | 03:28–03:39 UTC | H9: settings mirror ✓, async zip-deploy ✓, the staging BFF **starts** (L48 proven live) but every request is HTTP 500 (`IDW10106: The 'Instance' option must be provided`; `CosmosPersistence:DatabaseName is not configured`); 120 probe attempts → **Failed** `staging-health-check-failed` (last: HTTP 500) | **L50**. Swap blocked; production untouched |
+| ≈03:50 UTC | L50: `AzureAd__Instance` + `CosmosPersistence__DatabaseName` set live on `sprk-acme-prod-api` (names verified); committed (`cc4cfa965`) and deployed | — |
+| 03:59:07 UTC | `POST …/resume` | **202** |
+| 03:59–04:10 UTC | H9: settings mirror ✓, async zip-deploy ✓, staging `/health` ✓, NFR-01 34.93 MB (−7.95 MB vs baseline) ✓, **slot swap ✓**, production probe ✓ → **H9 Succeeded** (L43, L45, L46, L48, L50 all proven live) | First BFF on a Model 1 stamp |
+| 04:10:59 UTC | H7 → Succeeded (7 environment variables; root + customer BU linked) | — |
+| 04:11:16 UTC | H11 invited Jane Smith and John James (`@acmecorpdemo.onmicrosoft.com`) as B2B guests → **WaitingOnGate** `b2b-consent` (both `PendingAcceptance`) | Manual gate: each guest redeems, then `POST …/gates/b2b-consent/advance` re-runs H11's check |
 | ≈19:30 UTC | External-access R3 deployed spaarke-bff-dev `1.0.0+e276357a7` (source `c20bff283`, which contains #1901 `98c5962d7`), with owner OK. | The identity-link reconciliation job now skips the ACME in-progress registry row, so its per-run failure logs should stop. Not a provisioning action. |
