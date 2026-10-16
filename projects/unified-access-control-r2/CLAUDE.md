@@ -194,6 +194,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - **the BFF:** `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, from a FRESH short-path worktree of `origin/master`;
   - **web resources:** `scripts/Deploy-WebResourceInline.ps1`, then read back and compare the hash;
   - use `pac.cmd` (the bash `pac` shim does nothing) and run PowerShell scripts from inside `pwsh`.
+  - **While dev runs R3's build (BFF since 2026-10-16 12:59Z `2c2fed38d`; external SPA since 13:13Z, same commit):** never deploy master alone to either one. Message R3 (`spaarke-wt-spa-external-access-platform-49`) first. Deploy a build that contains the live one: run the ancestry check, live build must be an ancestor. For the SPA, dispatch `deploy-external-spa` from R3's branch, never from master, until R3 merges.
 - **Branches:**
   - task and fix work happens in fresh short-path worktrees from `origin/master`;
   - `work/unified-access-control-r2` holds notes and tasks and is merged from master periodically (last 2026-10-07);
