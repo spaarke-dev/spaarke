@@ -250,9 +250,9 @@ invited ? BindByEmail { ConsumeInviteCode = true } : Deny contact_not_invited
 - The marker is not touched.
 - It never clears or re-points an oid or a link. Task 141's invariant holds: only the hash is cleared, together with a bind onto an Unbound row.
 
-**In the binder.** In `RunUnlinkedAsync`'s `BindByEmail` case (`ContactIdentityBinder.cs:475-507`), the binder calls this method when `decision.ConsumeInviteCode` is set, and `BindOidAsync` otherwise. The workforce plane's bind stays byte-identical. The result handling is unchanged: Written, KeyConflict (K1), a 412 that re-decides once, or `contact_bind_failed`.
+**In the binder.** In `RunUnlinkedAsync`'s `BindByEmail` case (`ContactIdentityBinder.cs:475-507`), the binder calls this method when `decision.ConsumeInviteCode` is set, and `BindOidAsync` otherwise. The workforce plane's bind stays byte-identical. **Superseded 2026-10-16 (#2005, PR #2007):** every bind onto an existing contact (CIAM, workforce and systemuser) now calls this method, because the grant flows (§11) put a pending hash on contacts that may then bind on another plane. The store falls back to the plain bind only when the hash column is missing. The result handling is unchanged: Written, KeyConflict (K1), a 412 that re-decides once, or `contact_bind_failed`.
 
-**Why a new method and not a flag on `BindOidAsync`.** A flag would put a CIAM-only column into the signature and payload of every workforce and systemuser bind (the 141 surface). A separate method keeps those binds byte-identical.
+**Why a new method and not a flag on `BindOidAsync`.** A flag would put a CIAM-only column into the signature and payload of every workforce and systemuser bind (the 141 surface). A separate method keeps those binds byte-identical. *(Superseded 2026-10-16, #2005: those binds now consume too. The invariant is "a bound contact never holds an unused hash" on every plane. The invite mark is also conditional on the row version of a re-read, unbound contact, never `If-Match: *`.)*
 
 ### 5.3 Races and replays
 
