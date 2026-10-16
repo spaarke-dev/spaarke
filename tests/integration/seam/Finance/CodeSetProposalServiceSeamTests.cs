@@ -36,11 +36,17 @@ public sealed class CodeSetProposalServiceSeamTests
         _ai.Setup(a => a.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string text, string? _, int? _, CancellationToken _) =>
             {
+                // A code set is embedded as its profile, whose first line is "{name} ({body})"; a reference row as its name.
                 _embedded.Add(text);
-                return _vectors.TryGetValue(text, out var v)
+                return _vectors.TryGetValue(text.Split('\n')[0], out var v)
                     ? new ReadOnlyMemory<float>(v)
                     : throw new InvalidOperationException($"The test has no vector for '{text}'.");
             });
+
+        // Task 054: the AI review step is unavailable here (no Binding yet), so every proposal is the embedding ranking, unreviewed.
+        // CodeSetMatchingSeamTests covers the review step itself.
+        _ai.Setup(a => a.MatchCodeSetAsync(It.IsAny<InvoiceCodeSetMatchRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceAiException(InvoiceAiException.BindingMissing, ConsumerTypes.InvoiceCodeSetMatch, "no binding"));
 
         // Usable sets: each has Task codes. Activity has none (it holds only Activity codes), so it can never be proposed.
         _litigation = SetWithTaskCode("UTBMS Litigation", "ABA", "L110", [1f, 0f, 0f, 0f]);
@@ -51,7 +57,7 @@ public sealed class CodeSetProposalServiceSeamTests
         _vectors["UTBMS Activity (ABA)"] = [0.5f, 0.5f, 0.5f, 0.5f];
     }
 
-    private CodeSetProposalService Sut() => new(_data.Entities.Object, _ai.Object, NullLogger<CodeSetProposalService>.Instance);
+    private CodeSetProposalService Sut() => new(_data.Entities.Object, _data.Records.Object, _ai.Object, NullLogger<CodeSetProposalService>.Instance);
 
     private Guid SetWithTaskCode(string name, string body, string code, float[] vector)
     {
@@ -82,7 +88,7 @@ public sealed class CodeSetProposalServiceSeamTests
         var bankruptcyType = MatterType("Bankruptcy", [0.1f, 0f, 0.9f, 0f]);
         var patents = PracticeArea("Intellectual Property Patents", [0.1f, 0.9f, 0f, 0f]);
 
-        var proposals = await Sut().ProposeAsync();
+        var proposals = (await Sut().ProposeAsync()).Proposals;
 
         proposals.Select(p => (p.Table, p.ReferenceId)).Should().Equal(
             ("mattertype", bankruptcyType), ("mattertype", litigationType), ("practicearea", patents));
@@ -107,7 +113,7 @@ public sealed class CodeSetProposalServiceSeamTests
         MatterType("Retired type", [1f, 0f, 0f, 0f], active: false);
         PracticeArea("Appellate", [1f, 0f, 0f, 0f], mapped: _litigation);
 
-        var proposals = await Sut().ProposeAsync();
+        var proposals = (await Sut().ProposeAsync()).Proposals;
 
         proposals.Should().ContainSingle().Which.ReferenceId.Should().Be(unmapped);
         _data.Updates.Should().BeEmpty("proposing is read-only");
@@ -127,12 +133,12 @@ public sealed class CodeSetProposalServiceSeamTests
         // Closest of all to the row below, but the Activity set has no Task codes and the others are inactive.
         MatterType("Trademark and counseling", [0.3f, 0f, 0f, 1f]);
 
-        var proposals = await Sut().ProposeAsync();
+        var proposals = (await Sut().ProposeAsync()).Proposals;
 
         var proposed = proposals.Single();
         new[] { proposed.Proposed!.CodeSetId, proposed.RunnerUp!.CodeSetId }
             .Should().NotContain(new[] { _activity, inactive, onlyInactiveCodes });
-        _embedded.Should().NotContain("UTBMS Activity (ABA)").And.NotContain("UTBMS Trademark (LOC)");
+        _embedded.Should().NotContain(t => t.StartsWith("UTBMS Activity (ABA)", StringComparison.Ordinal) || t.StartsWith("UTBMS Trademark (LOC)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -142,13 +148,14 @@ public sealed class CodeSetProposalServiceSeamTests
         var empty = data.AddSet("UTBMS Activity");
         data.AddCode(empty, "A101", BillingCodeKind.Activity);
         var row = data.AddMatterType(null, "Litigation");
-        var sut = new CodeSetProposalService(data.Entities.Object, _ai.Object, NullLogger<CodeSetProposalService>.Instance);
+        var sut = new CodeSetProposalService(data.Entities.Object, data.Records.Object, _ai.Object, NullLogger<CodeSetProposalService>.Instance);
 
-        var proposal = (await sut.ProposeAsync()).Single();
+        var proposal = (await sut.ProposeAsync()).Proposals.Single();
 
         proposal.ReferenceId.Should().Be(row);
         proposal.Proposed.Should().BeNull();
         proposal.RunnerUp.Should().BeNull();
+        proposal.Outcome.Should().Be(CodeSetMatchOutcome.NoneFits, "with no usable set nothing can be proposed (D-93)");
         proposal.Rationale.Should().Contain("No active code set");
         _embedded.Should().BeEmpty("there was nothing to compare against");
     }
@@ -164,8 +171,8 @@ public sealed class CodeSetProposalServiceSeamTests
         await sut.ProposeAsync();
         await sut.ProposeAsync();
 
-        _embedded.Count(t => t == "UTBMS Litigation (ABA)").Should().Be(1);
-        _embedded.Count(t => t == "UTBMS Bankruptcy (ABA)").Should().Be(1);
+        _embedded.Count(t => t.StartsWith("UTBMS Litigation (ABA)\n", StringComparison.Ordinal)).Should().Be(1);
+        _embedded.Count(t => t.StartsWith("UTBMS Bankruptcy (ABA)\n", StringComparison.Ordinal)).Should().Be(1);
         _embedded.Count(t => t == "Litigation").Should().Be(2, "a row is embedded each time it is proposed for");
     }
 
@@ -221,7 +228,7 @@ public sealed class CodeSetProposalServiceSeamTests
     {
         var row = MatterType("Litigation", [1f, 0f, 0f, 0f]);
         var sut = Sut();
-        (await sut.ProposeAsync()).Should().ContainSingle(p => p.ReferenceId == row);
+        (await sut.ProposeAsync()).Proposals.Should().ContainSingle(p => p.ReferenceId == row);
 
         // Another admin confirms first.
         _data.Apply("sprk_mattertype_ref", row, new Dictionary<string, object> { [DefaultSetColumn] = new EntityReference("sprk_billingcodeset", _bankruptcy) });
@@ -231,6 +238,34 @@ public sealed class CodeSetProposalServiceSeamTests
         outcome.Should().Be(CodeSetConfirmOutcome.AlreadyMapped);
         _data.Updates.Should().BeEmpty("the other admin's mapping is not overwritten");
         _data.Find("sprk_mattertype_ref", row)!.GetAttributeValue<EntityReference>(DefaultSetColumn).Id.Should().Be(_bankruptcy);
+    }
+
+    [Fact]
+    public async Task Confirm_WhenAnotherAdminMapsTheRowBetweenTheReReadAndTheWrite_Returns409Outcome_AndKeepsTheOtherMapping()
+    {
+        // The 048 lost update (fixed in task 054): the re-read saw the row unmapped, another admin's mapping landed before the
+        // write, and an unconditional write replaced it. The write is now conditional on the version the re-read saw.
+        var row = MatterType("Litigation", [1f, 0f, 0f, 0f]);
+        var versionRead = (long)_data.Find("sprk_mattertype_ref", row)!["versionnumber"];
+        var raced = false;
+        _data.AfterQuery = query =>
+        {
+            if (!raced && query.EntityName == "sprk_mattertype_ref")
+            {
+                raced = true;
+                _data.Apply("sprk_mattertype_ref", row, new Dictionary<string, object> { [DefaultSetColumn] = new EntityReference("sprk_billingcodeset", _bankruptcy) });
+            }
+        };
+
+        var outcome = await Sut().ConfirmAsync(CodeSetReferenceKind.MatterType, row, _litigation, null);
+
+        raced.Should().BeTrue("the concurrent mapping landed after the confirm's re-read");
+        outcome.Should().Be(CodeSetConfirmOutcome.AlreadyMapped);
+        _data.Find("sprk_mattertype_ref", row)!.GetAttributeValue<EntityReference>(DefaultSetColumn).Id.Should().Be(
+            _bankruptcy, "the other admin's mapping is not overwritten");
+        _data.Updates.Should().BeEmpty();
+        _data.ConditionalWrites.Should().ContainSingle().Which.Should().Be(("sprk_mattertype_ref", row, versionRead),
+            "the write was conditional on the version the re-read saw, and Dataverse refused it");
     }
 
     [Fact]

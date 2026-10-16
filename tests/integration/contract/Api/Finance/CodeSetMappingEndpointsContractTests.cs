@@ -78,7 +78,7 @@ public sealed class CodeSetMappingEndpointsContractTests
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
-            builder.Services.AddScoped(_ => new CodeSetProposalService(host.Data.Entities.Object, host.Ai.Object, NullLogger<CodeSetProposalService>.Instance));
+            builder.Services.AddScoped(_ => new CodeSetProposalService(host.Data.Entities.Object, host.Data.Records.Object, host.Ai.Object, NullLogger<CodeSetProposalService>.Instance));
             if (admin)
             {
                 host.Probe.Hold(WriteMatterType);
@@ -108,7 +108,15 @@ public sealed class CodeSetMappingEndpointsContractTests
             Vectors["Appellate"] = [1f, 0f, 0f];
             Ai.Setup(a => a.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string text, string? _, int? _, CancellationToken _) =>
-                    new ReadOnlyMemory<float>(Vectors.TryGetValue(text, out var v) ? v : throw new InvalidOperationException($"No vector for '{text}'.")));
+                    new ReadOnlyMemory<float>(Vectors.TryGetValue(text.Split('\n')[0], out var v) ? v : throw new InvalidOperationException($"No vector for '{text}'.")));
+            // The AI review step (task 054): by default it agrees with the top-ranked candidate; tests override it.
+            Ai.Setup(a => a.MatchCodeSetAsync(It.IsAny<InvoiceCodeSetMatchRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((InvoiceCodeSetMatchRequest r, CancellationToken _) => new InvoiceCodeSetMatchResult
+                {
+                    CodeSetId = r.Candidates[0].CodeSetId.ToString(),
+                    Confidence = 0.9m,
+                    Reason = $"{r.ReferenceName} work is covered by {r.Candidates[0].Name}.",
+                });
         }
 
         public readonly Dictionary<string, float[]> Vectors = new(StringComparer.Ordinal);

@@ -32,7 +32,7 @@ public sealed class NullInvoiceAi : IInvoiceAi
 {
     private const string ErrorCode = "ai.invoice.disabled";
     private const string DetailMessage =
-        "Finance Intelligence and eBilling AI (invoice classification/extraction/search, line coding, rule drafting, firm notices) requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true.";
+        "Finance Intelligence and eBilling AI (invoice classification/extraction/search, line coding, code-set matching, rule drafting, firm notices) requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true.";
 
     private readonly ILogger<NullInvoiceAi> _logger;
 
@@ -83,6 +83,14 @@ public sealed class NullInvoiceAi : IInvoiceAi
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CodeLinesAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<InvoiceCodeSetMatchResult> MatchCodeSetAsync(
+        InvoiceCodeSetMatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(MatchCodeSetAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

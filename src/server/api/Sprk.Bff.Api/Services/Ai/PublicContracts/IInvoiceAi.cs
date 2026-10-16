@@ -91,11 +91,11 @@ public interface IInvoiceAi
         int? dimensions = null,
         CancellationToken cancellationToken = default);
 
-    // ── Action-backed capability methods (ebilling-r1 task 041, D-52 / ADR-039 / ADR-043) ──────────
+    // ── Action-backed capability methods (ebilling-r1 task 041, D-52 / ADR-039 / ADR-043; MatchCodeSetAsync task 054) ──
     //
     // Each resolves its Action ONLY through the Binding for its ConsumerTypes key and runs it ONLY through
     // IActionRunner: the prompt, output schema and model tier live in the Action / Binding rows, never in
-    // C#. All four FAIL CLOSED (FR-46) — they never return a default or fall back to a hard-coded prompt:
+    // C#. All five FAIL CLOSED (FR-46) — they never return a default or fall back to a hard-coded prompt:
     //   - InvoiceAiException(ai.invoice.binding_missing)   — the Action could not be resolved for the consumer type
     //   - InvoiceAiException(ai.invoice.completion_failed) — the run failed
     //   - InvoiceAiException(ai.invoice.output_invalid)    — the output does not parse into the result
@@ -131,6 +131,17 @@ public interface IInvoiceAi
     /// <exception cref="ArgumentException"><see cref="InvoiceCodeLinesRequest.Lines"/> is empty.</exception>
     Task<InvoiceCodeLinesResult> CodeLinesAsync(
         InvoiceCodeLinesRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Decide which candidate code set a matter type or practice area should be mapped to, or that none fits, with a 0-1
+    /// confidence and a short reason (consumer type <see cref="ConsumerTypes.InvoiceCodeSetMatch"/>, FR-22, D-93). The caller
+    /// refuses any returned id that is not one of the request's candidates.
+    /// </summary>
+    /// <exception cref="InvoiceAiException">Binding missing, completion failed or output invalid; the code classifies where the failure happened, not whether a retry helps (see the notes above).</exception>
+    /// <exception cref="ArgumentException"><see cref="InvoiceCodeSetMatchRequest.ReferenceName"/> is empty or <see cref="InvoiceCodeSetMatchRequest.Candidates"/> is empty.</exception>
+    Task<InvoiceCodeSetMatchResult> MatchCodeSetAsync(
+        InvoiceCodeSetMatchRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>

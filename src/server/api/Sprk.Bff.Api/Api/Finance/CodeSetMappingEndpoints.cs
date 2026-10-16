@@ -43,10 +43,12 @@ public static class CodeSetMappingEndpoints
                 Privilege(CodeSetReferenceKind.PracticeArea)))
             .RequireEbillingEnabled()
             .WithName("GetCodeSetMappingProposals")
-            .WithSummary("AI-proposed default code sets for unmapped matter types and practice areas")
+            .WithSummary("AI-proposed default code sets for unmapped matter types and practice areas, with coverage")
             .WithDescription(
-                "Lists every active matter type and practice area with no default code set, each with the best-matching code set, its " +
-                "similarity score, the runner-up and a one-sentence rationale. Nothing is applied: confirm a proposal with the POST route.")
+                "Lists every active matter type and practice area with no default code set as either Proposed (the code set, its " +
+                "similarity, the runner-up, the AI review's confidence and reason; Reviewed=false marks an embedding-only fallback) or " +
+                "NoneFits (no proposal; the closest set as context; map by hand or add a code set), plus coverage counts (mapped / " +
+                "proposed / none-fits) per table. Nothing is applied: confirm a proposal with the POST route.")
             .Produces<CodeSetProposalsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -96,7 +98,8 @@ public static class CodeSetMappingEndpoints
     {
         try
         {
-            return Results.Ok(new CodeSetProposalsResponse(await service.ProposeAsync(ct)));
+            var list = await service.ProposeAsync(ct);
+            return Results.Ok(new CodeSetProposalsResponse(list.Proposals, list.Coverage));
         }
         catch (FeatureDisabledException ex)
         {
@@ -135,8 +138,11 @@ public static class CodeSetMappingEndpoints
 /// <summary>Body of the confirm route.</summary>
 public sealed record ConfirmCodeSetMappingRequest(Guid CodeSetId);
 
-/// <summary>Response of the proposals route.</summary>
-public sealed record CodeSetProposalsResponse(IReadOnlyList<CodeSetProposal> Proposals);
+/// <summary>
+/// Response of the proposals route (task 054, D-93): one entry per unmapped active row (proposed or none-fits) and the coverage of both
+/// tables, so every active matter type and practice area is accounted for as mapped, proposed or none-fits.
+/// </summary>
+public sealed record CodeSetProposalsResponse(IReadOnlyList<CodeSetProposal> Proposals, CodeSetCoverage Coverage);
 
 /// <summary>Response of a confirmed mapping.</summary>
 public sealed record CodeSetMappingConfirmedResponse(string Table, Guid ReferenceId, Guid CodeSetId);

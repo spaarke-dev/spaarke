@@ -451,15 +451,7 @@ public sealed class LineCodingSeamTests
     private static IEnumerable<string?> Codes(JsonElement input, string list) =>
         input.GetProperty(list).EnumerateArray().Select(c => c.GetProperty("code").GetString());
 
-    /// <summary>Reads the JSON value of the rendered prompt's <c>## Input</c> section.</summary>
-    private static JsonElement InputSection(string prompt)
-    {
-        var start = prompt.IndexOf("## Input\n\n", StringComparison.Ordinal);
-        start.Should().BeGreaterThanOrEqualTo(0, "the operand renders through the ## Input section");
-        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(prompt[(start + "## Input\n\n".Length)..]));
-        using var doc = JsonDocument.ParseValue(ref reader);
-        return doc.RootElement.Clone();
-    }
+    private static JsonElement InputSection(string prompt) => AuthoredActionMirror.InputSection(prompt);
 
     private sealed class Harness
     {
@@ -479,8 +471,8 @@ public sealed class LineCodingSeamTests
                 {
                     Id = ActionId,
                     Name = "Invoice Line Code",
-                    SystemPrompt = AuthoredAction.SystemPrompt(),
-                    OutputSchemaJson = AuthoredAction.OutputSchema(),
+                    SystemPrompt = AuthoredActionMirror.SystemPrompt(LineCodingService.ActionCode),
+                    OutputSchemaJson = AuthoredActionMirror.OutputSchema(LineCodingService.ActionCode),
                     Temperature = 0.0m,
                     ModelTier = AiModelTier.Fast,
                 });
@@ -567,83 +559,6 @@ public sealed class LineCodingSeamTests
                 var fee = l.GetProperty("lineType").GetString() == "Fee";
                 return Coding(l.GetProperty("lineKey").GetString()!, fee ? task : null, fee ? activity : null, fee ? null : expense, 0.8);
             }).ToArray());
-        }
-    }
-
-    /// <summary>
-    /// The authored Action as the runtime stores it: <c>Deploy-ActionMirrors.ps1</c> writes the JPS keys of the mirror (in this order,
-    /// without <c>$comment*</c> keys) to <c>sprk_systemprompt</c> and the output-schema mirror to <c>sprk_outputschemajson</c>.
-    /// </summary>
-    private static class AuthoredAction
-    {
-        private static readonly string[] JpsKeys = ["$schema", "$version", "instruction", "input", "output", "examples", "metadata"];
-
-        public static string SystemPrompt()
-        {
-            var mirror = JsonNode.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infra", "dataverse", "actions", "invoice-line-code.action.json")))!.AsObject();
-            var jps = new JsonObject();
-            foreach (var key in JpsKeys)
-            {
-                if (mirror.TryGetPropertyValue(key, out var value) && value is not null)
-                {
-                    jps[key] = StripComments(value.DeepClone());
-                }
-            }
-
-            return jps.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-        }
-
-        public static string OutputSchema() =>
-            File.ReadAllText(Path.Combine(RepoRoot(), "infra", "dataverse", "outputschemas", "invoice-line-code.schema.json"));
-
-        private static JsonNode StripComments(JsonNode node)
-        {
-            switch (node)
-            {
-                case JsonObject obj:
-                    foreach (var key in obj.Select(p => p.Key).Where(k => k.StartsWith("$comment", StringComparison.Ordinal)).ToList())
-                    {
-                        obj.Remove(key);
-                    }
-
-                    foreach (var property in obj.ToList())
-                    {
-                        if (property.Value is not null)
-                        {
-                            StripComments(property.Value);
-                        }
-                    }
-
-                    break;
-                case JsonArray array:
-                    foreach (var item in array)
-                    {
-                        if (item is not null)
-                        {
-                            StripComments(item);
-                        }
-                    }
-
-                    break;
-            }
-
-            return node;
-        }
-
-        private static string RepoRoot()
-        {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir is not null)
-            {
-                if (File.Exists(Path.Combine(dir.FullName, "Spaarke.sln")))
-                {
-                    return dir.FullName;
-                }
-
-                dir = dir.Parent;
-            }
-
-            throw new InvalidOperationException("Could not locate the repo root (Spaarke.sln).");
         }
     }
 }

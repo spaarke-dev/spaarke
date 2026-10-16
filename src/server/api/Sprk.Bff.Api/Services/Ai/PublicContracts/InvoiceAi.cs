@@ -152,6 +152,45 @@ public sealed class InvoiceAi : IInvoiceAi
     }
 
     /// <inheritdoc />
+    public async Task<InvoiceCodeSetMatchResult> MatchCodeSetAsync(
+        InvoiceCodeSetMatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ReferenceName);
+        ArgumentNullException.ThrowIfNull(request.Candidates);
+        ArgumentNullException.ThrowIfNull(request.Examples);
+        if (request.Candidates.Count == 0)
+        {
+            throw new ArgumentException("At least one candidate code set is required.", nameof(request));
+        }
+
+        var input = ToElement(new
+        {
+            reference = new { type = request.ReferenceType.ToString(), name = request.ReferenceName },
+            candidates = request.Candidates.Select(c => new
+            {
+                codeSetId = c.CodeSetId,
+                name = c.Name,
+                body = c.Body,
+                description = c.Description,
+                matchHints = c.MatchHints,
+                taskCodes = c.TaskCodes,
+            }),
+            examples = request.Examples.Select(e => new
+            {
+                referenceType = e.ReferenceType.ToString(),
+                referenceName = e.ReferenceName,
+                codeSetName = e.CodeSetName,
+            }),
+        });
+
+        var output = await RunCapabilityAsync(
+            ConsumerTypes.InvoiceCodeSetMatch, input, request.TenantId, subjectId: null, cancellationToken).ConfigureAwait(false);
+        return ParseOrThrow(ConsumerTypes.InvoiceCodeSetMatch, output, subjectId: null, InvoiceAiOutputParser.ParseCodeSetMatch);
+    }
+
+    /// <inheritdoc />
     public async Task<BillingRuleDraftResult> DraftRulesAsync(
         BillingRuleDraftRequest request,
         CancellationToken cancellationToken = default)
@@ -437,7 +476,7 @@ internal sealed class InvoiceAiOutputException(string path) : Exception($"Invali
 /// Strict parsers from an Action's structured output to the <see cref="IInvoiceAi"/> result DTOs. A missing
 /// required member, a wrong JSON kind, an unknown enum name or a confidence outside 0–1 throws
 /// <see cref="InvoiceAiOutputException"/> — never a default (FR-46). The property names here are the
-/// contract the Action output schemas (042 / 047 / 075 / 131) must match.
+/// contract the Action output schemas (042 / 047 / 054 / 075 / 131) must match.
 /// </summary>
 internal static class InvoiceAiOutputParser
 {
@@ -490,6 +529,17 @@ internal static class InvoiceAiOutputParser
         }
 
         return new InvoiceCodeLinesResult { Lines = lines };
+    }
+
+    public static InvoiceCodeSetMatchResult ParseCodeSetMatch(JsonElement output)
+    {
+        var root = RequireObject(output, "$");
+        return new InvoiceCodeSetMatchResult
+        {
+            CodeSetId = RequireString(root, "codeSetId", "$").Trim(),
+            Confidence = RequireConfidence(root, "confidence", "$"),
+            Reason = RequireString(root, "reason", "$"),
+        };
     }
 
     public static BillingRuleDraftResult ParseDraftRules(JsonElement output)

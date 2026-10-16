@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -41,6 +42,63 @@ internal sealed class FakeCodingReferenceData
                 Apply(name, id, fields);
                 return Task.CompletedTask;
             });
+        Records
+            .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .Returns((string name, Guid id, Dictionary<string, object?> fields, long expectedVersion, CancellationToken _) =>
+            {
+                ConditionalWrites.Add((name, id, expectedVersion));
+                var row = Find(name, id);
+                if (row is null)
+                {
+                    return Task.FromException(new KeyNotFoundException($"{name} record was not found."));
+                }
+
+                if (row.GetAttributeValue<long>(VersionColumn) != expectedVersion)
+                {
+                    // What DataverseWebApiService does on HTTP 412: nothing is written.
+                    return Task.FromException(new DBConcurrencyException($"{name} record changed since it was read; the update was not applied."));
+                }
+
+                var applied = fields.ToDictionary(f => WebApiColumn(f.Key), f => WebApiValue(f.Key, f.Value));
+                Updates.Add((name, id, applied));
+                Apply(name, id, applied);
+                return Task.CompletedTask;
+            });
+    }
+
+    /// <summary>
+    /// The Web API write seam (<c>IFieldMappingDataverseService</c>). Only the conditional update is doubled: it honours the row's
+    /// <c>versionnumber</c> like Dataverse's If-Match (a stale version throws <see cref="DBConcurrencyException"/>, nothing written), turns
+    /// a <c>{nav}@odata.bind</c> of <c>/{entityset}({id})</c> into the lookup column, and records the write in <see cref="Updates"/>.
+    /// </summary>
+    public Mock<IFieldMappingDataverseService> Records { get; } = new();
+
+    /// <summary>Every conditional write attempted (entity, id, the version it expected), including refused ones.</summary>
+    public List<(string Entity, Guid Id, long ExpectedVersion)> ConditionalWrites { get; } = [];
+
+    /// <summary>Called after each query has been answered: lets a test land a concurrent change between a read and a write.</summary>
+    public Action<QueryExpression>? AfterQuery { get; set; }
+
+    private const string VersionColumn = "versionnumber";
+    private long _version = 1000;
+
+    private static string WebApiColumn(string key) =>
+        key.EndsWith("@odata.bind", StringComparison.Ordinal) ? key[..^"@odata.bind".Length].ToLowerInvariant() : key;
+
+    private static object WebApiValue(string key, object? value)
+    {
+        if (!key.EndsWith("@odata.bind", StringComparison.Ordinal))
+        {
+            return value ?? DBNull.Value;
+        }
+
+        // "/sprk_billingcodesets(<guid>)" -> EntityReference("sprk_billingcodeset", <guid>)
+        var bind = (string)value!;
+        var open = bind.IndexOf('(');
+        var entitySet = bind[1..open];
+        var id = Guid.Parse(bind[(open + 1)..^1]);
+        return new EntityReference(entitySet.EndsWith('s') ? entitySet[..^1] : entitySet, id);
     }
 
     /// <summary>Every <c>UpdateAsync</c> received, in order (the fake also applies it to the stored row).</summary>
@@ -56,13 +114,23 @@ internal sealed class FakeCodingReferenceData
 
     // ── Builders ────────────────────────────────────────────────────────────────
 
-    public Guid AddSet(string name, bool active = true, string? body = null)
+    public Guid AddSet(string name, bool active = true, string? body = null, string? description = null, string? matchHints = null)
     {
         var set = new Entity(CodeSetTable, Guid.NewGuid());
         set["sprk_name"] = name;
         if (body is not null)
         {
             set["sprk_body"] = body;
+        }
+
+        if (description is not null)
+        {
+            set["sprk_description"] = description;
+        }
+
+        if (matchHints is not null)
+        {
+            set["sprk_matchhints"] = matchHints;
         }
 
         set["statecode"] = new OptionSetValue(active ? 0 : 1);
@@ -116,6 +184,9 @@ internal sealed class FakeCodingReferenceData
 
             row[key] = value is DBNull ? null : value;
         }
+
+        // Every write moves the row to a new version, as in Dataverse.
+        row[VersionColumn] = ++_version;
     }
 
     public CodingCoreRecord AddCoreRecord(string entityLogicalName, Guid? matterTypeId = null, Guid? practiceAreaId = null)
@@ -181,6 +252,7 @@ internal sealed class FakeCodingReferenceData
         }
 
         row["statecode"] = new OptionSetValue(active ? 0 : 1);
+        row[VersionColumn] = ++_version;
         if (defaultSetId is { } setId)
         {
             row["sprk_defaultbillingcodeset"] = new EntityReference(CodeSetTable, setId);
@@ -240,6 +312,7 @@ internal sealed class FakeCodingReferenceData
             result.PagingCookie = $"page-{page}";
         }
 
+        AfterQuery?.Invoke(query);
         return result;
     }
 

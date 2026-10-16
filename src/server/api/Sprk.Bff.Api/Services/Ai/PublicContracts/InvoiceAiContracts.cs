@@ -243,6 +243,70 @@ public sealed record InvoiceLineObservation
     public required string QuotedText { get; init; }
 }
 
+// ── MatchCodeSetAsync (consumer type invoice-codeset-match; FR-22, D-93) ─────
+
+/// <summary>Which reference table the row to match comes from. Sent to the model as the name verbatim.</summary>
+public enum InvoiceCodeSetReferenceType
+{
+    MatterType,
+    PracticeArea,
+}
+
+/// <summary>
+/// Input to <see cref="IInvoiceAi.MatchCodeSetAsync"/>: one matter type or practice area, the code sets it may be mapped to (already
+/// pre-ranked by the caller) and confirmed mappings from the same environment as examples. The caller refuses any returned id that
+/// is not one of <see cref="Candidates"/> (ebilling-r1 task 054) — this facade only runs and parses.
+/// </summary>
+public sealed record InvoiceCodeSetMatchRequest
+{
+    /// <summary>Sent as <c>reference.type</c>.</summary>
+    public required InvoiceCodeSetReferenceType ReferenceType { get; init; }
+
+    /// <summary>The matter type or practice area name. Sent as <c>reference.name</c>.</summary>
+    public required string ReferenceName { get; init; }
+
+    /// <summary>The closed list of code sets the model may choose from. Sent as <c>candidates</c>.</summary>
+    public required IReadOnlyList<InvoiceCodeSetCandidate> Candidates { get; init; }
+
+    /// <summary>Confirmed mappings (examples, never candidates). Sent as <c>examples</c>; may be empty.</summary>
+    public required IReadOnlyList<InvoiceCodeSetMatchExample> Examples { get; init; }
+
+    /// <summary>Tenant id for the run context. Not sent to the model.</summary>
+    public string? TenantId { get; init; }
+}
+
+/// <summary>
+/// One code set the model may choose. Sent with camelCase names (<c>codeSetId</c>, <c>name</c>, <c>body</c>, <c>description</c>,
+/// <c>matchHints</c>, <c>taskCodes</c>). <see cref="TaskCodes"/> are "code short-name" strings of the set's active Task codes.
+/// </summary>
+public sealed record InvoiceCodeSetCandidate(
+    Guid CodeSetId,
+    string Name,
+    string? Body,
+    string? Description,
+    string? MatchHints,
+    IReadOnlyList<string> TaskCodes);
+
+/// <summary>A confirmed mapping an administrator made. Sent as <c>referenceType</c>, <c>referenceName</c>, <c>codeSetName</c>.</summary>
+public sealed record InvoiceCodeSetMatchExample(InvoiceCodeSetReferenceType ReferenceType, string ReferenceName, string CodeSetName);
+
+/// <summary>
+/// Output of <see cref="IInvoiceAi.MatchCodeSetAsync"/>. Output JSON: <c>codeSetId</c> (required: a candidate's id as given, or
+/// <see cref="NoneFits"/>), <c>confidence</c> (required, 0–1), <c>reason</c> (required, non-empty). <see cref="CodeSetId"/> is returned as
+/// the model wrote it; the caller decides whether it is a candidate.
+/// </summary>
+public sealed record InvoiceCodeSetMatchResult
+{
+    /// <summary>The <c>codeSetId</c> value that means "no candidate fits".</summary>
+    public const string NoneFits = "none";
+
+    public required string CodeSetId { get; init; }
+
+    public required decimal Confidence { get; init; }
+
+    public required string Reason { get; init; }
+}
+
 // ── DraftRulesAsync (consumer type billing-rule-draft; FR-27) ────────────────
 
 /// <summary>

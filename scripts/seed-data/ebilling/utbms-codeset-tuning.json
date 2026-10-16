@@ -1,0 +1,35 @@
+{
+  "$comment": "ebilling-r1 task 054 (D-93) - matching tuning text for the six UTBMS TASK code sets, seeded into sprk_billingcodeset.sprk_description and sprk_matchhints by scripts/ebilling/Seed-EbillingBillingCodes.ps1. Admin-editable in Dataverse: the seed fills a column only while it is empty and REPORTS (never overwrites) a value that differs from this file. Read by CodeSetProposalService (embedding profile + the invoice-codeset-match Action). 'description' says what work the set's task codes cover (written from the UTBMS code descriptions in the utbms-*.csv files); 'matchHints' names the matter types and practice areas the set fits, synonyms, and what it is NOT for. The shared 'UTBMS Activity' and 'UTBMS Expense' sets carry no Task codes, are never candidates for a mapping, and get no tuning text.",
+  "sets": [
+    {
+      "name": "UTBMS Litigation",
+      "description": "Task codes for disputes resolved through courts, arbitration or other adversarial proceedings: case assessment, fact investigation and strategy (L100), pleadings and motions (L200), discovery and depositions (L300), trial preparation, trial and enforcement of judgments (L400), and appeals: appellate motions, briefs and oral argument (L500).",
+      "matchHints": "Fits matter types and practice areas such as: litigation, disputes, appellate and appeals, commercial litigation, employment litigation and discrimination claims in court, product liability, class actions, arbitration, contested regulatory enforcement proceedings, patent or trademark infringement suits, insurance coverage disputes. Synonyms: lawsuit, dispute resolution, trial, court case, appeal. Not for: transactions and contracts (deals, M&A, financing) - use UTBMS Project; advice with no dispute - use UTBMS Counseling; bankruptcy cases - use UTBMS Bankruptcy; patent or trademark filings - use the IP sets."
+    },
+    {
+      "name": "UTBMS Counseling",
+      "description": "Task codes for advisory work where there is no transaction and no proceeding: fact gathering and instructions (C100), legal research (C200), analysis of the facts and law and advice to the client (C300), and communications with third parties such as regulators or counterparties to existing contracts (C400).",
+      "matchHints": "Fits matter types and practice areas such as: counseling and general advice, employment and labor (HR policies, workplace investigations, terminations, employment law compliance, employee handbooks), regulatory compliance, privacy and data protection, governance, ethics, policy reviews, legal opinions. Synonyms: advisory, advice, compliance, consultation, opinion. Not for: disputes in court or arbitration - use UTBMS Litigation; deals, contracts and financings - use UTBMS Project; bankruptcy cases - use UTBMS Bankruptcy; patent or trademark filings - use the IP sets."
+    },
+    {
+      "name": "UTBMS Project",
+      "description": "Task codes for transactional and project work: deal administration and budgeting (P100), due diligence from corporate, tax, environmental, property, labor, intellectual property and regulatory perspectives (P200), structure, strategy and term sheets (P300), drafting and filing transaction documents (P400), negotiation and revision (P500), closing (P600), post-closing (P700) and maintenance and renewal of agreements (P800).",
+      "matchHints": "Fits matter types and practice areas such as: commercial, commercial transactions, commercial contracts, corporate, mergers and acquisitions (M&A), joint ventures, private equity, venture capital, securities offerings, banking and finance, lending and credit facilities, loan agreements, financing transactions, real estate transactions and leasing, licensing agreements, outsourcing, procurement and supply agreements. Synonyms: transactional, deal, transaction, contract drafting and negotiation, closing. Not for: disputes - use UTBMS Litigation; insolvency and bankruptcy cases - use UTBMS Bankruptcy; patent or trademark prosecution - use the IP sets."
+    },
+    {
+      "name": "UTBMS Bankruptcy",
+      "description": "Task codes for insolvency and bankruptcy cases: case administration, asset analysis, recovery and disposition, relief from stay, creditor meetings, fee applications and avoidance actions (B100), the debtor's business operations, financing and cash collateral during the case (B200), claims administration and the plan and disclosure statement (B300), and bankruptcy advice and restructurings (B400).",
+      "matchHints": "Fits matter types and practice areas such as: bankruptcy, insolvency, creditors' rights in a bankruptcy case, Chapter 11 and Chapter 7 cases, debtor-in-possession matters, restructuring and workouts of a distressed company. Synonyms: insolvency, restructuring, creditors' rights, distressed. Not for: ordinary banking, lending or financing transactions of a solvent business - use UTBMS Project; general commercial or corporate work - use UTBMS Project; disputes outside a bankruptcy case - use UTBMS Litigation."
+    },
+    {
+      "name": "UTBMS IP Patent Prosecution",
+      "description": "Task codes for obtaining and maintaining patents: understanding and formalizing the invention and filing strategy, preparing and filing applications, correcting and restricting applications, prosecution before the patent office (office actions, examiner interviews, information disclosure statements, continued examination), appeals within the office, issuance, maintenance fees, reissue and re-examination.",
+      "matchHints": "Fits matter types and practice areas such as: patent, patents, intellectual property - patents, patent prosecution, patent portfolio management, invention disclosures. Synonyms: patent application, USPTO, EPO, PCT, office action. Not for: trademarks - use UTBMS Trademark; patent infringement litigation - use UTBMS Litigation; IP licensing or IP due diligence in a deal - use UTBMS Project."
+    },
+    {
+      "name": "UTBMS Trademark",
+      "description": "Task codes for trademarks: registrability and clearance investigations, publication watches and enforcement investigations, preparing and filing domestic and international applications, prosecution and office communications, oppositions and cancellations before trademark offices, affidavits and renewals, opinions, portfolio management, assignments, licensing and domain names.",
+      "matchHints": "Fits matter types and practice areas such as: trademark, trademarks, intellectual property - trademarks, brand protection, trademark prosecution, trademark portfolio, domain names. Synonyms: brand, mark, TTAB, opposition, renewal. Not for: patents - use UTBMS IP Patent Prosecution; trademark infringement suits in court - use UTBMS Litigation; copyright or general commercial contracts."
+    }
+  ]
+}

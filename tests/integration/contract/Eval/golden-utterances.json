@@ -2432,6 +2432,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "ebilling-r1 task 047 (FR-22)"
       }
+    },
+    {
+      "caseId": "GU-144",
+      "family": "invoice-codeset-match",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an administrator lists the code-set mapping proposals and each unmapped matter type or practice area is matched to one of its pre-ranked code sets, or to none (ebilling-r1 task 054, FR-22, D-93)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceCodeSetMatch constant (added task 054). A Linear AI Consumer, same shape as GU-143 invoice-line-code: invoked server-side by CodeSetProposalService through IInvoiceAi.MatchCodeSetAsync (the invoice-codeset-match Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed candidate list, examples from confirmed mappings, the out-of-candidates refusal, the embedding fallback, none-fits) lives in tests/integration/seam/Finance/CodeSetMatchingSeamTests.cs, the Action mirror contract in tests/integration/contract/Catalog/InvoiceCodeSetMatchActionContractTests.cs and the 11-row live evaluation in tests/integration/seam/Finance/CodeSetMatchingLiveTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-code-set-mapping" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-codeset-match",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 054 (FR-22, D-93)"
+      }
     }
   ]
 }

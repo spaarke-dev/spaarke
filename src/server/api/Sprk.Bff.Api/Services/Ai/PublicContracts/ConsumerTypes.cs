@@ -385,6 +385,14 @@ public static class ConsumerTypes
     public const string InvoiceLineCode = "invoice-line-code";
 
     /// <summary>
+    /// <see cref="IInvoiceAi.MatchCodeSetAsync"/> — decides which pre-ranked code set a matter type or practice area maps to, or
+    /// that none fits (spec <c>INVOICE-CODESET-MATCH@v1</c>, FR-22, D-93). Action <c>invoice-codeset-match</c> + Binding mirrored by
+    /// ebilling-r1 task 054 (<c>infra/dataverse/actions/invoice-codeset-match.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>;
+    /// live seeding in task 053's deploy order); this constant is in <see cref="All"/> from the same change.
+    /// </summary>
+    public const string InvoiceCodeSetMatch = "invoice-codeset-match";
+
+    /// <summary>
     /// <see cref="IInvoiceAi.DraftRulesAsync"/> — billing-rule drafting from a guideline document (spec
     /// <c>BILLING-RULE-DRAFT@v1</c>, FR-27). Binding + Action seeded by ebilling-r1 task 075, which also adds
     /// this constant to <see cref="All"/>.
@@ -434,5 +442,6 @@ public static class ConsumerTypes
         AssistantSuggest,
         InvoiceClassify,
         InvoiceLineCode,
+        InvoiceCodeSetMatch,
     };
 }

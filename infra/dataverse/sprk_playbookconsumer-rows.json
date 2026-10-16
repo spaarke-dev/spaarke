@@ -612,6 +612,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "ebilling-r1 task 054 (FR-22, D-93, D-52) - Binding for invoice-codeset-match, a Linear AI Consumer reached only through the IInvoiceAi PublicContracts facade (IInvoiceAi.MatchCodeSetAsync, called by CodeSetProposalService for the code-set mapping proposals and the FR-22 step 4 suggestion) - NOT chat/loop-projectable, deliberately: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null (same shape as invoice-line-code). actionCode resolves to the JPS Action infra/dataverse/actions/invoice-codeset-match.action.json (display name INVOICE-CODESET-MATCH@v1, Fast tier). ConsumerTypes.InvoiceCodeSetMatch joined ConsumerTypes.All in the same change. Live seeding is held for task 053's deploy order (Action row, then this row together with the BFF build carrying the All entry).",
+      "consumerType": "invoice-codeset-match",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Invoice Code Set Match (code-set mapping proposals)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "invoice-codeset-match",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "matter-pre-fill",
       "consumerCode": "default",
       "environment": "*",
