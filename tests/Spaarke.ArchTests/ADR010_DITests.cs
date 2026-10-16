@@ -348,7 +348,19 @@ public class ADR010_DITests
         // and rate-card Dataverse reads plus the embedding call behind it. One implementation, so a 1:1 mapping, accepted on the same
         // grounds as IInvoiceTotalsService above. Its collaborators (TimekeeperMatcher, the static calculators and resolvers) are
         // concrete. Falsifiable: if 049 does not fake it, register the concrete and drop this back to 162.
-        const int knownOneToOneCeiling = 163;
+        // ───────── Ceiling raised 163 → 165, 2026-10-16 (ebilling-r1 task 047; +2 interfaces) ─────────
+        // (1) ILineCodingService -> LineCodingService. SEAM JUSTIFICATION: it is the module boundary of two named callers that each
+        // fake it: the invoice submission job (049) is proven by feeding it an InvoiceCodingResult (coded, refused-code, NotReturned and
+        // firm-code-mismatch lines, per-line code-set source) through a Moq double, not by standing up the code-set reads, the chunked
+        // IInvoiceAi calls and the server-side guard behind it; the code-set suggestion flow (048) calls it the same way. One
+        // implementation, so a 1:1 mapping, accepted on the same grounds as IInvoiceTotalsService above. Falsifiable: if neither 048 nor
+        // 049 fakes it, register the concrete and drop this back.
+        // (2) ICodeSetSuggestionProvider -> NoCodeSetSuggestionProvider. SEAM JUSTIFICATION: FR-22 step 4 is produced by a different
+        // Action in a later task (048). The seam lets 048 supply the AI provider by replacing one DI registration instead of editing
+        // CodeSetResolver, and lets the resolver's tests fake the proposal. It has one implementation today (the Null-Object default,
+        // ADR-032) and gains the second in 048; if 048 does not, collapse it into the resolver and drop this back.
+        // Measured: master + the earlier eBilling tasks = 163 (after 046), this task adds exactly these two.
+        const int knownOneToOneCeiling = 165;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

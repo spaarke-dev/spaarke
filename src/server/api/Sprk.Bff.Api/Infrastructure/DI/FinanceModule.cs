@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -79,6 +80,14 @@ public static class FinanceModule
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
         // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<RateCardImportService>();
+        // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
+        // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
+        // Scoped (all three hold the scoped IGenericEntityService / IInvoiceAi); unconditional (flag rule above - IInvoiceAi is
+        // always registered, as NullInvoiceAi when AI is off). NoCodeSetSuggestionProvider is the FR-22 step 4 seam: task 048
+        // replaces this one registration with the AI provider.
+        services.AddScoped<ICodeSetSuggestionProvider, NoCodeSetSuggestionProvider>();
+        services.AddScoped<CodeSetResolver>();
+        services.AddScoped<ILineCodingService, LineCodingService>();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
