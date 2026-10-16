@@ -106,3 +106,23 @@ All under `src/dataverse/solutions/SpaarkeMaster/`. Re-export from dev after the
 - The delete was not run and the task stays `in-progress` (escalation trigger 1: rows exist; trigger 3: no owner OK).
 - The script also edits `{fc621f4e-...}` (not in the dependency list) and takes `-OwnerApproval` / `-DeleteRows` switches that the POML did not specify: the first is needed so the exported forms do not keep a dangling navigation entry (same reason 017 cleaned the Invoice form), the second is the single guarded way to include the rows once the owner decides.
 - The grep acceptance criterion cannot read "nothing" while the retirement script exists: the script, its README entry and file name carry the token by necessity.
+
+## 8. Run status (dev spaarkedev1, 2026-10-15)
+
+Owner OK: "Yes, delete with rows" (Ralph Schroeder, 2026-10-15, Claude session).
+
+Done in dev:
+- the 4 rows were backed up to `notes/011-invoicelineitem-rows-backup.json`;
+- the Billing Event and Invoice forms were edited and published;
+- the Timekeeper lookup `sprk_InvoiceLineItem_Timekeeper_1n` was deleted;
+- the 2 AI skill-config opt-outs were deleted;
+- the 2 Copilot table-search entries (`dvtablesearchentity`) naming the table were deleted.
+
+Not done: the 4 rows and the table still exist. One dependency remains. The app `Spaarke Platform` (`sprk_SpaarkePlatform`, appmoduleid `d908a85b-9454-f111-a825-7c1e520aa4df`) still lists the table, and the script stops at step 5 and names it:
+- `RemoveAppComponents` returns 204 but changes neither the working set nor the published set. Both entity-reference forms (typed `entityid`, and `@odata.id`) were tried, with and without deleting the table-search entries first.
+- The app is unmanaged, its validation shows warnings only, and its sitemap does not mention the table.
+- A solution export of the app shows `<AppModuleComponent type="1" schemaName="sprk_invoicelineitem" />`. The app bundles Copilot bots, an MCP server and table-search indexes, so importing an edited copy was not attempted.
+
+To finish:
+1. In make.powerapps.com, open the Spaarke Platform app in the designer, remove the Invoice Line Item table, then Save and Publish.
+2. Re-run the script with `-Delete -DeleteRows -OwnerApproval '2026-10-15 owner (Ralph Schroeder) via Claude session'`. Steps 0-4 are idempotent.

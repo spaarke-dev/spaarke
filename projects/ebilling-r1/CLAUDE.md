@@ -189,6 +189,7 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
 - 2026-10-15 — A consumer-type constant goes into `ConsumerTypes.All` only in the same change that seeds its Binding row. `RoutingConsumerTypeHealthCheck` turns /healthz Unhealthy otherwise. Action codes are lowercase kebab without a version suffix (e.g. `invoice-line-code`); the spec's `INVOICE-…@v1` names map to these.
 - 2026-10-15 — Action seeding: `Seed-JpsActions.ps1` is retired. Use `scripts/Deploy-ActionMirrors.ps1` (`infra/dataverse/actions/`) plus `scripts/dataverse/Seed-PlaybookConsumers.ps1`.
 - 2026-10-15 — Matter, Project and Work Assignment carry lookup columns `sprk_mattertype` / `sprk_practicearea` (target tables `sprk_mattertype_ref` / `sprk_practicearea_ref`). Code-set mapping keys off those.
+- 2026-10-15 — On dev, `RemoveAppComponents` against the `Spaarke Platform` app (`sprk_SpaarkePlatform`, an M365 Copilot app bundling bots, an MCP server and table-search indexes) returns 204 but removes nothing. Remove a table from that app in the app designer. `appmodulecomponent` rows cannot be DELETEd (0x80040800).
 
 ## 7. Key documents
 

@@ -156,7 +156,7 @@ function Get-Inventory {
     $inv.OwnForms = @((Invoke-Dv "systemforms?`$select=name,type&`$filter=objecttypecode eq '$Entity'").value)
     $inv.OwnViews = @((Invoke-Dv "savedqueries?`$select=name,savedqueryid,isdefault&`$filter=returnedtypecode eq '$Entity'").value)
     $inv.AiSkillConfigs = @((Invoke-Dv "aiskillconfigs?`$select=uniquename,aiskillconfigid&`$filter=_entity_value eq $id").value)
-    $inv.AppModuleComponents = @((Invoke-Dv "appmodulecomponents?`$select=appmodulecomponentid&`$filter=objectid eq $id and componenttype eq 1").value)
+    $inv.AppModuleComponents = @((Invoke-Dv "appmodulecomponents?`$select=appmodulecomponentid,_appmoduleidunique_value&`$filter=objectid eq $id and componenttype eq 1").value)
 
     # References from other components (anything here is a dependency to remove or a blocker).
     $forms = @((Invoke-Dv "systemforms?`$select=name,formid,objecttypecode&`$filter=contains(formxml,'invoicelineitem') and objecttypecode ne '$Entity'").value)
@@ -400,7 +400,29 @@ try {
     $ran.Add('3 AI skill configs removed')
 
     Write-Host "4. App module registrations" -ForegroundColor Cyan
-    Remove-ByIds 'appmodulecomponent' 'appmodulecomponents' @($inv.AppModuleComponents | ForEach-Object { $_.appmodulecomponentid })
+    # appmodulecomponent rows cannot be deleted directly (0x80040800); the app's RemoveAppComponents action removes the table
+    # from each app that lists it. Copilot table-search entries (dvtablesearchentity) naming the table go first.
+    foreach ($ts in @((Invoke-Dv "dvtablesearchentities?`$select=dvtablesearchentityid&`$filter=entitylogicalname eq '$Entity'").value)) {
+        if ($DryRun) { Write-Host "  WOULD DELETE table-search entry $($ts.dvtablesearchentityid)" -ForegroundColor Cyan; continue }
+        Invoke-Dv -Path "dvtablesearchentities($($ts.dvtablesearchentityid))" -Method DELETE | Out-Null
+        Write-Host "  DELETED  table-search entry $($ts.dvtablesearchentityid)" -ForegroundColor Green
+    }
+    # Known limit (dev, 2026-10-15): on 'Spaarke Platform' (sprk_SpaarkePlatform, an M365 Copilot app) RemoveAppComponents
+    # returns 204 but keeps the table; step 5 then refuses and names the app. Remove the table in the app designer and re-run.
+    $apps =@($inv.AppModuleComponents | ForEach-Object { $_._appmoduleidunique_value } | Where-Object { $_ } | Sort-Object -Unique)
+    foreach ($unique in $apps) {
+        $app = @((Invoke-Dv "appmodules?`$select=appmoduleid,name&`$filter=appmoduleidunique eq $unique").value) | Select-Object -First 1
+        if (-not $app) { Write-Host "  skipped  app $unique not found" -ForegroundColor Yellow; continue }
+        if ($DryRun) { Write-Host "  WOULD REMOVE table from app '$($app.name)'" -ForegroundColor Cyan; continue }
+        Invoke-Dv -Path 'RemoveAppComponents' -Method POST -Body @{
+            AppId      = $app.appmoduleid
+            Components = @(@{ '@odata.type' = 'Microsoft.Dynamics.CRM.entity'; entityid = "$($inv.Entity.MetadataId)" })
+        } | Out-Null
+        Write-Host "  REMOVED  table from app '$($app.name)'" -ForegroundColor Green
+        # The removal reaches the dependency graph only once the app is published.
+        Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><appmodules><appmodule>$($app.appmoduleid)</appmodule></appmodules></importexportxml>" } | Out-Null
+        Write-Host "  published app '$($app.name)'" -ForegroundColor Green
+    }
     $ran.Add('4 app module registrations removed')
 
     Write-Host "5. RetrieveDependenciesForDelete must now be empty" -ForegroundColor Cyan
