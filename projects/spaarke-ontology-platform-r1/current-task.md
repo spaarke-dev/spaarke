@@ -35,6 +35,8 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 
 **Docs->master #2044 MERGED** `e702c3401` (2026-10-16, 100+101+103). Console auto-deployed from it (Deploy SpaarkeAi success 23:28:56Z); peers told (uac-r2, R3; word-add-in notice HELD by its session). R3 asked to include e702c3401 in its next dev BFF line and send the ProductVersion; until then the admin tab's Rules/Classification areas call routes the live BFF may not have (only Ontology Administrators see the tab).
 
+**ebilling 070 (#1911) re-checked 2026-10-16** (7fc6b0593..be28df779): OK from ontology side; Q1 keep the throw. PAIRED CHANGE asked of ebilling in their 070 PR (ontology F3): 101 ValidateRule passes RuleDomain.Ontology + RuleTypeWrongDomain -> "ruleType"; 100/101 domain filters from RuleDomains constants; test billing type -> 400 on ruleType. If they decline: do it as our follow-up right after 070 merges (fail-closed window). Owner D-92 (ebilling log f4a96f10e) records schema sign-off - ask owner to confirm. ebilling 026 (touches Signal + DR writers, sprk_regardinginvoiceline) comes to us for full review. Temp worktree C:\wts-eb070 (detached be28df779) - remove with scripts/worktree/Remove-WorktreeSafe.ps1.
+
 **Endpoint census at docs->master:** uac-r2 #2035 (099a) sets master ExpectedEndpointFileCount 127 (104 = 125->126, 099a = 126->127). Each ontology admin file (100 merged, 101, 103) adds one: expect a conflict and recompute from the census when the next docs->master PR merges after #2035.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
