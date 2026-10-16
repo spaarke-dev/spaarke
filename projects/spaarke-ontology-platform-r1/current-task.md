@@ -23,10 +23,11 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 |---|---|---|---|
 | 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | PR #2018 in Opus review; after BFF deploy run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first) |
 | 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | ESCALATED: needs (sprk_matter, sprk_budget) VerifiedJoin; owner asked (recommend inside 063) |
-| 045 Decision Record tab [uac] | `C:\wts-045` `task/ontology-045` | sonnet/medium | PR #2014 fix round (forged-DR writer check, Acknowledged-with-DR, 401) |
-| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | implementing |
+| 045 Decision Record tab [uac] | `C:\wts-045` | sonnet/medium | ✅ merged #2014 `1931b405c`; after Console deploys from master run `scripts/seed-decision-records-workspace-layout.ps1` (-WhatIf first) |
+| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | PR #2019 in Opus review; uac-r2 OK on ledger row. 100/101 routes each need their own ledger classification (uac-r2) |
 | 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
-| 073 memo source #2 | `C:\wts-073` `task/ontology-073` | sonnet/high | implementing |
+| 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
+| 049 revoke Signal Write + DR Create | `C:\wts-049` `task/ontology-049` | sonnet/high | preparing PR (no live change; uac-r2 checks PR; main session applies after 055) |
 
 Next wave as slots free: 111 (wizard regression + deploy). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
 
