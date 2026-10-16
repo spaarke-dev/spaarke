@@ -133,7 +133,7 @@ For a table in `InvoiceFamilyCoreRecordGuard.CoreRecordLookups`, call `Check` on
 
 | Field | Value |
 |---|---|
-| **Status** | Open - owner / unified-access-control-r2 decision |
+| **Status** | Closed - owner decision D-85 (2026-10-15): batch stays outside the secure family; accepted that secure invoices in a batch are visible to anyone who can see the batch |
 | **Urgency** | before task 150 writes the first batch |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 013 |
