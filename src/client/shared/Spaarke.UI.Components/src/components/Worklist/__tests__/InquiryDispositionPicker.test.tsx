@@ -533,7 +533,7 @@ describe('an inquiry that already has an outcome cannot be recorded again', () =
 });
 
 describe('nothing is set after the widget has gone', () => {
-  it('a lookup that answers after unmount sets no state', async () => {
+  it('a lookup that answers after unmount opens nothing and sets no state', async () => {
     const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const service = inquiryService();
@@ -542,9 +542,11 @@ describe('nothing is set after the widget has gone', () => {
       await ready();
       await userEvent.click(line(T1));
       utils.unmount();
+      // null = no inquiry: without the mounted guard, launchFor would open the wizard for a widget that has gone.
       await act(async () => {
-        gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
+        gates.get(TODO_ID.inquiry)?.(null);
       });
+      expect(utils.launchWizard).not.toHaveBeenCalled();
       expect(errors).not.toHaveBeenCalled();
     } finally {
       errors.mockRestore();
