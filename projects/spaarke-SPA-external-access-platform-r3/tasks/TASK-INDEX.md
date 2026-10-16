@@ -32,7 +32,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 044 | A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link + key | P4b | ✅ [done] | none (owner-gated dev import) | S/h | STANDARD | A9 Wave 1 |
 | 045 | BFF WorkforceHome scheme, ExternalCollaboration only, census ArchTest, must-reject tests | P4b | ✅ [done] merged e6f6c6cd7; ships only with 046 (resolver denies WorkforceHome until then) | none | O/h | FULL | A9 Wave 1 |
 | 046 | BFF home principal resolution (link, contact by tid+oid, registration_required, guards d/e) | P4b | ✅ [done] merged dfee0a438 (2 Opus passes, fix round 1 bc0113e9d); not on dev yet | 044, 045 | O/h | FULL | A9 Wave 2 |
-| 047 | BFF registration endpoint POST /api/v1/external/registration | P4b | 🔲 [open] | 046 | O/h | FULL | A9 Wave 3 |
+| 047 | BFF registration endpoint POST /api/v1/external/registration | P4b | ✅ [done] merged 176857143 (2 Opus passes, fix rounds 1-3; schema label fix 69eed60c7); not on dev yet; option 100000012 not applied (owner-gated); UAC review requested | 046 | O/h | FULL | A9 Wave 3 |
 | 048 | BFF link endpoint POST /api/v1/external/workforce/link (dual-token proof) | P4b | 🔲 [open] | 046 (after 047: shared files) | O/h | FULL | A9 Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] code done, awaiting owner GitHub environments + prod Teams app id | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |

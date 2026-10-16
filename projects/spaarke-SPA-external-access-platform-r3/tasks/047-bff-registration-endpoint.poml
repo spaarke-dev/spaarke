@@ -4,7 +4,7 @@
     <title>BFF registration endpoint POST /api/v1/external/registration (owner team, verified-email bind, refusals, idempotency)</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 046</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, auth; new endpoint that creates or binds identities</rigor-reason>
     <model-tier>opus</model-tier>
