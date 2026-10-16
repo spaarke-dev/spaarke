@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
@@ -651,7 +651,7 @@ public class DataverseContactIdentityStoreTests
     [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060882\",\"message\":\"The version of the existing record doesn't match\"}}", StoreWriteStatus.PreconditionFailed)]
     [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060892\",\"message\":\"A record that has the attribute values External Object ID already exists.\"}}", StoreWriteStatus.KeyConflict)]
     [InlineData(HttpStatusCode.BadRequest, "{\"error\":{\"message\":\"The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", StoreWriteStatus.Failed)]
-    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"message\":\"Principal user is missing prvWriteContact privilege (sprk_externalinvitecodehash)\"}}", StoreWriteStatus.Failed)]
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"message\":\"Principal user is missing prvWriteContact privilege (sprk_externalinvitecodehash)\"}}", StoreWriteStatus.Forbidden)] // r3 047: a permission fault is Forbidden (callers deny it like Failed)
     public async Task TheConsumingBind_FallsBackOnlyForAMissingHashColumn(HttpStatusCode code, string? body, StoreWriteStatus expected)
     {
         var http = new ScriptedHttp((code, body));
@@ -859,52 +859,46 @@ public class DataverseContactIdentityStoreTests
             logger ?? NullLogger.Instance);
 
     /// <summary>
-    /// UAC review F1, column-missing case: an environment without the hash column can hold no hash. The first write (naming
-    /// the hash column) is refused for it, so the bind is retried ONCE with the plain payload and that result returned.
+    /// UAC review F1, column-missing case, through the real wiring (#2005 K3: the delegate seam let a dropped
+    /// missingColumns argument pass). The home bind names the hash column; where it is not provisioned the platform refuses
+    /// the PATCH, and the PLAIN home bind goes out once under the SAME row version.
     /// </summary>
     [Fact]
-    public async Task TheHomeBind_WhenTheHashColumnIsMissing_IsRetriedOnceWithThePlainPayload_AndIsWritten()
+    public async Task TheHomeBind_WhereTheHashColumnIsMissing_SendsThePlainHomeBind_UnderTheSameRowVersion()
     {
-        var sent = new List<(Dictionary<string, object?> Payload, IReadOnlyList<string>? Missing)>();
-        var store = NewStoreWithNoTransport();
+        var http = new ScriptedHttp(
+            (HttpStatusCode.BadRequest, HashColumnMissingBody),
+            (HttpStatusCode.NoContent, null));
 
-        var result = await store.HomeBindConsumingInviteAsync(HomeTenant, Oid, (payload, missing) =>
+        var write = await http.Store().BindHomeOidAsync(IntentContact, "W/\"42\"", HomeTenant, Oid, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        http.Requests.Should().HaveCount(2);
+        http.Requests.Should().AllSatisfy(r =>
         {
-            sent.Add((payload, missing));
-            return Task.FromResult(sent.Count == 1
-                ? new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "sprk_externalinvitecodehash does not exist on type")
-                : StoreWriteResult.Written);
+            r.Method.Should().Be(HttpMethod.Patch);
+            r.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+            r.IfMatch.Should().Be("W/\"42\"", "the retry is conditional on the version the decision was made on");
         });
-
-        result.Status.Should().Be(StoreWriteStatus.Written);
-        sent.Should().HaveCount(2);
-        sent[0].Payload.Should().ContainKey("sprk_externalinvitecodehash");
-        sent[0].Missing.Should().BeEquivalentTo(new[] { "sprk_externalinvitecodehash" },
-            "the first write names the hash column so a refusal for it is ColumnMissing");
-        sent[1].Missing.Should().BeNull();
-        sent[1].Payload.Should().BeEquivalentTo(DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid));
-        sent[1].Payload.Should().NotContainKey("sprk_externalinvitecodehash");
+        http.Requests[0].Body.Should().Contain("\"sprk_externalinvitecodehash\":null");
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[1].Body)!.Keys
+            .Should().BeEquivalentTo(DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid).Keys);
     }
 
+    /// <summary>The home bind falls back ONLY for the missing hash column; every other answer is one request, as is.</summary>
     [Theory]
-    [InlineData(StoreWriteStatus.Written)]
-    [InlineData(StoreWriteStatus.PreconditionFailed)]
-    [InlineData(StoreWriteStatus.KeyConflict)]
-    [InlineData(StoreWriteStatus.Forbidden)]
-    [InlineData(StoreWriteStatus.Failed)]
-    public async Task TheHomeBind_ForAnyStatusButColumnMissing_IsSentOnce_AndReturnedAsIs(StoreWriteStatus status)
+    [InlineData(HttpStatusCode.NoContent, null, StoreWriteStatus.Written)]
+    [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060882\",\"message\":\"The version of the existing record doesn't match\"}}", StoreWriteStatus.PreconditionFailed)]
+    [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060892\",\"message\":\"A record that has the attribute values External Object ID already exists.\"}}", StoreWriteStatus.KeyConflict)]
+    [InlineData(HttpStatusCode.BadRequest, "{\"error\":{\"message\":\"The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", StoreWriteStatus.Failed)]
+    public async Task TheHomeBind_FallsBackOnlyForAMissingHashColumn(HttpStatusCode code, string? body, StoreWriteStatus expected)
     {
-        var calls = 0;
-        var store = NewStoreWithNoTransport();
+        var http = new ScriptedHttp((code, body));
 
-        var result = await store.HomeBindConsumingInviteAsync(HomeTenant, Oid, (_, _) =>
-        {
-            calls++;
-            return Task.FromResult(new StoreWriteResult(status));
-        });
+        var write = await http.Store().BindHomeOidAsync(IntentContact, "W/\"42\"", HomeTenant, Oid, CancellationToken.None);
 
-        result.Status.Should().Be(status);
-        calls.Should().Be(1, "only a missing hash column is retried, never a precondition failure or a conflict");
+        write.Status.Should().Be(expected);
+        http.Requests.Should().ContainSingle().Which.Body.Should().Contain("\"sprk_externalinvitecodehash\":null");
     }
 
     /// <summary>

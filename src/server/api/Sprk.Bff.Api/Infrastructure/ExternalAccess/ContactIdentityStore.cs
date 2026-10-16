@@ -1203,39 +1203,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// UAC review F1 (#2005): the home bind consumes the invite-code hash in the SAME conditional PATCH, through the one
+    /// consuming-bind path every bind shares (<see cref="BindConsumingInviteAsync"/>, PR #2007).
+    /// </remarks>
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
         => RowVersionPrecondition(etag) is { } version
-            ? HomeBindConsumingInviteAsync(homeTenantId, oid, (payload, missingColumns) =>
-                WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", payload, ("If-Match", version), ct, missingColumns))
+            ? BindConsumingInviteAsync(contactId, version, HomeBindAndConsumeInvitePayload(homeTenantId, oid),
+                HomeBindPayload(homeTenantId, oid), ct)
             : Task.FromResult(NoRowVersion("bind", contactId));
-
-    private static readonly IReadOnlyList<string> InviteHashColumnOnly = new[] { ContactBindingDecision.ExternalInviteCodeHashColumn };
-
-    /// <summary>
-    /// UAC review F1: the home bind consumes the invite-code hash in the SAME conditional PATCH
-    /// (<see cref="HomeBindAndConsumeInvitePayload"/>). An environment without the hash column can hold no hash, so when
-    /// the platform refuses that write for the hash column (<see cref="StoreWriteStatus.ColumnMissing"/>) it is retried
-    /// ONCE with the plain <see cref="HomeBindPayload"/> (same row version, carried by <paramref name="write"/>) and that
-    /// result returned. Any other status returns as is. <paramref name="write"/> sends one payload and answers
-    /// ColumnMissing for the columns it is given when the platform says one does not exist.
-    /// </summary>
-    public async Task<StoreWriteResult> HomeBindConsumingInviteAsync(
-        Guid homeTenantId, Guid oid,
-        Func<Dictionary<string, object?>, IReadOnlyList<string>?, Task<StoreWriteResult>> write)
-    {
-        ArgumentNullException.ThrowIfNull(write);
-        var first = await write(HomeBindAndConsumeInvitePayload(homeTenantId, oid), InviteHashColumnOnly).ConfigureAwait(false);
-        if (first.Status != StoreWriteStatus.ColumnMissing)
-        {
-            return first;
-        }
-
-        _logger.LogWarning(
-            "[ID-BIND] {Hash} is not provisioned in this environment: the home bind is retried once without clearing it "
-            + "(an environment without the column holds no invite-code hash). Apply scripts/Set-ExternalInviteCodeHashSchema.ps1.",
-            ContactBindingDecision.ExternalInviteCodeHashColumn);
-        return await write(HomeBindPayload(homeTenantId, oid), null).ConfigureAwait(false);
-    }
 
     private void LogHomeSchemaMissing(string what)
         => _logger.LogError(
@@ -1306,30 +1282,35 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             : Task.FromResult(NoRowVersion("bind", contactId));
 
     /// <inheritdoc />
-    public async Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
+    public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
-    {
-        if (RowVersionPrecondition(etag) is not { } version)
-        {
-            return NoRowVersion("bind", contactId);
-        }
+        => RowVersionPrecondition(etag) is { } version
+            ? BindConsumingInviteAsync(contactId, version, BindAndConsumeInvitePayload(oid, plane), BindPayload(oid, plane), ct)
+            : Task.FromResult(NoRowVersion("bind", contactId));
 
+    /// <summary>
+    /// #2005: the one consuming bind. Sends <paramref name="consuming"/> (the bind plus the hash cleared) under
+    /// <paramref name="version"/>; where the hash column is not provisioned the platform refuses the whole PATCH (nothing
+    /// written) and no contact can hold a code to consume, so <paramref name="plain"/> goes out ONCE under the same row
+    /// version. Any other status returns as is. Shared by the CIAM/workforce/systemuser binds and the A9 home bind.
+    /// </summary>
+    private async Task<StoreWriteResult> BindConsumingInviteAsync(
+        Guid contactId, string version, Dictionary<string, object?> consuming, Dictionary<string, object?> plain,
+        CancellationToken ct)
+    {
         var path = $"contacts({contactId:D})";
-        var write = await WriteAsync(HttpMethod.Patch, path, BindAndConsumeInvitePayload(oid, plane), ("If-Match", version),
+        var write = await WriteAsync(HttpMethod.Patch, path, consuming, ("If-Match", version),
             ct, missingColumns: InviteCodeHashColumn).ConfigureAwait(false);
         if (write.Status != StoreWriteStatus.ColumnMissing)
         {
             return write;
         }
 
-        // #2005: the hash column is not provisioned here, so no contact can hold a code to consume. The refused PATCH wrote
-        // nothing, so the plain bind goes out under the same row version: the bind behaves exactly as before the schema.
         _logger.LogWarning(
             "[ID-BIND] {Hash} is not provisioned in this environment: contact {ContactId} is bound without consuming an "
             + "invite code. Apply scripts/Set-ExternalInviteCodeHashSchema.ps1.",
             ContactBindingDecision.ExternalInviteCodeHashColumn, contactId);
-        return await WriteAsync(HttpMethod.Patch, path, BindPayload(oid, plane), ("If-Match", version), ct)
-            .ConfigureAwait(false);
+        return await WriteAsync(HttpMethod.Patch, path, plain, ("If-Match", version), ct).ConfigureAwait(false);
     }
 
     /// <summary>The consuming bind's only extra column: a write fault naming it is a missing hash column (#2005).</summary>

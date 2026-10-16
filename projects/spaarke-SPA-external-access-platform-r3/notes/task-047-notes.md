@@ -277,3 +277,17 @@ Runs:
 - the full suite on 9e860c692 (23,856 passed, 1 TaskCanceled; it passes alone);
 - after this fix, 697/697 identity, registration and invite tests;
 - ArchTests 1052/1052.
+
+## Fold onto PR #2007 (2026-10-16)
+
+Master was merged into R3 with UAC's #2007 (`96d5b16c2`). The home bind now shares #2007's consuming bind:
+- **Fold:** a private `BindConsumingInviteAsync(contactId, version, consuming, plain, ct)` sends the consuming payload with the hash column named as a possible missing column. On ColumnMissing it sends the plain payload once, under the same row version.
+  - `BindOidAndConsumeInviteAsync` and `BindHomeOidAsync` both call it.
+  - R3's delegate seam `HomeBindConsumingInviteAsync` and its `InviteHashColumnOnly` array are gone. This closes K1.
+- **K3 closed:**
+  - The home fallback tests now drive `BindHomeOidAsync` through #2007's scripted HTTP fake, so the real `WriteAsync` classification is exercised.
+  - Seeded: passing `missingColumns: null` in the helper fails both fallback tests (home and #2007's); restored, both pass.
+- **Merge semantics:** R3 (047 fix round 1) reports a write refused for a missing privilege as `Forbidden`; #2007's theory expected `Failed` for its 403 case.
+  - Every #2007 caller treats any non-Written status as a denial: binder :967, :1187, :1234, and the invite service via `BindInvitedContactAsync`.
+  - So the case now expects `Forbidden`.
+- **Runs:** 781/781 identity, binding, invite and contract tests; ArchTests 1052/1052.
