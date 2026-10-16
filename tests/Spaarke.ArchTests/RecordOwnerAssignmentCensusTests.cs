@@ -212,6 +212,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("InvoiceReviewService.cs", "sprk_invoice", 1, Disposition.Routed,
             "Invoice confirm (G5): a fresh-id PATCH whose field map BuildInvoiceCreateFields binds the matter's team "
             + "(task 130, ResolveOwningTeamAsync record-first from the matter); an unresolved team refuses before any write."),
+        new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
+            "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
+            + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "
+            + "applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses (409) before the upload or any write."),
         new CensusEntry("SignalEvaluationService.cs", "sprk_spendsignal", 1, Disposition.Routed,
             "Spend signals: a deterministic-id PATCH (idempotent upsert) whose field map binds the matter's team, "
             + "resolved by the caller of UpsertSignalAsync; a refusal skips the evaluation."),
@@ -2092,6 +2096,9 @@ public class RecordOwnerAssignmentCensusTests
     {
         new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
+        new PersonBearingWriter("InvoiceSubmissionService.cs", "SubmitAsync",
+            "the submitter of an invoice (ebilling-r1 task 044): the internal caller (oid) or a workforce SPA caller (systemuser); a "
+            + "CIAM contact is recorded as sprk_submitter and the document's sprk_createdbycontact"),
         new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),

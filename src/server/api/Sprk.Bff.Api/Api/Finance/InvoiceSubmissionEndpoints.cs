@@ -37,46 +37,37 @@ public static class InvoiceSubmissionEndpoints
     /// </summary>
     internal const long MaxRequestBodyBytes = (EbillingOptions.MaxSubmissionFileSizeMbCeiling + 1L) * 1024 * 1024;
 
-    private static readonly (string Segment, InvoiceCoreRecordKind Kind, string EntitySet)[] CoreRoutes =
-    {
-        ("matters", InvoiceCoreRecordKind.Matter, FinanceAuthorizationFilter.MatterEntitySet),
-        ("projects", InvoiceCoreRecordKind.Project, FinanceAuthorizationFilter.ProjectEntitySet),
-        ("workassignments", InvoiceCoreRecordKind.WorkAssignment, FinanceAuthorizationFilter.WorkAssignmentEntitySet),
-    };
-
     public static IEndpointRouteBuilder MapInvoiceSubmissionEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup(Route)
             .RequireAuthorization()
             .WithTags("Finance");
 
-        foreach (var (segment, kind, entitySet) in CoreRoutes)
-        {
-            // POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions
-            group.MapPost($"/{segment}/{{id:guid}}/invoice-submissions",
-                    (Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct) =>
-                        SubmitAsync(new InvoiceCoreRecord(kind, id), http, service, ct))
-                .AddFinanceAuthorizationFilter(context => ResolveSubmitTargets(context, entitySet))
-                .RequireEbillingEnabled()
-                .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's own record rights, not a form token
-                .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
-                .Accepts<IFormFile>("multipart/form-data")
-                .WithName($"SubmitInvoiceFor{kind}")
-                .WithSummary($"Submit an invoice PDF against a {kind} on a firm's behalf")
-                .WithDescription(
-                    "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
-                    "tracking number) and enqueues processing. Query: firmId (required). Form: file (PDF), firmInvoiceNumber (required), " +
-                    "poNumber. 403 without Read and AppendTo on the record or AppendTo on the firm; 400 not_pdf, file_required, " +
-                    "firm_invoice_number_required, firm_invalid; 413 too_large; 503 ebilling.disabled.")
-                .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
-                .ProducesProblem(StatusCodes.Status400BadRequest)
-                .ProducesProblem(StatusCodes.Status401Unauthorized)
-                .ProducesProblem(StatusCodes.Status403Forbidden)
-                .ProducesProblem(StatusCodes.Status409Conflict)
-                .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
-                .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-                .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-        }
+        // POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions. Three literal chains (not a loop): the
+        // RouteAuthorizationGuard scanner reads each route's path and attachments from its own Map{Verb} chain.
+        group.MapPost("/matters/{id:guid}/invoice-submissions", SubmitForMatterAsync)
+            .AddFinanceAuthorizationFilter(context => ResolveSubmitTargets(context, FinanceAuthorizationFilter.MatterEntitySet))
+            .RequireEbillingEnabled()
+            .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's own record rights, not a form token
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
+            .WithName("SubmitInvoiceForMatter")
+            .WithSubmitContract("matter");
+
+        group.MapPost("/projects/{id:guid}/invoice-submissions", SubmitForProjectAsync)
+            .AddFinanceAuthorizationFilter(context => ResolveSubmitTargets(context, FinanceAuthorizationFilter.ProjectEntitySet))
+            .RequireEbillingEnabled()
+            .DisableAntiforgery()
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
+            .WithName("SubmitInvoiceForProject")
+            .WithSubmitContract("project");
+
+        group.MapPost("/workassignments/{id:guid}/invoice-submissions", SubmitForWorkAssignmentAsync)
+            .AddFinanceAuthorizationFilter(context => ResolveSubmitTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet))
+            .RequireEbillingEnabled()
+            .DisableAntiforgery()
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
+            .WithName("SubmitInvoiceForWorkAssignment")
+            .WithSubmitContract("work assignment");
 
         // GET /api/finance/invoice-submissions/{id}
         group.MapGet("/invoice-submissions/{id:guid}", GetAsync)
@@ -139,6 +130,15 @@ public static class InvoiceSubmissionEndpoints
     // ═══════════════════════════════════════════════════════════════════════════
     // Handlers
     // ═══════════════════════════════════════════════════════════════════════════
+
+    private static Task<IResult> SubmitForMatterAsync(Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct) =>
+        SubmitAsync(new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, id), http, service, ct);
+
+    private static Task<IResult> SubmitForProjectAsync(Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct) =>
+        SubmitAsync(new InvoiceCoreRecord(InvoiceCoreRecordKind.Project, id), http, service, ct);
+
+    private static Task<IResult> SubmitForWorkAssignmentAsync(Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct) =>
+        SubmitAsync(new InvoiceCoreRecord(InvoiceCoreRecordKind.WorkAssignment, id), http, service, ct);
 
     private static async Task<IResult> SubmitAsync(InvoiceCoreRecord core, HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
     {
@@ -235,6 +235,24 @@ public static class InvoiceSubmissionEndpoints
 
         return new SubmissionForm(new InvoiceSubmissionFile(part.FileName, part.ContentType, bytes), number, po, null);
     }
+
+    /// <summary>The OpenAPI contract of a submit route (documentation only; authorization is on each route's own chain).</summary>
+    internal static RouteHandlerBuilder WithSubmitContract(this RouteHandlerBuilder builder, string coreNoun) => builder
+        .Accepts<IFormFile>("multipart/form-data")
+        .WithSummary($"Submit an invoice PDF against a {coreNoun}")
+        .WithDescription(
+            "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
+            "tracking number) and enqueues processing. Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId. " +
+            "Refusals are ProblemDetails with errorCode: 400 not_pdf, file_required, firm_invoice_number_required, firm_invalid; " +
+            "403 without the rights the route needs; 413 too_large; 503 ebilling.disabled.")
+        .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
+        .ProducesProblem(StatusCodes.Status400BadRequest)
+        .ProducesProblem(StatusCodes.Status401Unauthorized)
+        .ProducesProblem(StatusCodes.Status403Forbidden)
+        .ProducesProblem(StatusCodes.Status409Conflict)
+        .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+        .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+        .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>202 with <c>Location</c> = the channel's status URL, or the refusal as ProblemDetails (ADR-019).</summary>
     internal static IResult ToResult(InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId) => outcome.Kind switch

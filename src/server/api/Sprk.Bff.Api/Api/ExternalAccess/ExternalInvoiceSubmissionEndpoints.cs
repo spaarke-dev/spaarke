@@ -21,41 +21,36 @@ public static class ExternalInvoiceSubmissionEndpoints
     /// <summary>The status route of a submission on the external surface.</summary>
     internal static string StatusUrl(Guid submissionId) => $"/api/v1/external/invoice-submissions/{submissionId}";
 
-    private static readonly (string Segment, InvoiceCoreRecordKind Kind)[] CoreRoutes =
-    {
-        ("matters", InvoiceCoreRecordKind.Matter),
-        ("projects", InvoiceCoreRecordKind.Project),
-        ("workassignments", InvoiceCoreRecordKind.WorkAssignment),
-    };
-
     /// <summary>Registers the routes on the shared external collaboration group (its policy and principal filter are inherited).</summary>
     public static RouteGroupBuilder MapExternalInvoiceSubmissionEndpoints(this RouteGroupBuilder externalGroup)
     {
-        foreach (var (segment, kind) in CoreRoutes)
-        {
-            externalGroup.MapPost($"/{segment}/{{id:guid}}/invoice-submissions", SubmitAsync)
-                .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, kind)
-                .RequireEbillingEnabled()
-                .DisableAntiforgery() // multipart upload; auth is the bearer token + the caller's record rights, not a form token
-                .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
-                .RequireRateLimiting("dataverse-query")
-                .Accepts<IFormFile>("multipart/form-data")
-                .WithName($"SubmitExternalInvoiceFor{kind}")
-                .WithSummary($"Submit an invoice PDF against a {kind} as the caller's firm")
-                .WithDescription(
-                    "Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId (optional; required when the caller belongs " +
-                    "to more than one firm, and must be one of the caller's firms). 403 ebilling.submission.record_forbidden without " +
-                    "Collaborate on the record; 403 ebilling.submission.firm_forbidden for another firm; 400 not_pdf, file_required, " +
-                    "firm_invoice_number_required, firm_required; 413 too_large; 503 ebilling.disabled or firm_unverifiable.")
-                .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
-                .ProducesProblem(StatusCodes.Status400BadRequest)
-                .ProducesProblem(StatusCodes.Status401Unauthorized)
-                .ProducesProblem(StatusCodes.Status403Forbidden)
-                .ProducesProblem(StatusCodes.Status409Conflict)
-                .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
-                .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-                .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-        }
+        // Three literal chains (not a loop): the RouteAuthorizationGuard scanner reads each route's path and attachments from its own chain.
+        externalGroup.MapPost("/matters/{id:guid}/invoice-submissions", SubmitAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.Matter)
+            .RequireEbillingEnabled()
+            .DisableAntiforgery() // multipart upload; auth is the bearer token + the caller's record rights, not a form token
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .RequireRateLimiting("dataverse-query")
+            .WithName("SubmitExternalInvoiceForMatter")
+            .WithSubmitContract("matter");
+
+        externalGroup.MapPost("/projects/{id:guid}/invoice-submissions", SubmitAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.Project)
+            .RequireEbillingEnabled()
+            .DisableAntiforgery()
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .RequireRateLimiting("dataverse-query")
+            .WithName("SubmitExternalInvoiceForProject")
+            .WithSubmitContract("project");
+
+        externalGroup.MapPost("/workassignments/{id:guid}/invoice-submissions", SubmitAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.WorkAssignment)
+            .RequireEbillingEnabled()
+            .DisableAntiforgery()
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .RequireRateLimiting("dataverse-query")
+            .WithName("SubmitExternalInvoiceForWorkAssignment")
+            .WithSubmitContract("work assignment");
 
         externalGroup.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.ReadOne)

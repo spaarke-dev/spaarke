@@ -153,6 +153,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.confirm")]
     [InlineData("finance.attach_invoice")] // task 130: Operation = "…" initialiser in FinanceEndpoints' resolvers
     [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
+    [InlineData("finance.submit_invoice")] // ebilling-r1 task 044: Operation = "…" initialiser in InvoiceSubmissionEndpoints' resolver
     [InlineData("event.attach_regarding")] // task 159: literal in AddRecordRouteAccessAuthorizationFilter("…") (EventEndpoints POST /)
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166: HasRequiredRights(rights, PinMatterOperation) const indirection
@@ -246,6 +247,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.confirm", AccessRights.Write)]
     [InlineData("finance.attach_invoice", AccessRights.AppendTo)] // task 130
     [InlineData("finance.link_invoice", AccessRights.Write | AccessRights.Append)] // task 130, owner G5: the document HOLDS the lookup
+    [InlineData("finance.submit_invoice", AccessRights.Read | AccessRights.AppendTo)] // ebilling-r1 task 044: rows are attached TO the core record
     [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
@@ -272,6 +274,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.confirm")]
     [InlineData("finance.attach_invoice")] // task 130
     [InlineData("finance.link_invoice")] // task 130, owner G5
+    [InlineData("finance.submit_invoice")] // ebilling-r1 task 044
     [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166

@@ -305,6 +305,11 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceSubmissionEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/{matters|projects|workassignments}/{id}/invoice-submissions and /api/finance/invoice-submissions/{id} "
+            + "(ebilling-r1 task 044, FR-17 internal channel). The submits run AddFinanceAuthorizationFilter as the caller: Read and "
+            + "AppendTo on the route's core record (finance.submit_invoice) and AppendTo on the query firm (finance.attach_invoice); "
+            + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -388,6 +393,13 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs", Scope.GroupGated,
+            "POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions, GET /api/v1/external/invoice-submissions"
+            + "/{id} and GET /api/v1/external/invoice-submissions (ebilling-r1 task 044, FR-17 SPA channel, NFR-10) on the COLLABORATION "
+            + "group. Each route runs AddExternalInvoiceSubmissionAuthorizationFilter: a submit needs Read and Create on the core "
+            + "record (the principal's post-veto rights) and a firm among the caller contact's conferring memberships; a read needs the "
+            + "submission's firm to be the caller's and Read on its core record (uniform 404); the list is the caller's firms on the "
+            + "caller's readable records. The eBilling kill switch runs after the filter."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -799,7 +811,11 @@ public partial class RouteAuthorizationGuardTests
     // 126 -> 127 (2026-10-16, ebilling-r1 task 106, FR-33). Net +1: Api/Finance/InvoiceContextEndpoints.cs ADDED -- GET
     // /api/finance/invoices/{invoiceId}/context. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read on the
     // route's invoice); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 127;
+    // 127 -> 129 (2026-10-16, ebilling-r1 task 044, FR-17). Net +2: Api/Finance/InvoiceSubmissionEndpoints.cs ADDED (RouteLevelGate:
+    // AddFinanceAuthorizationFilter as the caller on the core record, the firm and the submission) and
+    // Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs ADDED (GroupGated: AddExternalInvoiceSubmissionAuthorizationFilter,
+    // credited below). The kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 129;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -919,6 +935,11 @@ public partial class RouteAuthorizationGuardTests
             "Task 140: a CONTACT principal holding Collaborate or Full Access on the named record, from the evaluator's "
             + "post-veto rights (principal.RightsOn, ContactGrantorAuthorizationFilter.cs:182, :272); a revoke needs a row the "
             + "caller issued (one 404, :253); an unmapped request type is denied (:146-151)."),
+        new CreditedForm("AddExternalInvoiceSubmissionAuthorizationFilter", "Api/ExternalAccess/ExternalInvoiceSubmissionAuthorizationFilter.cs",
+            "ebilling-r1 task 044: a submit needs Read and Create on the route's core record from the evaluator's post-veto rights "
+            + "(principal.RightsOn, ExternalInvoiceSubmissionAuthorizationFilter.cs:153) and a firm among the caller contact's conferring "
+            + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
+            + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "

@@ -161,6 +161,9 @@ public class InvoiceSubmissionService
             return InvoiceSubmissionOutcome.OwnerRefused(owner);
         }
 
+        // The owner team and the creator person go on the row here, in the member that builds it (RecordOwnerAssignmentCensusTests).
+        owner.ApplyTo(row);
+
         ContainerDecision container;
         try
         {
@@ -325,8 +328,6 @@ public class InvoiceSubmissionService
             {
                 row["sprk_submitter"] = new EntityReference("contact", contactId);
             }
-
-            owner.ApplyTo(row);
 
             // The FR-05 guard on the payload exactly as written (one core lookup), the last check before the create.
             if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)
