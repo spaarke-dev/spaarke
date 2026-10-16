@@ -340,7 +340,15 @@ public class ADR010_DITests
         // Refused with a reason) by feeding it that InvoiceTransitionResult through a Moq double; without the interface each caller's test
         // would stand up the Dataverse conditional-write plumbing (versionnumber reads, If-Match, retry) behind a concrete. The service has
         // exactly one implementation, so it is a 1:1 mapping, accepted on the same grounds as IEbillingSettingsReader above.
-        const int knownOneToOneCeiling = 162;
+        // ───────── Ceiling raised 162 → 163, 2026-10-16 (ebilling-r1 task 046) ─────────
+        // IInvoiceResolutionService -> InvoiceResolutionService. SEAM JUSTIFICATION: it is Processing Pipeline step 2 (FR-23, D-47) and the
+        // module boundary the pipeline orchestration (049) is proven against: 049's tests must drive every branch of what it does with a
+        // resolution (matched / unmatched timekeepers, a missing or ambiguous rate, a failed arithmetic check, a confidence on either
+        // side of the reliability threshold) by feeding it an InvoiceResolutionResult through a Moq double, not by standing up the roster
+        // and rate-card Dataverse reads plus the embedding call behind it. One implementation, so a 1:1 mapping, accepted on the same
+        // grounds as IInvoiceTotalsService above. Its collaborators (TimekeeperMatcher, the static calculators and resolvers) are
+        // concrete. Falsifiable: if 049 does not fake it, register the concrete and drop this back to 162.
+        const int knownOneToOneCeiling = 163;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

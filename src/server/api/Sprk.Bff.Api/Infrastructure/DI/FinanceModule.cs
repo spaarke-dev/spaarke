@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -60,6 +61,15 @@ public static class FinanceModule
         // Invoice totals (ebilling-r1 task 016, FR-07, I-1, D-42): the one server-side owner of an invoice's five totals and its
         // Adjustment-line amounts. Scoped: stateless, holds only the (singleton) Dataverse clients. Unconditional (flag rule above).
         services.AddScoped<IInvoiceTotalsService, InvoiceTotalsService>();
+
+        // Invoice resolution (ebilling-r1 task 046, FR-23, D-47, D-69): Processing Pipeline step 2 - arithmetic checks, timekeeper
+        // match against the firm roster (exact, normalized, AI-assisted through IInvoiceAi.GenerateEmbeddingAsync only), rate
+        // lookup in the Published rate card, and the combined confidence per field. Scoped: IInvoiceAi and IGenericEntityService
+        // are scoped, and TimekeeperMatcher keeps its embedding memo per call, not per instance. Unconditional (flag rule above):
+        // IInvoiceAi already has its Null peer, so the AI-assisted name step degrades to "unmatched" when AI is off.
+        // Caller: task 049 (pipeline orchestration). IInvoiceResolutionService is the seam 049's tests fake.
+        services.AddScoped<TimekeeperMatcher>();
+        services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
 
         // Invoice lifecycle (ebilling-r1 task 014, FR-06, I-6, ADR-002): the single server-side owner of sprk_invoice
         // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
