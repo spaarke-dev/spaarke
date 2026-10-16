@@ -24,6 +24,7 @@
 import * as React from 'react';
 import {
   Button,
+  Body1,
   Caption1,
   MessageBar,
   MessageBarActions,
@@ -40,6 +41,7 @@ import type { DecisionItemLoader, DecisionLookupSearch } from '../DecisionWizard
 import type { LaneFilterKey } from './laneCountFilters';
 import type { OpenItemEvent, WorklistLane } from './types';
 import { useWorklistData } from './useWorklistData';
+import { useWorklistNarrative } from './useWorklistNarrative';
 import { WorklistDisclosures } from './WorklistDisclosures';
 import type { DisclosureSetName } from './WorklistDisclosures';
 import { WorklistLanePanel } from './WorklistLanePanel';
@@ -69,7 +71,10 @@ export interface WorklistWidgetProps {
   launchWizard?: (request: DecisionWizardLaunchRequest) => Promise<DecisionWizardLaunchResult>;
   /** The email aggregate row (task 054's card), placed at the top of the Do lane. */
   aggregateRow?: React.ReactNode;
-  /** The Briefing narrative, shown above the lanes while no filter is on. */
+  /**
+   * The Briefing narrative, shown above the lanes while no filter is on. When a host passes none, the widget asks `service.narrate`
+   * for the Assistant's summary of the list's counts (task 062) and shows that instead. A host-supplied narrative wins.
+   */
   narrative?: React.ReactNode;
   /** "Now" for ages and due states; tests inject a fixed date. Defaults to the time the list was last read. */
   today?: Date;
@@ -91,6 +96,7 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
   },
+  narrativeList: { margin: 0, paddingLeft: tokens.spacingHorizontalXL },
   narrativeTag: {
     display: 'flex',
     alignItems: 'center',
@@ -161,6 +167,11 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     Decide: buildLaneView(lanesData?.Decide ?? [], 'Decide', filters.Decide),
     Do: buildLaneView(lanesData?.Do ?? [], 'Do', filters.Do),
   };
+
+  const anyFilter = LANES.some(l => views[l].filterKey !== 'all');
+  // The Assistant's own narrative (task 062): counts of the list as read, never an item. Asked for only when the host gave none and
+  // no filter is on (W-10: hidden under any filter), so a filter does not call the model. A hook, so it runs before the early returns.
+  const assistantNarrative = useWorklistNarrative(service, lanesData, today, narrative === undefined && !anyFilter);
 
   // A filter whose cards emptied (the list changed under it) falls back to All, so it cannot come back unannounced.
   React.useEffect(() => {
@@ -329,7 +340,22 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     );
   }
 
-  const anyFilter = LANES.some(l => views[l].filterKey !== 'all');
+  const shownNarrative =
+    narrative ??
+    (assistantNarrative && (
+      <>
+        <Body1 data-testid="worklist-narrative-summary">{assistantNarrative.summary}</Body1>
+        {assistantNarrative.keyTakeaways.length > 0 && (
+          <ul className={styles.narrativeList}>
+            {assistantNarrative.keyTakeaways.map(t => (
+              <li key={t}>
+                <Body1>{t}</Body1>
+              </li>
+            ))}
+          </ul>
+        )}
+      </>
+    ));
 
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="worklist-widget">
@@ -349,9 +375,9 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
         </MessageBar>
       )}
 
-      {narrative && !anyFilter && (
+      {shownNarrative && !anyFilter && (
         <section className={styles.narrative} aria-label="Briefing" data-testid="worklist-narrative">
-          {narrative}
+          {shownNarrative}
           <span className={styles.narrativeTag}>
             <SparkleRegular aria-hidden />
             <Caption1>Written by the Assistant from the lists below. It doesn&apos;t choose or order them.</Caption1>
