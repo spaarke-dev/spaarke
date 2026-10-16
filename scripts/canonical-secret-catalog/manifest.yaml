@@ -581,6 +581,29 @@ per_env_settings:
       fails fast at boot when Cosmos endpoint is unset. Value is the per-env
       Cosmos account URI (e.g. https://sprk-prod-cosmos.documents.azure.com/).
 
+  - key: 'CosmosPersistence__DatabaseName'
+    per_env_source: 'literal'
+    literal_value: 'spaarke-ai'
+    iOptionsModule: 'AiPersistenceModule'
+    required: true
+    notes: >-
+      T186 L50. Paired with CosmosPersistence__Endpoint (docs/procedures/test-fixture-contracts.md
+      §2.1): SessionPersistenceService, FeedbackService, PinnedContextRepository and
+      WorkspaceStateService throw "CosmosPersistence:DatabaseName is not configured" on first
+      resolve. The BFF artifact ships no appsettings.json (appsettings.template.json is
+      CopyToPublishDirectory=Never), so the template's 'spaarke-ai' never reaches a stamp.
+
+  - key: 'AzureAd__Instance'
+    per_env_source: 'literal'
+    literal_value: 'https://login.microsoftonline.com/'
+    iOptionsModule: 'AzureAdOptions'
+    required: true
+    notes: >-
+      T186 L50. Microsoft.Identity.Web (AuthorizationModule, section AzureAd) throws IDW10106
+      "The 'Instance' option must be provided" on EVERY request, /healthz included — the staging
+      slot answered HTTP 500 to all 120 H9 probes on ACME. Same artifact gap as
+      CosmosPersistence__DatabaseName: the template's value never reaches a stamp.
+
   - key: 'AzureAd__TenantId'
     per_env_source: 'from-intake-parameter:tenant_id'
     iOptionsModule: 'AzureAdOptions'

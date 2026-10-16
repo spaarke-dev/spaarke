@@ -52,6 +52,49 @@ public sealed class FilePerEnvSettingsManifestTests
             "(entry 3 already existed) — a smaller count would indicate a parse regression");
     }
 
+    [Theory]
+    [InlineData("AzureAd__Instance")]                // IDW10106 on every request, /healthz included
+    [InlineData("CosmosPersistence__DatabaseName")]  // four AI/workspace services throw on first resolve
+    public async Task T186_L50_TemplateDefaultTheBffCannotRunWithout_IsWrittenByH4bWithTheTemplateValue(string key)
+    {
+        // T186 L50 — the BFF artifact ships no appsettings.json (appsettings.template.json is
+        // CopyToPublishDirectory=Never), so a template literal reaches a stamp only if H4b writes it.
+        // On ACME the staging BFF answered HTTP 500 to all 120 H9 probes for want of these two.
+        var success = (PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+        var entry = success.Entries.SingleOrDefault(e => e.Key == key);
+
+        entry.Should().NotBeNull($"H4b must write {key}: the BFF cannot run without it and no appsettings.json ships");
+        entry!.PerEnvSource.Should().Be(PerEnvSettingSource.Literal);
+        entry.LiteralValue.Should().Be(ReadTemplateValue(key), "the stamp value stays the BFF template's default");
+    }
+
+    private static string ReadTemplateValue(string key)
+    {
+        var path = Path.Combine("src", "server", "api", "Sprk.Bff.Api", "appsettings.template.json");
+        string? file = null;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null && file is null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, path);
+            file = File.Exists(candidate) ? candidate : null;
+        }
+        file.Should().NotBeNull($"{path} is found by walking up from the test output");
+
+        // The template carries unquoted #{TOKEN}# placeholders; quote them so it parses.
+        var text = System.Text.RegularExpressions.Regex.Replace(
+            File.ReadAllText(file!), @":\s*#\{[A-Za-z0-9_]+\}#", ": \"#{TOKEN}#\"");
+        using var doc = System.Text.Json.JsonDocument.Parse(text, new System.Text.Json.JsonDocumentOptions
+        {
+            CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+        var node = doc.RootElement;
+        foreach (var part in key.Split("__"))
+        {
+            node.TryGetProperty(part, out node).Should().BeTrue($"the template defines {key}");
+        }
+        return node.GetString()!;
+    }
+
     [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_EveryNonLiteralSourceResolvesThroughTheCatalog()
     {
