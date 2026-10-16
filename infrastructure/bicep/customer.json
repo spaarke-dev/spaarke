@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7395548179934998239"
+      "templateHash": "10990713878426831437"
     }
   },
   "parameters": {
@@ -102,7 +102,10 @@
         "sdap-jobs",
         "document-indexing",
         "ai-indexing",
-        "sdap-communication"
+        "sdap-communication",
+        "office-upload-finalization",
+        "office-profile",
+        "office-indexing"
       ],
       "metadata": {
         "description": "Service Bus queue names to create"
@@ -3259,7 +3262,8 @@
               "DOC_INTELLIGENCE_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
               "AiSafety__ContentSafety__Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName'))), '2025-04-01').outputs.contentSafetyEndpoint.value]",
               "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
-              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
+              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3",
+              "WEBSITES_CONTAINER_START_TIME_LIMIT": "600"
             }
           },
           "tags": {

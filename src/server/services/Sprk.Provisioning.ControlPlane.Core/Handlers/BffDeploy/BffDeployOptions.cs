@@ -84,10 +84,12 @@ public sealed class BffDeployOptions
     public TimeSpan SlotSwapTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
-    /// Post-swap production /health probe retry count. Defaults to 24 (matches
-    /// Deploy-BffApi.ps1's <c>MaxHealthCheckRetries</c> default).
+    /// Staging and post-swap production /health probe retry count. Defaults to 120 so that
+    /// <c>HealthProbeMaxRetries × HealthProbeInterval</c> (10 min, even when every request fails fast)
+    /// covers the stamp's <c>WEBSITES_CONTAINER_START_TIME_LIMIT</c> (600 s, customer.bicep).
+    /// T186 L48: 24 (the Deploy-BffApi.ps1 default) gave 2–6 min, and the BFF needed ~220 s to start on S1.
     /// </summary>
-    public int HealthProbeMaxRetries { get; set; } = 24;
+    public int HealthProbeMaxRetries { get; set; } = 120;
 
     /// <summary>
     /// Interval between /health probe retries. Defaults to 5 s (matches

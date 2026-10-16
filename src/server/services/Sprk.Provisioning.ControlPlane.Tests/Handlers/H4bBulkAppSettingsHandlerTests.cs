@@ -1075,6 +1075,51 @@ public sealed class H4bBulkAppSettingsHandlerTests
         queues.Should().Contain(queueName, "the BFF receives jobs from ServiceBus:QueueName; a queue the stamp never created fails every job");
     }
 
+    [Fact]
+    public void T186_L47_EveryQueueTheBffHardCodes_IsAQueueTheStampTemplateCreates()
+    {
+        // T186 L47 — live, the BFF's Office workers (office-upload-finalization, office-profile, office-indexing)
+        // looped on "messaging entity could not be found" on the ACME stamp: customer.bicep never created them.
+        var bffRoot = LocateRepoFile(Path.Combine("src", "server", "api", "Sprk.Bff.Api", "Sprk.Bff.Api.csproj"));
+        var queueConstant = new System.Text.RegularExpressions.Regex(
+            "const string \\w*QueueName\\s*=\\s*\"(?<name>[a-z0-9\\-]+)\"");
+        var hardCoded = Directory.EnumerateFiles(Path.GetDirectoryName(bffRoot)!, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .SelectMany(f => queueConstant.Matches(File.ReadAllText(f)).Select(m => m.Groups["name"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        using var template = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(LocateRepoFile(Path.Combine("infrastructure", "bicep", "customer.json"))));
+        var queues = template.RootElement.GetProperty("parameters").GetProperty("serviceBusQueues")
+            .GetProperty("defaultValue").EnumerateArray().Select(q => q.GetString()).ToList();
+
+        hardCoded.Should().Contain(new[] { "office-upload-finalization", "office-profile", "office-indexing" },
+            "must-fire control: the scan finds the Office workers' queue constants");
+        queueConstant.IsMatch("private const string QueueName = \"sdap-jobs\";").Should().BeTrue("must-fire control");
+        queueConstant.IsMatch("public string QueueName { get; set; } = \"x\";").Should().BeFalse("must-not-fire control: options defaults are config, not constants");
+        queues.Should().Contain(hardCoded, "a hard-coded queue the stamp never created fails every message on it");
+    }
+
+    [Fact]
+    public void T186_L48_H9HealthProbeWindow_CoversTheStampContainerStartLimit()
+    {
+        // T186 L48 — on S1 the BFF took ~220 s to listen; the platform's 230 s default start limit and H9's
+        // 24-attempt probe both gave up first. The stamp now allows 600 s; H9 must wait at least that long.
+        var bicep = File.ReadAllText(LocateRepoFile(Path.Combine("infrastructure", "bicep", "customer.bicep")));
+        var match = System.Text.RegularExpressions.Regex.Match(bicep, "WEBSITES_CONTAINER_START_TIME_LIMIT:\\s*'(?<s>\\d+)'");
+        match.Success.Should().BeTrue("customer.bicep sets the BFF container start-time limit (L48)");
+        var startLimit = TimeSpan.FromSeconds(int.Parse(match.Groups["s"].Value, System.Globalization.CultureInfo.InvariantCulture));
+
+        var options = new Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.BffDeployOptions();
+        var minimumWindow = options.HealthProbeInterval * options.HealthProbeMaxRetries;   // every attempt failing fast
+
+        startLimit.Should().BeGreaterThan(TimeSpan.FromSeconds(230), "the platform default (230 s) is shorter than an S1 BFF start");
+        minimumWindow.Should().BeGreaterThanOrEqualTo(startLimit,
+            "H9 must not declare staging unhealthy while App Service is still allowed to be starting it");
+    }
+
     /// <summary>
     /// Evaluates the generated script's settings the way PowerShell + az did: every line of the <c>$settings = @( … )</c>
     /// array, then each conditional <c>$settings += …</c> line whose parameter is not blank, then (T255) each indexed
