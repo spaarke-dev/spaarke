@@ -14,7 +14,8 @@
 
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
-import { OntologyAdminTab } from '@spaarke/ui-components';
+import { OntologyAdminTab, RulesArea, createOntologyRulesService } from '@spaarke/ui-components';
+import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
 const useStyles = makeStyles({
@@ -29,9 +30,15 @@ const useStyles = makeStyles({
 
 export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   const styles = useStyles();
+  const { authenticatedFetch, bffBaseUrl } = useAiSession();
+  // Task 100: the Rules area. Task 103 adds its `classification` slot beside this one.
+  const rulesService = React.useMemo(
+    () => createOntologyRulesService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
+  );
   return (
     <div className={styles.host} data-testid="ontology-admin-workspace-widget">
-      <OntologyAdminTab />
+      <OntologyAdminTab rules={<RulesArea service={rulesService} />} />
     </div>
   );
 };

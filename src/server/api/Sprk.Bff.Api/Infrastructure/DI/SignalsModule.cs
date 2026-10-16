@@ -108,6 +108,13 @@ public static class SignalsModule
         // compiler and the shared sysadmin entity service, both singletons.
         services.AddSingleton<RuleBodyDescriber>();
 
+        // Task 100 (FR-57, D-22): the Ontology admin Rules routes' service. Scoped: it holds the CALLER's IDataverseUserClient, so every read
+        // and write runs as the caller. The delegate is task 033's immediate PolicyRetired closure (a seam so Retire's ordering and re-run
+        // rule are testable without the Signal writer's constructor). Unconditional: the routes map unconditionally.
+        services.AddScoped<Sprk.Bff.Api.Services.Ontology.PolicyRetiredClosure>(
+            sp => sp.GetRequiredService<SignalClosureService>().ClosePolicyRetiredNowAsync);
+        services.AddScoped<Sprk.Bff.Api.Services.Ontology.OntologyAdminRulesService>();
+
         // Task 031 (FR-11, FR-15, D-13): the side-effect-free evaluation core (reused by the event triggers, 032, and the admin
         // dry run, 101) and the ONE nightly re-evaluating job wrapping it with the writes. An ADR-036 IScheduledJob on the
         // shared Spaarke.Scheduling host (no timer BackgroundService, ADR-052: BFF placement), registered unconditionally
