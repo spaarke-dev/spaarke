@@ -378,8 +378,9 @@ public static class ConsumerTypes
 
     /// <summary>
     /// <see cref="IInvoiceAi.CodeLinesAsync"/> — UTBMS line coding and observations (spec
-    /// <c>INVOICE-LINE-CODE@v1</c>, FR-22). Binding + Action seeded by ebilling-r1 task 047, which also adds
-    /// this constant to <see cref="All"/>.
+    /// <c>INVOICE-LINE-CODE@v1</c>, FR-22). Action <c>invoice-line-code</c> + Binding seeded by ebilling-r1 task 047
+    /// (<c>infra/dataverse/actions/invoice-line-code.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>); this
+    /// constant is in <see cref="All"/> from the same change.
     /// </summary>
     public const string InvoiceLineCode = "invoice-line-code";
 
@@ -432,5 +433,6 @@ public static class ConsumerTypes
         ComposeReviseDocument,
         AssistantSuggest,
         InvoiceClassify,
+        InvoiceLineCode,
     };
 }

@@ -2412,6 +2412,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "ebilling-r1 task 042 (FR-46)"
       }
+    },
+    {
+      "caseId": "GU-143",
+      "family": "invoice-line-code",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "the invoice submission pipeline codes the lines of an extracted invoice with UTBMS task, activity and expense codes from the invoice's resolved code set (ebilling-r1 task 047, FR-22)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceLineCode constant (added task 047). A Linear AI Consumer, same shape as GU-142 invoice-classify: invoked server-side by LineCodingService through IInvoiceAi.CodeLinesAsync (the invoice-line-code Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed code lists, output to DTO, the server-side out-of-set refusal, chunking) lives in tests/integration/seam/Finance/LineCodingSeamTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/InvoiceLineCodeActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-invoice-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-line-code",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 047 (FR-22)"
+      }
     }
   ]
 }

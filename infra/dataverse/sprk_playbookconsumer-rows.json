@@ -592,6 +592,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "ebilling-r1 task 047 (FR-22, D-52) - Binding for invoice-line-code, a Linear AI Consumer reached only through the IInvoiceAi PublicContracts facade (IInvoiceAi.CodeLinesAsync, called by LineCodingService) - NOT chat/loop-projectable, deliberately: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null (same shape as invoice-classify). actionCode resolves to the JPS Action infra/dataverse/actions/invoice-line-code.action.json (display name INVOICE-LINE-CODE@v1, Fast tier). The sprk_modeltieroverride column is not mirrored by this script and is not applied on the linear path (ISS-005); the Action row carries the tier. ConsumerTypes.InvoiceLineCode joined ConsumerTypes.All in the same change.",
+      "consumerType": "invoice-line-code",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Invoice Line Code (UTBMS coding and observations)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "invoice-line-code",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "matter-pre-fill",
       "consumerCode": "default",
       "environment": "*",
