@@ -195,6 +195,38 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
     }
 
     [Fact]
+    public async Task ASiblingInvoiceTheCallerCannotRead_NeverAppearsInTheResponse()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRead();
+        host.Header = Header(matter: true);
+        var readable = Guid.Parse("00000000-0000-0000-0000-00000000e001");
+        var hidden = Guid.Parse("00000000-0000-0000-0000-00000000e002");
+        host.Siblings.Add(Sibling(readable, "INV-READABLE"));
+        host.Siblings.Add(Sibling(hidden, "INV-HIDDEN"));
+        host.Access.Grant(InvoiceSet, readable, AccessRights.Read);   // Write on the hidden one is not Read
+        host.Access.Grant(InvoiceSet, hidden, AccessRights.Write);
+
+        var response = await host.SendAsync(Request(Url(InvoiceId)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["priorInvoices"]!["data"]!["items"]!.AsArray().Select(i => i!["number"]!.GetValue<string>()).Should().Equal("INV-READABLE");
+        body.Should().NotContain("INV-HIDDEN").And.NotContain(hidden.ToString());
+        host.Access.Calls.Should().Contain(new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, hidden, HasToken: true),
+            "the siblings are put to the caller's own rights, with the caller's token");
+    }
+
+    private static Entity Sibling(Guid id, string number)
+    {
+        var e = new Entity("sprk_invoice", id);
+        e["sprk_invoicenumber"] = number;
+        e["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview);
+        return e;
+    }
+
+    [Fact]
     public async Task WorkAssignmentInvoice_Returns200_WithBudgetNotTracked()
     {
         await using var host = await Host.StartAsync();
@@ -266,6 +298,7 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
         public List<QueryExpression> Queries { get; } = [];
         public Entity? Header { get; set; }
         public bool FailEverythingButTheHeader { get; set; }
+        public List<Entity> Siblings { get; } = [];
 
         public static async Task<Host> StartAsync(bool ebillingEnabled = true)
         {
@@ -291,7 +324,8 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
             host.Entities
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression q, CancellationToken _) => host.Answer(q));
-            builder.Services.AddScoped(_ => new InvoiceContextService(host.Entities.Object, NullLogger<InvoiceContextService>.Instance));
+            builder.Services.AddScoped(sp => new InvoiceContextService(
+                host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), NullLogger<InvoiceContextService>.Instance));
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
@@ -335,6 +369,11 @@ public sealed class InvoiceContextEndpointsAuthorizationContractTests
                 var budget = new Entity("sprk_matter", Guid.Parse("00000000-0000-0000-0000-0000000000b1"));
                 budget["sprk_totalspendtodate"] = new Money(10000m);
                 return Task.FromResult(new EntityCollection([budget]));
+            }
+
+            if (q.EntityName == "sprk_invoice")
+            {
+                return Task.FromResult(new EntityCollection(Siblings.ToList()));
             }
 
             return Task.FromResult(new EntityCollection());

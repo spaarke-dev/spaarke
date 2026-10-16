@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using Spaarke.Core.Auth;
+using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Xunit;
@@ -29,6 +31,12 @@ public class InvoiceContextServiceTests
     private static readonly Guid WorkAssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000000d1");
     private static readonly Guid Alice = Guid.Parse("00000000-0000-0000-0000-00000000aa01");
     private static readonly Guid Bob = Guid.Parse("00000000-0000-0000-0000-00000000aa02");
+
+    private static readonly InvoiceContextService.InvoiceCaller Caller = new("caller-oid", "caller-token");
+
+    private static readonly Guid SiblingA = Guid.Parse("00000000-0000-0000-0000-00000000e001");
+    private static readonly Guid SiblingB = Guid.Parse("00000000-0000-0000-0000-00000000e002");
+    private static readonly Guid SiblingC = Guid.Parse("00000000-0000-0000-0000-00000000e003");
 
     private const int Partner = 100000001;
     private const int Associate = 100000003;
@@ -57,6 +65,9 @@ public class InvoiceContextServiceTests
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
 
+        /// <summary>What the caller may do to each sibling invoice; by default Read on every sibling.</summary>
+        public SiblingAccess Access { get; } = new();
+
         public Harness()
         {
             Entities
@@ -66,7 +77,9 @@ public class InvoiceContextServiceTests
 
         public InvoiceContextService Service(TimeSpan? deadline = null)
         {
-            var service = new InvoiceContextService(Entities.Object, NullLogger<InvoiceContextService>.Instance);
+            var authorization = new AuthorizationService(
+                Access, [new OperationAccessRule(NullLogger<OperationAccessRule>.Instance)], NullLogger<AuthorizationService>.Instance);
+            var service = new InvoiceContextService(Entities.Object, authorization, NullLogger<InvoiceContextService>.Instance);
             if (deadline is { } d)
             {
                 service.Deadline = d;
@@ -76,6 +89,14 @@ public class InvoiceContextServiceTests
         }
 
         public int Count(Kind kind) => Queries.Count(q => Classify(q) == kind);
+
+        /// <summary>Dataverse would return only the lines of the invoices the query names; the fake does the same.</summary>
+        private static List<Entity> OwnedBy(List<Entity> lines, QueryExpression query)
+        {
+            var named = AllConditions(query)
+                .Single(c => c.AttributeName == "sprk_invoice" && c.Operator == ConditionOperator.In).Values.Cast<Guid>().ToHashSet();
+            return lines.Where(l => named.Contains(l.GetAttributeValue<EntityReference>("sprk_invoice").Id)).ToList();
+        }
 
         private Task<EntityCollection> Answer(QueryExpression query, CancellationToken ct)
         {
@@ -96,11 +117,11 @@ public class InvoiceContextServiceTests
                 Kind.Core => CoreRow is null ? [] : [CoreRow],
                 Kind.Budget => BudgetRow is null ? [] : [BudgetRow],
                 Kind.Prior => Prior,
-                Kind.Disallow => DisallowLines,
+                Kind.Disallow => OwnedBy(DisallowLines, query),
                 Kind.FeeLines => FeeLines,
                 Kind.Roster => RosterRows,
                 Kind.Rates => RateRows,
-                Kind.PreviousLines => PreviousLines,
+                Kind.PreviousLines => OwnedBy(PreviousLines, query),
                 _ => throw new InvalidOperationException("Unclassified query."),
             };
 
@@ -124,7 +145,7 @@ public class InvoiceContextServiceTests
             case "sprk_workassignment":
                 return columns.Contains("statuscode") ? Kind.Core : Kind.Budget;
             case "sprk_billingevent":
-                if (q.LinkEntities.Count == 0)
+                if (AllConditions(q).Any(c => c.AttributeName == "sprk_invoice" && c.Operator == ConditionOperator.Equal))
                 {
                     return Kind.FeeLines;
                 }
@@ -222,9 +243,10 @@ public class InvoiceContextServiceTests
         return e;
     }
 
-    private static Entity PreviousLine(Guid timekeeper, decimal rate, DateTime date)
+    private static Entity PreviousLine(Guid timekeeper, decimal rate, DateTime date, Guid? owner = null)
     {
         var e = new Entity("sprk_billingevent", Guid.NewGuid());
+        e["sprk_invoice"] = new EntityReference("sprk_invoice", owner ?? SiblingA);
         e["sprk_resolvedtimekeeper"] = new EntityReference("sprk_timekeeper", timekeeper);
         e["sprk_rate"] = new Money(rate);
         e["sprk_eventdate"] = date;
@@ -262,13 +284,13 @@ public class InvoiceContextServiceTests
 
         h.Prior =
         [
-            PriorInvoice(Guid.Parse("00000000-0000-0000-0000-00000000e001"), "INV-100.1", new DateTime(2026, 8, 1), 9000m, 8500m, InvoiceStatusCodes.Paid),
-            PriorInvoice(Guid.Parse("00000000-0000-0000-0000-00000000e002"), "INV-099.1", new DateTime(2026, 7, 1), 7000m, null, InvoiceStatusCodes.ReturnedToFirm),
-            PriorInvoice(Guid.Parse("00000000-0000-0000-0000-00000000e003"), "INV-098.1", null, 100m, null, 999),
+            PriorInvoice(SiblingA, "INV-100.1", new DateTime(2026, 8, 1), 9000m, 8500m, InvoiceStatusCodes.Paid),
+            PriorInvoice(SiblingB, "INV-099.1", new DateTime(2026, 7, 1), 7000m, null, InvoiceStatusCodes.Approved),
+            PriorInvoice(SiblingC, "INV-098.1", null, 100m, null, 999),
         ];
 
-        var ownerA = Guid.Parse("00000000-0000-0000-0000-00000000e001");
-        var ownerB = Guid.Parse("00000000-0000-0000-0000-00000000e002");
+        var ownerA = SiblingA;
+        var ownerB = SiblingB;
         h.DisallowLines =
         [
             DisallowLine(ownerA, InvoiceLineStatus.Reduced, 1000m, 800m, "Block billing"),
@@ -315,7 +337,7 @@ public class InvoiceContextServiceTests
     {
         var h = FullFixture();
 
-        var context = await h.Service().GetAsync(InvoiceId);
+        var context = await h.Service().GetAsync(InvoiceId, Caller);
 
         context.Should().NotBeNull();
         context!.InvoiceId.Should().Be(InvoiceId);
@@ -333,9 +355,9 @@ public class InvoiceContextServiceTests
         prior.Limit.Should().Be(InvoiceContextService.PriorInvoiceLimit);
         prior.HasMore.Should().BeFalse();
         prior.Items.Select(i => (i.Number, i.Status)).Should().Equal(
-            ("INV-100.1", "Paid"), ("INV-099.1", "ReturnedToFirm"), ("INV-098.1", "Unknown"));
+            ("INV-100.1", "Paid"), ("INV-099.1", "Approved"), ("INV-098.1", "Unknown"));
         prior.Items[0].Should().BeEquivalentTo(new PriorInvoiceItem(
-            Guid.Parse("00000000-0000-0000-0000-00000000e001"), "INV-100.1", new DateOnly(2026, 8, 1), 9000m, 8500m, "Paid", InvoiceStatusCodes.Paid));
+            SiblingA, "INV-100.1", new DateOnly(2026, 8, 1), 9000m, 8500m, "Paid", InvoiceStatusCodes.Paid));
         prior.Items[2].InvoiceDate.Should().BeNull();
 
         var disallow = context.DisallowHistory.Data!;
@@ -378,7 +400,7 @@ public class InvoiceContextServiceTests
             .Select(i => PriorInvoice(Guid.NewGuid(), $"INV-{i:000}", new DateTime(2026, 1, 1).AddDays(-i), 10m, null, InvoiceStatusCodes.InReview))
             .ToList();
 
-        var prior = (await h.Service().GetAsync(InvoiceId))!.PriorInvoices.Data!;
+        var prior = (await h.Service().GetAsync(InvoiceId, Caller))!.PriorInvoices.Data!;
 
         prior.Items.Should().HaveCount(InvoiceContextService.PriorInvoiceLimit);
         prior.HasMore.Should().BeTrue();
@@ -390,12 +412,12 @@ public class InvoiceContextServiceTests
     {
         var h = FullFixture();
 
-        await h.Service().GetAsync(InvoiceId);
+        await h.Service().GetAsync(InvoiceId, Caller);
 
         var q = h.Queries.Single(x => Classify(x) == Kind.Prior);
         q.Orders.Select(o => (o.AttributeName, o.OrderType)).Should().Equal(
             ("sprk_invoicedate", OrderType.Descending), ("createdon", OrderType.Descending), ("sprk_invoiceid", OrderType.Ascending));
-        q.TopCount.Should().Be(InvoiceContextService.PriorInvoiceLimit + 1);
+        q.TopCount.Should().BeNull("every sibling is read, so the readable ones can be chosen from before the limit is applied");
     }
 
     [Fact]
@@ -403,7 +425,7 @@ public class InvoiceContextServiceTests
     {
         var h = new Harness();
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
         context.PriorInvoices.Data!.Items.Should().BeEmpty();
@@ -421,6 +443,7 @@ public class InvoiceContextServiceTests
     {
         var h = new Harness();
         var owner = Guid.NewGuid();
+        h.Prior = [PriorInvoice(owner, "INV-1", new DateTime(2026, 1, 1), 10m, null, InvoiceStatusCodes.Paid)];
         h.DisallowLines =
         [
             .. Enumerable.Range(0, 3).Select(_ => DisallowLine(owner, InvoiceLineStatus.Disallowed, 1m, null, "Zeta")),
@@ -431,7 +454,7 @@ public class InvoiceContextServiceTests
             DisallowLine(owner, InvoiceLineStatus.Disallowed, 1m, null, "R4"),
         ];
 
-        var reasons = (await h.Service().GetAsync(InvoiceId))!.DisallowHistory.Data!.TopReasons;
+        var reasons = (await h.Service().GetAsync(InvoiceId, Caller))!.DisallowHistory.Data!.TopReasons;
 
         reasons.Should().HaveCount(InvoiceContextService.TopReasonLimit);
         reasons.Select(r => r.Reason).Should().Equal("Alpha", "Zeta", "R1", "R2", "R3");
@@ -446,14 +469,20 @@ public class InvoiceContextServiceTests
     {
         var h = FullFixture();
 
-        await h.Service().GetAsync(InvoiceId);
+        await h.Service().GetAsync(InvoiceId, Caller);
 
-        foreach (var kind in new[] { Kind.Prior, Kind.Disallow, Kind.PreviousLines })
+        // The siblings are read once, scoped to this firm and core record, never the current invoice ...
+        var q = h.Queries.Single(x => Classify(x) == Kind.Prior);
+        Has(q, "sprk_vendororg", ConditionOperator.Equal, FirmId).Should().BeTrue("siblings are this firm's");
+        Has(q, "sprk_matter", ConditionOperator.Equal, MatterId).Should().BeTrue("siblings are this core record's");
+        Has(q, "sprk_invoiceid", ConditionOperator.NotEqual, InvoiceId).Should().BeTrue("siblings exclude the current invoice");
+
+        // ... and the line reads that draw on other invoices name only those siblings (which never include the current invoice).
+        foreach (var kind in new[] { Kind.Disallow, Kind.PreviousLines })
         {
-            var q = h.Queries.Single(x => Classify(x) == kind);
-            Has(q, "sprk_vendororg", ConditionOperator.Equal, FirmId).Should().BeTrue($"{kind} is this firm's");
-            Has(q, "sprk_matter", ConditionOperator.Equal, MatterId).Should().BeTrue($"{kind} is this core record's");
-            Has(q, "sprk_invoiceid", ConditionOperator.NotEqual, InvoiceId).Should().BeTrue($"{kind} excludes the current invoice");
+            var named = AllConditions(h.Queries.Single(x => Classify(x) == kind))
+                .Single(c => c.AttributeName == "sprk_invoice").Values.Cast<Guid>().ToList();
+            named.Should().NotBeEmpty().And.NotContain(InvoiceId).And.OnlyContain(id => new[] { SiblingA, SiblingB, SiblingC }.Contains(id), kind.ToString());
         }
 
         var rates = h.Queries.Single(x => Classify(x) == Kind.Rates);
@@ -464,7 +493,7 @@ public class InvoiceContextServiceTests
         Has(h.Queries.Single(x => Classify(x) == Kind.FeeLines), "sprk_invoice", ConditionOperator.Equal, InvoiceId).Should().BeTrue();
 
         // Every id any query mentions is the invoice's own firm / core record / invoice, or one of its timekeepers.
-        var allowed = new HashSet<Guid> { InvoiceId, FirmId, MatterId, Alice, Bob };
+        var allowed = new HashSet<Guid> { InvoiceId, FirmId, MatterId, Alice, Bob, SiblingA, SiblingB, SiblingC };
         var mentioned = h.Queries.SelectMany(AllConditions).SelectMany(c => c.Values).OfType<Guid>();
         mentioned.Should().OnlyContain(id => allowed.Contains(id));
     }
@@ -473,12 +502,16 @@ public class InvoiceContextServiceTests
     public async Task Disallow_CountsOnlyDecidedInvoices_AndOnlyFeeAndExpenseLines()
     {
         var h = FullFixture();
+        var returned = Guid.NewGuid();
+        h.Prior.Add(PriorInvoice(returned, "INV-RET", new DateTime(2026, 6, 1), 10m, null, InvoiceStatusCodes.ReturnedToFirm));
+        h.DisallowLines.Add(DisallowLine(returned, InvoiceLineStatus.Disallowed, 5000m, null, "Not decided"));
 
-        await h.Service().GetAsync(InvoiceId);
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         var q = h.Queries.Single(x => Classify(x) == Kind.Disallow);
-        var statuses = AllConditions(q).Single(c => c.AttributeName == "statuscode" && c.Operator == ConditionOperator.In).Values;
-        statuses.Cast<int>().Should().BeEquivalentTo(new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid });
+        AllConditions(q).Single(c => c.AttributeName == "sprk_invoice").Values.Cast<Guid>()
+            .Should().BeEquivalentTo(new[] { SiblingA, SiblingB }, "only Approved / Sent to AP / Paid siblings; not the Returned one (nor the unknown-status one)");
+        context.DisallowHistory.Data!.DisallowedAmount.Should().Be(340m);
         AllConditions(q).Single(c => c.AttributeName == "sprk_linestatus").Values.Cast<int>()
             .Should().BeEquivalentTo(new[] { (int)InvoiceLineStatus.Reduced, (int)InvoiceLineStatus.Disallowed });
         AllConditions(q).Single(c => c.AttributeName == "sprk_costtype").Values.Cast<int>()
@@ -491,7 +524,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.Header = InvoiceHeader(project: ProjectId);
 
-        await h.Service().GetAsync(InvoiceId);
+        await h.Service().GetAsync(InvoiceId, Caller);
 
         var prior = h.Queries.Single(x => Classify(x) == Kind.Prior);
         Has(prior, "sprk_project", ConditionOperator.Equal, ProjectId).Should().BeTrue();
@@ -515,7 +548,7 @@ public class InvoiceContextServiceTests
         };
         h.CoreRow.FormattedValues["statuscode"] = "Active";
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         context.Budget.Status.Should().Be(ContextSectionStatus.NotTracked);
         context.Budget.Code.Should().Be(InvoiceContextService.CodeBudgetNotTracked);
@@ -540,7 +573,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.BudgetRow = MatterBudget(null, null, null, null, null);
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         context.Budget.Status.Should().Be(ContextSectionStatus.Unavailable);
         context.Budget.Code.Should().Be(InvoiceContextService.CodeBudgetNotPopulated);
@@ -555,7 +588,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.BudgetRow = MatterBudget(55000m, 25000m, remaining: null, utilization: null, count: 2);
 
-        var budget = (await h.Service().GetAsync(InvoiceId))!.Budget;
+        var budget = (await h.Service().GetAsync(InvoiceId, Caller))!.Budget;
 
         budget.Status.Should().Be(ContextSectionStatus.Available);
         budget.Data!.Remaining.Should().BeNull("a missing rollup field is not filled in by arithmetic");
@@ -568,11 +601,12 @@ public class InvoiceContextServiceTests
     // One source failing leaves the others intact
     // =========================================================================================
 
+    // The sibling invoice read is shared by the three sections that draw on other invoices, so when it fails they all say so.
     public static TheoryData<Kind, string> FailingSources => new()
     {
         { Kind.Core, InvoiceContextService.SectionCoreRecord },
         { Kind.Budget, InvoiceContextService.SectionBudget },
-        { Kind.Prior, InvoiceContextService.SectionPriorInvoices },
+        { Kind.Prior, string.Join('|', InvoiceContextService.SectionPriorInvoices, InvoiceContextService.SectionDisallowHistory, InvoiceContextService.SectionRateHistory) },
         { Kind.Disallow, InvoiceContextService.SectionDisallowHistory },
         { Kind.FeeLines, InvoiceContextService.SectionRateHistory },
         { Kind.Roster, InvoiceContextService.SectionRateHistory },
@@ -582,12 +616,12 @@ public class InvoiceContextServiceTests
 
     [Theory]
     [MemberData(nameof(FailingSources))]
-    public async Task OneSourceThrowing_MakesOnlyThatSectionUnavailable(Kind failing, string section)
+    public async Task OneSourceThrowing_MakesOnlyThatSectionUnavailable(Kind failing, string failingSections)
     {
         var h = FullFixture();
         h.Intercept = (kind, _, _) => kind == failing ? Task.FromException<EntityCollection>(new InvalidOperationException("Dataverse said no")) : null;
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         var sections = new (string Name, string Status, string? Code, string? Message)[]
         {
@@ -600,7 +634,7 @@ public class InvoiceContextServiceTests
 
         foreach (var s in sections)
         {
-            if (s.Name == section)
+            if (failingSections.Split('|').Contains(s.Name))
             {
                 s.Status.Should().Be(ContextSectionStatus.Unavailable, s.Name);
                 s.Code.Should().Be(s.Name + ".unavailable");
@@ -617,15 +651,15 @@ public class InvoiceContextServiceTests
     public async Task ASlowSource_TimesOutThatSectionOnly()
     {
         var h = FullFixture();
-        h.Intercept = (kind, _, ct) => kind == Kind.Prior ? WaitForever(ct) : null;
+        h.Intercept = (kind, _, ct) => kind == Kind.Disallow ? WaitForever(ct) : null;
 
-        var context = (await h.Service(deadline: TimeSpan.FromMilliseconds(300)).GetAsync(InvoiceId))!;
+        var context = (await h.Service(deadline: TimeSpan.FromMilliseconds(300)).GetAsync(InvoiceId, Caller))!;
 
-        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Unavailable);
-        context.PriorInvoices.Code.Should().Be(InvoiceContextService.SectionPriorInvoices + ".timeout");
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.DisallowHistory.Code.Should().Be(InvoiceContextService.SectionDisallowHistory + ".timeout");
         context.CoreRecord.Status.Should().Be(ContextSectionStatus.Available);
         context.Budget.Status.Should().Be(ContextSectionStatus.Available);
-        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Available);
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
         context.RateHistory.Status.Should().Be(ContextSectionStatus.Available);
     }
 
@@ -645,7 +679,7 @@ public class InvoiceContextServiceTests
             return null;
         };
 
-        var act = () => h.Service().GetAsync(InvoiceId, cts.Token);
+        var act = () => h.Service().GetAsync(InvoiceId, Caller, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -656,7 +690,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.Intercept = (kind, _, _) => kind == Kind.Header ? Task.FromException<EntityCollection>(new InvalidOperationException("boom")) : null;
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         new[] { context.CoreRecord.Code, context.Budget.Code, context.PriorInvoices.Code, context.DisallowHistory.Code, context.RateHistory.Code }
             .Should().OnlyContain(c => c == InvoiceContextService.CodeInvoiceUnavailable);
@@ -669,7 +703,7 @@ public class InvoiceContextServiceTests
         var h = new Harness();
         h.Intercept = (kind, _, _) => kind == Kind.Header ? Task.FromResult(new EntityCollection()) : null;
 
-        (await h.Service().GetAsync(InvoiceId)).Should().BeNull();
+        (await h.Service().GetAsync(InvoiceId, Caller)).Should().BeNull();
         h.Queries.Should().ContainSingle();
     }
 
@@ -683,7 +717,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.Header = InvoiceHeader(matter: MatterId, withFirm: false);
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         foreach (var code in new[] { context.PriorInvoices.Code, context.DisallowHistory.Code, context.RateHistory.Code })
         {
@@ -704,11 +738,187 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.Header = both ? InvoiceHeader(matter: MatterId, project: ProjectId) : InvoiceHeader();
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         new[] { context.CoreRecord.Code, context.Budget.Code, context.PriorInvoices.Code, context.DisallowHistory.Code, context.RateHistory.Code }
             .Should().OnlyContain(c => c == code);
         h.Queries.Should().ContainSingle();
+    }
+
+    // =========================================================================================
+    // Other invoices are limited to the ones the CALLER can Read (fix-round-2)
+    // =========================================================================================
+
+    [Fact]
+    public async Task AnUnreadableSibling_IsExcludedFromPriorInvoices_DisallowHistory_AndPreviousRates()
+    {
+        var h = FullFixture();
+        h.Access.OnlyReadable(SiblingA, SiblingC);   // B ("INV-099.1", Approved, with disallowed lines) is not the caller's to see
+        h.PreviousLines.Add(PreviousLine(Alice, 777m, new DateTime(2026, 5, 1), owner: SiblingB));
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        // priorInvoices: B's number, dates, totals, status and id are absent.
+        context.PriorInvoices.Data!.Items.Select(i => i.Number).Should().Equal("INV-100.1", "INV-098.1");
+
+        // disallowHistory: recomputed over A only (B's 300 + 40 disallowed and its "Travel time" reason are gone).
+        var disallow = context.DisallowHistory.Data!;
+        disallow.InvoicesConsidered.Should().Be(1);
+        disallow.ReducedCount.Should().Be(2);
+        disallow.ReducedAmount.Should().Be(200m);
+        disallow.DisallowedCount.Should().Be(0);
+        disallow.DisallowedAmount.Should().Be(0m);
+        disallow.TopReasons.Should().Equal(new DisallowReason("Block billing", 2));
+
+        // rateHistory: the rate billed on B (777) is not shown.
+        context.RateHistory.Data!.Timekeepers[0].BilledPreviously.Select(b => b.Rate).Should().NotContain(777m);
+
+        // Nothing about B reaches the response or the line queries.
+        var json = JsonSerializer.Serialize(context);
+        json.Should().NotContain("INV-099.1").And.NotContain(SiblingB.ToString());
+        h.Queries.Where(q => Classify(q) is Kind.Disallow or Kind.PreviousLines)
+            .SelectMany(AllConditions).SelectMany(c => c.Values).OfType<Guid>()
+            .Should().NotContain(SiblingB, "an unreadable invoice's lines are never even requested");
+    }
+
+    [Fact]
+    public async Task EverySiblingIsChecked_AsTheCaller_OnTheInvoiceEntitySet()
+    {
+        var h = FullFixture();
+
+        await h.Service().GetAsync(InvoiceId, Caller);
+
+        h.Access.Calls.Should().BeEquivalentTo(new[] { SiblingA, SiblingB, SiblingC }.Select(id => ("caller-oid", "sprk_invoices", id, (string?)"caller-token")));
+    }
+
+    [Fact]
+    public async Task WhenNoSiblingIsReadable_TheSectionsAreEmpty_NotUnavailable_AndNoLineQueryRuns()
+    {
+        var h = FullFixture();
+        h.Access.OnlyReadable();
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
+        context.PriorInvoices.Data!.Items.Should().BeEmpty();
+        context.DisallowHistory.Data.Should().BeEquivalentTo(new DisallowHistoryContext(0, 0, 0m, 0, 0m, []));
+        context.RateHistory.Data!.Timekeepers.Should().NotBeEmpty("the invoice's own lines are still shown");
+        context.RateHistory.Data.Timekeepers.SelectMany(t => t.BilledPreviously).Should().BeEmpty();
+        h.Count(Kind.Disallow).Should().Be(0);
+        h.Count(Kind.PreviousLines).Should().Be(0);
+    }
+
+    public enum AccessFailure { LookupFaulted, LookupThrows }
+
+    [Theory]
+    [InlineData(AccessFailure.LookupFaulted)]
+    [InlineData(AccessFailure.LookupThrows)]
+    public async Task AFailedAccessCheck_MakesTheOtherInvoiceSectionsUnavailable_NeverTheUnfilteredData(AccessFailure failure)
+    {
+        var h = FullFixture();
+        if (failure == AccessFailure.LookupFaulted)
+        {
+            h.Access.FaultFor(SiblingB);
+        }
+        else
+        {
+            h.Access.ThrowFor(SiblingB);
+        }
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.PriorInvoices.Code.Should().Be(InvoiceContextService.CodePriorAccessCheckFailed);
+        context.PriorInvoices.Data.Should().BeNull();
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowAccessCheckFailed);
+        context.DisallowHistory.Data.Should().BeNull();
+        context.RateHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateAccessCheckFailed);
+        context.RateHistory.Data.Should().BeNull();
+
+        // The sections that do not depend on other invoices are unaffected; no sibling's lines were requested.
+        context.CoreRecord.Status.Should().Be(ContextSectionStatus.Available);
+        context.Budget.Status.Should().Be(ContextSectionStatus.Available);
+        h.Count(Kind.Disallow).Should().Be(0);
+        h.Count(Kind.PreviousLines).Should().Be(0);
+        JsonSerializer.Serialize(context).Should().NotContain("INV-");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    public async Task ACallerWithoutAToken_GetsNoOtherInvoices_AndNothingIsFetchedForThem(string? token)
+    {
+        var h = FullFixture();
+
+        var context = (await h.Service().GetAsync(InvoiceId, new InvoiceContextService.InvoiceCaller("caller-oid", token)))!;
+
+        context.PriorInvoices.Code.Should().Be(InvoiceContextService.CodePriorAccessCheckFailed);
+        context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowAccessCheckFailed);
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateAccessCheckFailed);
+        h.Access.Calls.Should().BeEmpty();
+        h.Count(Kind.Disallow).Should().Be(0);
+        h.Count(Kind.PreviousLines).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task MoreSiblingsThanCanBeChecked_PriorInvoicesIsPartialAndSaysMore_TheAggregatesAreUnavailable()
+    {
+        var h = FullFixture();
+        h.Prior = Enumerable.Range(1, InvoiceContextService.MaxSiblingAccessChecks + 1)
+            .Select(i => PriorInvoice(Guid.NewGuid(), $"INV-{i:000}", new DateTime(2026, 1, 1).AddDays(-i), 10m, null, InvoiceStatusCodes.Paid))
+            .ToList();
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        h.Access.Calls.Should().HaveCount(InvoiceContextService.MaxSiblingAccessChecks);
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
+        context.PriorInvoices.Data!.HasMore.Should().BeTrue();
+        context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowTooLarge, "a total over some of the readable invoices would be wrong, so it is not given");
+        context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateTooLarge);
+    }
+
+    /// <summary>The caller's rights on each sibling invoice, answered the way Dataverse's RetrievePrincipalAccess would.</summary>
+    private sealed class SiblingAccess : IAccessDataSource
+    {
+        private HashSet<Guid>? _readable;
+        private readonly HashSet<Guid> _faulted = [];
+        private readonly HashSet<Guid> _throws = [];
+
+        public List<(string UserId, string EntitySet, Guid Id, string? Token)> Calls { get; } = [];
+
+        public void OnlyReadable(params Guid[] ids) => _readable = [.. ids];
+
+        public void FaultFor(Guid id) => _faulted.Add(id);
+
+        public void ThrowFor(Guid id) => _throws.Add(id);
+
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+        {
+            lock (Calls)
+            {
+                Calls.Add((userId, entitySetName, recordId, userAccessToken));
+            }
+
+            if (_throws.Contains(recordId))
+            {
+                return Task.FromException<AccessSnapshot>(new InvalidOperationException("Dataverse unreachable"));
+            }
+
+            var readable = !_faulted.Contains(recordId) && (_readable is null || _readable.Contains(recordId));
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = readable ? AccessRights.Read : AccessRights.None,
+                Faulted = _faulted.Contains(recordId),
+            });
+        }
+
+        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            throw new InvalidOperationException("The panel asks about invoices, not documents.");
     }
 
     // =========================================================================================
@@ -724,8 +934,8 @@ public class InvoiceContextServiceTests
             .Select(i => FeeLine(i % 2 == 0 ? Alice : Bob, "x", 500m + (i % 5), new DateTime(2026, 3, 1).AddDays(i % 20)))
             .ToList();
 
-        await small.Service().GetAsync(InvoiceId);
-        await large.Service().GetAsync(InvoiceId);
+        await small.Service().GetAsync(InvoiceId, Caller);
+        await large.Service().GetAsync(InvoiceId, Caller);
 
         large.Queries.Count.Should().Be(small.Queries.Count);
         small.Queries.Count.Should().Be(9, "header + core + budget + prior + disallow + fee lines + roster + rates + previous lines");
@@ -738,7 +948,7 @@ public class InvoiceContextServiceTests
         var h = FullFixture();
         h.DisallowNeverEnds = true;
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
         context.DisallowHistory.Code.Should().Be(InvoiceContextService.CodeDisallowTooLarge);
@@ -754,7 +964,7 @@ public class InvoiceContextServiceTests
             ? Task.FromResult(new EntityCollection(h.RateRows) { MoreRecords = true, PagingCookie = "c" })
             : null;
 
-        var context = (await h.Service().GetAsync(InvoiceId))!;
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
 
         context.RateHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
         context.RateHistory.Code.Should().Be(InvoiceContextService.CodeRateTooLarge);
@@ -764,8 +974,8 @@ public class InvoiceContextServiceTests
     [Fact]
     public async Task SameData_GivesTheSameResponse()
     {
-        var first = JsonSerializer.Serialize(await FullFixture().Service().GetAsync(InvoiceId));
-        var second = JsonSerializer.Serialize(await FullFixture().Service().GetAsync(InvoiceId));
+        var first = JsonSerializer.Serialize(await FullFixture().Service().GetAsync(InvoiceId, Caller));
+        var second = JsonSerializer.Serialize(await FullFixture().Service().GetAsync(InvoiceId, Caller));
 
         second.Should().Be(first);
     }

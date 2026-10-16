@@ -1,4 +1,6 @@
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -44,7 +46,13 @@ public static class InvoiceContextEndpoints
     private static async Task<IResult> GetInvoiceContext(
         Guid invoiceId, InvoiceContextService service, HttpContext httpContext, CancellationToken ct)
     {
-        var context = await service.GetAsync(invoiceId, ct);
+        // The caller's own identity and token: the other invoices on the panel are limited to the ones THIS caller can Read. The filter has
+        // already refused a caller with no oid; a missing token reaches the service as null and reads nothing (fail closed).
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(httpContext.User) ?? string.Empty,
+            TokenHelper.ExtractBearerTokenOrNull(httpContext));
+
+        var context = await service.GetAsync(invoiceId, caller, ct);
         return context is null
             ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
             : TypedResults.Ok(context);
