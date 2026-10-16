@@ -202,7 +202,15 @@ try {
 
     $containerId = $container.id
 
-    Write-Host "SPE container created!" -ForegroundColor Green
+    # #2040: a new container is created inactive and Microsoft deletes it automatically if it is not activated within
+    # 24 hours. Activate it explicitly (idempotent) rather than relying on a later write to do it implicitly.
+    Invoke-RestMethod `
+        -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$containerId/activate" `
+        -Method Post `
+        -Headers $graphHeaders `
+        -ErrorAction Stop | Out-Null
+
+    Write-Host "SPE container created and activated!" -ForegroundColor Green
     Write-Host "  Container ID: $containerId" -ForegroundColor Yellow
     Write-Host "  Display Name: $containerDisplayName" -ForegroundColor White
     Write-Host ""

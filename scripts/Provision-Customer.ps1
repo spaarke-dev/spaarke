@@ -1312,7 +1312,15 @@ function Invoke-Step10_ProvisionSPEContainers {
             -ErrorAction Stop
 
         $containerId = $container.id
-        Write-Log "SPE container created: $containerId" -Level SUCCESS
+
+        # #2040: a new container is created inactive and Microsoft deletes it automatically if it is not activated
+        # within 24 hours. Activate it explicitly (idempotent) rather than relying on the bind's PATCH to do it.
+        Invoke-RestMethod `
+            -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$containerId/activate" `
+            -Method Post `
+            -Headers $graphHeaders `
+            -ErrorAction Stop | Out-Null
+        Write-Log "SPE container created and activated: $containerId" -Level SUCCESS
     }
     catch {
         Write-Log "Failed to create SPE container: $($_.Exception.Message)" -Level ERROR
