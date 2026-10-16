@@ -48,6 +48,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-89 (owner, 2026-10-16) / 046-078 review">ApprovedTimekeeper findings hold the invoice for review and never reject. Enforce this directly (the rule outcome for ApprovedTimekeeper is never Reject), not only through the confidence cap: ReferenceMissingCap and ReliabilityThreshold are both editable settings, and a cap set at or above the threshold would otherwise let the rule reject. Add a test with the cap raised above the threshold.</constraint>
     <constraint source="D-87 (owner, 2026-10-16)">Every submission already carries its tracking number from creation (044 via the allocator). The job does not allocate; a submission without sprk_submissionsequence is a defect to fail closed on, not a case to repair.</constraint>
     <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
     <constraint source="ADR-002">This processor is the only code that creates sprk_invoice and its lines for eBilling; totals only through 016; status only through 014; core-ancestor fields through 013's guard; owner through IRecordOwnershipResolver.</constraint>
