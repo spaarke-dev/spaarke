@@ -343,5 +343,56 @@ describe('AccessGrantModal — one failure, one message (task 099a, verifier F1 
     );
 
     expect(await screen.findByText(GENERIC_NOTICE)).toBeInTheDocument();
+    // Verifier pass 2 (F1-low): one message — Current Access is "not shown", not a second error block.
+    expect(screen.queryByTestId('current-access-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('current-access-not-shown')).toBeInTheDocument();
+    expect(screen.queryByText(NO_GRANTS_TEXT)).not.toBeInTheDocument();
+  });
+
+  it('a grants 503 still loads every other section: role candidates, Suggested Access and the secure owner', async () => {
+    const suggestion = {
+      entryId: 'entry-099a',
+      sourceField: 'sprk_assignedtointernal',
+      sourceFieldLabel: 'Assigned To (Internal)',
+      subjectKind: 'contact',
+      subjectId: 'contact-suggested',
+      subjectName: 'Sue Suggested',
+      systemUserId: 'user-suggested',
+      accessRecordId: null,
+      state: 'PendingConfirmation',
+      reason: null,
+      residualAccessTerms: [],
+    };
+    const authenticatedFetch = jest.fn(async (url: string) =>
+      url.includes('/assigned-access?') ? ok({ entries: [suggestion] }) : ok({})
+    ) as unknown as IAccessGrantModalProps['authenticatedFetch'];
+    renderModal(
+      props(
+        jest.fn(async () => {
+          throw apiError(503, {
+            status: 503,
+            detail: SERVER_DETAIL,
+            reasonCode: 'sdap.access.record_grants.read_failed',
+          });
+        }),
+        {
+          recordType: 'matter',
+          isSecureRecord: true,
+          authenticatedFetch,
+          fetchCandidates: jest.fn(async () => [
+            { contactId: 'contact-role', fullName: 'Rory Role', role: 'Assigned Attorney 1' },
+          ]),
+          fetchSecureOwnerInfo: jest.fn(async () => ({ ownerName: 'Olive Owner', businessUnitName: 'Secure BU' })),
+        }
+      )
+    );
+
+    expect(await screen.findByTestId('current-access-error')).toHaveTextContent(SERVER_DETAIL);
+    expect(screen.getByText('Rory Role')).toBeInTheDocument();
+    expect(screen.getByText('Suggested Access')).toBeInTheDocument();
+    expect(screen.getByText(/Sue Suggested/)).toBeInTheDocument();
+    expect(screen.getByText('Olive Owner')).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC_NOTICE)).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
   });
 });

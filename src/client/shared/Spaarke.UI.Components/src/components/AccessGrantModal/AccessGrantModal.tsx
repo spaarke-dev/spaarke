@@ -1001,10 +1001,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
   // Task 099a: set when the record's grants could not be read — Current Access then shows this message (the server's
-  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants". `denied`: the read was refused by
-  // the delegation/sign-in rule, which the deny banner already explains — the section says only that it is not shown.
+  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants". `notShown`: another message on screen
+  // already says why (the deny banner for a refused grants read, the generic notice when another read failed) — the
+  // section says only that it is not shown, so one failure is one message.
   const [currentAccessError, setCurrentAccessError] = React.useState<
-    { kind: 'failed'; text: string } | { kind: 'denied' } | null
+    { kind: 'failed'; text: string } | { kind: 'notShown' } | null
   >(null);
   // Task 099a (verifier F2): the host's source listed only part of the record's grants (its cap) — stated, never silent.
   // Holds how many it listed; null when the list is whole.
@@ -1234,16 +1235,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     const isCurrent = () => seq === loadSeqRef.current;
     setLoading(true);
     setNotice(null);
-    // Task 099a: the grants read's own failure, kept apart from the others so Current Access can say what failed.
-    let grantsReadFailure: { err: unknown } | null = null;
     try {
-      const [candidateList, grantsRead, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
+      const [candidateList, grantsSettled, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
         await Promise.all([
           fetchCandidates(),
-          fetchExistingGrants().catch(err => {
-            grantsReadFailure = { err };
-            throw err;
-          }),
+          // Task 099a (verifier pass 2, F1): the grants read settles on its own, like /user-shares — its failure is
+          // Current Access's own state, and every other section still loads.
+          fetchExistingGrants().then(
+            read => ({ read, failed: null as { err: unknown } | null }),
+            (err: unknown) => ({ read: null, failed: { err } })
+          ),
           // Standing-grant members (task 073 UAT #2) — optional; a host that
           // hasn't wired the flag omits it. Failing soft so a standing-read
           // problem (e.g. field-level-security denial) never blocks the modal.
@@ -1268,7 +1269,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         ]);
       if (!isCurrent()) return;
       // Task 099a: a capped source says so (`{ grants, truncated }`); a plain array is the whole list.
-      const grantList = Array.isArray(grantsRead) ? grantsRead : grantsRead.grants;
+      const grantsRead = grantsSettled.read;
+      const grantList = grantsRead === null ? [] : Array.isArray(grantsRead) ? grantsRead : grantsRead.grants;
       const noAccess = noAccessRead.section;
       // Task 174: the effective access the gate and the "No effect" marks use (null: the host's values alone).
       setServerAccess(noAccessRead.access);
@@ -1284,10 +1286,34 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // so both are listed — the lapsed one marked Expired, the standing one as live access.
       const liveGrantContactIds = new Set(grantList.filter(g => !g.isExpired).map(g => g.contactId));
       const standingOnly = standingList.filter(s => !liveGrantContactIds.has(s.contactId));
-      const currentAccess = [...grantList, ...standingOnly, ...userShareList];
+      // Task 099a: a failed grants read lists nothing — Current Access shows its own state instead (never a partial
+      // list without the record's grants, never "No active grants"). A refusal by the delegation/sign-in rule is the
+      // deny banner's state (every write blocked, as for /user-shares); any other failure is the section's own error,
+      // with the server's ProblemDetails `detail` verbatim (rendered as text) or the generic sentence.
+      const currentAccess = grantsSettled.failed ? [] : [...grantList, ...standingOnly, ...userShareList];
       setExistingGrants(currentAccess);
-      setCurrentAccessError(null);
-      setGrantsTruncatedAt(!Array.isArray(grantsRead) && grantsRead.truncated === true ? grantList.length : null);
+      if (grantsSettled.failed) {
+        const grantsErr = grantsSettled.failed.err;
+        const grantsDeny = splitAccessFailure(AccessGrantModalApiError.fromThrown(grantsErr) ?? grantsErr).deny;
+        if (grantsDeny) setAccessDenyState(grantsDeny);
+        const detail: unknown = problemOf(grantsErr)?.detail;
+        setCurrentAccessError(
+          grantsDeny
+            ? { kind: 'notShown' }
+            : {
+                kind: 'failed',
+                text:
+                  typeof detail === 'string' && detail.trim() !== ''
+                    ? detail.trim()
+                    : CURRENT_ACCESS_READ_FAILED_MESSAGE,
+              }
+        );
+      } else {
+        setCurrentAccessError(null);
+      }
+      setGrantsTruncatedAt(
+        grantsRead !== null && !Array.isArray(grantsRead) && grantsRead.truncated === true ? grantList.length : null
+      );
 
       // Task 067: an organization wall in force walls off the organization's people, so the contacts in Current Access
       // are checked against it — only when such a wall exists and there are contacts to check.
@@ -1339,33 +1365,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       );
       setAssignedEntries(assignedList);
       setSecureOwnerInfo(ownerInfo);
-    } catch (err) {
+    } catch {
       if (!isCurrent()) return;
-      // Task 099a: Current Access is never shown as "No active grants" when it was not read. The server's ProblemDetails
-      // `detail` is shown verbatim (rendered as text); any other failure gets the generic sentence.
-      const grantsErr: unknown = grantsReadFailure !== null ? (grantsReadFailure as { err: unknown }).err : undefined;
-      const failure: unknown = grantsReadFailure !== null ? grantsErr : err;
-      // Verifier F1 (low): one failure, one message. A grants read refused by the delegation/sign-in rule is the deny
-      // banner's state (every write blocked, as for /user-shares); any other grants failure is explained by the
-      // section's own error. The generic notice is kept only for a failure of something else.
-      const grantsDeny =
-        grantsReadFailure !== null
-          ? splitAccessFailure(AccessGrantModalApiError.fromThrown(grantsErr) ?? grantsErr).deny
-          : null;
-      if (grantsDeny) setAccessDenyState(grantsDeny);
-      if (grantsReadFailure === null || err !== grantsErr) {
-        setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
-      }
-      const detail: unknown = problemOf(failure)?.detail;
-      setCurrentAccessError(
-        grantsDeny
-          ? { kind: 'denied' }
-          : {
-              kind: 'failed',
-              text:
-                typeof detail === 'string' && detail.trim() !== '' ? detail.trim() : CURRENT_ACCESS_READ_FAILED_MESSAGE,
-            }
-      );
+      // A read other than the grants read failed (the grants read never rejects here): the generic notice says so, and
+      // Current Access — not shown, never "No active grants" — does not add a second error of its own (task 099a,
+      // verifier pass 2).
+      setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
+      setCurrentAccessError({ kind: 'notShown' });
       setGrantsTruncatedAt(null);
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
@@ -2389,9 +2395,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         <MessageBarBody>Only the first {grantsTruncatedAt} grants are shown.</MessageBarBody>
                       </MessageBar>
                     )}
-                    {currentAccessError?.kind === 'denied' ? (
-                      // Task 099a: refused by the rule the deny banner above states — not repeated here, and never
-                      // "No active grants".
+                    {currentAccessError?.kind === 'notShown' ? (
+                      // Task 099a: the message above (the deny banner, or the load notice) says why — not repeated
+                      // here, and never "No active grants".
                       <Text className={styles.emptyState} data-testid="current-access-not-shown">
                         Not shown.
                       </Text>

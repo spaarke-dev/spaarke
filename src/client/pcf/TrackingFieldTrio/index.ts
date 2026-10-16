@@ -123,6 +123,10 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.50 (task 099a review round 2): no change in this file's logic. The bundled modal lets a failed grants read
+ *   settle on its own, so role candidates, Suggested Access and the secure-owner line still load beside Current Access's
+ *   error; when another read fails, Current Access shows "Not shown." under the one load notice, not a second error.
+ *
  * v1.0.49 (task 099a review round 1): `fetchExistingGrants` returns `{ grants, truncated }`, so a list the server capped
  *   is stated in Current Access ("Only the first N grants are shown.") instead of only reaching the console. The bundled
  *   modal also lists a contact's standing row beside their lapsed grant (the lapsed row no longer hides it), outlines
@@ -1524,7 +1528,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.49 • Built 2026-10-16',
+      versionText: 'v1.0.50 • Built 2026-10-16',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
