@@ -357,7 +357,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// and are excluded — they cannot hallucinate.
     /// </summary>
     private static string BuildTldrCandidateText(TldrResult tldr) =>
-        string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways));
 
     /// <summary>
     /// R5 task 014 (FR-A5): deterministic anchor-to-item grounding pass for the TL;DR — NEVER
@@ -367,8 +367,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// fabrication or a guaranteed-empty field. Instead: for every channel item whose
     /// <c>RegardingName</c> or <c>Title</c> appears VERBATIM (case-insensitive, matches the
     /// widget's own <c>NarrativeCitedText.buildSegments</c> matching rule) in the TL;DR's own
-    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> / <see
-    /// cref="TldrResult.TopAction"/> text, pair that matched span with the item's id. Uses the
+    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> text, pair that matched span with the item's id. Uses the
     /// SAME candidate-name universe as <see cref="BuildAllowList"/> (RegardingName ahead of
     /// Title) so the entity-scrub allow-list and the itemRefs grounding agree on what counts as
     /// "named". <see cref="PriorityItemDto"/> carries no <c>Id</c> — its titles are excluded (no
@@ -377,7 +376,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// </summary>
     private static TldrItemRefDto[] BuildTldrItemRefs(DailyBriefingNarrateRequest req, TldrResult tldr)
     {
-        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways));
         if (string.IsNullOrWhiteSpace(candidateText))
         {
             return [];
