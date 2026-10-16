@@ -12,7 +12,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Parallel mode. Done (39/79): 001-005, 010-014, 016-025, 027-029, 040-048, 054, 078, 106, 107, 108, 109. WIP: 026 (BLOCKED at step 0: sprk_billingevent not an intermediate in ResolveStampsAsync; option A asked of uac-r2), 070 (held for ontology-r1 review). Adversarial review of 054 running; its fix round adds D1 bounded-parallel AI calls + most-similar examples. ADR-010 ceiling 165; route ledger 131 |
-| **Step** | Waiting: 054 review; uac-r2 reply (026 option A: billingevent intermediate, 3 lockstep files); ontology-r1 reply (070 review, D-92 relayed 2026-10-16). Then 015 (owner OK) |
+| **Step** | Running: 054 fix-round-1 (review findings + D1 parallel + similar examples + profile cache), 026 (uac-r2 approved option A = D-94; uac-r2 and ontology-r1 review its diff before merge). Ontology approved 070 (notes) on condition of the paired change. NEXT after both land: merge origin/master (>= e702c3401; conflicts in ADR010_DITests, Route ledger (master 129), SignalReevaluationJobTests), then 070 fix-round-2 = ontology paired change (OntologyAdminAuthoringService/RulesService use RuleDomains + dry-run test), send to ontology-r1; then 070 done. Then 015 (owner OK) |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | As each agent reports: cherry-pick its commits onto work/ebilling-r1 (conflicts on FinanceModule.cs / ADR010_DITests.cs: keep both sides, sum the ceiling), amend trailers to Opus 5.5 with hooks, mark ✅ in TASK-INDEX, run the build + targeted Finance tests + ArchTests. Then 107 and 026 (serial, opus), then 015 (needs owner OK, destructive) |
 
