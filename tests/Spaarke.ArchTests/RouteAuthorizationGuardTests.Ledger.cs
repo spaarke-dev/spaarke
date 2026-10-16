@@ -67,8 +67,8 @@ public partial class RouteAuthorizationGuardTests
     {
         // ---- the document / file-byte surface (task 074's original RouteLevelGate set) ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all twelve routes carry "
-            + "AddDocumentAuthorizationFilter (share-link since task 072; resolve-identity pairs DocumentUrlIdentityFilter "
+            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all eleven routes carry "
+            + "AddDocumentAuthorizationFilter (share-link, gated by task 072, was RETIRED 2026-10-16, #1350; resolve-identity pairs DocumentUrlIdentityFilter "
             + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
             + "DocumentEmailIdentityFilter with it since word-add-in task 120)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
@@ -2153,6 +2153,10 @@ public partial class RouteAuthorizationGuardTests
         // composer needs external recipients to be able to open them (email-communication-solution-r5 R2
         // item 12) and an organization-scoped link cannot do that. That residual is bounded, gated on
         // Share, and recorded in notes/task-072-gate-share-link.md — not silently accepted.
+        //
+        // 2026-10-16: the ROUTE IS GONE (unified-access-control-r2, #1350; #1752 link half). Graph refuses createLink in
+        // SPE containers, so it answered 502 for every document; no client called it; a working link would have bypassed
+        // Secure and No Access. ShareLinkOptions (Documents:ShareLinks) and the createLink facade members went with it.
 
         // ---------- task 073: THREE WAIVERS REMOVED 2026-08-27, the routes are GONE ----------
         //
