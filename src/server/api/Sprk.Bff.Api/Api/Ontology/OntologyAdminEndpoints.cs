@@ -57,6 +57,7 @@ public static class OntologyAdminEndpoints
         // Task 103: the Classification area declares its own group under the same URL prefix (its routes are in their own file).
         app.MapOntologyAdminClassificationEndpoints();
         group.MapOntologyAdminRulesEndpoints(); // task 100: the Rules list, rule page, On/Off and Retire
+        OntologyAdminAuthoringEndpoints.MapOntologyAdminAuthoringEndpoints(group);
     }
 
     internal static async Task<IResult> GetCapabilitiesAsync(
