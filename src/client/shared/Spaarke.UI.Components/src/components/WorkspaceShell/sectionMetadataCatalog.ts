@@ -299,6 +299,19 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '720px',
     entityName: 'sprk_communication',
   },
+  // spaarke-ontology-platform-r1 task 156 (2026-10-16): Worklist section - the Console worklist
+  // (Decide / Do lanes over the Signal read route, `WorklistWidget`). Section shim for the
+  // `worklist` direct widget; surfaced as a system widget in the workspace dropdown via a
+  // "Worklist" sprk_workspacelayout row. Reads the BFF route, not an entity, so no `entityName`.
+  // See `worklist.registration.ts`.
+  {
+    id: 'worklist',
+    label: 'Worklist',
+    description: 'Your Decide and Do lanes - open a line to decide or act on it',
+    category: 'data',
+    icon: TaskListSquareLtrRegular,
+    defaultHeight: '720px',
+  },
   // ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis
   // section — the Analysis platform home/launcher (create-by-type cards + grid of
   // sprk_analysis). Pattern D dual-use with the `analysis-hub` direct widget in

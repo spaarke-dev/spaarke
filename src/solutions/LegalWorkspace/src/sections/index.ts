@@ -24,3 +24,4 @@ export {
 } from "./composeEditor.registration";
 export { emailRegistration } from "./email.registration";
 export { analysisHubRegistration } from "./analysisHub.registration";
+export { worklistRegistration } from "./worklist.registration";
