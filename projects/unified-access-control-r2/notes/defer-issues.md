@@ -1208,6 +1208,7 @@ Wrap-up candidate: make the 401 answer a ProblemDetails like every other refusal
 | #1363 | Demo SPE writer marker and expiry | PR #2017 |
 | #994 | Playbook Share bit | **Done**, PR #2013 `0ccc75b4c` |
 | #1077 / 153 §7, 062 NFR-05 | Owner live checks | UAT checklist |
+| **#2027** (new, 2026-10-16) | Customer environments: provisioning never sets org auditing (`isauditenabled`) or retention, and FR-32's interim audit trail depends on both | **Release-relevant.** The code belongs to customer-provisioning-orchestration-r1 (the H6 org-settings contract), handed over with the facts. The retention value is an owner decision (recommended -1, Forever) |
 
 ### FUTURE (deferred, with the reason and the trigger)
 
