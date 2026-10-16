@@ -4,7 +4,7 @@
     <title>Make the Worklist reachable in the Console: LegalWorkspace section shim + "Worklist" workspace layout row</title>
     <phase>5 The worklist surface</phase>
     <gate>Blocks 055's browser verification</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a section registration (code) and a Dataverse seed script; gates a deploy verification.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,6 +13,8 @@
     <deps>059, 155</deps>
     <tags>frontend,react,fluent-ui,dataverse</tags>
     <estimated-effort>2-3 hours</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
   </metadata>
 
   <prompt>Found at the 055 deploy (2026-10-16): the `worklist` direct widget is registered (`src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts:1055`) but no Console path opens it. The workspace dropdown lists `sprk_workspacelayout` rows, not the registry (docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md §3.1); each row mounts ONE LegalWorkspace section by id; there is no `worklist` section or row. Make "Worklist" appear in the dropdown and open the worklist, exactly as "Reconciliation" was made reachable.</prompt>
@@ -71,6 +73,8 @@
   </acceptance-criteria>
 
   <notes>Found by the main session at the 055 deploy (code map 2026-10-16). Task 064 later replaces the Briefing tab; this task only makes the worklist reachable.</notes>
+
+  <completion date="2026-10-16">PR #2004 merged `2160308e6` into docs/ontology-platform-design. Shim builds the service from LegalWorkspace's authenticatedFetch + getBffBaseUrl (WorklistWorkspaceWidget's useAiSession throws on the standalone page) and fills lookup + aggregateRow exactly as the direct widget does (review F1: without lookup, Revise budget / Reassign / Add To Do / Assign Work could not complete). Opus review, one fix round, re-check clean; seeding proof on the lookup case. Seed not yet run on dev (main session, after the Console redeploy). Follow-up DI-103 #2006 (provisioned environments).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
