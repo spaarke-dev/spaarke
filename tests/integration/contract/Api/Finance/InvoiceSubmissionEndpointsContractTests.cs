@@ -350,6 +350,20 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
+    [Fact]
+    public async Task The_kill_switch_runs_after_authorization_so_an_unauthorized_caller_is_denied_not_told_503()
+    {
+        _h.Options.Enabled = false;
+        _resolver.Principal = Collaborator(AccessRights.None);
+
+        var external = await PostExternalAsync(Form());
+        var internalPost = await PostInternalAsync(Form()); // no grants
+
+        external.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        internalPost.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        NothingWritten();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // External reads: own firm and readable record only, else one 404
     // ═══════════════════════════════════════════════════════════════════════════
@@ -462,6 +476,19 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         (await ErrorCodeAsync(notPdf)).Should().Be(InvoiceSubmissionErrors.NotPdf);
         (await ErrorCodeAsync(noNumber)).Should().Be(InvoiceSubmissionErrors.FirmInvoiceNumberRequired);
         NothingWritten();
+    }
+
+    [Fact]
+    public async Task Internal_get_with_read_on_the_submission_is_200()
+    {
+        var id = Guid.NewGuid();
+        StoredSubmission(id, FirmId);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, id, AccessRights.Read);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _access.Calls.Should().Contain(c => c.Set == "sprk_invoicesubmissions" && c.Id == id);
     }
 
     [Fact]

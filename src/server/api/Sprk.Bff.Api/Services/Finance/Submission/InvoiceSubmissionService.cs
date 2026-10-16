@@ -281,7 +281,9 @@ public class InvoiceSubmissionService
         var jobId = Guid.NewGuid();
         string? uploadedItemId = null;
         Guid? documentId = null;
-        var submissionCreated = false;
+        // True from the moment the allocator is asked: a create whose reply is lost (timeout, cancellation) may have committed the row, so
+        // compensation deletes it by its id whenever it MAY exist (a delete of an absent row is ignored).
+        var submissionMayExist = false;
 
         try
         {
@@ -300,8 +302,10 @@ public class InvoiceSubmissionService
 
             uploadedItemId = uploaded.Id;
 
-            // 2. The document row, linked to the core record, type Invoice.
-            documentId = await CreateDocumentAsync(request, uploaded, driveId, file, owner, ct);
+            // 2. The document row, linked to the core record, then typed Invoice. The id is held as soon as the row exists, so a failed
+            //    follow-up update is compensated too.
+            documentId = await CreateDocumentRowAsync(request, uploaded, driveId, file, owner, ct);
+            await CompleteDocumentRowAsync(request, documentId.Value, uploaded, driveId, file, ct);
 
             // 3. The submission, created with its tracking number (D-87).
             foreach (var (column, value) in resolverFields.ToFields())
@@ -335,16 +339,16 @@ public class InvoiceSubmissionService
                 throw new InvalidOperationException($"The submission payload failed the invoice-family guard ({refused.RefusalCode}).");
             }
 
+            submissionMayExist = true;
             var allocation = await _allocator.CreateSubmissionAsync(submissionId, request.FirmId, number, row.Attributes.ToDictionary(), ct);
             if (!allocation.Succeeded)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
-                await CompensateAsync(submissionId, created: false, documentId, driveId, uploadedItemId);
+                // A refusal creates nothing (TrackingNumberAllocator: the bound was reached without a create).
+                await CompensateAsync(submissionId, submissionMayExist: false, documentId, driveId, uploadedItemId);
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
-
-            submissionCreated = true;
 
             // 4. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
             await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), ct);
@@ -359,7 +363,7 @@ public class InvoiceSubmissionService
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.LogWarning("Invoice submission {SubmissionId} cancelled by the caller; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionCreated, documentId, driveId, uploadedItemId);
+            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId);
             throw;
         }
         catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict && uploadedItemId is null)
@@ -372,63 +376,71 @@ public class InvoiceSubmissionService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId} failed; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionCreated, documentId, driveId, uploadedItemId);
+            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
                 "The invoice could not be submitted and nothing was saved. Try again; if it keeps failing, contact support.");
         }
     }
 
     /// <summary>
-    /// The document row. SPA: the external surface's create (<see cref="ExternalDataService.CreateDocumentAsync"/>), which binds the core record,
-    /// the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person.
-    /// Both then set the type (Invoice) and MIME type in one update.
+    /// Creates the document row. SPA: the external surface's create (<see cref="ExternalDataService.CreateDocumentAsync"/>), which binds the core
+    /// record, the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person.
     /// </summary>
-    private async Task<Guid> CreateDocumentAsync(
+    private async Task<Guid> CreateDocumentRowAsync(
         InvoiceSubmissionRequest request, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file,
         RecordOwnerResolution owner, CancellationToken ct)
     {
         var core = request.CoreRecord;
-        var size = uploaded.Size ?? file.Content.LongLength;
         if (request.Channel == InvoiceSubmissionChannel.Spa)
         {
             var created = await _externalData.CreateDocumentAsync(
                 core.DocumentParentKind,
                 core.RecordId,
-                new ExternalUploadedFilePointers(uploaded.DriveId ?? driveId, uploaded.Id, uploaded.Name, size, uploaded.WebUrl),
+                new ExternalUploadedFilePointers(uploaded.DriveId ?? driveId, uploaded.Id, uploaded.Name, uploaded.Size ?? file.Content.LongLength, uploaded.WebUrl),
                 owner.OwningTeamId!.Value,
                 request.ExternalCaller!,
                 ct);
-            var id = Guid.Parse(created.SprkDocumentid);
-            await _documents.UpdateDocumentAsync(id.ToString(), new UpdateDocumentRequest
-            {
-                DocumentType = InvoiceDocumentType,
-                MimeType = PdfContentType,
-            }, ct);
-            return id;
+            return Guid.Parse(created.SprkDocumentid);
         }
 
-        var documentId = Guid.Parse(await _documents.CreateDocumentAsync(new CreateDocumentRequest
+        return Guid.Parse(await _documents.CreateDocumentAsync(new CreateDocumentRequest
         {
             Name = uploaded.Name,
             ContainerId = driveId,
             OwningTeamId = owner.OwningTeamId,
             CreatedByPersonId = owner.CreatedByPerson,
         }, ct));
-        await _documents.UpdateDocumentAsync(documentId.ToString(), new UpdateDocumentRequest
-        {
-            GraphDriveId = uploaded.DriveId ?? driveId,
-            GraphItemId = uploaded.Id,
-            FileName = uploaded.Name,
-            FileSize = size,
-            MimeType = PdfContentType,
-            HasFile = true,
-            FilePath = uploaded.WebUrl,
-            DocumentType = InvoiceDocumentType,
-            MatterLookup = core.Kind == InvoiceCoreRecordKind.Matter ? core.RecordId : null,
-            ProjectLookup = core.Kind == InvoiceCoreRecordKind.Project ? core.RecordId : null,
-            WorkAssignmentLookup = core.Kind == InvoiceCoreRecordKind.WorkAssignment ? core.RecordId : null,
-        }, ct);
-        return documentId;
+    }
+
+    /// <summary>
+    /// Types the document Invoice with the PDF MIME type. The internal row also gets its file pointers and its core-record lookup here (the SPA
+    /// create already set both).
+    /// </summary>
+    private Task CompleteDocumentRowAsync(
+        InvoiceSubmissionRequest request, Guid documentId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file, CancellationToken ct)
+    {
+        var core = request.CoreRecord;
+        var update = request.Channel == InvoiceSubmissionChannel.Spa
+            ? new UpdateDocumentRequest
+            {
+                DocumentType = InvoiceDocumentType,
+                MimeType = PdfContentType,
+            }
+            : new UpdateDocumentRequest
+            {
+                GraphDriveId = uploaded.DriveId ?? driveId,
+                GraphItemId = uploaded.Id,
+                FileName = uploaded.Name,
+                FileSize = uploaded.Size ?? file.Content.LongLength,
+                MimeType = PdfContentType,
+                HasFile = true,
+                FilePath = uploaded.WebUrl,
+                DocumentType = InvoiceDocumentType,
+                MatterLookup = core.Kind == InvoiceCoreRecordKind.Matter ? core.RecordId : null,
+                ProjectLookup = core.Kind == InvoiceCoreRecordKind.Project ? core.RecordId : null,
+                WorkAssignmentLookup = core.Kind == InvoiceCoreRecordKind.WorkAssignment ? core.RecordId : null,
+            };
+        return _documents.UpdateDocumentAsync(documentId.ToString(), update, ct);
     }
 
     internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
@@ -459,13 +471,17 @@ public class InvoiceSubmissionService
     }
 
     /// <summary>Best effort, reverse order, own token: a failed compensation is logged and never masks the original failure.</summary>
-    private async Task CompensateAsync(Guid submissionId, bool created, Guid? documentId, string driveId, string? itemId)
+    private async Task CompensateAsync(Guid submissionId, bool submissionMayExist, Guid? documentId, string driveId, string? itemId)
     {
-        if (created)
+        if (submissionMayExist)
         {
             try
             {
                 await _entities.DeleteAsync(SubmissionEntity, submissionId, CancellationToken.None);
+            }
+            catch (Exception ex) when (IsNotFound(ex))
+            {
+                // The lost-reply case went the other way: the create never committed. Nothing to remove.
             }
             catch (Exception ex)
             {

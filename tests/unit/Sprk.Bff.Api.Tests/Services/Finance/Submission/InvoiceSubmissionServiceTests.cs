@@ -83,6 +83,8 @@ public sealed class InvoiceSubmissionServiceTests
         public Exception? MatterReadFailure;
         public Exception? JobFailure;
         public Exception? DocumentCreateFailure;
+        public Exception? DocumentUpdateFailure;
+        public Exception? AllocatorFailure;
 
         public int Writes => Uploads.Count + DocumentCreates.Count + ExternalCreates.Count + Allocations.Count + JobsSent.Count;
 
@@ -132,8 +134,16 @@ public sealed class InvoiceSubmissionServiceTests
                     return DocumentId.ToString();
                 });
             Documents.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Callback((string id, UpdateDocumentRequest r, CancellationToken _) => DocumentUpdates.Add((id, r)))
-                .Returns(Task.CompletedTask);
+                .Returns((string id, UpdateDocumentRequest r, CancellationToken _) =>
+                {
+                    if (DocumentUpdateFailure is not null)
+                    {
+                        throw DocumentUpdateFailure;
+                    }
+
+                    DocumentUpdates.Add((id, r));
+                    return Task.CompletedTask;
+                });
 
             RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", RecordTypeId) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" });
@@ -162,7 +172,7 @@ public sealed class InvoiceSubmissionServiceTests
                 .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
                 {
                     Allocations.Add((id, firm, number, fields));
-                    return Allocation;
+                    return AllocatorFailure is { } failure ? throw failure : Allocation;
                 });
 
             var sbOptions = Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions
@@ -488,6 +498,35 @@ public sealed class InvoiceSubmissionServiceTests
         outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
         h.Allocations.Should().BeEmpty();
         h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.JobsSent.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task A_failed_document_update_removes_the_document_row_it_created_and_the_file(InvoiceSubmissionChannel channel)
+    {
+        var h = new Harness { DocumentUpdateFailure = new TimeoutException("throttled") };
+
+        var outcome = await h.Build().SubmitAsync(channel == InvoiceSubmissionChannel.Spa ? Spa() : Internal(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
+        h.Deleted.Should().Equal(("sprk_document", DocumentId));
+        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_submission_create_whose_reply_is_lost_is_deleted_by_its_id()
+    {
+        // The allocator's create may have committed before the timeout: the row would be Received with no job.
+        var h = new Harness { AllocatorFailure = new TimeoutException("the create timed out after Dataverse committed it") };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
+        var submissionId = h.Allocations.Single().SubmissionId;
+        h.Deleted.Should().Equal(("sprk_invoicesubmission", submissionId), ("sprk_document", DocumentId));
         h.JobsSent.Should().BeEmpty();
     }
 
