@@ -36,7 +36,12 @@ public class AssignedAccessMarkerTests
     private readonly Harness _h = new();
     private readonly Guid _matter = Guid.NewGuid();
 
-    public AssignedAccessMarkerTests() => _h.Store.Root(Matter, _matter);
+    public AssignedAccessMarkerTests()
+    {
+        _h.Store.Root(Matter, _matter);
+        // #1620: /unshare-user reads the record's owner for the owner-aware revoke; here it is a user no test shares with.
+        _h.Grants.RootOwners[_matter] = Guid.NewGuid();
+    }
 
     private Task<AssignedAccessOutcome> Sync() => _h.SyncAsync(Matter, _matter);
 

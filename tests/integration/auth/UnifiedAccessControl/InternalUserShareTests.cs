@@ -1082,6 +1082,79 @@ public class InternalUserShareTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // #1620 — the owner's OWN share is revoked as the owner (Dataverse refuses it app-only, 0x80040223)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The matter is owned by this user — in the owner read and in what the share table refuses app-only.</summary>
+    private void MatterOwnedByUser(Guid user)
+    {
+        _users.RecordOwners[MatterId] = User(user);
+        _shares.OwningUsers[MatterId] = user;
+    }
+
+    [Fact]
+    public async Task Unshare_TheOwningUsersOwnShare_IsRevokedAsTheOwner_AndConfirmedGone()
+    {
+        MatterOwnedByUser(UserId);
+        _shares.Seed(MatterTable, MatterId, User(UserId), ViewOnlyMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId))
+            .Should().Be(new UnshareRecordWithUserResponse(UserId, Removed: true));
+
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().BeNull("the owner's share row is gone");
+        _shares.RevokesAsOwner.Should().Equal((MatterId, User(UserId)));
+        _users.RecordOwners[MatterId].Should().Be(User(UserId), "the unshare removes the share, never the ownership");
+    }
+
+    [Fact]
+    public async Task Unshare_OnATeamOwnedRecord_RevokesAppOnly()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().BeNull();
+        _shares.RevokesAsOwner.Should().BeEmpty("a team owns the record, so no revoke runs as anyone");
+        _users.OwnerQueries.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Unshare_OfAUserWhoIsNotTheOwner_RevokesAppOnly_AndLeavesTheOwnersShare()
+    {
+        MatterOwnedByUser(OtherUserId);
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        _shares.Seed(MatterTable, MatterId, User(OtherUserId), ViewOnlyMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().BeNull();
+        _shares.MaskOf(MatterTable, MatterId, User(OtherUserId)).Should().Be(ViewOnlyMask);
+        _shares.RevokesAsOwner.Should().BeEmpty("only the owner's own share is revoked as the owner");
+    }
+
+    /// <summary>
+    /// An owner that cannot be read is a refusal before any write — never a fall-back to the app-only revoke, which
+    /// Dataverse refuses for the owner's own share.
+    /// </summary>
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("no-row")]
+    public async Task Unshare_WhenTheOwnerCannotBeRead_Is500ReadFailed_AndRemovesNothing(string fault)
+    {
+        MatterOwnedByUser(UserId);
+        _shares.Seed(MatterTable, MatterId, User(UserId), ViewOnlyMask);
+        if (fault == "throws")
+            _users.FailOwnerReads = true;
+        else
+            _users.OwnerReadFindsNothing = true;
+
+        ProblemOf(await Unshare(UserId)).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
+
+        _shares.Writes.Should().BeEmpty();
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(ViewOnlyMask);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // S5 (owner round 3; task 139 amendment R3) — a secure record always keeps someone who can see it
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1499,10 +1572,61 @@ public class InternalUserShareTests
                 .ReturnsAsync((string _, string? filter, string? select, int? _, int? _, CancellationToken _) =>
                     Answer(filter, select));
 
+            // #1620: the record's owner, read by /unshare-user for the owner-aware revoke.
+            mock.Setup(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? select, int? _, int? _, CancellationToken _) =>
+                    OwnerAnswer(filter, select));
+
             Client = mock.Object;
         }
 
         public DataverseWebApiClient Client { get; }
+
+        /// <summary>
+        /// The owner of each record (#1620). Unseeded: owned by <see cref="DefaultOwningTeamId"/> — a team, so the
+        /// owner-aware revoke is the app-only one.
+        /// </summary>
+        public Dictionary<Guid, DataversePrincipalRef> RecordOwners { get; } = new();
+
+        /// <summary>The team an unseeded record is owned by.</summary>
+        public static readonly Guid DefaultOwningTeamId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+        /// <summary>Makes the owner read throw (#1620).</summary>
+        public bool FailOwnerReads { get; set; }
+
+        /// <summary>Makes the owner read return no row (#1620).</summary>
+        public bool OwnerReadFindsNothing { get; set; }
+
+        /// <summary>How many owner reads were made (#1620).</summary>
+        public int OwnerQueries { get; private set; }
+
+        private static readonly Regex OwnerClause = new(@"^sprk_\w+id eq ([0-9a-fA-F-]{36})$", RegexOptions.CultureInvariant);
+
+        private List<RecordAccessGateEndpoint.OwnerRow> OwnerAnswer(string? filter, string? select)
+        {
+            OwnerQueries++;
+            if (FailOwnerReads)
+                throw new HttpRequestException("Dataverse 503");
+            if (select != InternalShareEndpoints.RecordOwnerSelect)
+                throw new InvalidOperationException($"Unexpected owner $select '{select}'.");
+            if (OwnerReadFindsNothing)
+                return new List<RecordAccessGateEndpoint.OwnerRow>();
+
+            var id = OwnerClause.Match(filter ?? string.Empty) is { Success: true } match
+                ? Guid.Parse(match.Groups[1].Value)
+                : throw new InvalidOperationException($"The fake does not understand the owner filter '{filter}'.");
+            var owner = RecordOwners.TryGetValue(id, out var seeded) ? seeded : DataversePrincipalRef.Team(DefaultOwningTeamId);
+            return new List<RecordAccessGateEndpoint.OwnerRow>
+            {
+                new()
+                {
+                    _owninguser_value = owner.Kind == DataversePrincipalKind.SystemUser ? owner.Id : null,
+                    _owningteam_value = owner.Kind == DataversePrincipalKind.Team ? owner.Id : null,
+                },
+            };
+        }
 
         public Exception? QueryFailure { get; set; }
 
