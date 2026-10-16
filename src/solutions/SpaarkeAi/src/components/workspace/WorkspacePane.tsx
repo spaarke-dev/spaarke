@@ -50,6 +50,7 @@ import {
   CreateAnalysisWizardWidget,
   whenOntologyAdminGateSettled,
   resolveRestorableWorkspaceWidget,
+  ONTOLOGY_ADMIN_WIDGET_TYPE,
 } from '@spaarke/ai-widgets';
 import type {
   WorkspacePaneEvent,
@@ -902,12 +903,17 @@ export function WorkspacePane(): React.JSX.Element {
       let restoredFromServer = false;
 
       // Ontology task 104 (D-22): the 'ontology-admin' tab is registered only after the capability probe answers
-      // (main.tsx step 2b). Wait for it (bounded, ONTOLOGY_ADMIN_GATE_RESTORE_WAIT_MS) so a persisted admin tab
-      // resolves to the real widget, not the unknown-type fallback. Restore resolves through
-      // resolveRestorableWorkspaceWidget, which skips a persisted admin tab the gate has not made available.
-      await whenOntologyAdminGateSettled();
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- set by the effect cleanup during the await; TS cannot see the write
-      if (cancelled) return;
+      // (main.tsx step 2b). Start waiting for it NOW (bounded, ONTOLOGY_ADMIN_GATE_RESTORE_WAIT_MS) but do not block the
+      // tabs GET on it: the wait overlaps the GET, and `settleGateFor` below awaits it only when the snapshot being restored
+      // holds an 'ontology-admin' tab, so every other restore, default-layout install and pinned-tab auto-open runs at the
+      // same time as before. Restore resolves through resolveRestorableWorkspaceWidget, which skips a persisted admin tab
+      // the gate has not made available.
+      const gateSettled = whenOntologyAdminGateSettled();
+      const settleGateFor = async (snapshot: WorkspaceTabPersistenceSnapshot): Promise<void> => {
+        if (Array.isArray(snapshot.tabs) && snapshot.tabs.some((t) => t.widgetType === ONTOLOGY_ADMIN_WIDGET_TYPE)) {
+          await gateSettled;
+        }
+      };
 
       if (chatSessionId) {
         try {
@@ -919,6 +925,10 @@ export function WorkspacePane(): React.JSX.Element {
           if (cancelled) return;
 
           const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
+          if (cancelled) return;
+
+          await settleGateFor(snapshot);
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- set by the effect cleanup during the await; TS cannot see the write
           if (cancelled) return;
 
           await managerRef.current.restoreFromPersistence(snapshot, resolveRestorableWorkspaceWidget);
@@ -946,7 +956,11 @@ export function WorkspacePane(): React.JSX.Element {
       if (!cancelled && !restoredFromServer && tabAnchorKey) {
         const localSnapshot = readLocalTabSnapshot(tabAnchorKey);
         if (localSnapshot) {
-          await managerRef.current.restoreFromPersistence(localSnapshot, resolveRestorableWorkspaceWidget);
+          await settleGateFor(localSnapshot);
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- set by the effect cleanup during the await; TS cannot see the write
+          if (!cancelled) {
+            await managerRef.current.restoreFromPersistence(localSnapshot, resolveRestorableWorkspaceWidget);
+          }
         }
       }
 

@@ -2787,7 +2787,7 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/v1/ontology/admin/capabilities", PermanentBasis.CallerScopedOnly, "ontology-104",
             "The caller's OWN privilege set: WhoAmI() as the caller (OntologyAdminEndpoints.cs:154), then "
             + "RetrieveUserPrivilegeByPrivilegeName on the systemuserid WhoAmI returned, also as the caller (:169, :189). Takes no id; "
-            + "returns one boolean. An unresolved caller is the single 403 (:104-108). Display only (D-22): every admin write "
+            + "returns one boolean. An unresolved caller is the single 403 (:104-113). Display only (D-22): every admin write "
             + "authorizes itself as the caller."),
         Permanent("GET /api/workspace/portfolio", PermanentBasis.CallerScopedOnly, "167",
             "Portfolio summary for the caller's own oid (WorkspaceEndpoints.cs:121, :140). Takes no id."),

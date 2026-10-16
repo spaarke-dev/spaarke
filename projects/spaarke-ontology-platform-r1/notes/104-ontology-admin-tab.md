@@ -79,8 +79,10 @@ Through the BFF route, the live leg `OntologyAdminCapabilityLiveTests` returned:
 - **Tab restore.** `resolveWorkspaceWidget` falls back to a generic widget for an unregistered type, so a persisted admin
   tab would come back as a dead tab. Because the type is single-instance, reopening it from Manage Workspaces would only
   focus that dead tab. Two changes prevent this:
-  - The workspace pane awaits `whenOntologyAdminGateSettled()` (bounded at 3 s) before it restores, so an administrator's
-    reloaded tab is the real widget.
+  - The workspace pane starts `whenOntologyAdminGateSettled()` (bounded at 3 s) when restore begins, in parallel with the
+    tabs GET, and awaits it only before restoring a snapshot (server or local) that holds an `ontology-admin` tab, so an
+    administrator's reloaded tab is the real widget and no other restore, default-layout install or pinned-tab auto-open
+    waits on the probe (fix round F1; the first version awaited it before the GET for every user).
   - Restore resolves through `resolveRestorableWorkspaceWidget`, which returns null for `ontology-admin` while the gate
     says no. The tab manager then skips the tab. This covers a revoked role, and a probe slower than 3 s; in the slow case
     the admin reopens the tab from the pane once the gate answers.
@@ -92,10 +94,16 @@ Through the BFF route, the live leg `OntologyAdminCapabilityLiveTests` returned:
     Dataverse 401/403, or no id).
   - 503: any other fault, including a refusal of the privilege read.
   - The client treats anything but `200 true` as "no tab".
+  - A transient OBO failure (`OboExchangeFailed`) is in the "caller cannot be named" set, so it returns the uniform 403,
+    not a 503; the Console treats both as "no tab" (fix round K1).
 - **Cache.** `ITenantCache` (Redis) per caller (`oid`), with TTL `min(token exp - now, 5 min)`.
   - ADR-009 rules: "cache data only" and "short TTLs for security data". The value is display data; nothing
     authorizes on it.
   - Never cached: a fault, or a token without `tid`, `oid` or `exp`.
+  - A role change takes effect after a reload plus up to 5 min of server cache. This is acceptable under D-22 because the
+    answer only decides what is shown; every write is authorized as the caller, so a stale answer can show a tab but
+    never grant a write (fix round K1). `OntologyAdminCallerBoundaryGuardTests` (ArchTests) enforces that nothing reads
+    the answer or writes through an app-identity client (fix round K2).
 - **No new service or DI registration.** The handler uses `IDataverseUserClient` (unconditional in `AddSpaarkeCore`),
   `ITenantCache` and `TimeProvider`.
 
