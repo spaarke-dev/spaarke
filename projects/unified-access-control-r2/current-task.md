@@ -17,13 +17,13 @@
 |---|---|---|---|---|
 | #2025 | #1576 (disabled users + per-request token) | C:/wt1576 `fix/uac-1576-disabled-users-per-request-token` | 689f217ff | **READY: awaiting owner sign-off (auth).** 2 full passes + 2 scoped re-checks; no F-class. Known limits closed (fail-closed JIT sweep and Decision Record owner, guard shapes, per-site ratchet). Filed #2033 (disabled sender) and #2034 (guest writer, provisioning). After merge: close #1576 parts (b) 61b0aa77a and (d) 633cce424; tell provisioning about the baseline marker. |
 | #2024 | #1755, #1735 create-POST | C:/wt1755 `fix/uac-1755-bounded-provisioning-token` | 428c7219a | **Round 3 running:** a failed compensating delete is reported honestly; connect-refused is classed as not sent; state-machine test; wording; and an **explicit `/activate`** after create (Learn: inactive containers auto-delete after 24h). Then a scoped re-check, then merge, then ping sdap-SPE-admin-app-r2 (#2032: their create, activate, lock and unlock). |
-| #2017 | #1363 (demo expiry) | C:/wt1363 `fix/uac-1363-demo-spe-marker` | e3d412b27 | Re-check fixes done (scheme+host+port next link, repeated-link guard, 404 only for a GUID id); main session reviewed the diff. **Merge watcher running.** Then tell provisioning the merge SHA. |
 | #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 882eae925 | **Adversarial pass 1 running.** Then pass 2 and owner sign-off. After merge and an R3 deploy, run the live check in the PR body (child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.48 import). Next: **099b** (after #2025 merges), **099c** (after #2035). #1010 closes after 099a+099b; #961 closes with 099c. |
 
 ## Merged today (2026-10-16)
 - #2007 `96d5b16c2` (#2005, live gate PASS)
 - #1983 `42aecf064`
 - #2013 `0ccc75b4c` (#994)
+- #2017 `9b72ea2c8` (#1363 demo expiry; issue stays open until the dev gate; provisioning told)
 - #2029 `72b55bb6c` (#2002; dev gate in the next R3 deploy)
 - #2021 `b1eaecb49` (share-link retired; task 012 closed; #1350 closed; #1752 link half commented)
 - #2016 `2e4ffc654` (#1620 owner-aware unshare; R3 told). The post-save web resource 1.1.2 is **deployed to dev** (16:37Z, verified).
