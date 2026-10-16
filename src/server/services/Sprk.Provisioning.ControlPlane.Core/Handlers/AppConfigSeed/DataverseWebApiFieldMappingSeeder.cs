@@ -128,6 +128,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
     internal const string SourceRecordTypeBind = "sprk_SourceRecordType@odata.bind";
     internal const string TargetRecordTypeBind = "sprk_TargetRecordType@odata.bind";
 
+    /// <summary><c>sprk_fieldmappingrule.sprk_targetfieldtype</c> "Lookup" (its own option set: 100000000-based).</summary>
+    internal const int TargetFieldTypeLookup = 100000001;
+
     /// <summary>
     /// The default attorney-matrix profiles this seeder maintains. Ground-truthed
     /// live against spaarkedev1's Active sprk_fieldmappingprofile +
@@ -491,7 +494,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         FieldMappingRuleSeedItem rule, CancellationToken cancellationToken)
     {
         var filter =
-            $"sprk_fieldmappingprofile eq {profileId} and " +
+            // T186 L57: a lookup is filtered by its _<name>_value property; "sprk_fieldmappingprofile eq" is a 400
+            // ("Could not find a property named 'sprk_fieldmappingprofile'").
+            $"_sprk_fieldmappingprofile_value eq {profileId} and " +
             $"sprk_sourcefield eq '{rule.SourceField.Replace("'", "''", StringComparison.Ordinal)}' and " +
             $"sprk_targetfield eq '{rule.TargetField.Replace("'", "''", StringComparison.Ordinal)}'";
         var getUri = new Uri(envUri,
@@ -541,7 +546,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
             ["sprk_sourcefield"] = rule.SourceField,
             ["sprk_targetfield"] = rule.TargetField,
             ["sprk_sourcefieldtype"] = 1, // Lookup
-            ["sprk_targetfieldtype"] = 1, // Lookup
+            // T186 L57: the target type is a different option set from the source type — Lookup is 100000001
+            // (live spaarkedev1 rules and ACME metadata); 1 is not a valid option and Dataverse refuses it.
+            ["sprk_targetfieldtype"] = TargetFieldTypeLookup,
             ["sprk_executionorder"] = rule.ExecutionOrder,
             ["sprk_isactive"] = true,
         };
