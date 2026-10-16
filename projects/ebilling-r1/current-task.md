@@ -11,9 +11,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done (37/79): 001-005, 010-014, 016-025, 027-029, 040-048, 078, 106, 108, 109. WIP: 054 (opus agent; also fixes 048 confirm race via If-Match), 107 (merged; fix-round-1 agent: truncated/cap/crowding leaks + same leak in 106 AllExamined + shared caller-Read helper), 070 (merged incl. fix-round-1; held for ontology-r1 review). ADR-010 ceiling 165; route ledger 131 |
-| **Step** | Waiting on 054 and 107 fix-round-1. Then: 026 (serial, SpaarkeMaster source), 015 (owner OK). 044 fix-round-2 merged (f68d26b73). Last verified: build clean, 3556 targeted tests + 1056 ArchTests green after 107 merge |
-| **Pending relay** | Tell ontology-r1 (session closed when tried) that the owner approved D-92 (their D-138 question); collect their 070 review (Q1 throw vs failed result) |
+| **Task** | Parallel mode. Done (39/79): 001-005, 010-014, 016-025, 027-029, 040-048, 054, 078, 106, 107, 108, 109. WIP: 026 (BLOCKED at step 0: sprk_billingevent not an intermediate in ResolveStampsAsync; option A asked of uac-r2), 070 (held for ontology-r1 review). Adversarial review of 054 running; its fix round adds D1 bounded-parallel AI calls + most-similar examples. ADR-010 ceiling 165; route ledger 131 |
+| **Step** | Waiting: 054 review; uac-r2 reply (026 option A: billingevent intermediate, 3 lockstep files); ontology-r1 reply (070 review, D-92 relayed 2026-10-16). Then 015 (owner OK) |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | As each agent reports: cherry-pick its commits onto work/ebilling-r1 (conflicts on FinanceModule.cs / ADR010_DITests.cs: keep both sides, sum the ceiling), amend trailers to Opus 5.5 with hooks, mark ✅ in TASK-INDEX, run the build + targeted Finance tests + ArchTests. Then 107 and 026 (serial, opus), then 015 (needs owner OK, destructive) |
 
