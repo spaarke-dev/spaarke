@@ -4,8 +4,9 @@ namespace Sprk.Bff.Api.Services.Finance.Coding;
 
 /// <summary>
 /// FR-22 step 4: proposes a code set when the firm's own codes, the matter-type mapping and the practice-area mapping did
-/// not resolve one. Task 048 supplies the AI implementation (and persists a confirmed proposal as a mapping); this task
-/// ships only the seam and <see cref="NoCodeSetSuggestionProvider"/>.
+/// not resolve one. Task 048's <see cref="CodeSetProposalService"/> is the AI implementation (registered in
+/// <c>FinanceModule</c>); it never persists the suggestion. A mapping is written only by that service's admin-confirm route.
+/// <see cref="NoCodeSetSuggestionProvider"/> remains as the Null-Object peer.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,8 +42,8 @@ public sealed record CodeSetSuggestionContext(
     IReadOnlyList<InvoiceLineToCode> Lines);
 
 /// <summary>
-/// The default <see cref="ICodeSetSuggestionProvider"/>: never proposes a set, so FR-22 step 4 is skipped until task 048
-/// registers the AI provider (ADR-032 Null-Object peer; not a feature-flag fallback).
+/// The Null-Object <see cref="ICodeSetSuggestionProvider"/>: never proposes a set, so FR-22 step 4 is skipped (ADR-032 peer; not a
+/// feature-flag fallback). Since task 048 it is no longer the registered provider; it stays for tests and as the explicit "no step 4" choice.
 /// </summary>
 public sealed class NoCodeSetSuggestionProvider : ICodeSetSuggestionProvider
 {

@@ -89,8 +89,12 @@ public static class FinanceModule
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
         // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
         // unconditional (flag rule above - IInvoiceAi is always registered, as NullInvoiceAi when AI is off).
-        // NoCodeSetSuggestionProvider is the FR-22 step 4 seam: task 048 replaces this one registration with the AI provider.
-        services.AddScoped<ICodeSetSuggestionProvider, NoCodeSetSuggestionProvider>();
+        // ICodeSetSuggestionProvider is the FR-22 step 4 seam. Task 048: CodeSetProposalService is the AI provider (it replaces
+        // NoCodeSetSuggestionProvider here) and also serves the code-set-mapping routes (proposals, confirm). One scoped instance plays
+        // both roles, so its per-scope code-set embeddings are loaded once. Unconditional (flag rule above): IInvoiceAi has its Null
+        // peer, which throws the feature-disabled exception rather than guessing.
+        services.AddScoped<CodeSetProposalService>();
+        services.AddScoped<ICodeSetSuggestionProvider>(sp => sp.GetRequiredService<CodeSetProposalService>());
         services.AddScoped<CodeSetResolver>();
         services.AddScoped<ILineCodingService, LineCodingService>();
         // Tracking numbers (ebilling-r1 task 045, FR-10, D-37, D-87, ADR-002): the single server-side owner of a submission's

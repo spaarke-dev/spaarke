@@ -310,6 +310,11 @@ public partial class RouteAuthorizationGuardTests
             + "(ebilling-r1 task 044, FR-17 internal channel). The submits run AddFinanceAuthorizationFilter as the caller: Read and "
             + "AppendTo on the route's core record (finance.submit_invoice) and AppendTo on the query firm (finance.attach_invoice); "
             + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter."),
+        new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
+            + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
+            + "D-76, fail closed): Write on BOTH reference tables for the list, Write on the one table named in the path for the confirm; the "
+            + "eBilling kill switch runs after it. Only the confirm route writes a mapping."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -815,7 +820,11 @@ public partial class RouteAuthorizationGuardTests
     // AddFinanceAuthorizationFilter as the caller on the core record, the firm and the submission) and
     // Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs ADDED (GroupGated: AddExternalInvoiceSubmissionAuthorizationFilter,
     // credited below). The kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 129;
+    // 129 -> 130 (2026-10-16, ebilling-r1 task 048, FR-22). Net +1: Api/Finance/CodeSetMappingEndpoints.cs ADDED -- GET
+    // /api/finance/code-set-mappings/proposals and POST /api/finance/code-set-mappings/{table}/{id}/confirm. Classified by GovernedFiles
+    // (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse table privilege, D-76); the
+    // kill-switch filter and the errorCode-stamping filter are classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 130;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1074,6 +1083,10 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("RequireEbillingEnabled",
             "ebilling-r1 task 078: the eBilling kill switch (EbillingEnabledFilter.cs) answers 503 ebilling.disabled when the feature flag is off. "
             + "It is chained AFTER the route's AddFinanceAuthorizationFilter and decides nothing about who may act on what."),
+        new NotAuthorizationForm("AddEndpointFilter<CodeSetForbiddenCodeFilter>",
+            "ebilling-r1 task 048: stamps the stable errorCode ebilling.codeset.forbidden (ADR-019) on a 403 that the route's "
+            + "AddFinanceAuthorizationFilter produced (CodeSetMappingEndpoints.cs). It is chained BEFORE that filter, only reads its result, "
+            + "and can never turn a denial into anything else; it decides nothing."),
         new NotAuthorizationForm("AddIdempotencyFilter", "Replays a cached response for a repeated client key."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentUrlIdentityFilter>", "Resolves a document URL to an id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),

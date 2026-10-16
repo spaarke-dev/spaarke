@@ -378,6 +378,7 @@ public static class EndpointMappingExtensions
         app.MapRateCardImportEndpoints(); // ebilling-r1 task 078 (FR-29)
         app.MapInvoiceContextEndpoints(); // ebilling-r1 task 106 (FR-33)
         app.MapInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 internal channel)
+        app.MapCodeSetMappingEndpoints(); // ebilling-r1 task 048 (FR-22)
         app.MapCommunicationEndpoints();
 
         // Email composer "insert template" render surface (email-communication-solution-r5). Thin,

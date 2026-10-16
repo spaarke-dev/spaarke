@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Seam.Finance;
 /// the wrong rows here instead of passing against a canned response.
 /// </summary>
 /// <remarks>
-/// Only <see cref="ConditionOperator.Equal"/> and <see cref="ConditionOperator.In"/> over a flat AND filter are supported; anything
+/// Only <see cref="ConditionOperator.Equal"/>, <see cref="ConditionOperator.In"/>, <see cref="ConditionOperator.Null"/> and <see cref="ConditionOperator.NotNull"/> over a flat AND filter are supported; anything
 /// else throws, so a new kind of query in the production code makes this fake fail loudly rather than silently match nothing.
 /// </remarks>
 internal sealed class FakeCodingReferenceData
@@ -33,7 +33,18 @@ internal sealed class FakeCodingReferenceData
         Entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string name, Guid id, string[] columns, CancellationToken _) => Get(name, id, columns));
+        Entities
+            .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string name, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                Updates.Add((name, id, new Dictionary<string, object>(fields)));
+                Apply(name, id, fields);
+                return Task.CompletedTask;
+            });
     }
+
+    /// <summary>Every <c>UpdateAsync</c> received, in order (the fake also applies it to the stored row).</summary>
+    public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = [];
 
     public Mock<IGenericEntityService> Entities { get; } = new();
 
@@ -45,10 +56,15 @@ internal sealed class FakeCodingReferenceData
 
     // ── Builders ────────────────────────────────────────────────────────────────
 
-    public Guid AddSet(string name, bool active = true)
+    public Guid AddSet(string name, bool active = true, string? body = null)
     {
         var set = new Entity(CodeSetTable, Guid.NewGuid());
         set["sprk_name"] = name;
+        if (body is not null)
+        {
+            set["sprk_body"] = body;
+        }
+
         set["statecode"] = new OptionSetValue(active ? 0 : 1);
         set["createdon"] = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(_created++);
         _rows.Add(set);
@@ -77,9 +93,30 @@ internal sealed class FakeCodingReferenceData
         _rows.Add(row);
     }
 
-    public Guid AddMatterType(Guid? defaultSetId) => AddReference("sprk_mattertype_ref", defaultSetId);
+    public Guid AddMatterType(Guid? defaultSetId, string? name = null, bool active = true) =>
+        AddReference("sprk_mattertype_ref", defaultSetId, name is null ? null : ("sprk_mattertypename", name), active);
 
-    public Guid AddPracticeArea(Guid? defaultSetId) => AddReference("sprk_practicearea_ref", defaultSetId);
+    public Guid AddPracticeArea(Guid? defaultSetId, string? name = null, bool active = true) =>
+        AddReference("sprk_practicearea_ref", defaultSetId, name is null ? null : ("sprk_practiceareaname", name), active);
+
+    /// <summary>The reference or set row as stored (for asserting what a write changed).</summary>
+    public Entity? Find(string entityLogicalName, Guid id) =>
+        _rows.FirstOrDefault(r => r.LogicalName == entityLogicalName && r.Id == id);
+
+    /// <summary>Applies an <c>UpdateAsync</c> to the stored row, as Dataverse would (a C# null skips, DBNull clears).</summary>
+    public void Apply(string entityLogicalName, Guid id, Dictionary<string, object> fields)
+    {
+        var row = Find(entityLogicalName, id) ?? throw new InvalidOperationException($"{entityLogicalName} {id} does not exist in the fake.");
+        foreach (var (key, value) in fields)
+        {
+            if (value is null)
+            {
+                continue;
+            }
+
+            row[key] = value is DBNull ? null : value;
+        }
+    }
 
     public CodingCoreRecord AddCoreRecord(string entityLogicalName, Guid? matterTypeId = null, Guid? practiceAreaId = null)
     {
@@ -135,9 +172,15 @@ internal sealed class FakeCodingReferenceData
     private const string CodeSetTable = "sprk_billingcodeset";
     private const string CodeTable = "sprk_billingcode";
 
-    private Guid AddReference(string entityLogicalName, Guid? defaultSetId)
+    private Guid AddReference(string entityLogicalName, Guid? defaultSetId, (string Column, string Value)? name = null, bool active = true)
     {
         var row = new Entity(entityLogicalName, Guid.NewGuid());
+        if (name is { } named)
+        {
+            row[named.Column] = named.Value;
+        }
+
+        row["statecode"] = new OptionSetValue(active ? 0 : 1);
         if (defaultSetId is { } setId)
         {
             row["sprk_defaultbillingcodeset"] = new EntityReference(CodeSetTable, setId);
@@ -181,6 +224,11 @@ internal sealed class FakeCodingReferenceData
         }
 
         var all = (ordered ?? rows).ToList();
+        if (query.TopCount is { } top)
+        {
+            all = all.Take(top).ToList();
+        }
+
         var count = query.PageInfo?.Count > 0 ? query.PageInfo.Count : DataverseDefaultPageSize;
         var page = Math.Max(1, query.PageInfo?.PageNumber ?? 1);
         var slice = all.Skip((page - 1) * count).Take(count).Select(r => Project(r, query.ColumnSet)).ToList();
@@ -204,6 +252,8 @@ internal sealed class FakeCodingReferenceData
         {
             ConditionOperator.Equal => expected.Count == 1 && AreEqual(actual, expected[0]),
             ConditionOperator.In => expected.Any(e => AreEqual(actual, e)),
+            ConditionOperator.Null => actual is null,
+            ConditionOperator.NotNull => actual is not null,
             _ => throw new NotSupportedException($"The fake does not support {condition.Operator}."),
         };
     }

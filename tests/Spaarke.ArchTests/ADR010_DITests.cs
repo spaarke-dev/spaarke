@@ -369,7 +369,12 @@ public class ADR010_DITests
         // highest-sequence read, the alternate-key retry and its faults behind a concrete. One implementation, so a 1:1 mapping, accepted on
         // the same grounds as IInvoiceLifecycleService above. Falsifiable: if 044's tests do not fake it by 044's completion, register the
         // concrete and drop this back to 165.
-        const int knownOneToOneCeiling = 166;
+        // ───────── Ceiling LOWERED 166 → 165, 2026-10-16 (ebilling-r1 task 048; +0 interfaces, -1 mapping) ─────────
+        // ICodeSetSuggestionProvider now has two implementations (NoCodeSetSuggestionProvider and CodeSetProposalService, the AI provider that
+        // 048 registers in its place), so it is a genuine seam and no longer a 1:1 mapping; this is the "gains the second in 048" the task 047
+        // entry above promised. 048 adds no interface (CodeSetProposalService is registered concrete, ADR-010). Measured with the ceiling at 0:
+        // 165 mappings, ICodeSetSuggestionProvider not among them.
+        const int knownOneToOneCeiling = 165;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
