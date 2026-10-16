@@ -28,11 +28,22 @@ export interface RuleActionRate {
   tooFewToJudge: boolean;
 }
 
+/**
+ * The Signal numbers. The three are read independently by the BFF: a number that could not be read is null here and its flag in
+ * `RuleMetricsAvailability` is false. `lastFiredOn` null with its flag true means no Signal in the window, not "unreadable".
+ */
 export interface RuleMetrics {
-  openItems: number;
+  openItems: number | null;
+  /** The newest Signal created for the rule in the last `lastFiredWindowDays` days. */
   lastFiredOn: string | null;
-  actionRate: RuleActionRate;
+  actionRate: RuleActionRate | null;
   needsALook: boolean;
+}
+
+export interface RuleMetricsAvailability {
+  openItems: boolean;
+  lastFired: boolean;
+  actionRate: boolean;
 }
 
 export interface RuleSummary {
@@ -48,13 +59,17 @@ export interface RuleSummary {
   headline: string | null;
   severity: string;
   subjectType: string;
-  metrics: RuleMetrics | null;
+  metrics: RuleMetrics;
 }
 
 export interface RuleListResponse {
   rules: RuleSummary[];
+  /** True only when all three numbers were read. */
   metricsAvailable: boolean;
+  metricsAvailability: RuleMetricsAvailability;
   actionRateWindowDays: number;
+  /** How far back "last fired" looks. */
+  lastFiredWindowDays: number;
   minimumJudged: number;
 }
 
@@ -141,7 +156,9 @@ export interface RuleDetail {
   versions: RuleVersion[];
   history: RuleHistoryEntry[];
   metricsAvailable: boolean;
+  metricsAvailability: RuleMetricsAvailability;
   actionRateWindowDays: number;
+  lastFiredWindowDays: number;
   minimumJudged: number;
 }
 
@@ -175,6 +192,11 @@ export interface RulesFailure {
   reasonCode: string | null;
   /** Readable text for the admin. */
   message: string;
+  /**
+   * True for a write (On/Off, Retire) whose outcome the server did not prove: a 503, another 5xx, or a network failure. The change may
+   * or may not have been saved; the message says so. False for every read, and for a refusal (4xx) where the server proved no write.
+   */
+  outcomeUnknown: boolean;
 }
 
 export type RulesResult<T> = { ok: true; data: T } | RulesFailure;
@@ -214,16 +236,29 @@ function firstValidationMessage(errors: unknown): string | null {
   return null;
 }
 
+/** What a write that ended without a proven outcome says. The only honest answer is "maybe": do not claim it was or was not saved. */
+const OUTCOME_UNKNOWN = 'The change may not have been saved. Reload to check.';
+
+/**
+ * Whether a failed WRITE leaves the outcome unknown. A 4xx is the server's refusal before any write, so nothing changed; a 5xx, or no
+ * answer at all (a network failure, an unreadable reply), could have come before or after the write landed.
+ */
+function isOutcomeUnknown(status: number | null, writes: boolean): boolean {
+  return writes && (status === null || status >= 500);
+}
+
 /** The text the admin reads for a failure. Never the raw problem JSON. */
-function messageFor(status: number | null, reasonCode: string | null, problem: Problem | null): string {
+function messageFor(status: number | null, reasonCode: string | null, problem: Problem | null, writes: boolean): string {
   if (reasonCode === 'sdap.access.deny.caller_unresolved') {
     return 'Your sign-in could not be matched to a Dataverse user, so nothing was changed.';
   }
   if (status === 403) {
-    return 'Dataverse refused this change. It needs the Spaarke Ontology Administrator role.';
+    return 'Dataverse refused this change. It needs the Spaarke Ontology Administrator role. Nothing was changed.';
   }
   if (status === 404) {
-    return 'That rule no longer exists, or it is not an Ontology rule.';
+    return writes
+      ? 'That rule no longer exists, or it is not an Ontology rule. Nothing was changed.'
+      : 'That rule no longer exists, or it is not an Ontology rule.';
   }
   if (status === 400 || status === 409) {
     const validation = firstValidationMessage(problem?.errors);
@@ -235,15 +270,25 @@ function messageFor(status: number | null, reasonCode: string | null, problem: P
     }
     return status === 409 ? 'The rule is in a state that does not allow this change.' : 'The request was not accepted.';
   }
-  return 'The rules could not be reached. Nothing was changed. Try again.';
+  if (isOutcomeUnknown(status, writes)) {
+    return OUTCOME_UNKNOWN;
+  }
+  return 'The rules could not be reached. Try again.';
 }
 
-function failure(status: number | null, problem: Problem | null): RulesFailure {
+function failure(status: number | null, problem: Problem | null, writes: boolean): RulesFailure {
   const reasonCode = typeof problem?.reasonCode === 'string' ? problem.reasonCode : null;
-  return { ok: false, status, reasonCode, message: messageFor(status, reasonCode, problem) };
+  return {
+    ok: false,
+    status,
+    reasonCode,
+    message: messageFor(status, reasonCode, problem, writes),
+    outcomeUnknown: isOutcomeUnknown(status, writes),
+  };
 }
 
-async function call<T>(fetch: ResponseFetchFn, url: string, init: RequestInit): Promise<RulesResult<T>> {
+/** `writes` is true for the PUT / POST calls: a failure there may have come after the change was saved. */
+async function call<T>(fetch: ResponseFetchFn, url: string, init: RequestInit, writes = false): Promise<RulesResult<T>> {
   try {
     const response = await fetch(url, init);
     if (!response.ok) {
@@ -253,14 +298,14 @@ async function call<T>(fetch: ResponseFetchFn, url: string, init: RequestInit): 
       } catch {
         problem = null;
       }
-      return failure(response.status, problem);
+      return failure(response.status, problem, writes);
     }
     return { ok: true, data: (await response.json()) as T };
   } catch (error: unknown) {
     if (isApiError(error)) {
-      return failure(error.status, problemOf(error));
+      return failure(error.status, problemOf(error), writes);
     }
-    return failure(null, null);
+    return failure(null, null, writes);
   }
 }
 
@@ -276,16 +321,18 @@ export function createOntologyRulesService({ fetch, baseUrl }: OntologyRulesServ
     list: () => call<RuleListResponse>(fetch, root, { method: 'GET', headers: read }),
     get: policyId => call<RuleDetail>(fetch, one(policyId), { method: 'GET', headers: read }),
     setEnabled: (policyId, enabled) =>
-      call<RuleEnabledResult>(fetch, `${one(policyId)}/enabled`, {
-        method: 'PUT',
-        headers: write,
-        body: JSON.stringify({ enabled }),
-      }),
+      call<RuleEnabledResult>(
+        fetch,
+        `${one(policyId)}/enabled`,
+        { method: 'PUT', headers: write, body: JSON.stringify({ enabled }) },
+        true
+      ),
     retire: (policyId, reason) =>
-      call<RuleRetiredResult>(fetch, `${one(policyId)}/retire`, {
-        method: 'POST',
-        headers: write,
-        body: JSON.stringify({ reason }),
-      }),
+      call<RuleRetiredResult>(
+        fetch,
+        `${one(policyId)}/retire`,
+        { method: 'POST', headers: write, body: JSON.stringify({ reason }) },
+        true
+      ),
   };
 }

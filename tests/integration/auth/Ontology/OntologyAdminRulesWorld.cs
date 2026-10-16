@@ -43,6 +43,9 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         public string? RetiredReason { get; set; }
         public DateTime ModifiedOn { get; set; } = new(2026, 10, 15, 9, 0, 0, DateTimeKind.Utc);
         public Guid? ModifiedBy { get; set; }
+
+        /// <summary>The row's <c>versionnumber</c>; moves on every write, as Dataverse does.</summary>
+        public long Version { get; set; } = 1_000_000_001;
     }
 
     public sealed class VersionRow
@@ -95,6 +98,28 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
 
     /// <summary>Refuses (500) every Signal read: the numbers are unavailable but the rules must still be listed.</summary>
     public bool SignalReadsFail { get; set; }
+
+    /// <summary>Refuses (500, <c>AggregateQueryRecordLimit</c>) only these Signal numbers: <c>open</c>, <c>last</c> or <c>rate</c>.</summary>
+    public HashSet<string> FailedSignalNumbers { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Dataverse's aggregate limit: a FetchXML aggregate that has to scan more rows than this fails with
+    /// <c>AggregateQueryRecordLimit</c>.</summary>
+    public const int AggregateRecordLimit = 50_000;
+
+    /// <summary>Every Signal ever written (what an aggregate with no date window scans).</summary>
+    public int TotalSignals { get; set; }
+
+    /// <summary>Signals created in the last 90 days (what an aggregate bounded by <c>createdon last-x-days</c> scans).</summary>
+    public int RecentSignals { get; set; }
+
+    /// <summary>Leaves <c>versionnumber</c> out of every policy row (a read that did not return it).</summary>
+    public bool OmitVersionNumber { get; set; }
+
+    /// <summary>Called with the policy at write time, before the version check: another admin writing in between.</summary>
+    public Action<Policy>? BeforePatch { get; set; }
+
+    /// <summary>The FetchXML of every last-fired aggregate the service sent (decoded).</summary>
+    public List<string> LastFiredFetches { get; } = new();
 
     /// <summary>Makes the policy list return this many rows (a page limit probe).</summary>
     public int? PadPolicyListTo { get; set; }
@@ -155,9 +180,16 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         });
     }
 
-    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
+        Patch(relativePath, jsonBody, expectedVersion: null);
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
+        Patch(relativePath, jsonBody, expectedVersion);
+
+    private Task<DataverseUserResponse> Patch(string relativePath, string jsonBody, long? expectedVersion)
     {
         Requests.Add($"PATCH {relativePath} {jsonBody}");
+        ExpectedVersions.Add(expectedVersion);
         Order.Add($"PATCH {relativePath}");
         Patches.Add((relativePath, jsonBody));
         if (WriteRefusal is { } refusal)
@@ -170,6 +202,15 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         if (policy is null)
         {
             return Task.FromResult(DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "not found"));
+        }
+
+        BeforePatch?.Invoke(policy);
+        if (expectedVersion is { } expected && expected != policy.Version)
+        {
+            // Dataverse: If-Match names a version the row has moved past. Nothing is written.
+            Patches.RemoveAt(Patches.Count - 1);
+            PreconditionFailures.Add(relativePath);
+            return Task.FromResult(DataverseUserResponse.Fail(412, DataverseUserClientErrorCodes.BadRequest, "The version of the record does not match."));
         }
 
         using var doc = JsonDocument.Parse(jsonBody);
@@ -194,8 +235,15 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
             }
         }
 
+        policy.Version++;
         return Task.FromResult(DataverseUserResponse.Ok(204, null));
     }
+
+    /// <summary>The conditional PATCHes Dataverse refused with 412 (they are not counted in <see cref="Patches"/>: nothing was written).</summary>
+    public List<string> PreconditionFailures { get; } = new();
+
+    /// <summary>The expected versions the service sent, in order (null for an unconditional PATCH).</summary>
+    public List<long?> ExpectedVersions { get; } = new();
 
     public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("The Rules routes never create a row (no Decision Record is written).");
@@ -247,7 +295,18 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         return list;
     }
 
-    private object ToJson(Policy p) => new Dictionary<string, object?>
+    private object ToJson(Policy p)
+    {
+        var row = ToRow(p);
+        if (OmitVersionNumber)
+        {
+            row.Remove("versionnumber");
+        }
+
+        return row;
+    }
+
+    private static Dictionary<string, object?> ToRow(Policy p) => new()
     {
         ["sprk_policyid"] = p.Id,
         ["sprk_name"] = p.Name,
@@ -267,6 +326,7 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         ["sprk_retiredreason"] = p.RetiredReason,
         ["modifiedon"] = p.ModifiedOn.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         ["_modifiedby_value"] = p.ModifiedBy,
+        ["versionnumber"] = p.Version,
     };
 
     private IEnumerable<object> VersionRows(string query)
@@ -328,7 +388,25 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
         }
 
         var fetch = Uri.UnescapeDataString(query["fetchXml=".Length..]);
-        if (fetch.Contains("sprk_resolutiontype", StringComparison.Ordinal))
+        var number = fetch.Contains("sprk_resolutiontype", StringComparison.Ordinal) ? "rate"
+            : fetch.Contains("aggregate=\"max\"", StringComparison.Ordinal) ? "last"
+            : "open";
+        if (FailedSignalNumbers.Contains(number))
+        {
+            return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "AggregateQueryRecordLimit exceeded");
+        }
+
+        if (number == "last")
+        {
+            LastFiredFetches.Add(fetch);
+            var windowed = fetch.Contains("operator=\"last-x-days\" value=\"90\"", StringComparison.Ordinal);
+            if ((windowed ? RecentSignals : TotalSignals) > AggregateRecordLimit)
+            {
+                return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "AggregateQueryRecordLimit exceeded");
+            }
+        }
+
+        if (number == "rate")
         {
             return Ok(Resolved.Select(r => (object)new Dictionary<string, object?>
             {
@@ -340,7 +418,7 @@ public sealed class OntologyAdminRulesWorld : IDataverseUserClient
             }));
         }
 
-        if (fetch.Contains("aggregate=\"max\"", StringComparison.Ordinal))
+        if (number == "last")
         {
             return Ok(LastFired.Select(l => (object)new Dictionary<string, object?>
             {

@@ -119,9 +119,11 @@ public class OntologyAdminRulesServiceTests
         var response = (await h.Service.ListAsync(default)).Value!;
 
         response.MetricsAvailable.Should().BeTrue();
+        response.MetricsAvailability.Should().Be(new RuleMetricsAvailability(OpenItems: true, LastFired: true, ActionRate: true));
         response.ActionRateWindowDays.Should().Be(90);
+        response.LastFiredWindowDays.Should().Be(90);
         response.MinimumJudged.Should().Be(5);
-        var metrics = response.Rules.Single().Metrics!;
+        var metrics = response.Rules.Single().Metrics;
         metrics.OpenItems.Should().Be(4);
         metrics.LastFiredOn.Should().Be(new DateTime(2026, 10, 15, 8, 30, 0, DateTimeKind.Utc));
         metrics.ActionRate.Should().Be(new RuleActionRate(Acted: 2, Dismissed: 6, Rate: 0.25, TooFewToJudge: false));
@@ -143,10 +145,10 @@ public class OntologyAdminRulesServiceTests
         if (acted > 0) h.World.Resolved.Add(("POL-NAL", version.Id, 100000000, PolicyActionRateService.Acted, acted));
         if (dismissed > 0) h.World.Resolved.Add(("POL-NAL", version.Id, 100000000, PolicyActionRateService.Dismissed, dismissed));
 
-        var metrics = (await h.Service.ListAsync(default)).Value!.Rules.Single().Metrics!;
+        var metrics = (await h.Service.ListAsync(default)).Value!.Rules.Single().Metrics;
 
         metrics.NeedsALook.Should().Be(needsALook);
-        metrics.ActionRate.TooFewToJudge.Should().Be(acted + dismissed < 5);
+        metrics.ActionRate!.TooFewToJudge.Should().Be(acted + dismissed < 5);
         (metrics.ActionRate.Rate is null).Should().Be(acted + dismissed < 5, "no rate is shown below five judged");
     }
 
@@ -162,7 +164,81 @@ public class OntologyAdminRulesServiceTests
 
         result.Outcome.Should().Be(OntologyAdminRulesOutcome.Ok);
         result.Value!.MetricsAvailable.Should().BeFalse();
-        result.Value.Rules.Should().HaveCount(2).And.OnlyContain(r => r.Metrics == null);
+        result.Value.MetricsAvailability.Should().Be(new RuleMetricsAvailability(OpenItems: false, LastFired: false, ActionRate: false));
+        result.Value.Rules.Should().HaveCount(2).And.OnlyContain(r => r.Metrics.OpenItems == null && r.Metrics.ActionRate == null && !r.Metrics.NeedsALook);
+    }
+
+    [Theory]
+    [InlineData("open")]
+    [InlineData("last")]
+    [InlineData("rate")]
+    public async Task List_OneSignalNumberFailing_LeavesTheOtherTwoIntact(string failing)
+    {
+        // An AggregateQueryRecordLimit fault on one number must leave the other two intact (they were all-or-nothing before).
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-ONE");
+        var current = h.World.AddVersion(rule);
+        h.World.OpenSignals[rule.Id] = 4;
+        h.World.LastFired[rule.Id] = new DateTime(2026, 10, 15, 8, 30, 0, DateTimeKind.Utc);
+        h.World.Resolved.Add(("POL-ONE", current.Id, 100000001, PolicyActionRateService.Acted, 2));
+        h.World.Resolved.Add(("POL-ONE", current.Id, 100000001, PolicyActionRateService.Dismissed, 6));
+        h.World.FailedSignalNumbers.Add(failing);
+
+        var result = await h.Service.ListAsync(default);
+
+        result.Outcome.Should().Be(OntologyAdminRulesOutcome.Ok);
+        var response = result.Value!;
+        response.MetricsAvailable.Should().BeFalse();
+        response.MetricsAvailability.Should().Be(new RuleMetricsAvailability(failing != "open", failing != "last", failing != "rate"));
+        var metrics = response.Rules.Single().Metrics;
+        metrics.OpenItems.Should().Be(failing == "open" ? null : 4);
+        metrics.LastFiredOn.Should().Be(failing == "last" ? null : new DateTime(2026, 10, 15, 8, 30, 0, DateTimeKind.Utc));
+        if (failing == "rate")
+        {
+            metrics.ActionRate.Should().BeNull();
+            metrics.NeedsALook.Should().BeFalse("with no rate there is nothing to look at");
+        }
+        else
+        {
+            metrics.ActionRate.Should().Be(new RuleActionRate(Acted: 2, Dismissed: 6, Rate: 0.25, TooFewToJudge: false));
+        }
+    }
+
+    [Fact]
+    public async Task List_LastFired_LooksBackOnlyNinetyDays_SoATenantOverFiftyThousandSignalsStillReadsIt()
+    {
+        // The unwindowed max(createdon) scanned every Signal ever written and failed tenant-wide above 50,000 rows.
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-BIG");
+        h.World.AddVersion(rule);
+        h.World.OpenSignals[rule.Id] = 7;
+        h.World.LastFired[rule.Id] = new DateTime(2026, 10, 15, 8, 30, 0, DateTimeKind.Utc);
+        h.World.TotalSignals = OntologyAdminRulesWorld.AggregateRecordLimit + 10_000;
+        h.World.RecentSignals = 12_000;
+
+        var response = (await h.Service.ListAsync(default)).Value!;
+
+        response.MetricsAvailable.Should().BeTrue("the last-fired aggregate is bounded to the last 90 days");
+        response.Rules.Single().Metrics.LastFiredOn.Should().Be(new DateTime(2026, 10, 15, 8, 30, 0, DateTimeKind.Utc));
+        response.Rules.Single().Metrics.OpenItems.Should().Be(7);
+        h.World.LastFiredFetches.Should().ContainSingle().Which.Should().Contain("operator=\"last-x-days\" value=\"90\"");
+    }
+
+    [Fact]
+    public async Task Get_OneSignalNumberFailing_StillShowsThePageAndTheOtherNumbers()
+    {
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-PAGE");
+        h.World.AddVersion(rule);
+        h.World.OpenSignals[rule.Id] = 4;
+        h.World.FailedSignalNumbers.Add("last");
+
+        var detail = (await h.Service.GetAsync(rule.Id, default)).Value!;
+
+        detail.MetricsAvailable.Should().BeFalse();
+        detail.MetricsAvailability.Should().Be(new RuleMetricsAvailability(OpenItems: true, LastFired: false, ActionRate: true));
+        detail.Summary.Metrics.OpenItems.Should().Be(4);
+        detail.Summary.Metrics.LastFiredOn.Should().BeNull();
     }
 
     [Theory]
@@ -449,6 +525,19 @@ public class OntologyAdminRulesServiceTests
     }
 
     [Fact]
+    public async Task OnOff_AnInactiveRuleThatIsNotRetired_IsRefused_WithTheInactiveWording()
+    {
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-I", configure: p => p.StateCode = 1);
+
+        var result = await h.Service.SetEnabledAsync(rule.Id, true, default);
+
+        result.Outcome.Should().Be(OntologyAdminRulesOutcome.Conflict);
+        result.Detail.Should().Be("An inactive rule cannot be switched.");
+        h.World.WriteCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task OnOff_AnUnresolvedCaller_GetsNoWrite()
     {
         var h = Build();
@@ -520,6 +609,52 @@ public class OntologyAdminRulesServiceTests
         h.World.Order.Should().EndWith(
             [$"PATCH sprk_policies({rule.Id:D})", $"CLOSE {rule.Id:D}"],
             "the rule is Retired BEFORE its Signals are closed (the closure does not check)");
+    }
+
+    [Fact]
+    public async Task Retire_IsConditionalOnTheRowVersionItRead()
+    {
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-V");
+        var read = rule.Version;
+
+        (await h.Service.RetireAsync(rule.Id, "because", default)).Outcome.Should().Be(OntologyAdminRulesOutcome.Ok);
+
+        h.World.ExpectedVersions.Should().Equal(new long?[] { read }, "the PATCH carries the versionnumber just read as its If-Match");
+    }
+
+    [Fact]
+    public async Task Retire_WhenTheRuleChangedSinceItWasRead_Is409_WritesNothing_AndRunsNoClosure()
+    {
+        // Another admin writes the rule between this admin's read and write: Dataverse answers 412.
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-RACE");
+        h.World.BeforePatch = p => p.Version++;
+
+        var result = await h.Service.RetireAsync(rule.Id, "mine", default);
+
+        result.Outcome.Should().Be(OntologyAdminRulesOutcome.Conflict);
+        result.ReasonCode.Should().Be(OntologyAdminRulesService.ChangedSinceRead);
+        result.Detail.Should().Contain("changed since you opened it");
+        h.World.PreconditionFailures.Should().ContainSingle();
+        h.World.WriteCount.Should().Be(0);
+        rule.StatusCode.Should().Be(1, "the loser write never landed");
+        rule.RetiredReason.Should().BeNull();
+        h.ClosureCalls.Should().BeEmpty("the closure runs only after the caller own write succeeded");
+    }
+
+    [Fact]
+    public async Task Retire_WithNoRowVersionRead_WritesNothing()
+    {
+        var h = Build();
+        var rule = h.World.AddPolicy("POL-NOVERSION");
+        h.World.OmitVersionNumber = true;
+
+        var result = await h.Service.RetireAsync(rule.Id, "because", default);
+
+        result.Outcome.Should().Be(OntologyAdminRulesOutcome.Unavailable);
+        h.World.WriteCount.Should().Be(0);
+        h.ClosureCalls.Should().BeEmpty();
     }
 
     [Fact]

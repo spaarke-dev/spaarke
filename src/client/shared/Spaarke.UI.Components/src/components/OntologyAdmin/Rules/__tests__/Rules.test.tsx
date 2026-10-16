@@ -3,7 +3,9 @@
  *
  *  - the service calls the four routes, never throws, and reads a failure whether the fetch THROWS (an ApiError) or RETURNS it;
  *  - the list shows lane, On/Off, version in force and the numbers, and the All / Decide / Do / Needs a look filters narrow it;
- *  - the rule page is read-only: its only controls are On/Off and Retire; a retired rule has neither;
+ *  - the rule page is read-only: its only controls are On/Off and Retire; a retired or otherwise inactive rule has neither;
+ *  - the three Signal numbers are read independently: one that could not be read says so on its own and the others still show;
+ *  - a write that ends in a 503 or a network failure says the change may not have been saved; only a 4xx refusal says nothing changed;
  *  - Retire needs a reason (the button stays disabled), shows what the closure did, and shows a refusal with the rule unchanged;
  *  - tokens only (ADR-021): no colour literal in the sources.
  */
@@ -12,7 +14,7 @@ import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RuleList } from '../RuleList';
@@ -45,10 +47,14 @@ const summary = (over: Partial<RuleSummary> = {}): RuleSummary => ({
   ...over,
 });
 
+const allRead = { openItems: true, lastFired: true, actionRate: true };
+
 const list = (rules: RuleSummary[], over: Partial<RuleListResponse> = {}): RuleListResponse => ({
   rules,
   metricsAvailable: true,
+  metricsAvailability: allRead,
   actionRateWindowDays: 90,
+  lastFiredWindowDays: 90,
   minimumJudged: 5,
   ...over,
 });
@@ -76,12 +82,14 @@ const detail = (over: Partial<RuleDetail> = {}): RuleDetail => ({
   ],
   history: [{ when: '2026-10-14T17:30:00Z', by: 'Ada Author', event: 'Version 2 authored' }],
   metricsAvailable: true,
+  metricsAvailability: allRead,
   actionRateWindowDays: 90,
+  lastFiredWindowDays: 90,
   minimumJudged: 5,
   ...over,
 });
 
-const fail = (status: number | null, message = 'No.') => ({ ok: false as const, status, reasonCode: null, message });
+const fail = (status: number | null, message = 'No.') => ({ ok: false as const, status, reasonCode: null, message, outcomeUnknown: false });
 
 const makeService = (over: Partial<OntologyRulesService> = {}): OntologyRulesService => ({
   list: jest.fn(async () => ({ ok: true as const, data: list([summary()]) })),
@@ -148,19 +156,59 @@ describe('createOntologyRulesService', () => {
     expect(answer.ok ? '' : answer.message).toContain('could not be matched');
   });
 
-  it('shows the validation message for a 400 and says "nothing was changed" for a network failure', async () => {
+  it('shows the validation message for a 400, and a read that cannot be reached says so without claiming anything about changes', async () => {
     const validation = createOntologyRulesService({
       fetch: jest.fn(async () => bad(400, { errors: { reason: ['A reason is required to retire a rule.'] } })),
       baseUrl: 'https://bff.example',
     });
     const network = createOntologyRulesService({ fetch: jest.fn(async () => Promise.reject(new TypeError('offline'))), baseUrl: 'https://bff.example' });
 
-    expect((await validation.retire('abc', '')).ok).toBe(false);
     const v = await validation.retire('abc', '');
+    expect(v).toMatchObject({ ok: false, outcomeUnknown: false });
     expect(v.ok ? '' : v.message).toBe('A reason is required to retire a rule.');
     const n = await network.list();
-    expect(n).toMatchObject({ ok: false, status: null });
-    expect(n.ok ? '' : n.message).toContain('Nothing was changed');
+    expect(n).toMatchObject({ ok: false, status: null, outcomeUnknown: false });
+    expect(n.ok ? '' : n.message).toBe('The rules could not be reached. Try again.');
+  });
+
+  it.each([
+    ['a 503', () => Promise.resolve(bad(503, { reasonCode: 'ontology.admin.rules_unavailable' }))],
+    ['a 500', () => Promise.resolve(bad(500, null))],
+    ['a network failure', () => Promise.reject(new TypeError('offline'))],
+    ['a thrown 503 ApiError', () => Promise.reject(Object.assign(new Error('Service Unavailable'), { name: 'ApiError', status: 503, problemDetails: {} }))],
+    ['an unreadable success body', () => Promise.resolve({ ok: true, status: 200, json: async () => Promise.reject(new SyntaxError('bad')) } as unknown as Response)],
+  ])('a WRITE that ends in %s may or may not have been saved, and says so (never "Nothing was changed")', async (_name, respond) => {
+    const service = createOntologyRulesService({ fetch: jest.fn(respond), baseUrl: 'https://bff.example' });
+
+    for (const answer of [await service.setEnabled('abc', false), await service.retire('abc', 'because')]) {
+      expect(answer).toMatchObject({ ok: false, outcomeUnknown: true, message: 'The change may not have been saved. Reload to check.' });
+    }
+  });
+
+  it.each([
+    [400, { errors: { reason: ['A reason is required to retire a rule.'] } }],
+    [403, { reasonCode: 'ontology.admin.forbidden' }],
+    [404, { reasonCode: 'ontology.rule.not_found' }],
+    [409, { detail: 'The rule has changed since you opened it.' }],
+  ])('a WRITE refused with a %s proves no write happened, so it is not an unknown outcome', async (status, problem) => {
+    const service = createOntologyRulesService({ fetch: jest.fn(async () => bad(status, problem)), baseUrl: 'https://bff.example' });
+
+    const answer = await service.setEnabled('abc', false);
+
+    expect(answer).toMatchObject({ ok: false, status, outcomeUnknown: false });
+    expect(answer.ok ? '' : answer.message).not.toContain('may not have been saved');
+    if (status === 403 || status === 404) {
+      expect(answer.ok ? '' : answer.message).toContain('Nothing was changed');
+    }
+  });
+
+  it('a READ that ends in a 503 is not a write: it never claims a change may have been saved', async () => {
+    const service = createOntologyRulesService({ fetch: jest.fn(async () => bad(503, null)), baseUrl: 'https://bff.example' });
+
+    const answer = await service.get('abc');
+
+    expect(answer).toMatchObject({ ok: false, status: 503, outcomeUnknown: false });
+    expect(answer.ok ? '' : answer.message).toBe('The rules could not be reached. Try again.');
   });
 
   it('never rejects, even for an unreadable success body', async () => {
@@ -218,12 +266,51 @@ describe('RuleList', () => {
     expect(shown()).toHaveLength(4);
   });
 
-  it('says so when the numbers could not be read, and still lists every rule', async () => {
-    const stripped = rules.map(r => ({ ...r, metrics: null }));
-    renderUi(<RuleList service={makeService({ list: jest.fn(async () => ({ ok: true as const, data: list(stripped, { metricsAvailable: false }) })) })} onOpen={jest.fn()} />);
+  it('says so when none of the numbers could be read, and still lists every rule', async () => {
+    const none = { openItems: false, lastFired: false, actionRate: false };
+    const stripped = rules.map(r => ({ ...r, metrics: { openItems: null, lastFiredOn: null, actionRate: null, needsALook: false } }));
+    renderUi(
+      <RuleList
+        service={makeService({ list: jest.fn(async () => ({ ok: true as const, data: list(stripped, { metricsAvailable: false, metricsAvailability: none }) })) })}
+        onOpen={jest.fn()}
+      />
+    );
 
-    expect(await screen.findByTestId('rules-metrics-unavailable')).toBeInTheDocument();
+    expect(await screen.findByTestId('rules-metrics-unavailable')).toHaveTextContent('open items, last fired, action rate');
     expect(screen.getByTestId('rule-row-POL-DECIDE')).toBeInTheDocument();
+    expect(within(screen.getByTestId('rule-row-POL-DECIDE')).getByTestId('rule-open-items')).toHaveTextContent('Could not be read');
+  });
+
+  it('one number that could not be read shows its own state and leaves the other two showing', async () => {
+    const metricsWithoutLastFired = { ...metrics(), lastFiredOn: null };
+    const partial = rules.map(r => ({ ...r, metrics: metricsWithoutLastFired }));
+    renderUi(
+      <RuleList
+        service={makeService({
+          list: jest.fn(async () => ({
+            ok: true as const,
+            data: list(partial, { metricsAvailable: false, metricsAvailability: { openItems: true, lastFired: false, actionRate: true } }),
+          })),
+        })}
+        onOpen={jest.fn()}
+      />
+    );
+
+    const row = await screen.findByTestId('rule-row-POL-DECIDE');
+    expect(within(row).getByTestId('rule-last-fired')).toHaveTextContent('Could not be read');
+    expect(within(row).getByTestId('rule-open-items')).toHaveTextContent('2');
+    expect(within(row).getByTestId('rule-action-rate')).toHaveTextContent('63% (5 of 8)');
+    expect(screen.getByTestId('rules-metrics-unavailable')).toHaveTextContent('last fired');
+    expect(screen.getByTestId('rules-metrics-unavailable')).not.toHaveTextContent('open items');
+  });
+
+  it('labels last fired with its window, and a rule with none in the window says so rather than "never"', async () => {
+    const quiet = [summary({ policyId: 'p9', code: 'POL-QUIET', metrics: metrics({ lastFiredOn: null }) })];
+    renderUi(<RuleList service={makeService({ list: jest.fn(async () => ({ ok: true as const, data: list(quiet) })) })} onOpen={jest.fn()} />);
+
+    expect(await screen.findByRole('columnheader', { name: 'Last fired (in the last 90 days)' })).toBeInTheDocument();
+    expect(screen.getByTestId('rule-last-fired')).toHaveTextContent('None in the last 90 days');
+    expect(screen.getByTestId('rule-last-fired')).not.toHaveTextContent('Never');
   });
 
   it('shows an error with a retry, never an empty list, when the rules cannot be read', async () => {
@@ -235,6 +322,29 @@ describe('RuleList', () => {
     expect(screen.queryByTestId('rules-list-empty')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('rule-row-POL-DECIDE')).toBeInTheDocument();
+  });
+
+  it('is a real table: each rule is a row of cells, with a labelled button that opens it from the keyboard', async () => {
+    const onOpen = jest.fn();
+    const user = userEvent.setup();
+    renderUi(<RuleList service={makeService({ list: jest.fn(async () => ({ ok: true as const, data: list(rules) })) })} onOpen={onOpen} />);
+
+    const table = await screen.findByRole('table', { name: 'Rules' });
+    const row = within(table).getByTestId('rule-row-POL-DO');
+    expect(row.tagName).toBe('TR');
+    expect(within(table).getAllByRole('row')).toContain(row);
+    expect(within(row).getAllByRole('cell')).toHaveLength(7);
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(7);
+    // No button is a row, and no row is a button: the activation is the labelled button inside the first cell.
+    expect(row.tagName).not.toBe('BUTTON');
+    const open = within(row).getByRole('button', { name: 'Open POL-DO' });
+
+    await user.tab(); // the filter tabs
+    open.focus();
+    await user.keyboard('{Enter}');
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith('p2');
   });
 
   it('opens the rule page for the clicked row', async () => {
@@ -316,6 +426,51 @@ describe('RulePage', () => {
     expect(await screen.findByTestId('rule-retired-note')).toHaveTextContent('Replaced by POL-NEW');
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByTestId('rule-retire-button')).not.toBeInTheDocument();
+  });
+
+  it('an inactive rule that is not retired (statecode 1) has neither On/Off nor Retire either', async () => {
+    const inactive = detail({ summary: summary({ state: 'Inactive', enabled: false }), behaviour: { ...detail().behaviour, state: 'Inactive' } });
+    renderUi(<RulePage service={makeService({ get: jest.fn(async () => ({ ok: true as const, data: inactive })) })} policyId="p1" onBack={jest.fn()} />);
+
+    expect(await screen.findByTestId('rule-inactive-note')).toHaveTextContent('inactive');
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rule-retire-button')).not.toBeInTheDocument();
+  });
+
+  it('labels last fired with its window, and one unreadable number shows its own state while the others show', async () => {
+    const partial = detail({
+      metricsAvailable: false,
+      metricsAvailability: { openItems: true, lastFired: false, actionRate: true },
+      summary: summary({ metrics: metrics({ lastFiredOn: null }) }),
+    });
+    renderUi(<RulePage service={makeService({ get: jest.fn(async () => ({ ok: true as const, data: partial })) })} policyId="p1" onBack={jest.fn()} />);
+
+    const numbers = await screen.findByRole('region', { name: 'Numbers' });
+    expect(numbers).toHaveTextContent('Last fired (in the last 90 days)');
+    expect(numbers).toHaveTextContent('Could not be read');
+    expect(numbers).toHaveTextContent('Open items');
+    expect(numbers).toHaveTextContent('63% (5 of 8)');
+    expect(within(numbers).getByTestId('rule-metrics-unavailable')).toHaveTextContent('last fired');
+  });
+
+  it('after a write whose outcome is unknown, the page says the change may not have been saved', async () => {
+    const service = makeService({
+      setEnabled: jest.fn(async () => ({
+        ok: false as const,
+        status: 503,
+        reasonCode: null,
+        message: 'The change may not have been saved. Reload to check.',
+        outcomeUnknown: true,
+      })),
+    });
+    const user = userEvent.setup();
+    renderUi(<RulePage service={service} policyId="p1" onBack={jest.fn()} />);
+
+    await user.click(await screen.findByRole('switch'));
+
+    const error = await screen.findByTestId('rule-action-error');
+    expect(error).toHaveTextContent('may not have been saved');
+    expect(error).not.toHaveTextContent('Nothing was changed');
   });
 
   it('a 404 is an error with the way back, not a blank page', async () => {

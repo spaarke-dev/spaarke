@@ -1846,28 +1846,29 @@ public partial class RouteAuthorizationGuardTests
             new[] { "OntologyAdminRulesService.ListAsync" },
             "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.ListAsync (OntologyAdminRulesEndpoints.cs:83). It lists the "
             + "policies, their version rows and the user-visible Signal numbers through IDataverseUserClient AS THE CALLER (GetRowsAsync, "
-            + "OntologyAdminRulesService.cs:414), each policy query carrying the Ontology-only domain condition (:136, :146); a caller no "
-            + "user context names is the single 403 (Classify, :460), a fault 503, never a shorter list (:149-153). Takes no id."),
+            + "OntologyAdminRulesService.cs:441), each policy query carrying the Ontology-only domain condition (:142, :152); a caller no "
+            + "user context names is the single 403 (Classify, :487), a fault 503, never a shorter list (:153-162). Takes no id."),
         new HandlerDecision("GET /api/v1/ontology/admin/rules/{policyId:guid}", "GetRuleAsync", "IDataverseUserClient",
             new[] { "OntologyAdminRulesService.GetAsync" },
             "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.GetAsync (OntologyAdminRulesEndpoints.cs:89), whose first act "
-            + "is ReadPolicyAsync (OntologyAdminRulesService.cs:194): the policy by id through IDataverseUserClient AS THE CALLER with the "
-            + "Ontology-only domain condition (:449). A rule the caller cannot read, that does not exist or is a Billing/Docketing rule is the "
-            + "uniform 404 before the versions, names or numbers are read (:195-198)."),
+            + "is ReadPolicyAsync (OntologyAdminRulesService.cs:202): the policy by id through IDataverseUserClient AS THE CALLER with the "
+            + "Ontology-only domain condition (:476). A rule the caller cannot read, that does not exist or is a Billing/Docketing rule is the "
+            + "uniform 404 before the versions, names or numbers are read (:203-206)."),
         new HandlerDecision("PUT /api/v1/ontology/admin/rules/{policyId:guid}/enabled", "SetRuleEnabledAsync", "IDataverseUserClient",
             new[] { "OntologyAdminRulesService.SetEnabledAsync" },
             "Ontology task 100 (D-22): the handler's only I/O is OntologyAdminRulesService.SetEnabledAsync (OntologyAdminRulesEndpoints.cs:96). "
-            + "It reads the policy by id AS THE CALLER with the Ontology-only domain condition (OntologyAdminRulesService.cs:272, :449; a missing, "
-            + "invisible or Billing rule is the uniform 404 with no write), refuses a retired rule (:276), then PATCHes sprk_enabled through "
-            + "IDataverseUserClient (WriteAsync, :385) so Dataverse enforces the Ontology Administrator role: a refusal is 403 (:396-399). "
+            + "It reads the policy by id AS THE CALLER with the Ontology-only domain condition (OntologyAdminRulesService.cs:281, :476; a missing, "
+            + "invisible or Billing rule is the uniform 404 with no write), refuses an inactive rule (:287-291), then PATCHes sprk_enabled through "
+            + "IDataverseUserClient (WriteAsync, :294, :410-412) so Dataverse enforces the Ontology Administrator role: a refusal is 403 (:425-427). "
             + "The PATCH is issued even when the value is unchanged, so Dataverse decides every call."),
         new HandlerDecision("POST /api/v1/ontology/admin/rules/{policyId:guid}/retire", "RetireRuleAsync", "IDataverseUserClient",
             new[] { "OntologyAdminRulesService.RetireAsync" },
             "Ontology task 100 (D-22, FR-16): the handler's only I/O is OntologyAdminRulesService.RetireAsync (OntologyAdminRulesEndpoints.cs:103). "
-            + "A missing reason is refused before any I/O (:303-313). It reads the policy by id AS THE CALLER with the Ontology-only domain "
-            + "condition (OntologyAdminRulesService.cs:315, :449; uniform 404, no write), PATCHes statecode/statuscode/sprk_retiredreason through "
-            + "IDataverseUserClient (WriteAsync, :333, :385; a Console User is refused by Dataverse, 403), and ONLY THEN calls task 033's "
-            + "PolicyRetired closure (CloseOpenSignalsAsync, :341): a refused write returns before the closure (:334-338)."),
+            + "A missing reason is refused before any I/O (:311-322). It reads the policy by id AS THE CALLER with the Ontology-only domain "
+            + "condition (OntologyAdminRulesService.cs:324, :476; uniform 404, no write), PATCHes statecode/statuscode/sprk_retiredreason through "
+            + "IDataverseUserClient conditional on the row version it read (WriteAsync, :350, :410-411; a concurrent change is a 412, returned as a 409 "
+            + "with no closure, :427; a Console User is refused by Dataverse, 403), and ONLY THEN calls task 033's PolicyRetired closure "
+            + "(CloseOpenSignalsAsync, :361): a refused write returns before the closure (:351-358)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

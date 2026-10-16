@@ -225,6 +225,24 @@ public class OntologyAdminRulesEndpointTests : IClassFixture<OntologyAdminRulesT
     }
 
     [Fact]
+    public async Task Retire_WhenTheRuleChangedSinceItWasOpened_Is409_WithNoWriteAndNoClosure()
+    {
+        var rule = _fixture.World.AddPolicy("POL-RACE-ROUTE");
+        _fixture.World.BeforePatch = p => p.Version++; // another admin writes between this admin's read and write
+
+        var response = await Client().PostAsync($"{Base}/{rule.Id:D}/retire", Json("{\"reason\":\"mine\"}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        var body = await BodyOf(response);
+        body.GetProperty("reasonCode").GetString().Should().Be("ontology.rule.changed_since_read");
+        body.GetProperty("detail").GetString().Should().Contain("changed since you opened it");
+        _fixture.World.PreconditionFailures.Should().ContainSingle();
+        _fixture.World.WriteCount.Should().Be(0);
+        rule.StatusCode.Should().Be(1);
+        _fixture.ClosureCalls.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AFaultReadingTheRules_Is503_NeverAShorterList()
     {
         _fixture.World.ReadError = DataverseUserClientErrorCodes.ServiceError;
@@ -312,7 +330,7 @@ public class OntologyAdminRulesEndpointTests : IClassFixture<OntologyAdminRulesT
 }
 
 /// <summary>The BFF with only the caller-identity client, the Signal closure and the inbound token substituted.</summary>
-public sealed class OntologyAdminRulesTestFixture : WorkspaceTestFixture
+public class OntologyAdminRulesTestFixture : WorkspaceTestFixture
 {
     public OntologyAdminRulesWorld World { get; private set; } = new();
 
@@ -340,13 +358,7 @@ public sealed class OntologyAdminRulesTestFixture : WorkspaceTestFixture
             services.RemoveAll<IDataverseUserClient>();
             services.AddScoped<IDataverseUserClient>(_ => World);
 
-            services.RemoveAll<PolicyRetiredClosure>();
-            services.AddScoped<PolicyRetiredClosure>(_ => (policyId, _) =>
-            {
-                ClosureCalls.Add(policyId);
-                World.RecordClosure(policyId);
-                return Task.FromResult(new SignalClosureOutcome(Closed: 3, ChangedSinceRead: 0, Failed: 0));
-            });
+            ConfigureClosure(services);
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, CallerTokenHandler>(CallerTokenHandler.SchemeName, _ => { });
@@ -355,6 +367,22 @@ public sealed class OntologyAdminRulesTestFixture : WorkspaceTestFixture
                 o.DefaultAuthenticateScheme = CallerTokenHandler.SchemeName;
                 o.DefaultChallengeScheme = CallerTokenHandler.SchemeName;
             });
+        });
+    }
+
+    /// <summary>
+    /// How Retire's closure is wired. Here the delegate is substituted (it records the call and answers a fixed outcome); the real-closure
+    /// fixture overrides this to keep the production <c>PolicyRetiredClosure</c> registration and substitute only the Signal writer's
+    /// Dataverse clients.
+    /// </summary>
+    protected virtual void ConfigureClosure(IServiceCollection services)
+    {
+        services.RemoveAll<PolicyRetiredClosure>();
+        services.AddScoped<PolicyRetiredClosure>(_ => (policyId, _) =>
+        {
+            ClosureCalls.Add(policyId);
+            World.RecordClosure(policyId);
+            return Task.FromResult(new SignalClosureOutcome(Closed: 3, ChangedSinceRead: 0, Failed: 0));
         });
     }
 

@@ -7,7 +7,7 @@
  * user without the Spaarke Ontology Administrator role; a refusal is shown here and the rule is left as it was.
  *
  * Off stops the rule from being evaluated and leaves its open items for the next pass; Retire closes them at once and needs a reason.
- * A retired rule shows its reason and has neither control. A condition or plan the BFF refused to describe is shown as that refusal,
+ * A retired rule shows its reason, and a rule that is inactive for any reason has neither control (a switch there would be refused). A condition or plan the BFF refused to describe is shown as that refusal,
  * never as a guess. Fluent v9 tokens only (ADR-021).
  */
 
@@ -25,7 +25,16 @@ import {
 import { ArrowLeftRegular } from '@fluentui/react-icons';
 import { StatusBadge } from '../../StatusBadge';
 import { RetireRuleDialog } from './RetireRuleDialog';
-import { describeActionRate, describeLastFired, formatWhen, severityTone, stateTone } from './ruleDisplay';
+import {
+  describeActionRate,
+  describeLastFired,
+  describeOpenItems,
+  formatWhen,
+  lastFiredLabel,
+  severityTone,
+  stateTone,
+  unreadNumbers,
+} from './ruleDisplay';
 import type { OntologyRulesService, RuleDetail, RuleRetiredResult } from './rulesService';
 
 export interface RulePageProps {
@@ -216,6 +225,8 @@ export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack })
 
   const { summary, condition, wording, plan, scope, noise, behaviour, versions, history } = detail;
   const retired = summary.state === 'Retired';
+  // Retired, or inactive for any other reason (statecode 1): the BFF refuses a switch there (409), so the controls are not offered.
+  const inactive = summary.state === 'Retired' || summary.state === 'Inactive';
 
   return (
     <div className={styles.root} data-testid="ontology-rule-page">
@@ -233,7 +244,7 @@ export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack })
           <StatusBadge label={summary.state} tone={stateTone(summary.state)} />
           <StatusBadge label={summary.severity} tone={severityTone(summary.severity)} />
         </div>
-        {retired ? null : (
+        {inactive ? null : (
           <div className={styles.controls}>
             <Switch
               label={summary.enabled ? 'On' : 'Off'}
@@ -261,6 +272,10 @@ export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack })
             This rule is retired{behaviour.retiredReason ? `: ${behaviour.retiredReason}` : '.'}
           </MessageBarBody>
         </MessageBar>
+      ) : inactive ? (
+        <MessageBar intent="info" data-testid="rule-inactive-note">
+          <MessageBarBody>This rule is inactive, so it cannot be switched or retired here.</MessageBarBody>
+        </MessageBar>
       ) : (
         <Text size={200} className={styles.muted}>
           Off stops the rule; its open items close at the next pass. Retire closes them now and needs a reason.
@@ -269,17 +284,21 @@ export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack })
 
       <section className={styles.section} aria-label="Numbers">
         <Text weight="semibold">Numbers</Text>
-        {detail.metricsAvailable ? (
-          <Facts
-            rows={[
-              ['Open items', summary.metrics === null ? '-' : String(summary.metrics.openItems)],
-              ['Last fired', describeLastFired(summary.metrics)],
-              [`Action rate (${detail.actionRateWindowDays} days, this version)`, describeActionRate(summary.metrics, detail.minimumJudged)],
-            ]}
-          />
-        ) : (
-          <Text className={styles.muted}>These numbers could not be read just now.</Text>
+        {detail.metricsAvailable ? null : (
+          <Text size={200} className={styles.muted} data-testid="rule-metrics-unavailable">
+            {`These numbers could not be read just now: ${unreadNumbers(detail.metricsAvailability).join(', ')}.`}
+          </Text>
         )}
+        <Facts
+          rows={[
+            ['Open items', describeOpenItems(summary.metrics, detail.metricsAvailability)],
+            [lastFiredLabel(detail.lastFiredWindowDays), describeLastFired(summary.metrics, detail.metricsAvailability, detail.lastFiredWindowDays)],
+            [
+              `Action rate (${detail.actionRateWindowDays} days, this version)`,
+              describeActionRate(summary.metrics, detail.minimumJudged, detail.metricsAvailability),
+            ],
+          ]}
+        />
       </section>
 
       <section className={styles.section} aria-label="Condition">

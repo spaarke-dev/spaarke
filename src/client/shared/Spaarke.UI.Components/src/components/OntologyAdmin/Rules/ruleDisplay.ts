@@ -2,11 +2,12 @@
  * ruleDisplay - the words and tones the Rules list and rule page share (task 100; #43, #44).
  *
  * The BFF sends option values as the labels the Console shows; this maps them onto the generic StatusBadge tones and formats the
- * few numbers #44 allows: open items, last fired and the action rate over the version in force (H-7).
+ * few numbers #44 allows: open items, last fired and the action rate over the version in force (H-7). The three are read
+ * independently, so each has its own "could not be read" state; a number that could not be read is never shown as zero or never.
  */
 
 import type { StatusBadgeTone } from '../../StatusBadge';
-import type { RuleMetrics, RuleSummary } from './rulesService';
+import type { RuleMetrics, RuleMetricsAvailability, RuleSummary } from './rulesService';
 
 export type RuleFilter = 'all' | 'decide' | 'do' | 'needsALook';
 
@@ -27,7 +28,7 @@ export function matchesFilter(rule: RuleSummary, filter: RuleFilter): boolean {
     case 'do':
       return rule.lane === 'Do';
     case 'needsALook':
-      return rule.metrics?.needsALook === true;
+      return rule.metrics.needsALook;
   }
 }
 
@@ -53,10 +54,32 @@ export function severityTone(severity: string): StatusBadgeTone {
   }
 }
 
-/** "62% (5 of 8)", or "Too few to judge" below the minimum, or a dash when the numbers could not be read. */
-export function describeActionRate(metrics: RuleMetrics | null, minimumJudged: number): string {
-  if (metrics === null) {
-    return '-';
+/** What a number that could not be read says (its own state, not zero and not "never"). */
+export const COULD_NOT_BE_READ = 'Could not be read';
+
+/** The names of the numbers that could not be read, for the banner. */
+export function unreadNumbers(availability: RuleMetricsAvailability): string[] {
+  const names: string[] = [];
+  if (!availability.openItems) {
+    names.push('open items');
+  }
+  if (!availability.lastFired) {
+    names.push('last fired');
+  }
+  if (!availability.actionRate) {
+    names.push('action rate');
+  }
+  return names;
+}
+
+export function describeOpenItems(metrics: RuleMetrics, availability: RuleMetricsAvailability): string {
+  return availability.openItems && metrics.openItems !== null ? String(metrics.openItems) : COULD_NOT_BE_READ;
+}
+
+/** "62% (5 of 8)", or "Too few to judge" below the minimum, or "Could not be read". */
+export function describeActionRate(metrics: RuleMetrics, minimumJudged: number, availability: RuleMetricsAvailability): string {
+  if (!availability.actionRate || metrics.actionRate === null) {
+    return COULD_NOT_BE_READ;
   }
   const { acted, dismissed, rate, tooFewToJudge } = metrics.actionRate;
   if (tooFewToJudge || rate === null) {
@@ -74,9 +97,15 @@ export function formatWhen(iso: string | null): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
-export function describeLastFired(metrics: RuleMetrics | null): string {
-  if (metrics === null) {
-    return '-';
+/** The newest Signal in the window, or "None in the last N days" (the window is part of the answer), or "Could not be read". */
+export function describeLastFired(metrics: RuleMetrics, availability: RuleMetricsAvailability, windowDays: number): string {
+  if (!availability.lastFired) {
+    return COULD_NOT_BE_READ;
   }
-  return metrics.lastFiredOn === null ? 'Never' : formatWhen(metrics.lastFiredOn);
+  return metrics.lastFiredOn === null ? `None in the last ${windowDays} days` : formatWhen(metrics.lastFiredOn);
+}
+
+/** The label of the last-fired column or fact: the window is always stated, because the number looks back only that far. */
+export function lastFiredLabel(windowDays: number): string {
+  return `Last fired (in the last ${windowDays} days)`;
 }

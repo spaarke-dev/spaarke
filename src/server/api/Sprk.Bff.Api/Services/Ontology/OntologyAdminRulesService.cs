@@ -30,8 +30,10 @@ namespace Sprk.Bff.Api.Services.Ontology;
 /// once; a Failed or PolicyFailures count, or a re-run still incomplete, is reported to the admin as incomplete (the nightly job closes
 /// the rest within a day). A closure that throws is reported as unavailable: the rule IS retired.</para>
 /// <para><b>Numbers (#44).</b> Open items, last fired and the action rate per version in force (H-7) are read as the caller, so the
-/// counts cover the Signals the caller may read and a secure family's items are never inferable from a total (D-123). If they cannot
-/// be read the rules are still listed with <c>metricsAvailable</c> false.</para>
+/// counts cover the Signals the caller may read and a secure family's items are never inferable from a total (D-123). The three are
+/// read INDEPENDENTLY: one that cannot be read (a fault, or Dataverse's 50,000-row aggregate limit, <c>AggregateQueryRecordLimit</c>) is
+/// shown as "could not be read" on its own and never blanks the other two; the rules are always listed. Last fired looks back
+/// <see cref="LastFiredWindowDays"/> days (the action rate's window) so its aggregate scans a bounded set, not every Signal ever written.</para>
 /// <para>§11. <i>Existing</i>: the model-driven app is read-only (D-22) and no route read or wrote <c>sprk_policy</c> for
 /// administration. <i>Extension</i>: the closure, the describer, the plan resolver and the action rate are reused as they are; this
 /// class only composes them. <i>Cost of doing nothing</i>: a rule cannot be switched or retired with a reason and an immediate
@@ -48,6 +50,9 @@ public sealed class OntologyAdminRulesService
     /// <summary>One page of policies; a result this long is refused rather than shown as the whole list.</summary>
     internal const int MaxPolicies = 1000;
 
+    /// <summary>How far back the last-fired number looks: a bounded aggregate, never every Signal ever written.</summary>
+    public const int LastFiredWindowDays = PolicyActionRateService.WindowDays;
+
     internal const int StateActive = 0;
     internal const int StatusRetired = 100000000;
 
@@ -56,6 +61,7 @@ public sealed class OntologyAdminRulesService
     internal const string EnabledRequired = "ontology.rule.enabled_required";
     internal const string AlreadyRetired = "ontology.rule.already_retired";
     internal const string NotActive = "ontology.rule.not_active";
+    internal const string ChangedSinceRead = "ontology.rule.changed_since_read";
 
     private const string PolicySet = "sprk_policies";
     private const string VersionSet = "sprk_policyversions";
@@ -185,7 +191,9 @@ public sealed class OntologyAdminRulesService
         }
 
         return OntologyAdminRulesResult<RuleListResponse>.Ok(
-            new RuleListResponse(rules, metrics is not null, PolicyActionRateService.WindowDays, PolicyActionRateService.MinimumJudged));
+            new RuleListResponse(
+                rules, metrics.Availability.All, metrics.Availability, PolicyActionRateService.WindowDays, LastFiredWindowDays,
+                PolicyActionRateService.MinimumJudged));
     }
 
     /// <summary>One rule's page: condition in words and formal form, wording, plan, scope, noise, behaviour, versions, change history.</summary>
@@ -253,14 +261,15 @@ public sealed class OntologyAdminRulesService
         return OntologyAdminRulesResult<RuleDetailResponse>.Ok(new RuleDetailResponse(
             summary, condition, wording, plan, scope, noise, behaviour, versionViews,
             BuildHistory(policy, versionViews, names),
-            metrics is not null, PolicyActionRateService.WindowDays, PolicyActionRateService.MinimumJudged));
+            metrics.Availability.All, metrics.Availability, PolicyActionRateService.WindowDays, LastFiredWindowDays,
+            PolicyActionRateService.MinimumJudged));
     }
 
     // ================================================================================================================
     // Writes (as the caller)
     // ================================================================================================================
 
-    /// <summary>On/Off: sets <c>sprk_enabled</c> and nothing else. A Retired (or Inactive) rule cannot be switched.</summary>
+    /// <summary>On/Off: sets <c>sprk_enabled</c> and nothing else. An inactive rule (Retired or otherwise) cannot be switched.</summary>
     public async Task<OntologyAdminRulesResult<RuleEnabledResult>> SetEnabledAsync(Guid policyId, bool? enabled, CancellationToken ct)
     {
         if (enabled is null)
@@ -278,11 +287,11 @@ public sealed class OntologyAdminRulesService
         if (Int(found.Row, "statecode") is { } state && state != StateActive)
         {
             return OntologyAdminRulesResult<RuleEnabledResult>.Fail(
-                OntologyAdminRulesOutcome.Conflict, NotActive, "A retired rule cannot be switched on or off.");
+                OntologyAdminRulesOutcome.Conflict, NotActive, "An inactive rule cannot be switched.");
         }
 
         var body = JsonSerializer.Serialize(new Dictionary<string, object?> { ["sprk_enabled"] = enabled.Value });
-        var write = await WriteAsync(policyId, body, ct).ConfigureAwait(false);
+        var write = await WriteAsync(policyId, body, expectedVersion: null, ct).ConfigureAwait(false);
         if (write is not null)
         {
             return OntologyAdminRulesResult<RuleEnabledResult>.Fail(write.Value);
@@ -312,7 +321,7 @@ public sealed class OntologyAdminRulesService
                 OntologyAdminRulesOutcome.Invalid, ReasonTooLong, $"The reason must be {MaxReasonLength} characters or fewer.");
         }
 
-        var found = await ReadPolicyAsync(policyId, "sprk_policyid,sprk_policycode,statecode,statuscode", ct).ConfigureAwait(false);
+        var found = await ReadPolicyAsync(policyId, "sprk_policyid,sprk_policycode,statecode,statuscode,versionnumber", ct).ConfigureAwait(false);
         if (found.Failure is { } failure)
         {
             return OntologyAdminRulesResult<RuleRetiredResult>.Fail(failure);
@@ -324,17 +333,28 @@ public sealed class OntologyAdminRulesService
                 OntologyAdminRulesOutcome.Conflict, AlreadyRetired, "The rule is already retired.");
         }
 
+        // The Retire is conditional on the row version just read, so two admins retiring at once cannot both win (the loser would
+        // overwrite the winner's reason and close the Signals a second time). No version read means no safe write: nothing is written.
+        if (Long(found.Row, "versionnumber") is not { } version)
+        {
+            _logger.LogWarning("Ontology admin rules: policy {PolicyCode} was read without a versionnumber; nothing was written.", Str(found.Row, "sprk_policycode"));
+            return OntologyAdminRulesResult<RuleRetiredResult>.Fail(OntologyAdminRulesOutcome.Unavailable);
+        }
+
         var body = JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["statecode"] = 1,
             ["statuscode"] = StatusRetired,
             ["sprk_retiredreason"] = trimmed,
         });
-        var write = await WriteAsync(policyId, body, ct).ConfigureAwait(false);
+        var write = await WriteAsync(policyId, body, version, ct).ConfigureAwait(false);
         if (write is not null)
         {
             // The rule was not retired: the closure is NOT called (it does not check the state itself).
-            return OntologyAdminRulesResult<RuleRetiredResult>.Fail(write.Value);
+            return write.Value == OntologyAdminRulesOutcome.Conflict
+                ? OntologyAdminRulesResult<RuleRetiredResult>.Fail(
+                    OntologyAdminRulesOutcome.Conflict, ChangedSinceRead, "The rule has changed since you opened it. Reload the rule and check it before retiring.")
+                : OntologyAdminRulesResult<RuleRetiredResult>.Fail(write.Value);
         }
 
         _logger.LogInformation("Ontology admin rules: policy {PolicyCode} retired.", Str(found.Row, "sprk_policycode"));
@@ -376,13 +396,20 @@ public sealed class OntologyAdminRulesService
         }
     }
 
-    /// <summary>The caller's PATCH of one policy. Null when it succeeded, else the outcome to return.</summary>
-    private async Task<OntologyAdminRulesOutcome?> WriteAsync(Guid policyId, string jsonBody, CancellationToken ct)
+    /// <summary>
+    /// The caller's PATCH of one policy. Null when it succeeded, else the outcome to return. With <paramref name="expectedVersion"/> the
+    /// PATCH is conditional on the row still being at that version: Dataverse answers 412 when it moved, returned here as
+    /// <see cref="OntologyAdminRulesOutcome.Conflict"/> with nothing written.
+    /// </summary>
+    private async Task<OntologyAdminRulesOutcome?> WriteAsync(Guid policyId, string jsonBody, long? expectedVersion, CancellationToken ct)
     {
         DataverseUserResponse response;
         try
         {
-            response = await _user.PatchAsync($"{PolicySet}({policyId:D})", jsonBody, ct).ConfigureAwait(false);
+            var path = $"{PolicySet}({policyId:D})";
+            response = expectedVersion is { } version
+                ? await _user.PatchAsync(path, jsonBody, version, ct).ConfigureAwait(false)
+                : await _user.PatchAsync(path, jsonBody, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -397,7 +424,7 @@ public sealed class OntologyAdminRulesService
 
         _logger.LogWarning("Ontology admin rules: the write to policy {PolicyId} was refused ({ErrorCode}, status {Status}).",
             policyId, response.ErrorCode, response.StatusCode);
-        return Classify(response.ErrorCode);
+        return response.StatusCode == 412 ? OntologyAdminRulesOutcome.Conflict : Classify(response.ErrorCode);
     }
 
     // ================================================================================================================
@@ -500,8 +527,16 @@ public sealed class OntologyAdminRulesService
     // Numbers (#44, H-7)
     // ================================================================================================================
 
+    /// <summary>
+    /// The three Signal numbers, each read on its own (a null member is a number that could not be read). Kept apart so one fault
+    /// (a Dataverse error, or the 50,000-row aggregate limit, <c>AggregateQueryRecordLimit</c>) shows as "could not be read" for that
+    /// number only.
+    /// </summary>
     private sealed record Metrics(
-        IReadOnlyList<PolicyActionRate> Rates, IReadOnlyDictionary<Guid, int> Open, IReadOnlyDictionary<Guid, DateTime> LastFired);
+        IReadOnlyList<PolicyActionRate>? Rates, IReadOnlyDictionary<Guid, int>? Open, IReadOnlyDictionary<Guid, DateTime>? LastFired)
+    {
+        public RuleMetricsAvailability Availability => new(Open is not null, LastFired is not null, Rates is not null);
+    }
 
     private const string OpenItemsFetch =
         "<fetch aggregate=\"true\"><entity name=\"sprk_signal\">"
@@ -510,43 +545,62 @@ public sealed class OntologyAdminRulesService
         + "<filter><condition attribute=\"sprk_signalstatus\" operator=\"in\"><value>100000000</value><value>100000001</value></condition></filter>"
         + "</entity></fetch>";
 
-    private const string LastFiredFetch =
+    // Bounded to the last LastFiredWindowDays days. An aggregate over EVERY Signal ever written fails tenant-wide with
+    // AggregateQueryRecordLimit once there are more than 50,000 rows; a window keeps the scan to recent Signals.
+    private static readonly string LastFiredFetch =
         "<fetch aggregate=\"true\"><entity name=\"sprk_signal\">"
         + "<attribute name=\"createdon\" alias=\"last\" aggregate=\"max\"/>"
         + "<attribute name=\"sprk_policy\" alias=\"policy\" groupby=\"true\"/>"
+        + $"<filter><condition attribute=\"createdon\" operator=\"last-x-days\" value=\"{LastFiredWindowDays.ToString(CultureInfo.InvariantCulture)}\"/></filter>"
         + "</entity></fetch>";
 
-    /// <summary>The three Signal reads, all as the caller. Null (and a warning) on any fault: the rules are still shown.</summary>
-    private async Task<Metrics?> ReadMetricsAsync(CancellationToken ct)
+    /// <summary>The three Signal reads, all as the caller, each independent: a fault in one is logged and leaves that number unread; the rules are still shown.</summary>
+    private async Task<Metrics> ReadMetricsAsync(CancellationToken ct)
     {
-        try
-        {
-            var rates = await _rates.GetAsync(ct).ConfigureAwait(false);
+        var rates = await TryReadAsync("action rate", () => _rates.GetAsync(ct), ct).ConfigureAwait(false);
 
-            var open = new Dictionary<Guid, int>();
+        var open = await TryReadAsync("open items", async () =>
+        {
+            var counts = new Dictionary<Guid, int>();
             foreach (var row in await AggregateAsync(OpenItemsFetch, ct).ConfigureAwait(false))
             {
                 if (GuidOf(row, "policy") is { } policy)
                 {
-                    open[policy] = InquiryDispositionService.ReadInt(row, "n");
+                    counts[policy] = InquiryDispositionService.ReadInt(row, "n");
                 }
             }
 
-            var last = new Dictionary<Guid, DateTime>();
+            return (IReadOnlyDictionary<Guid, int>)counts;
+        }, ct).ConfigureAwait(false);
+
+        var last = await TryReadAsync("last fired", async () =>
+        {
+            var newest = new Dictionary<Guid, DateTime>();
             foreach (var row in await AggregateAsync(LastFiredFetch, ct).ConfigureAwait(false))
             {
                 if (GuidOf(row, "policy") is { } policy && Date(row, "last") is { } at)
                 {
-                    last[policy] = at;
+                    newest[policy] = at;
                 }
             }
 
-            return new Metrics(rates, open, last);
+            return (IReadOnlyDictionary<Guid, DateTime>)newest;
+        }, ct).ConfigureAwait(false);
+
+        return new Metrics(rates, open, last);
+    }
+
+    /// <summary>Runs one Signal read; null (and a warning that names the number) when it faults.</summary>
+    private async Task<T?> TryReadAsync<T>(string number, Func<Task<T>> read, CancellationToken ct) where T : class
+    {
+        try
+        {
+            return await read().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Ontology admin rules: the Signal numbers could not be read ({ExceptionType}); the rules are shown without them.",
-                ex.GetType().Name);
+            _logger.LogWarning("Ontology admin rules: the {Number} number could not be read ({ExceptionType}); the rules are shown without it.",
+                number, ex.GetType().Name);
             return null;
         }
     }
@@ -557,31 +611,31 @@ public sealed class OntologyAdminRulesService
         return InquiryDispositionService.ReadRows(response);
     }
 
-    private static RuleMetrics? MetricsFor(JsonElement policy, Guid? versionId, Metrics? metrics)
+    private static RuleMetrics MetricsFor(JsonElement policy, Guid? versionId, Metrics metrics)
     {
-        if (metrics is null)
-        {
-            return null;
-        }
-
         var id = GuidOf(policy, "sprk_policyid") ?? System.Guid.Empty;
         var code = Str(policy, "sprk_policycode") ?? string.Empty;
-        var inVersion = metrics.Rates.Where(r => r.PolicyCode == code && versionId is { } v && r.PolicyVersionId == v).ToList();
-        var rate = new PolicyActionRate(code, versionId, SignalLane.Decide, inVersion.Sum(r => r.Acted), inVersion.Sum(r => r.Dismissed));
-        var actionRate = new RuleActionRate(rate.Acted, rate.Dismissed, rate.Rate, rate.TooFewToJudge);
+
+        RuleActionRate? actionRate = null;
+        if (metrics.Rates is { } rates)
+        {
+            var inVersion = rates.Where(r => r.PolicyCode == code && versionId is { } v && r.PolicyVersionId == v).ToList();
+            var rate = new PolicyActionRate(code, versionId, SignalLane.Decide, inVersion.Sum(r => r.Acted), inVersion.Sum(r => r.Dismissed));
+            actionRate = new RuleActionRate(rate.Acted, rate.Dismissed, rate.Rate, rate.TooFewToJudge);
+        }
 
         return new RuleMetrics(
-            metrics.Open.GetValueOrDefault(id),
-            metrics.LastFired.TryGetValue(id, out var at) ? at : null,
+            metrics.Open is { } open ? open.GetValueOrDefault(id) : null,
+            metrics.LastFired is { } last && last.TryGetValue(id, out var at) ? at : null,
             actionRate,
-            NeedsALook: actionRate.Rate is < 0.5);
+            NeedsALook: actionRate?.Rate is < 0.5);
     }
 
     // ================================================================================================================
     // Shaping
     // ================================================================================================================
 
-    private static RuleSummary Summarize(JsonElement policy, JsonElement? version, Metrics? metrics)
+    private static RuleSummary Summarize(JsonElement policy, JsonElement? version, Metrics metrics)
     {
         var versionId = version is { } v ? GuidOf(v, "sprk_policyversionid") : null;
         var enabled = Bool(policy, "sprk_enabled") ?? false;
@@ -755,6 +809,11 @@ public sealed class OntologyAdminRulesService
     private static int? Int(JsonElement row, string name) =>
         row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)
             ? i
+            : null;
+
+    private static long? Long(JsonElement row, string name) =>
+        row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var l)
+            ? l
             : null;
 
     private static bool? Bool(JsonElement row, string name) =>

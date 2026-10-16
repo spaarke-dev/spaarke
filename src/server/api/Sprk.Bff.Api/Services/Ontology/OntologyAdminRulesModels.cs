@@ -22,7 +22,7 @@ public enum OntologyAdminRulesOutcome
     /// <summary>The request body is not acceptable (no reason, no value). Nothing was read or written.</summary>
     Invalid,
 
-    /// <summary>The rule is in a state that refuses the change (Retired). Nothing was written.</summary>
+    /// <summary>The rule is in a state that refuses the change (inactive or Retired), or it changed since the caller read it. Nothing was written.</summary>
     Conflict,
 
     /// <summary>Dataverse could not be asked or answered with a fault. Never a shorter list.</summary>
@@ -59,11 +59,23 @@ public sealed record RuleRetireRequest(string? Reason);
 /// <summary>A rule's action rate over the version in force (H-7): <c>acted / (acted + dismissed)</c>, 90 days; no rate below 5 judged.</summary>
 public sealed record RuleActionRate(int Acted, int Dismissed, double? Rate, bool TooFewToJudge);
 
-/// <summary>The numbers #44 allows: open items, last fired, action rate. "Needs a look" is a rate below one half.</summary>
-public sealed record RuleMetrics(int OpenItems, DateTime? LastFiredOn, RuleActionRate ActionRate, bool NeedsALook);
+/// <summary>
+/// The numbers #44 allows: open items, last fired, action rate. "Needs a look" is a rate below one half. The three are read
+/// independently (<see cref="RuleMetricsAvailability"/>): a number that could not be read is null here and its flag is false, so one
+/// failing read never blanks the other two. <see cref="LastFiredOn"/> is null both for "never" and for "could not be read" within the
+/// window; the availability flag tells them apart.
+/// </summary>
+/// <param name="LastFiredOn">The newest Signal created for the rule in the last <see cref="OntologyAdminRulesService.LastFiredWindowDays"/> days.</param>
+public sealed record RuleMetrics(int? OpenItems, DateTime? LastFiredOn, RuleActionRate? ActionRate, bool NeedsALook);
+
+/// <summary>Which of the three Signal numbers were read. A false flag means that number is shown as "could not be read", not as zero or never.</summary>
+public sealed record RuleMetricsAvailability(bool OpenItems, bool LastFired, bool ActionRate)
+{
+    public bool All => OpenItems && LastFired && ActionRate;
+}
 
 /// <param name="State">On, Off, Retired or Inactive. Retired wins over the On/Off column.</param>
-/// <param name="Metrics">Null when the Signal numbers could not be read (the response says so); the rule is still listed.</param>
+/// <param name="Metrics">Always present; each number inside is null when it could not be read (the response's availability says which).</param>
 public sealed record RuleSummary(
     Guid PolicyId,
     string Code,
@@ -75,9 +87,17 @@ public sealed record RuleSummary(
     string? Headline,
     string Severity,
     string SubjectType,
-    RuleMetrics? Metrics);
+    RuleMetrics Metrics);
 
-public sealed record RuleListResponse(IReadOnlyList<RuleSummary> Rules, bool MetricsAvailable, int ActionRateWindowDays, int MinimumJudged);
+/// <param name="MetricsAvailable">True only when all three numbers were read (<see cref="RuleMetricsAvailability.All"/>).</param>
+/// <param name="LastFiredWindowDays">The window the last-fired number looks back over (its aggregate is bounded by Dataverse's 50,000-row limit).</param>
+public sealed record RuleListResponse(
+    IReadOnlyList<RuleSummary> Rules,
+    bool MetricsAvailable,
+    RuleMetricsAvailability MetricsAvailability,
+    int ActionRateWindowDays,
+    int LastFiredWindowDays,
+    int MinimumJudged);
 
 // ---- rule page --------------------------------------------------------------------------------------------------------------
 
@@ -129,7 +149,9 @@ public sealed record RuleDetailResponse(
     IReadOnlyList<RuleVersionView> Versions,
     IReadOnlyList<RuleHistoryEntry> History,
     bool MetricsAvailable,
+    RuleMetricsAvailability MetricsAvailability,
     int ActionRateWindowDays,
+    int LastFiredWindowDays,
     int MinimumJudged);
 
 // ---- writes -----------------------------------------------------------------------------------------------------------------

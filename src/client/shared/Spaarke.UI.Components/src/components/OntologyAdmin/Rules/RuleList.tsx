@@ -12,11 +12,18 @@
 import * as React from 'react';
 import {
   Button,
+  Link,
   MessageBar,
   MessageBarBody,
   Spinner,
   Tab,
   TabList,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
   Text,
   makeStyles,
   mergeClasses,
@@ -24,7 +31,17 @@ import {
 } from '@fluentui/react-components';
 import type { SelectTabData, SelectTabEvent } from '@fluentui/react-components';
 import { StatusBadge } from '../../StatusBadge';
-import { RULE_FILTERS, describeActionRate, describeLastFired, matchesFilter, severityTone, stateTone } from './ruleDisplay';
+import {
+  RULE_FILTERS,
+  describeActionRate,
+  describeLastFired,
+  describeOpenItems,
+  lastFiredLabel,
+  matchesFilter,
+  severityTone,
+  stateTone,
+  unreadNumbers,
+} from './ruleDisplay';
 import type { RuleFilter } from './ruleDisplay';
 import type { OntologyRulesService, RuleListResponse } from './rulesService';
 
@@ -34,7 +51,8 @@ export interface RuleListProps {
   onOpen: (policyId: string) => void;
 }
 
-const COLUMNS = 'minmax(0, 2.2fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 0.7fr) minmax(0, 1.2fr) minmax(0, 1.6fr)';
+// Column widths as flex ratios (the Fluent Table lays its rows out as flex rows): rule, lane, on/off, version, open items, last fired, action rate.
+const COLUMN_GROW = [2.2, 0.8, 0.8, 0.7, 0.9, 1.4, 1.6] as const;
 
 const useStyles = makeStyles({
   root: {
@@ -43,47 +61,21 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalM,
     minWidth: 0,
   },
-  header: {
-    display: 'grid',
-    gridTemplateColumns: COLUMNS,
-    columnGap: tokens.spacingHorizontalM,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    color: tokens.colorNeutralForeground3,
-  },
   row: {
-    display: 'grid',
-    gridTemplateColumns: COLUMNS,
-    columnGap: tokens.spacingHorizontalM,
-    alignItems: 'center',
-    width: '100%',
-    boxSizing: 'border-box',
-    textAlign: 'left',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    borderBottomStyle: 'solid',
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: 'transparent',
-    borderTopStyle: 'none',
-    borderLeftStyle: 'none',
-    borderRightStyle: 'none',
-    color: tokens.colorNeutralForeground1,
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
-    ':focus-visible': {
-      outlineStyle: 'solid',
-      outlineWidth: tokens.strokeWidthThick,
-      outlineColor: tokens.colorStrokeFocus2,
-    },
   },
+  col0: { flexGrow: COLUMN_GROW[0], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col1: { flexGrow: COLUMN_GROW[1], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col2: { flexGrow: COLUMN_GROW[2], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col3: { flexGrow: COLUMN_GROW[3], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col4: { flexGrow: COLUMN_GROW[4], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col5: { flexGrow: COLUMN_GROW[5], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col6: { flexGrow: COLUMN_GROW[6], flexShrink: 1, flexBasis: 0, minWidth: 0 },
   retired: {
     color: tokens.colorNeutralForeground3,
   },
   cell: {
-    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
@@ -162,65 +154,79 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen }) => {
       {list && !list.metricsAvailable ? (
         <MessageBar intent="warning" data-testid="rules-metrics-unavailable">
           <MessageBarBody>
-            The open-item and action-rate numbers could not be read just now, so Needs a look is empty. The rules are all listed.
+            {`These numbers could not be read just now: ${unreadNumbers(list.metricsAvailability).join(', ')}. The rest are shown and every rule is listed.`}
+            {list.metricsAvailability.actionRate ? '' : ' Needs a look is empty until the action rate can be read.'}
           </MessageBarBody>
         </MessageBar>
       ) : null}
 
       {list && !loading ? (
-        <div role="table" aria-label="Rules">
-          <div role="row" className={styles.header}>
-            <Text role="columnheader" size={200}>Rule</Text>
-            <Text role="columnheader" size={200}>Lane</Text>
-            <Text role="columnheader" size={200}>On / Off</Text>
-            <Text role="columnheader" size={200}>Version</Text>
-            <Text role="columnheader" size={200}>Open items</Text>
-            <Text role="columnheader" size={200}>Last fired</Text>
-            <Text role="columnheader" size={200}>Action rate ({list.actionRateWindowDays} days)</Text>
-          </div>
-          {shown.map(rule => (
-            <button
-              key={rule.policyId}
-              type="button"
-              role="row"
-              className={mergeClasses(styles.row, rule.state === 'Retired' && styles.retired)}
-              onClick={() => onOpen(rule.policyId)}
-              data-testid={`rule-row-${rule.code}`}
-              aria-label={`Open ${rule.code}`}
-            >
-              <span role="cell" className={mergeClasses(styles.cell, styles.stack)}>
-                <Text weight="semibold">{rule.code}</Text>
-                <Text size={200} className={styles.muted}>
-                  {rule.headline ?? rule.name}
-                </Text>
-              </span>
-              <span role="cell" className={styles.cell} data-testid="rule-lane">
-                <Text>{rule.lane}</Text>
-              </span>
-              <span role="cell" className={styles.cell}>
-                <StatusBadge label={rule.state} tone={stateTone(rule.state)} />
-              </span>
-              <span role="cell" className={styles.cell} data-testid="rule-version">
-                <Text>{rule.versionNumber === null ? '-' : `v${rule.versionNumber}`}</Text>
-              </span>
-              <span role="cell" className={styles.cell}>
-                <Text>{rule.metrics === null ? '-' : rule.metrics.openItems}</Text>
-              </span>
-              <span role="cell" className={styles.cell}>
-                <Text size={200}>{describeLastFired(rule.metrics)}</Text>
-              </span>
-              <span role="cell" className={mergeClasses(styles.cell, styles.stack)}>
-                <Text size={200}>{describeActionRate(rule.metrics, list.minimumJudged)}</Text>
-                {rule.metrics?.needsALook === true ? <StatusBadge label="Needs a look" tone={severityTone('Warning')} /> : null}
-              </span>
-            </button>
-          ))}
+        <>
+          <Table aria-label="Rules">
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell className={styles.col0}>Rule</TableHeaderCell>
+                <TableHeaderCell className={styles.col1}>Lane</TableHeaderCell>
+                <TableHeaderCell className={styles.col2}>On / Off</TableHeaderCell>
+                <TableHeaderCell className={styles.col3}>Version</TableHeaderCell>
+                <TableHeaderCell className={styles.col4}>Open items</TableHeaderCell>
+                <TableHeaderCell className={styles.col5}>{lastFiredLabel(list.lastFiredWindowDays)}</TableHeaderCell>
+                <TableHeaderCell className={styles.col6}>Action rate ({list.actionRateWindowDays} days)</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shown.map(rule => (
+                // The rule code is a real button (keyboard and screen reader activation, as the DataGrid's primary-name link); a click
+                // anywhere on the row opens it too for the pointer. One handler: the button's click bubbles to the row.
+                <TableRow
+                  key={rule.policyId}
+                  className={mergeClasses(styles.row, rule.state === 'Retired' && styles.retired)}
+                  onClick={() => onOpen(rule.policyId)}
+                  data-testid={`rule-row-${rule.code}`}
+                >
+                  <TableCell className={mergeClasses(styles.col0, styles.cell, styles.stack)}>
+                    <Link as="button" aria-label={`Open ${rule.code}`} data-testid={`rule-open-${rule.code}`}>
+                      <Text weight="semibold">{rule.code}</Text>
+                    </Link>
+                    <Text size={200} className={styles.muted}>
+                      {rule.headline ?? rule.name}
+                    </Text>
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col1, styles.cell)} data-testid="rule-lane">
+                    <Text>{rule.lane}</Text>
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col2, styles.cell)}>
+                    <StatusBadge label={rule.state} tone={stateTone(rule.state)} />
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col3, styles.cell)} data-testid="rule-version">
+                    <Text>{rule.versionNumber === null ? '-' : `v${rule.versionNumber}`}</Text>
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col4, styles.cell)} data-testid="rule-open-items">
+                    <Text className={list.metricsAvailability.openItems ? undefined : styles.muted}>
+                      {describeOpenItems(rule.metrics, list.metricsAvailability)}
+                    </Text>
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col5, styles.cell)} data-testid="rule-last-fired">
+                    <Text size={200} className={list.metricsAvailability.lastFired ? undefined : styles.muted}>
+                      {describeLastFired(rule.metrics, list.metricsAvailability, list.lastFiredWindowDays)}
+                    </Text>
+                  </TableCell>
+                  <TableCell className={mergeClasses(styles.col6, styles.cell, styles.stack)} data-testid="rule-action-rate">
+                    <Text size={200} className={list.metricsAvailability.actionRate ? undefined : styles.muted}>
+                      {describeActionRate(rule.metrics, list.minimumJudged, list.metricsAvailability)}
+                    </Text>
+                    {rule.metrics.needsALook ? <StatusBadge label="Needs a look" tone={severityTone('Warning')} /> : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
           {shown.length === 0 ? (
             <Text className={styles.muted} data-testid="rules-list-empty">
               {list.rules.length === 0 ? 'There are no rules yet.' : 'No rules match this filter.'}
             </Text>
           ) : null}
-        </div>
+        </>
       ) : null}
     </div>
   );

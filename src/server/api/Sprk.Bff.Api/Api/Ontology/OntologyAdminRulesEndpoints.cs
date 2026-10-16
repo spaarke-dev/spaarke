@@ -33,8 +33,8 @@ public static class OntologyAdminRulesEndpoints
             .WithSummary("List the Ontology rules with lane, On/Off, version in force and the numbers the Needs a look filter reads")
             .WithDescription("Every rule whose domain is empty or Ontology (Billing and Docketing rules are never listed), read as the caller. "
                 + "Each rule carries its lane, state (On, Off, Retired), version in force, open items, last fired and action rate (acted / "
-                + "(acted + dismissed) over 90 days; no rate below 5 judged). When the Signal numbers cannot be read the rules are still "
-                + "listed with metricsAvailable false. 403 when the caller cannot be resolved; 503 when the list cannot be read.")
+                + "(acted + dismissed) over 90 days; no rate below 5 judged). The three numbers are read independently: one that cannot be read is null "
+                + "(metricsAvailability says which) and the rest still show; last fired looks back 90 days. 403 when the caller cannot be resolved; 503 when the list cannot be read.")
             .Produces<RuleListResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -53,8 +53,8 @@ public static class OntologyAdminRulesEndpoints
         group.MapPut("/rules/{policyId:guid}/enabled", SetRuleEnabledAsync)
             .WithName("SetOntologyAdminRuleEnabled")
             .WithSummary("Switch an Ontology rule On or Off")
-            .WithDescription("Sets sprk_enabled and nothing else, as the caller; open items close at the next pass. A retired rule cannot be "
-                + "switched (409). 403 when Dataverse refuses the caller (not an Ontology Administrator) or the caller cannot be resolved; "
+            .WithDescription("Sets sprk_enabled and nothing else, as the caller; open items close at the next pass. An inactive rule (retired or "
+                + "otherwise) cannot be switched (409). 403 when Dataverse refuses the caller (not an Ontology Administrator) or the caller cannot be resolved; "
                 + "404 for a missing, invisible or non-Ontology rule.")
             .Produces<RuleEnabledResult>(200)
             .ProducesValidationProblem()
@@ -69,7 +69,7 @@ public static class OntologyAdminRulesEndpoints
             .WithDescription("A reason is required (400 without one, nothing read or written). Sets the rule Retired with the reason as the caller, "
                 + "then closes its open Signals as rule retired at once; no Decision Record is written. The reply reports whether every open "
                 + "item closed; an incomplete close is finished by the nightly pass. 403 when Dataverse refuses the caller or the caller cannot be "
-                + "resolved; 404 for a missing, invisible or non-Ontology rule; 409 when already retired.")
+                + "resolved; 404 for a missing, invisible or non-Ontology rule; 409 when already retired or changed since it was opened.")
             .Produces<RuleRetiredResult>(200)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status403Forbidden)
