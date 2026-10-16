@@ -1,41 +1,50 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment incl. the R3-holds-dev deploy rule, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` and `notes/decisions.md` (D-113 amended 2026-10-16). Task 185: `notes/185-invite-code-design.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules incl. D-11 team ownership, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment incl. the R3-holds-dev deploy rule, §6 Gotchas). Decisions: `notes/decisions.md` (D-113 amended 2026-10-16). Defer list with the 2026-10-16 release disposition: `notes/defer-issues.md`. Task 186: `notes/186-model1-workforce-design.md` §0. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-16 (checkpoint #36).
+> **Last Updated**: 2026-10-16 ~16:45Z (checkpoint #37).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push to release, owner decisions of 2026-10-16. Do 099, 186 and 036. Fix #1620, #1363, #994 and #1010 (verify first). For #1576, investigate, scope and fix: here unless an active project overlaps it. Do not defer or hand it off. For every deferred or not-uac-r2 item, decide NOW, FUTURE (with the reason, in an issue and the defer list) or NEVER (close). Then finish wrap-up: 090, 058, the gate-only tasks, the owner checklist. Then write the **UAT checklist** for the owner, as scenarios by user type. |
-| **Fix bar** | The most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity that brings no value. |
-| **Order** | 099 → 186 (design note and the ceiling question to the owner first) → 036 (runs alone, Opus xhigh). The defect fixes run in parallel where they are parallel-safe. |
+| **Mode** | Final push to release (owner decisions 2026-10-16). Fix-round loop, then merge on a green Router and deploy via R3. A task closes on merge + deploy + server gate. |
+| **Fix bar** | The most technically correct, best-practice, code-efficient fix. Never the quick route. No complexity without value. |
+| **Order** | 099 (running) → 186 (waits on the owner's ceiling answer) → 036 (alone, Opus xhigh). Then the remaining wrap-up 090 items, then the **UAT checklist** (scenarios by user type). |
 
-## Running (2026-10-16)
-- #1620 fix: owner unshare through the owner-aware `RevokeAccessAsync`. Implementer, worktree `C:/wt1620`, branch `fix/uac-1620-unshare-owner`; result is a PR.
-- #994 fix: playbook Share bit (262144). Implementer, `C:/wt994`, `fix/uac-994-playbook-share-bit`; result is a PR.
-- #1576 investigation, read-only (`C:/wt1576r`): (a) resolvers and isdisabled, (b) own versus effective flag readers, (c) shared HttpClient OBO header race, (d) creator attribution. Returns a fix plan.
-- Assessment of deferred and not-uac-r2 items, read-only. Returns NOW, FUTURE, NEVER, ALREADY-DONE or OTHER-PROJECT for each.
+## Open PRs (UAC) and their state
+| PR | Issue | Worktree / branch | Head | State |
+|---|---|---|---|---|
+| #2025 | #1576 (disabled users + per-request token) | C:/wt1576 `fix/uac-1576-disabled-users-per-request-token` | 419512e51 → fix round running | Pass 1 found F1 (NotificationService and AssignedAccessMaterializer baselines) and F2 (guard shapes, stale comments, untrue reason). The implementer was told #2016 merged, so it does the materializer after merging master. Then **pass 2** (auth needs two passes), then **owner sign-off** (auth code). After merge, close #1576 parts (b) 61b0aa77a and (d) 633cce424. |
+| #2024 | #1755, #1735 create-POST | C:/wt1755 `fix/uac-1755-bounded-provisioning-token` | 63543aae3 → fix round running | The diff is CLEAN. Adjacent F1s being fixed: per-request Polly opt-out for the create POST, the Step 6 "may exist" message, Step 7 read-back, K4 test hygiene. General case filed as #2028. Then a scoped re-check, then merge. |
+| #2017 | #1363 (demo expiry) | C:/wt1363 `fix/uac-1363-demo-spe-marker` | 90bd3879a | Full review fixes done. **Scoped re-check running.** Provisioning told about the T186 change (absent → Expired; unreadable → retry). Then merge. |
+| #2029 | #2002 (no-root Warning noise) | C:/wt2002 `fix/uac-2002-ancestor-warning` | bd53f762f | I reviewed it CLEAN. **Merge watcher running** (background job). Close #2002 after the merge. |
+| (099) | task 099 + #1010 | C:/wt099 `feat/uac-099-expiry-picker-grant-read` | — | **Executor running** (Opus, task-execute). It needs two adversarial passes and owner sign-off. It must NOT run the backfill -Apply; the main session runs it after merge. |
 
-## Queued
-- #1363: demo self-registration SPE writer marker keyed to the demo Dataverse; expiry leaves the marker. Task 171 code.
-- #1010: Manage Access grants list for non-root users; a failed read shows "no grants". Verify against task 172 (team-owned owner column) before fixing.
-- Task 099: the Expiration date picker plus fixes for expired rows and read errors. Run through task-execute.
-- Task 186: design note, then the ceiling question to the owner (service-request privileges?), then the build.
-- Task 036: the FR-20 flag-gated swap. Closes #1074 and #1567.
-- Wrap-up 090: absorbs 058 and #1364's hand-off doc. Fix 183's index status (it shipped; only the K2 live gate is open). Close the 21 done-task issues after checking their evidence.
+## Merged today (2026-10-16)
+- #2007 `96d5b16c2` (#2005, live gate PASS)
+- #1983 `42aecf064`
+- #2013 `0ccc75b4c` (#994)
+- #2021 `b1eaecb49` (share-link retired; task 012 closed; #1350 closed; #1752 link half commented)
+- #2016 `2e4ffc654` (#1620 owner-aware unshare; R3 told). The post-save web resource 1.1.2 is **deployed to dev** (16:37Z, verified).
+- Tasks 012, 023 and 183 closed; 20 done-task issues closed with evidence.
 
-## Done this session (2026-10-15/16)
-- **PR #2007 MERGED** as `96d5b16c2` (#2005, owner sign-off 2026-10-16): every bind consumes the invite hash; the invite mark is conditional (never `*`); "pending" requires an unconsumed hash. **Not on dev yet.** R3 merges master, folds its home bind onto #2007's store method, then the dev BFF deploys from R3's branch after the ancestry check. Then run #2007's server gate on dev.
-- **PR #1983 MERGED** as `42aecf064`: GitHub registration is a MUST in /project-pipeline.
-- R3 047 #2005 fixes: CLEAN at `4eacd5934`. Deployed to the dev BFF and SPA at `2c2fed38d` (12:59Z and 13:13Z). Heartbeat at 13:00:50Z healthy. #1830 noise is known.
-- Ontology PR #2012 (task 126): UAC review found F1 (the anchor narrowing) and F3 (untested fault paths). **D-113 amended** (each grant applies at its own anchor BU): #1355 comment and notes/decisions.md. Ontology is fixing it; a scoped re-check follows. Their merge is held for UAC.
-- Coordination project worktree: `C:/code_files/spaarke-wt-spaarke-project-coordination-r1`. The owner runs /design-to-spec there.
+## Next dev BFF build (via R3 only; R3 session `spaarke-wt-spa-external-access-platform-*`)
+- Must include master ≥ 2e4ffc654: #994, #2016, #2021, ontology #2020, then #2017, #2024, #2025, #2029 and 099 as they merge.
+- Run the ancestry check, then the server gates: #1620, #994, #1576, #1755, #1363, #2002.
 
-## Open owner items
-- The live CIAM checks: §12 (185's code-gated bind; the dev SPA now carries 185) and §11; §13 is optional; §14 is the combined session (135 gate, 136, 037, 039).
-- Task 186 ceiling (asked with the design note).
-- Board #2 triage: the 4 views, or the grouped list.
-- Task 049 (ontology): confirm the Ontology Administrator change to ontology directly.
-- Older items: #1747, #1776, ontology #1876/#1877/#1879; restate the Model 1 `-Apply` rule after #1815; checklist items for 140, 153, 165 and 171.
+## Waiting on others
+- **Ontology:** PR #2022 (task 049) is UAC-OK at 2dd6a67ad; no live -Apply until their second pass and the owner's go. PR #2019 (task 104): UAC has no objection. Q1 (Ontology Administrator Signal Write) is with the owner, through ontology.
+- **Provisioning:** #2027 (org auditing and retention are never set; FR-32's interim audit trail depends on them). Asked whether and when they'll take it. **Retention value = owner decision** (recommended -1, Forever).
+
+## Open owner items (put in the final report)
+- **186 ceiling:** approve option (a), and add to the Workforce role on `sprk_servicerequest` (Basic): Create, Read, AppendTo, Delete; plus Create on `sprk_document` if uploads are wanted. See design note §0.
+- **#2027** retention value. **#2025** sign-off (auth). **099** sign-off (auth path).
+- Live CIAM checks: §12/§11, §14 (135 gate, 136, 037, 039); 140's four-identity gate; 153 §7; 062 NFR-05 at UAT.
+- Board #2 views; #1747; #1776; ontology #1876/#1877/#1879; Model 1 `-Apply` restatement; checklist items for 140/153/165/171.
+
+## Remaining wrap-up 090
+- 058 docs.
+- Deferred bookkeeping: add #2028 to the defer list (FUTURE, BFF platform).
+- Keep #1059, #1063 and #1077 open until their owner gates; #961 until 099; #1074 and #1567 until 036; #1014 and #1564 are PARTIAL (owner/peer).
+- Then the UAT checklist.
