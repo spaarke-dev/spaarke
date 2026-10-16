@@ -320,9 +320,9 @@ function Ensure-GlobalOptionSet([string]$Name, [string]$Display, $Options) {
         # A choice created by an earlier run may lack an option added since (e.g. 100000011, B2): add it.
         $present = @($existing.Options | ForEach-Object { [int]$_.Value })
         foreach ($value in $Options.Keys | Where-Object { $present -notcontains [int]$_ }) {
-            if ($Verify) { Report 'MISSING' "option $value '$($Options[$value])' in $Name"; continue }
-            if ($IsDryRun) { Report 'WOULD' "add option $value '$($Options[$value])' to $Name"; continue }
-            Invoke-DvWrite POST 'InsertOptionValue' @{ OptionSetName = $Name; Value = $value; Label = (New-Label $Options[$value]) } | Out-Null
+            if ($Verify) { Report 'MISSING' "option $value '$($Options[[object]$value])' in $Name"; continue }
+            if ($IsDryRun) { Report 'WOULD' "add option $value '$($Options[[object]$value])' to $Name"; continue }
+            Invoke-DvWrite POST 'InsertOptionValue' @{ OptionSetName = $Name; Value = $value; Label = (New-Label $Options[[object]$value]) } | Out-Null
             Report 'DONE' "added option $value to $Name"
         }
         return
@@ -335,7 +335,7 @@ function Ensure-GlobalOptionSet([string]$Name, [string]$Display, $Options) {
         DisplayName   = (New-Label $Display)
         IsGlobal      = $true
         OptionSetType = 'Picklist'
-        Options       = @($Options.Keys | ForEach-Object { @{ Value = $_; Label = (New-Label $Options[$_]) } })
+        Options       = @($Options.Keys | ForEach-Object { @{ Value = $_; Label = (New-Label $Options[[object]$_]) } })
     } | Out-Null
     Report 'DONE' "created global choice $Name"
 }

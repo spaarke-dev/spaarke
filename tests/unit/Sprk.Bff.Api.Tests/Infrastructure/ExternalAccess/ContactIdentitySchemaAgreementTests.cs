@@ -72,6 +72,16 @@ public class ContactIdentitySchemaAgreementTests
             "the solution's sprk_identitycollisionreason must offer every reason the BFF writes");
         values.Should().BeEquivalentTo(Analyse(File.ReadAllText(ScriptPath())).ReasonOptions,
             "the solution and the schema script describe the same choice");
+
+        // The labels too: the export carried every option with an empty label, so an environment built from the solution
+        // showed operators blank collision reasons (r3 task 047, main-session review 2026-10-16).
+        var solutionLabels = XDocument.Load(path).Descendants("option").ToDictionary(
+            o => int.Parse((string)o.Attribute("value")!, CultureInfo.InvariantCulture),
+            o => (string?)o.Descendants("label").FirstOrDefault(l => (string?)l.Attribute("languagecode") == "1033")?.Attribute("description"));
+        var block = Regex.Match(File.ReadAllText(ScriptPath()), @"\$ReasonOptions\s*=\s*\[ordered\]@\{(?<body>.*?)\}", RegexOptions.Singleline);
+        var scriptLabels = Regex.Matches(block.Groups["body"].Value, @"(?<value>1\d{8})\s*=\s*'(?<label>[^']*)'")
+            .ToDictionary(m => int.Parse(m.Groups["value"].Value, CultureInfo.InvariantCulture), m => (string?)m.Groups["label"].Value);
+        solutionLabels.Should().BeEquivalentTo(scriptLabels, "the solution labels each collision reason as the schema script does");
     }
 
     // ── The guard bites: the analyser on seeded scripts ───────────────────────────────────────────────
