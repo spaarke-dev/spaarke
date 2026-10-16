@@ -887,8 +887,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out downstream.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out downstream.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

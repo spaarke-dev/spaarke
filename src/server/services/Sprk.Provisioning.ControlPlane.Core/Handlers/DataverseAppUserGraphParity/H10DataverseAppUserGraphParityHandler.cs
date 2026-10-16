@@ -665,8 +665,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

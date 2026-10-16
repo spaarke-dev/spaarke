@@ -663,8 +663,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier;
+        run.MarkPhaseSucceeded(HandlerIdentifier);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

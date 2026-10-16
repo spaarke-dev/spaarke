@@ -330,9 +330,14 @@ public sealed class RunControlService : IRunControlService
         }
 
         var run = read.Run;
-        if (run.Status != RunStatus.WaitingOnGate)
+        // T186 L37: also a Running run. A sibling's success could overwrite the gated handler's WaitingOnGate (fixed in
+        // ProvisioningRun.MarkPhaseSucceeded, but a run already in that state, or one whose gate a later failure +
+        // resume left Pending, would otherwise have no way forward: the reconciler's re-dispatch of the verifier reuses
+        // its MessageId and is dropped as a duplicate). Re-dispatching a Pending gate's verifier on a Running run is
+        // safe: per-customer messages are serialised by session, and the verifier re-checks the gate idempotently.
+        if (run.Status is not (RunStatus.WaitingOnGate or RunStatus.Running))
         {
-            return new GateAdvanceResult.Conflict(run.Status, "a gate can only be advanced while the run is WaitingOnGate");
+            return new GateAdvanceResult.Conflict(run.Status, "a gate can only be advanced while the run is WaitingOnGate or Running");
         }
 
         if (!run.GateStates.TryGetValue(gateId, out var gate))

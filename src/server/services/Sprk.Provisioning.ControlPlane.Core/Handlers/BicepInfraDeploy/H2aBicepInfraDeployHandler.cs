@@ -759,8 +759,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out to H2b/H4/H5.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out to H2b/H4/H5.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

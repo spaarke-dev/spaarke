@@ -203,6 +203,37 @@ public sealed class ProvisioningRun
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public QuarantineInfo? Quarantine { get; set; }
 
+    /// <summary>
+    /// The run-status transition every handler applies when it succeeds: the run is <see cref="RunStatus.Running"/>
+    /// with <paramref name="handlerId"/> as its current phase, so the reconciler fans out.
+    /// <para>
+    /// T186 L37: a handler must not overwrite ANOTHER handler's stop. Per-customer messages run one at a time, so a
+    /// sibling dispatched earlier can finish after a branch has parked the run — live, H5 succeeded right after H3 put
+    /// the run in <see cref="RunStatus.WaitingOnGate"/> (admin consent), wrote Running/H5, and the run stalled with no
+    /// gate to advance. A WaitingOnGate, Failed or Quarantined run whose current phase is another handler keeps that
+    /// status and phase (the success is still recorded in CompletedPhases by the caller); the handler that owns the stop
+    /// (its own gate re-verified) moves the run on. A Cancelled run is never revived.
+    /// </para>
+    /// </summary>
+    public void MarkPhaseSucceeded(string handlerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+
+        if (Status == RunStatus.Cancelled)
+        {
+            return;
+        }
+
+        if (Status is RunStatus.WaitingOnGate or RunStatus.Failed or RunStatus.Quarantined
+            && !string.Equals(CurrentPhase, handlerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Status = RunStatus.Running;
+        CurrentPhase = handlerId;
+    }
+
     // TTL: REMOVED 2026-08-18 (Phase F acceptance discovery). Cosmos SDK uses its
     // own default serializer (Newtonsoft-based) which ignores System.Text.Json
     // [JsonIgnore(WhenWritingNull)] attributes and emits `"ttl": null`. Cosmos

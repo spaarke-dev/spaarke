@@ -591,8 +591,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         var completedAt = _timeProvider.GetUtcNow();
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out to H10.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out to H10.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

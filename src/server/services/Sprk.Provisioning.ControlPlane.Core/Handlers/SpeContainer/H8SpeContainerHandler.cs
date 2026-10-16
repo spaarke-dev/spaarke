@@ -1102,8 +1102,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true, owningBusinessUnitId),
         };
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

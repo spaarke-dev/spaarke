@@ -724,8 +724,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         // see them — every real run deadlocked at H4.
         var verified = (AdminConsentVerificationResult.Verified)consentResult;
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier;
+        run.MarkPhaseSucceeded(HandlerIdentifier);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

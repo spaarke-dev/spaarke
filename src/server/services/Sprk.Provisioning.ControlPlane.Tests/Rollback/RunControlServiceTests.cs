@@ -416,9 +416,26 @@ public sealed class RunControlServiceTests
         result.Should().BeOfType<GateAdvanceResult.NotFound>();
     }
 
+    [Fact]
+    public async Task AdvanceGate_RunningRunWithAPendingGate_ReDispatchesTheVerifier()
+    {
+        // T186 L37: a sibling's success overwrote the gated handler's WaitingOnGate with Running; the run then had no
+        // way forward (the reconciler's re-dispatch of the verifier reused its MessageId and was dropped).
+        var rig = new Rig();
+        var run = MakeGatedRun("admin-consent", GateState.Pending, "H0.5");
+        run.Status = RunStatus.Running;
+        rig.Repo.Seed(run, "\"etag-1\"");
+
+        var result = await rig.Sut.AdvanceGateAsync(TestCustomerId, TestRunId, "admin-consent", default);
+
+        result.Should().BeOfType<GateAdvanceResult.Success>().Which.VerifierHandler.Should().Be("H0.5");
+        rig.Enqueuer.Enqueued.Should().ContainSingle().Which.Attempt.Should().Be(1);
+    }
+
     [Theory]
-    [InlineData(RunStatus.Running)]
     [InlineData(RunStatus.Failed)]
+    [InlineData(RunStatus.Quarantined)]
+    [InlineData(RunStatus.Cancelled)]
     [InlineData(RunStatus.Completed)]
     public async Task AdvanceGate_RunNotWaitingOnGate_IsConflict(RunStatus status)
     {

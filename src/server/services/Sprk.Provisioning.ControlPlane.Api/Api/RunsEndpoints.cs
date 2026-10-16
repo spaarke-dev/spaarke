@@ -93,7 +93,7 @@
 //     - cancel   non-final -> Cancelled, releases the customer guard (409 when the
 //                run is Completed / Cancelled / Quarantined).
 //     - gate     re-dispatches the Pending gate's verifier handler now (404 unknown
-//                gate; 409 when the run is not WaitingOnGate or the gate is not Pending).
+//                gate; 409 when the run is not WaitingOnGate/Running or the gate is not Pending).
 //   clear-quarantine already worked this way (IQuarantineClearService) and enqueues
 //   nothing.
 //
@@ -297,7 +297,7 @@ public static class RunsEndpoints
                 "bumped attempt so Service Bus duplicate detection does not drop it); the " +
                 "verifier itself re-checks the gate and transitions the run. It does NOT " +
                 "force the gate open. 404 if the run or the gate does not exist; 409 if the " +
-                "run is not WaitingOnGate, the gate is not Pending / has no dispatchable " +
+                "run is not WaitingOnGate or Running, the gate is not Pending / has no dispatchable " +
                 "verifier, or a concurrent write raced; 503 if the handler could not be enqueued.")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -952,7 +952,7 @@ public static class RunsEndpoints
             case GateAdvanceResult.Conflict conflict:
                 return Conflict(
                     httpContext,
-                    conflict.CurrentStatus != RunStatus.WaitingOnGate
+                    conflict.CurrentStatus is not (RunStatus.WaitingOnGate or RunStatus.Running)
                         ? ControlPlaneErrorCodes.RunNotWaitingOnGate
                         : ControlPlaneErrorCodes.GateNotAdvanceable,
                     $"Cannot advance gate '{gateId}' of run '{id}' (run status: {conflict.CurrentStatus}): {conflict.Detail}.");

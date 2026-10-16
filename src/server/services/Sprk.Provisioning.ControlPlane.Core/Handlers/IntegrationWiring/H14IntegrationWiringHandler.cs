@@ -359,8 +359,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
 
         // (7) All sub-steps succeeded — record the parent "H14" completion.
         var parentKey = BuildParentIdempotencyKey(envelope.CustomerId, h14aKey, h14mKey);
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier;
+        run.MarkPhaseSucceeded(HandlerIdentifier);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

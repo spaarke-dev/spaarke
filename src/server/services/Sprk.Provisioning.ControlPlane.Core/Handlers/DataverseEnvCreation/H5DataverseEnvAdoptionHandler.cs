@@ -276,8 +276,7 @@ public sealed class H5DataverseEnvAdoptionHandler : IProvisioningHandler
     {
         var completedAt = _timeProvider.GetUtcNow();
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

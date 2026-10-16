@@ -601,8 +601,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1); // Approximate; probe start not tracked separately.
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
