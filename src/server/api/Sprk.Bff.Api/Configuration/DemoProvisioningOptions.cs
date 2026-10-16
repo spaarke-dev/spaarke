@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Configuration;
 /// Bound from appsettings.json section "DemoProvisioning".
 /// Per-environment config is resolved via <see cref="DataverseEnvironmentRecord"/> /
 /// DataverseEnvironmentService (sprk_dataverseenvironment Dataverse entity) — see
-/// DemoExpirationService.ResolveTargetEnvironmentAsync and RegistrationEndpoints.
+/// DemoExpirationJob.ResolveTargetEnvironmentAsync and RegistrationEndpoints.
 /// </summary>
 public class DemoProvisioningOptions
 {

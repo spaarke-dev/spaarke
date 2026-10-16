@@ -38,7 +38,7 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
                                     │            - Welcome email         │
                                     │            - Admin notification    │
                                     │                                     │
-                                    │  DemoExpirationService (daily)      │
+                                    │  DemoExpirationJob (daily)          │
                                     │       - Disable expired accounts   │
                                     │       - Send warning/expired email │
                                     └─────────────────────────────────────┘
@@ -87,7 +87,7 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
 
 11. **Day 11** (3 days before expiry): Pre-expiration warning email sent with extension contact info and production access CTA.
 
-12. **Day 14** (expiration day): DemoExpirationService disables the Entra account, removes from Demo Team, revokes SPE container access, sends expired notification email, updates status to `Expired`.
+12. **Day 14** (expiration day): DemoExpirationJob disables the Entra account, removes from Demo Team and the demo security group, revokes the SPE container grant, then updates status to `Expired` and sends the expired notification email. If any cleanup step fails, the request stays `Provisioned` and the next daily run retries it.
 
 ### What the Admin Sees in MDA
 
@@ -168,7 +168,7 @@ Per-environment config has moved to Dataverse. The `DemoProvisioning` section no
 }
 ```
 
-> **Note**: `Environments` array and `DefaultEnvironment` are deprecated. They are retained temporarily for backward compatibility with `DemoExpirationService` but will be removed in a future update.
+> **Note**: `Environments` array and `DefaultEnvironment` are deprecated and no longer read: demo expiry (`DemoExpirationJob`) reads each request's own target environment from `sprk_dataverseenvironment` (T186). They can be removed.
 
 ### Configuration Field Reference
 
@@ -370,7 +370,7 @@ Submitted (0) ─── Approve ──► Approved (1) ──► Provisioned (3)
 ```
 
 - **Approved** is a transient status set at the start of provisioning. On success it immediately becomes **Provisioned**. If provisioning fails partway, it stays at Approved to indicate retry is needed.
-- **Expired** is set by the DemoExpirationService when `sprk_expirationdate <= today`.
+- **Expired** is set by the DemoExpirationJob when `sprk_expirationdate <= today` and every cleanup step has succeeded.
 - **Revoked** is set manually by an admin who wants to end access before the expiration date.
 
 ### Views
@@ -410,7 +410,7 @@ Submitted (0) ─── Approve ──► Approved (1) ──► Provisioned (3)
 1. Open the provisioned `sprk_registrationrequest` record in MDA
 2. Edit the **Expiration Date** (`sprk_expirationdate`) field to the desired new date
 3. Save the record
-4. The DemoExpirationService respects the updated date — no further action needed
+4. The DemoExpirationJob respects the updated date — no further action needed
 
 ### How to Revoke Access Manually
 
@@ -505,11 +505,12 @@ To modify a template:
 
 ## Expiration Service
 
-### DemoExpirationService
+### DemoExpirationJob
 
-- **Type**: .NET 10 hand-rolled timer `BackgroundService` (same structure as `DailySendCountResetService`; existing debt — migrates to an `IScheduledJob` when next touched, ADR-052 §1)
-- **Schedule**: Runs daily at midnight UTC
-- **Location**: `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs`
+- **Type**: `IScheduledJob` (`demo-expiration`) on the in-process `ScheduledJobHost` (ADR-036), registered with `AddScheduledJob` inside the demo-provisioning gate of `RegistrationModule`. Migrated from a hand-rolled timer `BackgroundService` (`DemoExpirationService`) by #1363.
+- **Schedule**: cron `0 0 * * *` — daily at midnight UTC; one run per schedule across every BFF instance (the host's distributed Redis lease)
+- **Manual run**: `POST /api/admin/jobs/demo-expiration/trigger` (SystemAdmin); status at `GET /api/admin/jobs/demo-expiration/status`
+- **Location**: `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationJob.cs`
 
 ### Daily Processing Logic
 
@@ -517,24 +518,23 @@ To modify a template:
 2. For each record:
    - If `sprk_expirationdate <= now`: **Expire** the record:
      - Disable Entra ID account (`PATCH /users/{id}` with `accountEnabled: false`)
-     - Remove from Demo Team in Dataverse
+     - Remove from Demo Team in the request's target Dataverse environment
      - Remove from "Spaarke Demo Users" Entra security group
-     - Revoke SPE container permissions
-     - Send expired notification email
-     - Update `sprk_status` to `Expired`
+     - Remove the demo SPE container grant (the `SprkDemo<Entra object id>` marked grant, #1363)
+     - Only when all four succeeded: update `sprk_status` to `Expired`, then send the expired notification email (once)
    - If `sprk_expirationdate <= now + 3 days` (and not yet expired): **Warn**:
-     - Send expiration warning email with extension contact and production access CTA
+     - Send expiration warning email with extension contact and production access CTA — at most once per request per UTC day
 3. Each record is processed independently — one failure does not block others (each sub-operation has its own try/catch)
 
 ### Error Handling
 
-- If a daily run fails entirely, the service retries after 1 minute
-- If an individual record fails, it logs the error and continues to the next record
-- Cancellation (app shutdown) is handled gracefully via `stoppingToken`
-
-### Known Issue
-
-The DemoExpirationService is currently **commented out in `RegistrationModule.cs`** due to a DI resolution issue. The `GraphUserService` singleton fails to resolve when the hosted service starts. This is likely a constructor dependency chain timing issue (`GraphClientFactory` -> `GraphTokenCache`). The service code is complete and tested — it just needs the DI chain debugged before enabling.
+- If the Provisioned list cannot be read, the run fails and the scheduler retries it (nothing was done or sent)
+- If a cleanup step fails for a record, the record stays `Provisioned`; a Warning naming the request and the failed step(s) is logged each run, and the next daily run repeats every step (each is idempotent: an account already disabled, a user no longer in the team or group, a grant already removed change nothing)
+- Target environment: if the request names none, or the registry read succeeds and finds no such `sprk_dataverseenvironment` row, there is nothing in that environment to clean — the team removal and SPE revoke are done, a Warning names the request (and the environment id), and the request expires once the Entra disable and group removal succeed. If the registry read itself fails (error, timeout, throttle, auth), that is transient: the request stays `Provisioned` and the next run retries it. Only Dataverse's "record not found" (`0x80040217`) counts as no such row; any other 404 is a failed read
+- An Entra account that no longer exists (Graph 404) counts as disabled, so a deleted demo user does not block expiry
+- A request still not expired more than 7 days after its expiration date logs its retry line at **Error** instead of Warning, so a permanent fault (a lost team name or Dataverse URL, a renamed team, a persistent 5xx) reaches alerting. It never becomes `Expired` with access possibly standing
+- Known limit: the warning's once-per-day marker fails open on a Redis fault, so a manual trigger after a Redis outage may resend that day's warning (the scheduled run cannot double-send)
+- Cancellation (app shutdown) is honoured; the host drains the run
 
 ---
 
@@ -585,7 +585,7 @@ User = new SharePointIdentity
 **Fix**:
 1. Check that all required services are registered: `GraphUserService`, `RegistrationDataverseService`, `RegistrationEmailService`, `DemoProvisioningService`, `PasswordGenerator`, `EmailDomainValidator`, `TrackingIdGenerator`
 2. Verify `DemoProvisioning` configuration section is present and valid in appsettings or App Service config
-3. If `DemoExpirationService` is causing the crash, it can be temporarily disabled in `RegistrationModule.cs`
+3. The expiry job can be paused without a redeploy: `POST /api/admin/jobs/demo-expiration/disable` (per instance, until restart — ADR-036 A1 §2)
 
 ### Duplicate request error (409 Conflict)
 
