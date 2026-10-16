@@ -4,7 +4,7 @@
     <title>Resolution and combined confidence</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deterministic resolvers and a scoring function with clear inputs; its output gates rejection, so the scoring rules are tested exhaustively, but no auth or write path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-23, D-47, Processing Pipeline step 2. Shared append point: FinanceModule.cs. Weights and caps seeded by 025 are provisional and calibrated by 161. Firm and core record come from the submission context (044), not from extracted text.</notes>
+  <notes>Spec FR-23, D-47, Processing Pipeline step 2. Shared append point: FinanceModule.cs. Weights and caps seeded by 025 are provisional and calibrated by 161. Firm and core record come from the submission context (044), not from extracted text.
+    Completed 2026-10-16: see projects/ebilling-r1/notes/046-resolution-combined-confidence.md (assumptions A1-A15, embedding experiment, cap = ceiling confirmed, owner question on the ApprovedTimekeeper reject path, publish-size delta +42,813 B, ADR-010 ceiling 162 -> 163). TASK-INDEX.md is updated by the main session.
+    rework: none task 046</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
