@@ -179,6 +179,13 @@ const METRICS_DASHBOARD_OPT_OUT = assistantContractOptOut(
     '(outside R3 FR-06/07 scope).'
 );
 
+// spaarke-ontology-platform-r1 task 059 — the Worklist. Its lists are the Signal read route's answer (D-15); the Assistant's
+// part is the Briefing narrative written from those same lists (W-10, task 062), not a second overview tool over the grid.
+const WORKLIST_OPT_OUT = assistantContractOptOut(
+  'Worklist — the lists come from the Signal read route; the Assistant narrates them in the Briefing (task 062) and does not ' +
+    'query or order them through an overview tool (outside R3 FR-06/07 scope).'
+);
+
 // ---------------------------------------------------------------------------
 // Registration helper
 // ---------------------------------------------------------------------------
@@ -1033,6 +1040,36 @@ safeRegisterWidget(
     import('./ReconciliationWorkspaceWidget').then(m => ({
       default:
         m.ReconciliationWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+// ---------------------------------------------------------------------------
+// spaarke-ontology-platform-r1 task 059 — Worklist (Decide / Do lanes + closed sets).
+//
+// `WorklistWorkspaceWidget.tsx` is a thin host over the shared `WorklistWidget` (`@spaarke/ui-components`): it supplies the
+// authenticated Signal read route client, the wizard's lookup search and the email reconciliation card (task 054) and nothing
+// else. The decision wizard is mounted by the Console shell (task 058), so nothing is registered for it here. The type string
+// `worklist` is distinct from every other registration (ADR-039 Path C — surface identity stays in code).
+// ---------------------------------------------------------------------------
+
+safeRegisterWidget(
+  'worklist',
+  {
+    displayName: 'Worklist',
+    category: 'data',
+    icon: 'TaskListSquareLtrRegular',
+    // One worklist per user: a second tab would show the same lists.
+    allowMultiple: false,
+    // defaultOrder=247: next to Email (245) and Reconciliation (246), whose tab the aggregate card opens.
+    defaultOrder: 247,
+    // A page of lanes and counts, not a grid of one entity.
+    contextType: 'dashboard',
+    // FR-15 (task 050): explicit opt-out — see WORKLIST_OPT_OUT.
+    assistantContract: WORKLIST_OPT_OUT,
+  },
+  () =>
+    import('./WorklistWorkspaceWidget').then(m => ({
+      default: m.WorklistWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
     }))
 );
 

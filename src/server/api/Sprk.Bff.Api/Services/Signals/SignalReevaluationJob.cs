@@ -5,6 +5,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -19,7 +21,10 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// the Redis lease gives one run per schedule across instances, the run history is in the admin jobs endpoint, and no timer
 /// <c>BackgroundService</c> is added. Hundreds of rows a night is not a scale problem; fewer moving parts wins.</para>
 /// <para><b>One component decides both directions.</b> A hit with no open Signal is raised; an open Signal whose subject is no
-/// longer a hit is closed as <c>ConditionCleared</c> (no Decision Record, FR-16); a Resolved Signal is never closed again. The
+/// longer a hit is closed as <c>ConditionCleared</c> (FR-16); a Resolved Signal is never closed again. Task 153 (D-145b): a DO-lane
+/// Signal closed that way (its subject no longer a hit, so not a re-file) then gets ONE Routine Decision Record naming, best effort, the
+/// person who changed the subject (<see cref="DecisionRecordWriter.WriteConditionClearedAsync"/>), linked to the Signal; a Decide-lane
+/// ConditionCleared, a re-file and every Superseded or PolicyRetired closure stay record-free. The
 /// Superseded and PolicyRetired closures are task 033's (<see cref="SignalClosureService"/>, run from this job); the planner
 /// re-raises their episodes.</para>
 /// <para><b>Re-raise rule (D-13, D-32, FR-03, FR-17a).</b> See <see cref="SignalEpisodePlanner"/>.</para>
@@ -48,6 +53,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     private readonly SignalWriter _writer;
     private readonly SignalSuppressionService _suppression;
     private readonly SignalClosureService _closure;
+    private readonly DecisionRecordWriter _records;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _timeProvider;
@@ -58,6 +64,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         SignalWriter writer,
         SignalSuppressionService suppression,
         SignalClosureService closure,
+        DecisionRecordWriter records,
         IGenericEntityService entities,
         IDistributedCache cache,
         TimeProvider timeProvider,
@@ -67,6 +74,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _closure = closure ?? throw new ArgumentNullException(nameof(closure));
+        _records = records ?? throw new ArgumentNullException(nameof(records));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -246,7 +254,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             counts.AddClosure(superseded.Outcome, retired: false);
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
             // found at the threshold and withdraw a stamp its partition no longer justifies, so the planner below sees the result.
-            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct).ConfigureAwait(false);
+            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct,
+                doLane: lane == SignalWriter.LaneDo).ConfigureAwait(false);
             counts.PolicyFailures += reconciled.Failures;
             if (reconciled.PartitionsUnavailable)
             {
@@ -261,8 +270,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             // #1661 R1 (D-123): a hit's new episode belongs to the partition the writer's truth gives it NOW, never its previous
             // episode's. Asked only for hits on a record that carries a live stamp (where the answer can change the outcome).
             var now = _timeProvider.GetUtcNow();
-            var hitPartitions = await _suppression.PartitionsOfHitsAsync(
-                policy.Code, SignalEpisodePlanner.HitsOnStampedGrains(evaluation.Hits, existing, now), ct).ConfigureAwait(false);
+            var stampedHits = SignalEpisodePlanner.HitsOnStampedGrains(evaluation.Hits, existing, now);
+            var hitPartitions = await _suppression.PartitionsOfHitsAsync(policy.Code, stampedHits, ct).ConfigureAwait(false);
             if (hitPartitions is null)
             {
                 // #1661 round 2 F2: a fault is never answered per hit (that would depend on which record carries a stamp): the whole
@@ -273,9 +282,24 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 return;
             }
 
+            // D-145a (task 152): a Do-lane stamp mutes only the same person's (or item's) Do items, so each such hit's holder is read from
+            // its subject now. A fault is answered like a partition fault: the whole policy waits for the next pass.
+            IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionHolder>? hitHolders = null;
+            if (lane == SignalWriter.LaneDo)
+            {
+                hitHolders = await _suppression.HoldersOfHitsAsync(policy.Code, stampedHits, ct).ConfigureAwait(false);
+                if (hitHolders is null)
+                {
+                    counts.PolicyFailures++;
+                    SkipForPartitions(policy, counts, 1,
+                        "whose Do items its hits are could not be read (the suppression pass before it completed and wrote only justified stamps)");
+                    return;
+                }
+            }
+
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, now, evaluation.Hits, existing, hitPartitions,
                 isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold,
-                unjudged: unjudged);
+                unjudged: unjudged, hitHolders: hitHolders);
             if (superseded.NotClosed.Count > 0)
             {
                 // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
@@ -303,9 +327,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     "resolution time is unknown), so they stay un-raised.", policy.Code, plan.NoDatedEvidence);
             }
 
-            await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
+            var closedNow = await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
             await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
+            if (lane == SignalWriter.LaneDo)
+            {
+                // Task 153 (D-145b): after the redaction, whose conditional writes are planned on the versions read; each link below reads
+                // its Signal again first.
+                await RecordConditionClearedAsync(policy, evaluation.Hits, unjudged, existing, closedNow, now, counts, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -369,7 +399,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
     }
 
-    private async Task ApplyAsync(PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
+    /// <returns>Task 153: every Signal this pass closed as ConditionCleared, with the time it was closed.</returns>
+    private async Task<IReadOnlyDictionary<Guid, DateTime>> ApplyAsync(
+        PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
     {
         // Task 145 (D-123, #1747 finding e): a Signal never carries the subject or sender of a witness in another (or an undetermined)
         // secure family. Every write below can create a row (a reconcile creates when its row is gone), so both take the filtered lines.
@@ -380,6 +412,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
         var closedIds = new HashSet<Guid>();
+        var closedAt = new Dictionary<Guid, DateTime>();
         foreach (var signal in plan.Closes)
         {
             await GuardAsync(policy, "close", signal.SubjectId, counts, writerLogged: true, async () =>
@@ -390,6 +423,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 {
                     counts.Closed++;
                     closedIds.Add(signal.Id);
+                    closedAt[signal.Id] = _timeProvider.GetUtcNow().UtcDateTime;
                 }
                 else
                 {
@@ -479,6 +513,367 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 else if (create.Episode > 1) counts.Reraised++;
                 else counts.Written++;
             }).ConfigureAwait(false);
+        }
+
+        return closedAt;
+    }
+
+    /// <summary>Task 153: how long after its close a Do-lane ConditionCleared Signal whose record could not be written or linked is still
+    /// retried by a later pass. Past it the closure stays unrecorded (it was logged and metered on every failed attempt).</summary>
+    internal static readonly TimeSpan ConditionClearedRecordRetryWindow = TimeSpan.FromDays(7);
+
+    /// <summary>Task 153 (adversarial pass 1 F1): the cache entry that marks a closure whose record can never be written or linked (a counted
+    /// skip), so a later pass does not attempt it again. Kept a day past <see cref="ConditionClearedRecordRetryWindow"/>.</summary>
+    internal static string ClosureRecordSkippedCacheKey(Guid signalId, int episode) =>
+        $"sprk:ontology:evaluator:cleared-dr-skipped:{signalId.ToString("D", CultureInfo.InvariantCulture)}:{episode.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>Task 153 (adversarial pass 1 F2): how many linked Decision Records one read asks for (an <c>in</c> list).</summary>
+    private const int LinkedRecordReadChunk = 100;
+
+    /// <summary>
+    /// Task 153 (D-145b, D-139): one Routine Decision Record per Do-lane Signal closed as ConditionCleared, written AFTER the close and never
+    /// instead of it. Adversarial pass 1: a transient failure leaves the Signal closed, is logged and metered (<c>ontology.writer.failures</c>,
+    /// which pages) and is retried by a later pass through the record's idempotent key, but it does NOT fail the run (F1b): the closes, raises
+    /// and redactions all landed. A closure whose record can never be written (the subject no longer exists, cannot be filed or is not a
+    /// filing table; the core type names no core table; the Signal names a record other than the one it named when it was closed) is a
+    /// counted SKIP on <c>ontology.writer.skips</c>, marked so no later pass attempts it again (F1a).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which closures.</b> (1) Every Signal this pass closed whose subject is not a hit: the condition cleared. A re-file's close (its
+    /// subject still a hit, a new episode opens under the new core) is not a satisfied item and gets no record. (2) Retries: a Signal of this
+    /// policy that is Resolved as ConditionCleared, was closed within <see cref="ConditionClearedRecordRetryWindow"/>, is the latest episode
+    /// of its subject, whose subject is neither a hit nor unjudged this pass, that is not marked skipped, and that links either no record or
+    /// (F2) a record that existed before the close and is not this closure's own (a D-128 reminder or inquiry: one read per policy per
+    /// pass tells them apart). A Signal linked to its own closure record is never touched again (D-61: a re-run writes nothing).</para>
+    /// <para><b>Per Signal.</b> The core record's table (once per type per pass), D-134's assignee for a no-core To Do, the writer's entry
+    /// point (lookup, attribution read, filing, owner, create), then the link (<see cref="SignalWriter.LinkConditionClearedRecordAsync"/>),
+    /// which replaces exactly the record the Signal named when it was closed.</para>
+    /// </remarks>
+    private async Task RecordConditionClearedAsync(
+        PolicyRow policy, IReadOnlyList<SignalHit> hits, IReadOnlySet<(string, Guid)> unjudged, IReadOnlyList<ExistingSignal> existing,
+        IReadOnlyDictionary<Guid, DateTime> closedNow, DateTimeOffset now, RunCounts counts, CancellationToken ct)
+    {
+        var hitSubjects = hits.Select(h => (h.SubjectEntity, h.SubjectId)).ToHashSet();
+        var latestEpisode = existing
+            .GroupBy(s => (s.SubjectEntity, s.SubjectId))
+            .ToDictionary(g => g.Key, g => g.Max(s => s.Episode));
+        var retryFrom = now.UtcDateTime - ConditionClearedRecordRetryWindow;
+
+        // The record each candidate's link may replace: the one its Signal named when it was closed (F2).
+        var candidates = new List<(ExistingSignal Signal, DateTime ClosedOn, Guid? PriorRecordId)>();
+        var unlinkedRetries = new List<ExistingSignal>();
+        var linkedRetries = new List<ExistingSignal>();
+        foreach (var signal in existing)
+        {
+            var subject = (signal.SubjectEntity, signal.SubjectId);
+            if (hitSubjects.Contains(subject) || unjudged.Contains(subject))
+            {
+                // Adversarial pass 2: a closure from an EARLIER pass that is still unlinked, inside the retry window and still its subject's
+                // latest episode, whose subject is a hit again: it leaves the retry set now (a new episode follows), so a record that was not
+                // written or linked is abandoned. Said once, on the pass the subject is a hit again (the next pass sees the new episode). A
+                // re-file's close is never this: its subject was a hit on the pass that closed it, so it is in closedNow, never here.
+                if (hitSubjects.Contains(subject)
+                    && !closedNow.ContainsKey(signal.Id)
+                    && IsUnlinkedConditionClearedClosureInWindow(signal, retryFrom)
+                    && latestEpisode[subject] == signal.Episode)
+                {
+                    _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                        "Policy {PolicyCode}: Signal {SignalId} (episode {Episode}) was closed as ConditionCleared but links no Decision Record, and its " +
+                        "subject is a hit again; its closure is no longer retried, so any record not yet written or linked is abandoned.",
+                        policy.Code, signal.Id, signal.Episode);
+                }
+
+                continue; // still a hit (a re-file), or not judged: the condition is not known to have cleared
+            }
+
+            if (closedNow.TryGetValue(signal.Id, out var closedOn))
+            {
+                candidates.Add((signal, closedOn, signal.DecisionRecordId)); // as read before this pass closed it
+            }
+            else if (signal.IsResolved
+                     && signal.Resolution == SignalWriter.ResolutionConditionCleared
+                     && signal.ResolvedOn is { } resolvedOn
+                     && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= retryFrom
+                     && latestEpisode[subject] == signal.Episode)
+            {
+                (signal.DecisionRecordId is null ? unlinkedRetries : linkedRetries).Add(signal);
+            }
+        }
+
+        int recorded = 0, failed = 0, skipped = 0;
+        var retries = unlinkedRetries.Select(s => (Signal: s, PriorRecordId: (Guid?)null)).ToList();
+        if (linkedRetries.Count > 0)
+        {
+            try
+            {
+                var (replacing, skippedForeign) = await RetriesReplacingAPriorLinkAsync(linkedRetries, ct).ConfigureAwait(false);
+                retries.AddRange(replacing);
+                skipped += skippedForeign;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // Transient: which of these closures are already recorded is unknown, so none is touched; the next pass reads them again.
+                failed++;
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "Policy {PolicyCode}: the Decision Records of {Count} closed Signal(s) could not be read ({ExceptionType}); their closures are not retried this pass.",
+                    policy.Code, linkedRetries.Count, ex.GetType().Name);
+                OntologyWriterTelemetry.RecordFailure(SignalWriter.IsDataverseAccessDenied(ex)
+                    ? OntologyWriterFailureReason.DataverseAccessDenied
+                    : OntologyWriterFailureReason.WriteFailed);
+            }
+        }
+
+        foreach (var (signal, prior) in retries)
+        {
+            if (!await IsClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false))
+            {
+                candidates.Add((signal, DateTime.SpecifyKind(signal.ResolvedOn!.Value, DateTimeKind.Utc), prior));
+            }
+        }
+
+        var coreTables = new Dictionary<Guid, string?>();
+        foreach (var (signal, closedOn, prior) in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                DecisionRecordCore? core = null;
+                if (signal.CoreTypeRefId is { } typeRef && signal.CoreRecordId is { } coreId)
+                {
+                    if (!coreTables.TryGetValue(typeRef, out var table))
+                    {
+                        table = await CoreTableOfAsync(typeRef, ct).ConfigureAwait(false);
+                        coreTables[typeRef] = table;
+                    }
+
+                    if (table is null || !CoreAncestorResolver.CoreRecordEntities.Contains(table, StringComparer.Ordinal))
+                    {
+                        // D-34: the record copies its Signal's core; a core type that names no core table cannot be copied. Never written
+                        // without it (that would file the closure as a no-core item's). Permanent: a counted skip (F1).
+                        skipped++;
+                        _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                            "Policy {PolicyCode}: the closure of Signal {SignalId} cannot be recorded (reason={Reason}): its core record type names no core table. The Signal stays closed; it is not retried.",
+                            policy.Code, signal.Id, OntologyWriterFailureReason.ClosureRecordSkippedCoreTypeNotCataloged);
+                        OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedCoreTypeNotCataloged);
+                        await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    core = new DecisionRecordCore(table, coreId, typeRef);
+                }
+
+                var assignee = core is null && string.Equals(signal.SubjectEntity, PersonalToDoAssignee.Table, StringComparison.Ordinal)
+                    ? await _writer.PersonalToDoAssigneeAsync(signal.SubjectId, ct).ConfigureAwait(false)
+                    : null;
+                var result = await _records.WriteConditionClearedAsync(new ConditionClearedRecordRequest(
+                    signal.Id, signal.Episode, policy.Code, signal.PolicyVersionId ?? Guid.Empty,
+                    new DecisionRecordRef(signal.SubjectEntity, signal.SubjectId), core, closedOn,
+                    signal.LineageRow?.GetAttributeValue<DateTime?>("createdon"),
+                    AssigneeSystemUserId: assignee,
+                    PrivilegeFlagged: signal.LineageRow?.GetAttributeValue<bool?>("sprk_privilegeflagged") ?? false), ct).ConfigureAwait(false);
+                if (!result.AlreadyRecorded) recorded++;
+
+                switch (await _writer.LinkConditionClearedRecordAsync(
+                            signal.Id, result.RecordId, prior, result.ConfirmedByUserId, policy.Code, ct).ConfigureAwait(false))
+                {
+                    case SignalRecordLinkOutcome.ChangedSinceRead:
+                        counts.ChangedSinceRead++;
+                        break;
+                    case SignalRecordLinkOutcome.Linked:
+                        counts.ClosureRecordsLinked++;
+                        break;
+                    case SignalRecordLinkOutcome.ForeignLink:
+                        skipped++; // logged at Warning and metered by SignalWriter
+                        await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
+                        break;
+                    case SignalRecordLinkOutcome.NotApplicable when !result.AlreadyRecorded:
+                        // Adversarial pass 2 K1: a person's decision re-closed the Signal (with its own record) after this pass closed it and
+                        // before the record just written could be linked. The human decision wins; the record stays unlinked. A counted skip,
+                        // never retried (the Signal is no longer a condition-cleared closure).
+                        skipped++;
+                        _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                            "Policy {PolicyCode}: Decision Record {RecordId} of the closure of Signal {SignalId} was written but not linked (reason={Reason}): " +
+                            "a person's decision re-closed the Signal first. The record stays unlinked.",
+                            policy.Code, result.RecordId, signal.Id, OntologyWriterFailureReason.ClosureRecordSkippedSignalReclosed);
+                        OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedSignalReclosed);
+                        break;
+                }
+            }
+            catch (DecisionRecordRefusedException ex) when (DecisionRecordWriter.ConditionClearedSkipTag(ex.Reason) is not null)
+            {
+                // F1: the record can never be written (logged at Warning and metered as a skip by the writer). Not a failure, not retried.
+                skipped++;
+                await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The Signal stays closed and a later pass retries. The writer (a DecisionRecordRefusedException) and SignalWriter (its
+                // escalation) have already logged and metered their own failures; anything else (the job's own core-type read, the assignee
+                // read, an access denial included: K4) is logged and metered here, once.
+                failed++;
+                if (ex is not DecisionRecordRefusedException and not SignalWriterEscalationException)
+                {
+                    var reason = SignalWriter.IsDataverseAccessDenied(ex)
+                        ? OntologyWriterFailureReason.DataverseAccessDenied
+                        : OntologyWriterFailureReason.WriteFailed;
+                    _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                        "Policy {PolicyCode}: the closure of Signal {SignalId} could not be recorded ({ExceptionType}, reason={Reason}); the Signal stays closed and the next pass retries.",
+                        policy.Code, signal.Id, ex.GetType().Name, reason);
+                    OntologyWriterTelemetry.RecordFailure(reason);
+                }
+            }
+        }
+
+        if (candidates.Count == 0 && failed == 0 && skipped == 0) return;
+
+        counts.ClosureRecorded += recorded;
+        counts.ClosureRecordFailures += failed;
+        counts.ClosureRecordSkips += skipped;
+        _logger.LogInformation(
+            "Policy {PolicyCode}: {Recorded} condition-cleared closure(s) recorded, {Skipped} skipped (cannot be recorded), {Failed} not recorded this pass (of {Candidates}).",
+            policy.Code, recorded, skipped, failed, candidates.Count);
+    }
+
+    /// <summary>
+    /// Task 153 (adversarial pass 1 F2): of the closed Signals that link a Decision Record, those whose link is NOT their own closure record
+    /// and that record existed before the close (a D-128 reminder or inquiry the item carried while it was open): their closure still needs
+    /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. Adversarial pass
+    /// 2: the read returns only records the writer created (<c>createdby</c>), and a record is replaced only when it took nothing but actions
+    /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own is left alone; one that was created
+    /// after the close, was created by a person, is any other decision, or cannot be found is left alone, logged at Warning and metered
+    /// (<see cref="OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink"/>). A read fault (the writer's identity
+    /// included) propagates (the caller does not guess).
+    /// </summary>
+    private async Task<(List<(ExistingSignal Signal, Guid? PriorRecordId)> Retries, int Skipped)> RetriesReplacingAPriorLinkAsync(
+        IReadOnlyList<ExistingSignal> linked, CancellationToken ct)
+    {
+        var records = new Dictionary<Guid, Entity>();
+        Guid? writerUserId = null;
+        foreach (var chunk in linked.Select(s => s.DecisionRecordId!.Value).Distinct().Chunk(LinkedRecordReadChunk))
+        {
+            var query = new QueryExpression("sprk_decisionrecord")
+            {
+                ColumnSet = new ColumnSet("sprk_steps", "sprk_followons", "createdon"),
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            // Adversarial pass 2: only records the writer itself created. A record a person created is never a link this job replaces.
+            writerUserId ??= await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
+            query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId.Value);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
+            {
+                records[row.Id] = row;
+            }
+        }
+
+        var retries = new List<(ExistingSignal, Guid?)>();
+        var skipped = 0;
+        foreach (var signal in linked)
+        {
+            var prior = signal.DecisionRecordId!.Value;
+            // The writer's own record for this closure: already recorded, nothing to retry (not a drop worth reporting).
+            if (records.TryGetValue(prior, out var record)
+                && DecisionRecordWriter.IsConditionClearedRecordFor(record.GetAttributeValue<string>("sprk_steps"), signal.Id, signal.Episode))
+            {
+                continue;
+            }
+
+            // Adversarial pass 2: and only a D-128 link: a record that took only actions leaving the item open (a reminder or an inquiry), or only
+            // created Next steps (uac-r2 re-check K2: the same rule as the commit's InquirySent). Any other prior link (a person's own decision, a
+            // record a person re-linked, a record not found among the writer's own) is foreign, whatever the skip marker says.
+            if (record is not null
+                && DecisionRecordWriter.IsNonResolvingReviewRecord(record.GetAttributeValue<string>("sprk_steps"), record.GetAttributeValue<string>("sprk_followons"))
+                && record.GetAttributeValue<DateTime?>("createdon") is { } created
+                && DateTime.SpecifyKind(created, DateTimeKind.Utc) < DateTime.SpecifyKind(signal.ResolvedOn!.Value, DateTimeKind.Utc))
+            {
+                retries.Add((signal, prior));
+                continue;
+            }
+
+            // uac-r2 re-check K2: never silent. This closure's record is not retried; say so, and count it. uac-r2 re-check 2 (K): said once, like the
+            // other permanent skips: the closure-skip marker is checked first (a later pass stays quiet while it holds), and set before the warning.
+            if (await IsClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            await MarkClosureRecordSkippedAsync(signal, ct).ConfigureAwait(false);
+            skipped++;
+            _logger.LogWarning(DecisionRecordEvents.ConditionClearedSkipped,
+                "Signal {SignalId} (episode {Episode}) was closed as ConditionCleared and links Decision Record {RecordId}, which is not one of the " +
+                "writer's own records that left the item open (reason={Reason}); its closure's record is not retried.",
+                signal.Id, signal.Episode, prior, OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink);
+            OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink);
+        }
+
+        return (retries, skipped);
+    }
+
+    /// <summary>Adversarial pass 2: a Signal closed as ConditionCleared within the retry window that links no Decision Record.</summary>
+    private static bool IsUnlinkedConditionClearedClosureInWindow(ExistingSignal signal, DateTime retryFrom) =>
+        signal.IsResolved
+        && signal.Resolution == SignalWriter.ResolutionConditionCleared
+        && signal.DecisionRecordId is null
+        && signal.ResolvedOn is { } resolvedOn
+        && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= retryFrom;
+
+    /// <summary>Task 153: the table a core record type names (<c>sprk_recordtype_ref.sprk_recordlogicalname</c>), or null when the type row
+    /// names none or no longer exists (F1: a permanent condition, not a fault). Any other fault propagates.</summary>
+    private async Task<string?> CoreTableOfAsync(Guid typeRef, CancellationToken ct)
+    {
+        try
+        {
+            var row = await _entities.RetrieveAsync("sprk_recordtype_ref", typeRef, new[] { "sprk_recordlogicalname" }, ct).ConfigureAwait(false);
+            return row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && IsRecordNotFound(ex))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A read that failed because the row does not exist (Dataverse <c>0x80040217</c> anywhere in the chain).</summary>
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Task 153 (F1): whether an earlier pass marked this closure a permanent skip. A cache fault reads as "not marked": the closure
+    /// is attempted again and, if it is still permanent, skipped and metered again (never a failure).</summary>
+    private async Task<bool> IsClosureRecordSkippedAsync(ExistingSignal signal, CancellationToken ct)
+    {
+        try
+        {
+            return await _cache.GetStringAsync(ClosureRecordSkippedCacheKey(signal.Id, signal.Episode), ct).ConfigureAwait(false) is not null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Signal {SignalId}: whether its closure was marked skipped could not be read ({ExceptionType}); it is attempted again.",
+                signal.Id, ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>Task 153 (F1): marks a closure a permanent skip so later passes do not attempt it again. A cache fault is logged, never thrown.</summary>
+    private async Task MarkClosureRecordSkippedAsync(ExistingSignal signal, CancellationToken ct)
+    {
+        try
+        {
+            await _cache.SetStringAsync(ClosureRecordSkippedCacheKey(signal.Id, signal.Episode),
+                _timeProvider.GetUtcNow().ToString("o", CultureInfo.InvariantCulture),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ConditionClearedRecordRetryWindow + TimeSpan.FromDays(1) },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Signal {SignalId}: its closure could not be marked skipped ({ExceptionType}); a later pass may skip it again.",
+                signal.Id, ex.GetType().Name);
         }
     }
 
@@ -798,6 +1193,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
                 "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord",
+                // Task 153: when the Signal was raised (the attribution window) and its privilege flag (copied to its closure record).
+                "createdon", "sprk_privilegeflagged",
                 // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync).
                 SignalSuppressionService.EvidenceColumn,
             }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
@@ -900,6 +1297,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
 
+        /// <summary>Task 153 (D-145b): condition-cleared Decision Records written this pass, Signals linked to one, closures whose record
+        /// could not be written or linked this pass (metered on ontology.writer.failures and retried by a later pass; adversarial pass 1 F1b:
+        /// they do NOT fail the run), and closures whose record can never be written or linked (counted skips, not retried).</summary>
+        public int ClosureRecorded, ClosureRecordsLinked, ClosureRecordFailures, ClosureRecordSkips;
+
         /// <summary>Task 145 (uac-r2 F1 on #1874): the policies whose stored evidence this run already checked (or tried to), so the
         /// sweeps after the policy loop reach every other policy exactly once.</summary>
         public HashSet<string> EvidenceRedactionAttempted { get; } = new(StringComparer.Ordinal);
@@ -985,6 +1387,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
             noDatedEvidence = NoDatedEvidence,
             clearedMarked = ClearedMarked,
             evidenceRedacted = EvidenceRedacted,
+            closureRecorded = ClosureRecorded,
+            closureRecordsLinked = ClosureRecordsLinked,
+            closureRecordFailures = ClosureRecordFailures,
+            closureRecordSkips = ClosureRecordSkips,
             missingInputs = MissingInputs,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
@@ -1007,7 +1413,9 @@ public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed
 /// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031). <c>Partition</c> (#1661, D-123): the Signal's
 /// secure-family partition, set by <see cref="SignalSuppressionService.ReconcileAsync"/> for every Signal of a record that carries a live
 /// stamp (null: not placed, read as ordinary by the pure planner), so the planner reads a stamp only within the partition it was written
-/// for. <c>LineageRow</c>: the row as read, with its lineage lookups (the partition's input).</summary>
+/// for. <c>LineageRow</c>: the row as read, with its lineage lookups (the partition's input). <c>Holder</c> (D-145a, task 152): whose Do
+/// item the Signal is, set with <c>Partition</c> for a Do-lane policy (<see cref="SuppressionHolder.Everyone"/> in the Decide lane; null:
+/// not placed, read as everyone), so the planner reads a Do-lane stamp only within the same person's (or item's) Do items.</summary>
 internal sealed record ExistingSignal(
     Guid Id,
     string? RowVersion,
@@ -1026,7 +1434,8 @@ internal sealed record ExistingSignal(
     DateTime? LastEvaluated = null,
     Guid? DecisionRecordId = null,
     SuppressionPartition? Partition = null,
-    Entity? LineageRow = null)
+    Entity? LineageRow = null,
+    SuppressionHolder? Holder = null)
 {
     /// <summary>D-120: how much later than <c>sprk_resolvedon</c> <c>sprk_lastevaluated</c> must be to read as "the job observed the
     /// condition cleared after the resolution" (a person's commit may stamp both within moments of each other).</summary>
@@ -1105,10 +1514,14 @@ internal static class SignalEpisodePlanner
     /// <param name="hitPartitions">#1661 R1: each hit's partition from the truth (<see cref="SignalSuppressionService.PartitionsOfHitsAsync"/>);
     /// a hit that is absent or undetermined is live (round 2 F2). Null only for callers with no partition truth at all (the pure rule
     /// tests): every hit and every unplaced Signal is then ordinary.</param>
+    /// <param name="hitHolders">D-145a (task 152): each Do-lane hit's holder (<see cref="SignalSuppressionService.HoldersOfHitsAsync"/>);
+    /// a stamp mutes a hit only when it sits on a row of the same holder. Null (the Decide lane, and the pure rule tests): every hit and
+    /// every row with no holder is <see cref="SuppressionHolder.Everyone"/>.</param>
     public static EpisodePlan Plan(
         int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing,
         IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionPartition>? hitPartitions = null,
-        bool isThreshold = false, IReadOnlySet<(string, Guid)>? unjudged = null)
+        bool isThreshold = false, IReadOnlySet<(string, Guid)>? unjudged = null,
+        IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionHolder>? hitHolders = null)
     {
         var plan = new EpisodePlan();
         var now = nowUtc.UtcDateTime;
@@ -1129,7 +1542,11 @@ internal static class SignalEpisodePlanner
             var partition = hitPartitions is null
                 ? SuppressionPartition.Ordinary
                 : hitPartitions.GetValueOrDefault((hit.SubjectEntity, hit.SubjectId), SuppressionPartition.Undetermined);
-            return stamped.Contains(partition); // StampedPartitions never holds the undetermined bucket
+            // D-145a: and only within the hit's own holder (a hit not placed is everyone, which no Do-lane row is: it is live).
+            var holder = hitHolders is not null && hitHolders.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var placed)
+                ? placed
+                : SuppressionHolder.Everyone;
+            return stamped.Contains((partition, holder)); // StampedPartitions never holds the undetermined bucket
         }
 
         foreach (var hit in hits)
@@ -1271,13 +1688,14 @@ internal static class SignalEpisodePlanner
 
     private enum EvidenceVerdict { Newer, Older, Undated }
 
-    /// <summary>The partitions that carry a live stamp on <paramref name="grain"/> (an unplaced Signal reads as ordinary; the
-    /// undetermined bucket never mutes).</summary>
-    private static HashSet<SuppressionPartition> StampedPartitions(IReadOnlyList<ExistingSignal> existing, Grain grain, DateTime now) =>
+    /// <summary>The (partition, holder) pairs that carry a live stamp on <paramref name="grain"/> (an unplaced Signal reads as ordinary
+    /// and everyone; the undetermined bucket never mutes). A holder splits only Do-lane rows (D-145a).</summary>
+    private static HashSet<(SuppressionPartition Partition, SuppressionHolder Holder)> StampedPartitions(
+        IReadOnlyList<ExistingSignal> existing, Grain grain, DateTime now) =>
         existing
             .Where(s => GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now)
-            .Select(s => s.Partition ?? SuppressionPartition.Ordinary)
-            .Where(p => !p.IsUndetermined)
+            .Select(s => (Partition: s.Partition ?? SuppressionPartition.Ordinary, Holder: s.Holder ?? SuppressionHolder.Everyone))
+            .Where(p => !p.Partition.IsUndetermined)
             .ToHashSet();
 
     /// <summary>#1661 R1: the hits whose partition can change the outcome, those on a record (or item) that carries a live stamp. Only

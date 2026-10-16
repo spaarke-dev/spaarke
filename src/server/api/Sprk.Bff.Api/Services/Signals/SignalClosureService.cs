@@ -44,7 +44,8 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// never counts toward suppression (grain (policy, core record) or (policy, item), D-34/D-36/D-39). It also never touches
 /// the Signal's policy, subject, core record, dedupe key or episode, so task 031 can find a <c>PolicyRetired</c> or
 /// <c>Superseded</c> episode and re-raise from it (D-32). A Signal already Resolved is never read as open here, so no
-/// closure path changes it.</para>
+/// closure path changes it. (Task 153, D-145b: only the job's Do-lane ConditionCleared closure is recorded, by the job after the
+/// close; the closures here stay record-free.)</para>
 /// <para><b>Callable.</b> <see cref="ClosePolicyRetiredNowAsync"/> is for task 100 (Retire closes immediately). Task 101
 /// (publish) calls <see cref="SignalReevaluationJob.ReevaluatePolicyAsync"/> instead, which supersedes AND raises the new
 /// episode in one pass (there is deliberately no close-only supersede: it would drop still-true items off the worklist until

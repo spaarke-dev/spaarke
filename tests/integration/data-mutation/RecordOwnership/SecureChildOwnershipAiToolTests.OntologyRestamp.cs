@@ -73,6 +73,33 @@ public sealed partial class SecureChildOwnershipAiToolTests
         }
     }
 
+    // ── Task 149 (D-144 as amended): a gate Decision Record about an UNFILED communication is owned by the communication's own USER ──
+
+    [Theory]
+    [MemberData(nameof(OntologyRefileRoutes))]
+    public async Task OntologyRestamp_AUserOwnedGateDecisionRecord_FollowsItsCommunicationIntoIsolation_WhenTheCommunicationIsLaterFiledUnderASecureMatter(
+        string route)
+    {
+        // The gate decided while the communication stood alone, so the record is owned by the communication's owning user (D-144 as
+        // amended), not by a team. When the communication is later filed under a secure matter, the secure-child walk reaches the record
+        // through sprk_regardingcommunication and moves it to the Secure team, exactly as it moves a team-owned one.
+        _world.WithRecord("sprk_communication", OntologyCommunication, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+        });
+        ShareWorld.OrdinaryChild("sprk_communication", OntologyCommunication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        OntologyRowsAboutTheCommunication(stamp: OrdinaryMatter, isolated: false, userOwnedDecisionRecord: true);
+        ShareWorld.OwnerOf("sprk_decisionrecord", OntologyDecisionRecord).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "the seed: the decision record starts user-owned");
+        var before = DecisionContextOf("sprk_decisionrecord");
+
+        await RefileOntologyCommunication(route, SecureMatter, OntologyRestamper());
+
+        ShareWorld.OwnerOf("sprk_decisionrecord", OntologyDecisionRecord).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "a user-owned gate record follows its communication into isolation (secure-child walk via sprk_regardingcommunication)");
+        DecisionContextOf("sprk_decisionrecord").Should().Equal(before, "the decision context is immutable (D-34)");
+    }
+
     // ── Criterion 3: back to M (a Full Access holder) ────────────────────────────────────────────────────────────
 
     [Theory]
@@ -162,7 +189,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>A Signal and a Decision Record whose subject is the communication, stamped with <paramref name="stamp"/>, and
     /// a full decision context naming the ordinary matter they were decided about.</summary>
-    private void OntologyRowsAboutTheCommunication(Guid stamp, bool isolated)
+    private void OntologyRowsAboutTheCommunication(Guid stamp, bool isolated, bool userOwnedDecisionRecord = false)
     {
         foreach (var table in OntologyTables)
         {
@@ -174,6 +201,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             };
             if (isolated)
                 ShareWorld.SecureChild(table, row, lookups);
+            else if (userOwnedDecisionRecord && table == "sprk_decisionrecord")
+                ShareWorld.UserOwnedChild(table, row, lookups);
             else
                 ShareWorld.OrdinaryChild(table, row, lookups);
             ShareWorld.Set(table, row, "sprk_matter", new EntityReference("sprk_matter", OrdinaryMatter));

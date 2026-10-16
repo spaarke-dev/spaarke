@@ -1,5 +1,7 @@
 # Preflight Results — spaarkedev1
 
+> ⚠️ **Superseded 2026-10-14.** This June snapshot is stale. On the Task 003 re-check, SDV, EventAutoAssociate, EventFormController and RegardingLink were found live, FieldMappingAdmin retained on master, and UQC plus two canvas pages already gone. The current dispositions are in [`preflight-deviations.md`](preflight-deviations.md) DEV-002–007 and [`dataverse-cleanup-log.md`](dataverse-cleanup-log.md).
+
 > **Task**: 001 — Pre-flight backups + 4-check verification
 > **Environment**: spaarkedev1 (`https://spaarkedev1.crm.dynamics.com/`)
 > **Executed**: 2026-06-22

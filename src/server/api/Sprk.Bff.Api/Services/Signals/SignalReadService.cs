@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -84,9 +85,18 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 
 /// <summary>One Work Item: display columns only (D-23, task 051 #1513, task 052 #1536 F4).</summary>
 /// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
-/// witness rule (D-123): a line whose witness is not in the Signal's own known secure family has no <c>text</c> or <c>source</c> and
-/// carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather than absent. Null when nothing is stored or the
+/// witness rules (D-123, D-142): a line whose witness the caller cannot read, or whose witness is not in the Signal's own known secure
+/// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
+/// than absent. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
+/// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored. FR-48/D-23 bind what it may
+/// assert when it is written: the rule's literal text, with its tokens filled from the subject's own tested fields
+/// (<c>SignalWriter.RenderSentence</c>), never a witness value. It adds nothing beyond the caller's own read of the Signal row (the
+/// column is not field-secured); a non-core subject the caller cannot read is DI-89 (#1913). Null when empty. Task 154 (#1959 item 1).</param>
+/// <param name="SubjectRecordType">Do lane only (task 154, #1958): the subject's table (logical name), the table whose caller-scoped
+/// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
+/// a Decide-lane row.</param>
+/// <param name="SubjectRecordId">Do lane only: the subject's id, with <see cref="SubjectRecordType"/>. Null on a Decide-lane row.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -102,7 +112,10 @@ public sealed record WorklistItemRow(
     Guid? PolicyVersionId,
     DateTimeOffset? ResolvedOn = null,
     int? ResolutionType = null,
-    DateTimeOffset? SuppressedUntil = null);
+    DateTimeOffset? SuppressedUntil = null,
+    string? Sentence = null,
+    string? SubjectRecordType = null,
+    Guid? SubjectRecordId = null);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -122,13 +135,20 @@ public sealed record WorklistItemRow(
 /// (5) A Do-lane row is kept only when the caller's own read of its subject, filtered to "mine", returns it
 /// (<see cref="DoLaneMineRules"/>); that read also proves the caller can read the subject (D-35 as amended by D-129). A dropped
 /// row leaves no trace: no count, no placeholder, no group.</para>
+/// <para><b>What a row carries (task 154).</b> Every returned value belongs to a row the caller's own reads admitted. The rule sentence
+/// is a column of the Signal row the caller read. The subject reference (<see cref="WorklistItemRow.SubjectRecordType"/>,
+/// <see cref="WorklistItemRow.SubjectRecordId"/>) is returned on Do-lane rows only, from the step (5) read that returned the subject to
+/// the caller; a Decide-lane row has no such read and returns neither. Neither adds a request.</para>
+/// <para><b>Group order.</b> The lanes follow D-42 and the secondary sets the configuration's order; in the Do lane the "Not filed"
+/// group (D-35) is always emitted last (HANDOFF 1.2, task 154).</para>
 /// <para><b>Fail closed, honestly.</b> A row the caller cannot read is dropped; a FAULT (a 5xx, throttling, an unparseable
 /// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
 /// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
 /// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
 /// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
-/// catalog query; and, only for returned rows whose evidence carries detail, the app-only secure-family placement of those
-/// Signals and their witnesses (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
+/// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
+/// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -142,8 +162,18 @@ public sealed class SignalReadService
     /// <summary>Ids per batched caller read (keeps the GET URL well under Dataverse's limit).</summary>
     internal const int IdChunk = 100;
 
+    /// <summary>Witness ids per batched caller read (task 151, D-142: In lists of at most 200 ids).</summary>
+    internal const int WitnessIdChunk = 200;
+
     internal const string SignalEntitySet = "sprk_signals";
     internal const string HighPriorityColumn = "sprk_highpriority";
+
+    /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
+    internal const string TodoNotesColumn = "sprk_notes";
+
+    /// <summary><c>sprk_todo</c>'s matter lookup as a Web API name: the inquiry-outcome To Do's matter fallback reads that matter's
+    /// open inquiries (task 154, pass 2 F1).</summary>
+    internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
 
@@ -236,41 +266,15 @@ public sealed class SignalReadService
     /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
     public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
     {
-        // (1) Who the caller is, as Dataverse sees them (the identity every later caller read runs as).
-        var who = await _user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
-        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
+        var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
+        if (caller.Failure is { } callerFailure)
         {
-            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
-            {
-                _logger.LogWarning("Signal read: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
-                return SignalReadResult.CallerUnresolved;
-            }
-
-            _logger.LogWarning("Signal read: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
-            return SignalReadResult.Unavailable("caller_identity_fault");
+            return callerFailure;
         }
 
-        // (2) The caller's linked contact (the person columns are contact lookups). Under D-129 records are team-owned, so most of
-        // the caller's own work matches only on an assignee column: a contact that cannot be READ (a fault, as opposed to a user
-        // with no linked contact) is 503, never a Do lane silently missing that work.
-        Guid? contactId;
-        try
-        {
-            var person = await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
-            if (person.ContactUnreadable)
-            {
-                _logger.LogWarning("Signal read: the caller's linked contact could not be read; unavailable.");
-                return SignalReadResult.Unavailable("caller_contact_fault");
-            }
-
-            contactId = person.ContactId is { } c && c != Guid.Empty ? c : null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
-                ex.GetType().Name);
-            return SignalReadResult.Unavailable("caller_contact_fault");
-        }
+        var callerId = caller.CallerId;
+        var contactId = caller.ContactId;
 
         try
         {
@@ -360,12 +364,13 @@ public sealed class SignalReadService
                         continue;
                     }
 
-                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact));
+                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact, mine.Table));
                 }
                 else
                 {
+                    // No subject reference on a Decide row: no caller read of its subject admitted it (task 154).
                     var decide = key != Guid.Empty && subjects.Decide.TryGetValue(key, out var found) ? found : null;
-                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact));
+                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact, SubjectTable: null));
                 }
             }
 
@@ -375,8 +380,8 @@ public sealed class SignalReadService
                 visible = await PartitionClosedAsync(visible, set == WorklistSet.ClosedToday, ct).ConfigureAwait(false);
             }
 
-            // (9) The witness rule at read time (D-123; task 145 review F1, option B): a stored line keeps its subject and sender only
-            // while its witness is in the Signal's own known secure family.
+            // (9) The witness rules at read time (D-123; task 145 review F1, option B; D-142, task 151): a stored line keeps its subject
+            // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -526,7 +531,9 @@ public sealed class SignalReadService
                 if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
                 {
                     // No Read on sprk_signal at all: the caller reads nothing, which is an empty list, not an error (FR-54).
-                    _logger.LogInformation("Signal read: the caller has no read on sprk_signal; nothing to return.");
+                    // Warning (task 149, uac-r2 K3 on #1891): an empty worklist from a refused read looks exactly like "no work", so the
+                    // refusal must be visible at the level an operator filters on. No behaviour change.
+                    _logger.LogWarning("Signal read: the caller has no read on sprk_signal; nothing to return.");
                     return new FetchPages([], null);
                 }
 
@@ -695,7 +702,8 @@ public sealed class SignalReadService
     // (7) subjects: Do-lane "mine", the D-42 flag, the closed sets' assignee
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact);
+    /// <param name="Table">The table whose caller read returned the subject (task 154: the Do-lane row's subject reference).</param>
+    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact, string Table);
 
     private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
 
@@ -719,12 +727,10 @@ public sealed class SignalReadService
 
             var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
             var pk = $"{rule.Table}id";
-            var mineFilter = MineFilter(rule, callerId, contactId);
-            var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
             foreach (var chunk in ids.Chunk(IdChunk))
             {
                 var response = await _user.GetAsync(
-                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)} and ({mineFilter})", ct).ConfigureAwait(false);
+                    MineSubjectQuery(rule, entitySet, chunk, callerId, contactId), ct).ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Do-lane subject");
                 if (result.Outcome is { } failure)
                 {
@@ -737,7 +743,8 @@ public sealed class SignalReadService
                     {
                         mine[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null);
+                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null,
+                            rule.Table);
                     }
                 }
             }
@@ -772,7 +779,8 @@ public sealed class SignalReadService
                     {
                         decide[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null);
+                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null,
+                            table);
                     }
                 }
             }
@@ -784,6 +792,74 @@ public sealed class SignalReadService
     /// <summary>The subject's table from its <c>sprk_regardingrecordtype</c> catalog row; null when untyped or not cataloged.</summary>
     private static string? SubjectTable(SignalRow row, IReadOnlyDictionary<Guid, CatalogRow> catalog) =>
         row.SubjectTypeId is { } t && catalog.TryGetValue(t, out var type) ? type.LogicalName : null;
+
+    /// <summary>The caller and their linked contact, as the Do-lane "mine" rule compares them; or why they could not be resolved.</summary>
+    /// <param name="Failure">Null when resolved; otherwise the single 403 (<see cref="SignalReadOutcome.CallerUnresolved"/>) or a
+    /// 503 (<see cref="SignalReadOutcome.Unavailable"/>).</param>
+    /// <param name="CallerId">The caller's <c>systemuserid</c>; set only when resolved.</param>
+    /// <param name="ContactId">The caller's linked contact, or null when they have none (never null because a read faulted).</param>
+    internal sealed record MineCaller(SignalReadResult? Failure, Guid CallerId, Guid? ContactId);
+
+    /// <summary>
+    /// The inputs of the Do-lane "mine" rule, read AS THE CALLER: who they are (<c>WhoAmI</c>) and their linked contact (the person
+    /// columns are contact lookups). Shared by the worklist and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, task 150,
+    /// D-141) so both resolve "the caller" the same way. An unresolvable caller is the single 403; a fault reading their identity or
+    /// contact is 503 (under D-129 records are team-owned, so most of the caller's own work matches only on an assignee column: a
+    /// contact that cannot be READ, as opposed to a user with no linked contact, never reads as "no contact").
+    /// </summary>
+    internal static async Task<MineCaller> ResolveMineCallerAsync(
+        IDataverseUserClient user, IIdentityNormalizationService identity, ILogger logger, CancellationToken ct)
+    {
+        var who = await user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
+        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        {
+            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                logger.LogWarning("Do-lane mine: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
+                return new MineCaller(SignalReadResult.CallerUnresolved, Guid.Empty, null);
+            }
+
+            logger.LogWarning("Do-lane mine: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
+            return new MineCaller(SignalReadResult.Unavailable("caller_identity_fault"), Guid.Empty, null);
+        }
+
+        try
+        {
+            var person = await identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
+            if (person.ContactUnreadable)
+            {
+                logger.LogWarning("Do-lane mine: the caller's linked contact could not be read; unavailable.");
+                return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+            }
+
+            return new MineCaller(null, callerId, person.ContactId is { } c && c != Guid.Empty ? c : null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Do-lane mine: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
+                ex.GetType().Name);
+            return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+        }
+    }
+
+    /// <summary>
+    /// THE Do-lane "mine" read (task 150, D-141): the caller's own read of <paramref name="ids"/> in <paramref name="rule"/>'s table,
+    /// filtered to the rows <see cref="MineFilter"/> admits. A row comes back only when the caller can read it AND it is their own
+    /// work. The worklist (a chunk of ids) and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, one id) both send this
+    /// request; neither builds the predicate itself.
+    /// </summary>
+    /// <param name="includeTodoNotes">The per-Signal gate's single-id read only (task 154, D-111): a To Do's notes (the inquiry hint)
+    /// and its matter (the fallback, pass 2 F1), so the plan route identifies an inquiry-outcome To Do exactly as the commit route does
+    /// with no To Do request of its own. Columns, never a predicate. The worklist's chunked read leaves them out (adversarial pass 1
+    /// K3: an unused ntext column on up to 100 rows).</param>
+    internal static string MineSubjectQuery(
+        DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId, bool includeTodoNotes = false)
+    {
+        var pk = $"{rule.Table}id";
+        var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty)
+            + (includeTodoNotes && string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn},{TodoMatterColumn}" : string.Empty);
+        return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
+    }
 
     /// <summary>The OData "mine" clause: the rule's parts OR-ed, each compared with the caller (never widened, only narrowed).</summary>
     internal static string MineFilter(DoLaneMineRule rule, Guid callerId, Guid? contactId)
@@ -861,9 +937,10 @@ public sealed class SignalReadService
 
     /// <summary>
     /// Each returned row's stored witness lines, judged now (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>): a
-    /// line that carries a <c>text</c> or <c>source</c> keeps them only when its witness is in the Signal's own known secure family;
+    /// line that carries a <c>text</c> or <c>source</c> keeps them only when the caller's own read returns its witness
+    /// (<see cref="WitnessesTheCallerReadsAsync"/>, D-142) AND its witness is in the Signal's own known secure family (D-123);
     /// otherwise both are removed and the line carries <c>"withheld": true</c> (kind, ref, tier, as-of and clause stay). A fault in
-    /// that judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
+    /// either judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
     /// is returned as null: what it holds cannot be judged line by line.
     /// </summary>
     private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
@@ -891,7 +968,14 @@ public sealed class SignalReadService
             return rows;
         }
 
-        var shown = asked.Count == 0 ? new Dictionary<Guid, IReadOnlySet<string>>() : await _families.WitnessDetailShownOnReadAsync(asked, ct).ConfigureAwait(false);
+        // D-142 (task 151): the caller's own read of the witness rows first; a fault there withholds every detail on the page.
+        IReadOnlyDictionary<Guid, IReadOnlySet<string>>? shown = new Dictionary<Guid, IReadOnlySet<string>>();
+        if (asked.Count > 0)
+        {
+            var readable = await WitnessesTheCallerReadsAsync(asked.SelectMany(a => a.References), ct).ConfigureAwait(false);
+            shown = readable is null ? null : await _families.WitnessDetailShownOnReadAsync(asked, readable, ct).ConfigureAwait(false);
+        }
+
         var withheld = 0;
         var result = new List<VisibleRow>(rows.Count);
         foreach (var row in rows)
@@ -928,7 +1012,7 @@ public sealed class SignalReadService
 
         if (withheld > 0)
         {
-            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (another or an undetermined secure family; D-123).", withheld);
+            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (a witness the caller cannot read, or another or an undetermined secure family; D-142, D-123).", withheld);
         }
 
         return result;
@@ -936,6 +1020,73 @@ public sealed class SignalReadService
         static bool HasDetail(JsonObject line) => line["text"] is not null || line["source"] is not null;
 
         static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    /// <summary>
+    /// D-142 (task 151): the witnesses (<see cref="SignalSuppressionService.WitnessOf"/>) the CALLER's own read returns. One batched
+    /// read per witness table per request, in lists of at most <see cref="WitnessIdChunk"/> ids, never one per witness. The table's
+    /// entity set and key come from uac-r2's lineage (<see cref="SecureChildLineage"/>), the only tables a witness can name. A table
+    /// the caller has no Read on (403) returns none of its rows. Any other failure (a 5xx, throttling, an unparseable body, an
+    /// exception) returns null: the caller then withholds every detail on the page, and the list itself is unchanged (fail closed,
+    /// logged at Warning with the table and the error code only).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: the core-record and subject reads above (batched caller
+    /// reads through <see cref="IDataverseUserClient"/>, <see cref="InFilter"/>). Extension: they read core and subject tables, never
+    /// the rows a Signal's evidence quotes, so this applies the same caller read to the witness rows. Cost of doing nothing: a reader
+    /// sees the subject and sender of a communication they cannot open (re-filed to another business unit's matter, or unfiled and
+    /// privately owned), contrary to D-142.</remarks>
+    private async Task<IReadOnlySet<(string Table, Guid Id)>?> WitnessesTheCallerReadsAsync(IEnumerable<string> references, CancellationToken ct)
+    {
+        var readable = new HashSet<(string Table, Guid Id)>();
+        foreach (var byTable in references.Select(SignalSuppressionService.WitnessOf).OfType<(string Table, Guid Id)>().Distinct()
+                     .GroupBy(w => w.Table, StringComparer.Ordinal))
+        {
+            var lineage = SecureChildLineage.Children[byTable.Key];
+            var pk = lineage.IdColumn;
+            foreach (var chunk in byTable.Select(w => w.Id).Chunk(WitnessIdChunk))
+            {
+                DataverseUserResponse response;
+                try
+                {
+                    response = await _user.GetAsync($"{lineage.EntitySet}?$select={pk}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                        "Signal read: the caller's read of {Table} witnesses faulted ({ExceptionType}); every witness line is shown without its detail (D-142, fail closed).",
+                        byTable.Key, ex.GetType().Name);
+                    return null;
+                }
+
+                if (response.IsSuccess
+                    && response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in value.EnumerateArray())
+                    {
+                        if (TryReadGuid(row, pk, out var id) && chunk.Contains(id))
+                        {
+                            readable.Add((byTable.Key, id));
+                        }
+                    }
+
+                    continue;
+                }
+
+                // A 403 is "no Read on the table": none of its witnesses is readable. A 401 is the same mapped code but means the
+                // caller's token failed mid-request, which is a fault (every detail on the page is withheld), not a verdict.
+                if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && response.StatusCode != 401)
+                {
+                    continue;
+                }
+
+                _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                    "Signal read: the caller's read of {Table} witnesses failed ({ErrorCode}); every witness line is shown without its detail (D-142, fail closed).",
+                    byTable.Key, response.IsSuccess ? "unparseable" : response.ErrorCode);
+                return null;
+            }
+        }
+
+        return readable;
     }
 
     /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
@@ -969,7 +1120,8 @@ public sealed class SignalReadService
     // shaping and D-42 order
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact);
+    /// <param name="SubjectTable">Do lane: the table whose caller-scoped "mine" read returned the subject; null on a Decide row.</param>
+    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact, string? SubjectTable);
 
     private static IReadOnlyList<WorklistLaneGroups> Shape(
         WorklistSet set,
@@ -1020,8 +1172,17 @@ public sealed class SignalReadService
 
             // Secondary sets keep the configuration's order (membership and order come from the row, FR-24), grouped by first
             // appearance; the closed and suppressed queries already order by the core pair first.
+
+            if (lane == DecisionLane.Do)
+            {
+                // HANDOFF 1.2 (task 154, #1959 item 3): in every set, the Do lane's "Not filed" group (D-35) comes last; every other
+                // group keeps its order above. Stable, so nothing else moves. The Decide lane has no Not filed group (no-core rows
+                // are Do-only).
+                groups = [.. groups.Where(g => g.Core is not null), .. groups.Where(g => g.Core is null)];
+            }
+
             lanes.Add(new WorklistLaneGroups(LaneName(lane), groups
-                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r.Row)).ToList()))
+                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(ToItem).ToList()))
                 .ToList()));
         }
 
@@ -1055,9 +1216,13 @@ public sealed class SignalReadService
     private static int CompareNullableOrdinal(string? a, string? b) =>
         a is null ? (b is null ? 0 : 1) : b is null ? -1 : string.CompareOrdinal(a, b);
 
-    private static WorklistItemRow ToItem(SignalRow row)
+    private static WorklistItemRow ToItem(VisibleRow visible)
     {
+        var row = visible.Row;
         var workType = row.WorkType is { } w && WorkTypeKeys.TryGetValue(w, out var key) ? key : null;
+
+        // Task 154 (#1958): the subject reference only where the caller's own "mine" read returned the subject (Do lane).
+        var subjectTable = row.Lane == DecisionLane.Do ? visible.SubjectTable : null;
         return new WorklistItemRow(
             row.SignalId,
             LaneName(row.Lane!.Value),
@@ -1073,7 +1238,10 @@ public sealed class SignalReadService
             row.PolicyVersionId,
             row.ResolvedOn,
             row.ResolutionType,
-            row.SuppressedUntil);
+            row.SuppressedUntil,
+            row.Sentence,
+            subjectTable,
+            subjectTable is null ? null : row.SubjectId);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1175,7 +1343,8 @@ public sealed class SignalReadService
         int? Severity,
         DateTimeOffset? ResolvedOn,
         int? ResolutionType,
-        DateTimeOffset? SuppressedUntil)
+        DateTimeOffset? SuppressedUntil,
+        string? Sentence)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -1212,7 +1381,9 @@ public sealed class SignalReadService
                 Int(Aliased(raw, "sprk_severity")),
                 Instant(raw, "sprk_resolvedon"),
                 Int(raw, "sprk_resolutiontype"),
-                Instant(raw, "sprk_suppresseduntil"));
+                Instant(raw, "sprk_suppresseduntil"),
+                // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
+                ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null);
             return true;
         }
 

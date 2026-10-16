@@ -111,6 +111,7 @@ public class WorklistGridConfigurationTests
             {
                 "sprk_signalid", "sprk_name", "sprk_lane", "sprk_signalstatus", "sprk_firstdetected", "sprk_duedate",
                 "sprk_regardingrecordname", "sprk_corerecordtype", "sprk_corerecordid", "sprk_policyversion", "sprk_evidencerefs", "ownerid",
+                "sprk_sentence", // task 154: the row's sentence, as stored
             }, name);
 
             var link = entity.Elements("link-entity").Single();

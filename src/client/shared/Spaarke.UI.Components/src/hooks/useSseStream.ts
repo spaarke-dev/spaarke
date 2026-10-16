@@ -819,6 +819,11 @@ export function useSseStream(): IUseSseStreamResult {
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      // A superseded stream (aborted by a newer startStream, or by cancelStream) must not
+      // write state: its AbortError catch would otherwise set isStreaming=false AFTER the
+      // newer stream set it true. That happens when a send follows `done` while the server
+      // is still closing the previous response.
+      const isCurrent = () => abortControllerRef.current === controller;
 
       const fetchStream = async () => {
         try {
@@ -917,6 +922,7 @@ export function useSseStream(): IUseSseStreamResult {
             getAccessToken,
             signal: controller.signal,
             onLine: (line: string) => {
+              if (!isCurrent()) return;
               const paneEvent = parsePaneEvent(line);
               if (paneEvent) {
                 const paneHandler = onPaneEventRef.current;
@@ -933,9 +939,11 @@ export function useSseStream(): IUseSseStreamResult {
             },
           });
 
+          if (!isCurrent()) return;
           setIsStreaming(false);
           setIsTyping(false);
         } catch (err: unknown) {
+          if (!isCurrent()) return;
           if (err instanceof DOMException && err.name === 'AbortError') {
             // Stream was cancelled by user — not an error
             setIsStreaming(false);

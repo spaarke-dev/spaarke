@@ -227,6 +227,10 @@ public static class DecisionCommitReasons
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
 
+    /// <summary>Task 154 (D-111): Mark complete was taken on an inquiry's "Record the outcome" To Do (409). It is completed by recording
+    /// the inquiry's disposition (<c>POST /api/v1/inquiries/{id}/disposition</c>); the code is that route's family.</summary>
+    public const string InquiryDispositionRequired = "inquiry.disposition_required";
+
     /// <summary>Task 141 fix round 2 (K2): a Signal names a subject (its pair id is set) but the subject's table cannot be
     /// derived, for example the subject was deleted and its RemoveLink cascade cleared the lookup. Refused exactly as before
     /// (Forbidden, fail closed, no new allow path); only the code and message say what is wrong. A Replay's warning for the
@@ -453,7 +457,8 @@ public sealed class DecisionCommitService
         var lanes = new Dictionary<Guid, SignalAccessDecision>();
         foreach (var id in ids)
         {
-            var decision = await _access.AuthorizeAsync(id, ct).ConfigureAwait(false);
+            // Readability only here; the Do-lane "mine" half (D-141) follows below, once the review id is known (task 150).
+            var decision = await _access.AuthorizeAsync(id, ct, enforceDoLaneMine: false).ConfigureAwait(false);
             if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = review.ReviewId };
             if (decision.Outcome == SignalAccessOutcome.Unavailable)
@@ -465,6 +470,17 @@ public sealed class DecisionCommitService
 
         var hash = ContentHash(signalId, review);
         var ledgerKey = $"{callerObjectId}:{review.ReviewId:D}";
+
+        // ---- (1b) D-141 (task 150): a Do item is the caller's own work, or the uniform 404, before any lock, ledger answer or write.
+        // The one exception is THIS caller's own review of exactly this content already in the ledger: it passed this check on its
+        // first attempt, and the decision may since have reassigned the item (Reassign), so its stored outcome is RETURNED (no
+        // write) or reported as in progress. The skip stops at the first write: a resume or a repair replay of that review checks
+        // "mine" again (CommitLeasedAsync) unless the review's own landed reassign step is what moved the item. Any other review
+        // id, or the same id with other content, is checked here, so a not-mine item never gets an in-progress, review-changed or
+        // replay answer an unreadable item would not.
+        var mineConfirmed = !await IsSameReviewInLedgerAsync(tenantId, ledgerKey, hash, ct).ConfigureAwait(false);
+        if (mineConfirmed && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
 
         // ---- (0a) Locks, across instances: atomic leases (Redis SET NX PX when Redis is on; the same primitive
         // NoAccessShareEnforcer uses as a keyed mutex). One for the review id (the ledger's marker alone is a get-then-set), and
@@ -496,7 +512,7 @@ public sealed class DecisionCommitService
                 ct.ThrowIfCancellationRequested();
             }
 
-            return await CommitLeasedAsync(signalId, review, http, now, tenantId, callerObjectId, ids, lanes, hash, ledgerKey, ct).ConfigureAwait(false);
+            return await CommitLeasedAsync(signalId, review, http, now, tenantId, callerObjectId, ids, lanes, hash, ledgerKey, mineConfirmed, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -526,6 +542,54 @@ public sealed class DecisionCommitService
     private static DateTimeOffset Bounded(DateTimeOffset reviewStart, DateTimeOffset now) =>
         reviewStart > now - DecisionPlanReadStamp.Ttl ? reviewStart : now - DecisionPlanReadStamp.Ttl;
 
+    /// <summary>
+    /// Task 150: whether THIS caller's ledger already holds this review id with this content (in progress or with an outcome). A
+    /// ledger fault answers false, so the Do-lane "mine" check runs (fail closed; the locked read then answers the fault itself).
+    /// </summary>
+    private async Task<bool> IsSameReviewInLedgerAsync(string tenantId, string ledgerKey, string hash, CancellationToken ct)
+    {
+        try
+        {
+            var prior = await _ledger.GetAsync<LedgerEntry>(tenantId, LedgerResource, ledgerKey, LedgerVersion, ct: ct).ConfigureAwait(false);
+            return prior is not null && string.Equals(prior.ContentHash, hash, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: the review ledger could not be read before the Do-lane check ({ExceptionType}); checking.",
+                ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// D-141 (task 150): every Do-lane Signal in the review must be the caller's own work (<see cref="SignalCoreRecordAccess.ConfirmDoLaneMineAsync"/>,
+    /// the worklist's rule). Null when they all are; otherwise exactly the answer the readability check gives an unreadable item.
+    /// </summary>
+    private async Task<DecisionCommitResult?> ConfirmDoLaneMineAsync(
+        Guid reviewId, IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, CancellationToken ct)
+    {
+        foreach (var id in ids)
+        {
+            var decision = await _access.ConfirmDoLaneMineAsync(lanes[id], ct).ConfigureAwait(false);
+            if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
+                return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = reviewId };
+            if (decision.Outcome == SignalAccessOutcome.Unavailable)
+                return Unavailable(reviewId, DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.");
+            if (decision.Outcome != SignalAccessOutcome.Allowed)
+                return new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = reviewId };
+        }
+
+        return null;
+    }
+
+    /// <summary>Task 150 (pass 2 F): whether the review's own <c>reassign</c> step landed. That step moved the Do item away from the
+    /// caller, after the caller passed the "mine" check on the first attempt, so a resume or replay of this review is not judged by
+    /// whose item it is now.</summary>
+    private static bool OwnReassignLanded(DecisionCommitResult first) =>
+        first.Steps.Any(s => s.Code == ReassignActionCode && s.Status == nameof(DecisionActionStatus.Done));
+
+    private const string ReassignActionCode = "reassign";
+
     private static DecisionCommitResult InProgress(Guid reviewId) =>
         new()
         {
@@ -537,7 +601,8 @@ public sealed class DecisionCommitService
 
     private async Task<DecisionCommitResult> CommitLeasedAsync(
         Guid signalId, DecisionReview review, HttpContext http, DateTimeOffset now, string tenantId, string callerObjectId,
-        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, string hash, string ledgerKey, CancellationToken ct)
+        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, string hash, string ledgerKey, bool mineConfirmed,
+        CancellationToken ct)
     {
         // ---- (0) The review id: in progress, or a first outcome to return --------------------------------------------
         LedgerEntry? prior;
@@ -551,6 +616,12 @@ public sealed class DecisionCommitService
             return Unavailable(review.ReviewId);
         }
 
+        // D-141 (task 150): the check was skipped before the lock because this review was in the ledger; under the lock it is not
+        // (or holds other content), so this is a first attempt after all and the check runs now.
+        if (!mineConfirmed && (prior is null || !string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
+            && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
+
         DecisionCommitResult? resume = null;
         if (prior is { InProgress: true })
             return InProgress(review.ReviewId);
@@ -560,12 +631,19 @@ public sealed class DecisionCommitService
             // The same review id is the same review: the stored hash covers the Signal id and everything the review asks for.
             if (!string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
                 return Refused(review.ReviewId, DecisionCommitReasons.ReviewChanged, "This review id was already used for a different decision.");
+            // D-141 (task 150, pass 2 F): returning the stored outcome writes nothing, so it keeps the skipped "mine" check. A resume
+            // and a repair replay WRITE (as the caller, on a Do item someone else may own now), so unless the check already ran for
+            // this attempt they run it first; the one exception is a review whose own reassign step landed: that step is what moved
+            // the item, and the first attempt passed the check before it ran (task 150 review F1).
+            var mineNeeded = !mineConfirmed && !OwnReassignLanded(first);
             if (first.Status == DecisionCommitStatus.Recorded)
-                return await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey).ConfigureAwait(false);
+                return await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey, mineNeeded, ct).ConfigureAwait(false);
             if (!review.Retry || first.Status != DecisionCommitStatus.Failed)
                 return first with { Replayed = true };
             if (!first.Resumable)
                 return first with { Replayed = true, ReasonCode = DecisionCommitReasons.NotResumable };
+            if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMineOnResume)
+                return notMineOnResume;
             resume = first;
         }
 
@@ -665,15 +743,21 @@ public sealed class DecisionCommitService
     /// <remarks>K5: FR-51 is asked again, as the caller, before any repair (rights may have been revoked since the first run).
     /// When the caller may no longer decide, or it cannot be checked, nothing is closed: the stored outcome is returned with
     /// each still-open Signal listed as Unchanged and a warning saying why, and the stored outcome is left as it was so a later
-    /// repeat can try again. K6: a repair that dismisses runs suppression as a first run does.</remarks>
+    /// repeat can try again. K6: a repair that dismisses runs suppression as a first run does.
+    /// Task 150 (pass 2 F, D-141): when <paramref name="mineNeeded"/>, the Do-lane "mine" check runs before the first read or write
+    /// of a repair, and a not-mine answer is returned with nothing written; a replay with nothing to close writes nothing and skips it.</remarks>
     private async Task<DecisionCommitResult> ReplayRecordedAsync(
         DecisionCommitResult first, LedgerEntry prior, DateTimeOffset reviewStart, IReadOnlyList<Guid> ids,
-        IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http, string tenantId, string ledgerKey)
+        IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http, string tenantId, string ledgerKey,
+        bool mineNeeded, CancellationToken ct)
     {
         var closedAlready = first.Signals.Where(s => s.State != Unchanged).Select(s => s.SignalId).ToHashSet();
         var open = ids.Where(id => !closedAlready.Contains(id)).ToList();
         if (open.Count == 0 || first.DecisionRecordId is not { } recordId)
             return first with { Replayed = true };
+
+        if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
+            return notMine;
 
         Guid? confirmedBy;
         try
@@ -1181,8 +1265,47 @@ public sealed class DecisionCommitService
         if (resolution.Plan is not { } plan)
             return No(DecisionCommitReasons.PlanRefused, "This item's decision plan does not resolve against the action catalog.");
 
-        // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
         var given = review.Actions ?? [];
+
+        // Task 154 (D-111, 059 review): an OPEN inquiry's "Record the outcome" To Do is completed by recording the inquiry's
+        // disposition (071's route), never by Mark complete, which would close the To Do and leave the inquiry open with nobody
+        // prompted again. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). The plan route offers the reduced plan
+        // (ResolvedDecisionPlan.WithoutMarkComplete); this route applies the same reduction and refuses a Mark complete that is taken.
+        // Read AS THE CALLER, only when the plan offers Mark complete on a To Do: the To Do, then the hinted inquiry or (no usable
+        // hint) the matter's open inquiries, the for-todo lookup's own identification.
+        // Pass 2 K4: not on the finishing path (linkedRecord set). A writer-created record of this same review already exists, so no
+        // executor runs; the check would protect nothing and could only refuse (or 503) and leave the Signals unclosed.
+        var isTodo = lane == DecisionLane.Do && string.Equals(primary.SubjectEntity, "sprk_todo", StringComparison.OrdinalIgnoreCase);
+        if (linkedRecord is null && isTodo
+            && primary.SubjectId is { } todoId && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            var inquiryOutcome = await _access.CheckInquiryOutcomeTodoAsync(todoId, ct).ConfigureAwait(false);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.Unavailable)
+                return No(DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.", status: DecisionCommitStatus.Unavailable);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.NotReadable)
+                return (new DecisionCommitResult { Status = DecisionCommitStatus.NotFound }, null);
+            if (inquiryOutcome == InquiryOutcomeTodoCheck.OpenInquiry)
+            {
+                if (given.Any(a => a?.Code == ResolvedDecisionPlan.MarkCompleteCode && a.Taken))
+                    return No(DecisionCommitReasons.InquiryDispositionRequired,
+                        "This To Do is completed by recording how the inquiry turned out, not by marking it complete; nothing was done.",
+                        ResolvedDecisionPlan.MarkCompleteCode, DecisionCommitStatus.Conflict);
+
+                plan = plan.WithoutMarkComplete();
+                // A review built from an earlier plan may still list Mark complete as skipped: that is not an action of this plan.
+                given = given.Where(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode).ToList();
+            }
+        }
+        else if (linkedRecord is not null && isTodo && plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode)
+            && given.All(a => a?.Code != ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            // K4, finishing a review recorded under the reduced plan (the inquiry was open then): the stored record carries this
+            // review's content hash (StoredRecord.Covers), so the review was matched against that plan when it was written. Without
+            // the read, the plan it was matched against is the one without Mark complete.
+            plan = plan.WithoutMarkComplete();
+        }
+
+        // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
         foreach (var action in given)
         {
             if (!DecisionActionCatalog.TryGet(action?.Code, out _))
@@ -1572,8 +1695,8 @@ public sealed class DecisionCommitService
         return false;
     }
 
-    /// <summary>The record this caller already wrote for this review id, if any (<c>sprk_steps</c> carries the review id), with
-    /// what it stored about the review: its content hash, its Signals and what it did (F1).</summary>
+    /// <summary>The record this caller already wrote for this review id, if any (<c>sprk_steps</c> carries the review id; created by the
+    /// ontology writer itself, not by a person), with what it stored about the review: its content hash, its Signals and what it did (F1).</summary>
     private async Task<StoredRecord?> FindRecordAsync(Guid reviewId, Guid confirmedBy, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_decisionrecord")
@@ -1583,6 +1706,12 @@ public sealed class DecisionCommitService
         };
         query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Equal, confirmedBy);
         query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{reviewId:D}\"%");
+        // Task 153 (uac-r2 re-check F1): and only a record the ontology writer itself created. Console User and Ontology Administrator have Deep
+        // Create on sprk_decisionrecord, and sprk_confirmedby / sprk_steps are not field-secured, so a person can write a row carrying their own
+        // confirmer, this review id, the (predictable) review hash and the Signals; without this condition it would be taken as "already written"
+        // and the finishing path would close the Signals with the forged resolution, running no executor. A WhoAmI fault throws here and lands in
+        // the caller's catch (Unavailable, fail closed), never as "no record found".
+        query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false));
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty ? StoredRecord.From(row) : null;
     }
@@ -1602,9 +1731,10 @@ public sealed class DecisionCommitService
         {
             if (TakenCodes.Count == 0 && FollowOnCount == 0)
                 return (Resolution.Dismissed, Reason);
-            return (TakenCodes.Any(c => DecisionActionCatalog.TryGet(c, out var def) && def.ResolvesSignal)
-                ? Resolution.Acted
-                : Resolution.InquirySent, null);
+            // Task 153 (uac-r2 re-check K2): the same rule the closure retry uses to recognise this record as one that left the item open.
+            return (DecisionRecordWriter.LeavesSignalOpen(TakenCodes, FollowOnCount)
+                ? Resolution.InquirySent
+                : Resolution.Acted, null);
         }
 
         public static StoredRecord From(Entity row)

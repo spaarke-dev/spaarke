@@ -9,7 +9,19 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 public sealed record ResolvedDecisionPlan(
     IReadOnlyList<DecisionActionDefinition> Actions,
     IReadOnlyList<DecisionActionDefinition> NextSteps,
-    IReadOnlyList<DecisionDismissalReason> DismissalReasons);
+    IReadOnlyList<DecisionDismissalReason> DismissalReasons)
+{
+    /// <summary>The catalog code of Mark complete.</summary>
+    public const string MarkCompleteCode = "mark-complete";
+
+    /// <summary>
+    /// Task 154 (D-111, 059 review): the plan for an inquiry's "Record the outcome" To Do. Mark complete is removed, because completing
+    /// that To Do without the inquiry's disposition leaves the inquiry open with nobody prompted again; it is completed by 071's
+    /// disposition route. Every other action keeps its place. The ONE reduction: the plan route and the commit route both apply it.
+    /// </summary>
+    public ResolvedDecisionPlan WithoutMarkComplete() =>
+        this with { Actions = Actions.Where(a => a.Code != MarkCompleteCode).ToList() };
+}
 
 /// <summary>Exactly one of <see cref="Plan"/> / <see cref="RefusalReason"/> is set.</summary>
 public sealed record DecisionPlanResolution(ResolvedDecisionPlan? Plan, string? RefusalReason)

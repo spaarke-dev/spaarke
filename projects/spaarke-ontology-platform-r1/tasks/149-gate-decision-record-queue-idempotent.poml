@@ -4,7 +4,7 @@
     <title>Gate Decision Records: one per decision (idempotent on retry), written by an ADR-004 queue job after the gate acts (D-139)</title>
     <phase>4 Decision Record</phase>
     <gate>blocked: #1878 (task 042) merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves a secure-family record write onto a queue; changes a shipped consumer's behaviour; adds a job handler.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -40,6 +40,8 @@
     <constraint source="D-139">The gate decides and runs the RI action without waiting on the record. The enqueue happens before the authorize/deny branch so both paths enqueue; an enqueue failure is logged and metered and never changes the gate outcome or the RI action.</constraint>
     <constraint source="ADR-004">Job handler per the reference: idempotent, retry-safe, poison after the standard attempts. Job payload carries ids and the gate's decision values only — never communication subject or sender text (D-123).</constraint>
     <constraint source="042">All 042 semantics stay: Judgement both paths; action null on deny; confirmedby, policyversion, gatesessionid null; unfiled communication → refused at Information (`gate_dr_skipped_unfiled`); owner via RecordOwnershipResolver; one CreateAsync site (the 142/042 ArchTests stay green, extended for the job if needed, never weakened).</constraint>
+    <constraint source="D-144 (amended 2026-10-15, #1907 F1)">An unfiled communication (no team owner from RecordOwnershipResolver) is no longer refused. Secure-if-any first (Secure Record BU owner goes to the secure team); otherwise the record is owned by the communication's own owning principal, never the BU default team. A missing or unreadable owner refuses and counts on `ontology.writer.skips`. Accepted exposure: Console User / Ontology Administrator Deep read on DRs. uac-r2 re-checks the fix diff. This overrides the "unfiled communication refused" item in the 042 constraint below.</constraint>
+    <constraint source="uac-r2 K3 on #1891">Also raise the empty-worklist refusal log in `SignalReadService.cs` (~:526-531, the no-Read refusal path) from Information to Warning. One-line change; no behaviour change.</constraint>
     <constraint source="bff-extensions">Placement statement, publish-size delta vs a fresh master build, no new HIGH CVE.</constraint>
   </constraints>
 
@@ -56,7 +58,9 @@
     <criterion testable="true">A different outcome for the same communication (deny, then authorize after a rule change) creates a second record.</criterion>
     <criterion testable="true">An enqueue failure leaves the gate outcome and the RI action unchanged and is logged and metered.</criterion>
     <criterion testable="true">The job payload contains no communication subject or sender text.</criterion>
-    <criterion testable="true">An unfiled communication: the job writes nothing and logs at Information with `gate_dr_skipped_unfiled`.</criterion>
+    <criterion testable="true">An unfiled communication: the job writes one record owned by the communication's own owner (D-144 amended); a Basic colleague in the same BU is not the owner and holds no share.</criterion>
+    <criterion testable="true">Negative: missing or unreadable communication owner: nothing written, counted on `ontology.writer.skips`, never on `ontology.writer.failures`.</criterion>
+    <criterion testable="true">The empty-worklist refusal logs at Warning.</criterion>
     <criterion testable="true">The single-create-site ArchTests stay green.</criterion>
     <criterion testable="false">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in the notes. Seeding proof on the idempotency check only.</criterion>
   </acceptance-criteria>

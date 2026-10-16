@@ -135,6 +135,13 @@ public static class SignalsModule
         // create and the association-confirmed filing path call. Unconditional (bff-extensions.md F.1).
         services.AddSingleton<SignalEvaluationTrigger>();
         services.AddSingleton<IJobHandler, SignalEvaluationTriggerHandler>();
+
+        // Task 149 (D-139): the communications gate queues its decision and acts at once; ONE ADR-004 IJobHandler writes the Decision Record
+        // (exactly one per communication + outcome) through the writer above. The enqueuer is a singleton (the gate consumer, a singleton,
+        // takes it); the handler is SCOPED because IIdempotencyService is (WorkersModule), and the job processor resolves its handlers from a
+        // scope. Unconditional (bff-extensions.md F.1): JobSubmissionService, IGenericEntityService and IIdempotencyService are too.
+        services.AddSingleton<GateDecisionRecordEnqueuer>();
+        services.AddScoped<IJobHandler, GateDecisionRecordJobHandler>();
         services.AddHealthChecks()
             .AddCatalogCheck<SignalEvaluatorHealthCheck>(
                 "signal-reevaluation",
