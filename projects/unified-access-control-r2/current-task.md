@@ -16,15 +16,15 @@
 | PR | Issue | Worktree / branch | Head | State |
 |---|---|---|---|---|
 | #2025 | #1576 (disabled users + per-request token) | C:/wt1576 `fix/uac-1576-disabled-users-per-request-token` | 3c777073c | Pass-1 fixes done (NotificationService, materializer disabled → Unresolved, guard shapes, comments, K3 tests; master merged). **Pass 2 running** (Opus). One baseline entry left: `DataverseWebApiGuestUserWriter.cs:282` (provisioning file, active project) — pass 2 judges; file/report to provisioning. Then **owner sign-off** (auth). After merge close #1576 parts (b) 61b0aa77a, (d) 633cce424. |
-| #2024 | #1755, #1735 create-POST | C:/wt1755 `fix/uac-1755-bounded-provisioning-token` | 63543aae3 → fix round running | The diff is CLEAN. Adjacent F1s being fixed: per-request Polly opt-out for the create POST, the Step 6 "may exist" message, Step 7 read-back, K4 test hygiene. General case filed as #2028. Then a scoped re-check, then merge. |
+| #2024 | #1755, #1735 create-POST | C:/wt1755 `fix/uac-1755-bounded-provisioning-token` | 428c7219a | Round 2 fixed the Step 6 classification (2xx with no container → unknown; not-sent → known, using a handler-recorded dispatch state on NoTransientRetryOption) and K4 logging. **Scoped re-check running.** Then merge, then tell sdap-SPE-admin-app-r2 (#2032). |
 | #2017 | #1363 (demo expiry) | C:/wt1363 `fix/uac-1363-demo-spe-marker` | 90bd3879a | Re-check: no F1–F3. **Fix round running**: F4 next-link scheme+port check, K3 repeated-link guard, K2 404-only-with-GUID. Then merge; tell provisioning the head SHA. |
-| #2029 | #2002 (no-root Warning noise) | C:/wt2002 `fix/uac-2002-ancestor-warning` | bd53f762f | I reviewed it CLEAN. **Merge watcher running** (background job). Close #2002 after the merge. |
-| (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | — | **Executor running** (Opus high): gated `/record-grants` route + TrackingFieldTrio via BFF. Two adversarial passes, owner sign-off. Then **099b** (D-11 grant ownership + extend `Backfill-RecordOwnership.ps1`; after #2025 merges) and **099c** (picker; after 099a). #1010 closes after 099a+099b; #961 with 099c. |
+| #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 882eae925 | **Adversarial pass 1 running.** Then pass 2 and owner sign-off. After merge and an R3 deploy, run the live check in the PR body (child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.48 import). Next: **099b** (after #2025 merges), **099c** (after #2035). #1010 closes after 099a+099b; #961 closes with 099c. |
 
 ## Merged today (2026-10-16)
 - #2007 `96d5b16c2` (#2005, live gate PASS)
 - #1983 `42aecf064`
 - #2013 `0ccc75b4c` (#994)
+- #2029 `72b55bb6c` (#2002; dev gate in the next R3 deploy)
 - #2021 `b1eaecb49` (share-link retired; task 012 closed; #1350 closed; #1752 link half commented)
 - #2016 `2e4ffc654` (#1620 owner-aware unshare; R3 told). The post-save web resource 1.1.2 is **deployed to dev** (16:37Z, verified).
 - Tasks 012, 023 and 183 closed; 20 done-task issues closed with evidence.
