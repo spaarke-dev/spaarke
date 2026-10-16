@@ -195,6 +195,14 @@ export interface AggregateCardProps {
   className?: string;
 }
 export const AggregateCard: React.FC<AggregateCardProps> = () => null;
+// `worklist.registration.ts` (LegalWorkspace section, ontology task 156) imports these three. `WorklistWidget` renders nothing and
+// `createWorklistService` / `launchDecisionWizard` are inert stubs; `worklistSectionRegistration.test.ts` spies on them to assert the wiring.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const WorklistWidget: React.FC<any> = () => null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const createWorklistService: (...args: any[]) => any = () => ({});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({ opened: false, reason: 'no-host' });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —
@@ -442,6 +450,7 @@ export const SECTION_METADATA_CATALOG: ReadonlyArray<{ id: string; widthPreferen
   { id: 'compose-editor' },
   { id: 'email' },
   { id: 'reconciliation' },
+  { id: 'worklist' },
   { id: 'analysis' },
   { id: 'communications' },
 ];
@@ -466,6 +475,9 @@ const _driftGuard = {
   RichFilePreviewDialog,
   sanitizeEmailHtml,
   DataGridViewSelector,
+  WorklistWidget,
+  createWorklistService,
+  launchDecisionWizard,
   EntityCreationService,
   cleanGuid,
   XrmDataverseClient,
