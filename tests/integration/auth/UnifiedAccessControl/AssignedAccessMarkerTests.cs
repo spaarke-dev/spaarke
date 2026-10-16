@@ -181,6 +181,31 @@ public class AssignedAccessMarkerTests
         _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().BeNull();
     }
 
+    /// <summary>
+    /// #1620: an owner that cannot be read refuses (500 read_failed) BEFORE the operator's marker is written — no Declined row
+    /// over a share that was never revoked, and the share stays.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingAnAutoShare_WhenTheRecordsOwnerCannotBeRead_Is500_AndWritesNoMarker()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Grants.Person(user);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var before = (Row(contact).State, Row(contact).Reason);
+        var ledgerWrites = _h.Store.Writes.Count;
+        _h.Grants.FailRootOwnerQueries = true;
+
+        var result = await UnshareUser(user);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ReadFailedReasonCode);
+        _h.Store.Writes.Count.Should().Be(ledgerWrites, "the marker is written only ahead of a revoke that is sent");
+        (Row(contact).State, Row(contact).Reason).Should().Be(before);
+        _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().NotBeNull("nothing was revoked");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 6 — "Grant" on a secure-record suggestion writes through the normal path and marks Adopted
     // ─────────────────────────────────────────────────────────────────────────────
