@@ -4,7 +4,7 @@
     <title>Context panel API</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only, deterministic aggregation behind an existing authorization pattern; no writes.</rigor-reason>
     <model-tier>sonnet</model-tier>

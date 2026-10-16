@@ -53,11 +53,11 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 041 | ✅ [done] | Reshape `IInvoiceAi` to capability methods; consumer-type keys | FULL | opus / high | P2-A | none |
 | 042 | ✅ [done] | Migrate attachment classification to `INVOICE-CLASSIFY@v1` | STANDARD | sonnet / high | P2-B | 041 |
 | 043 | ✅ [done] | Content Understanding client and `ReadInvoiceAsync` | FULL | opus / high | P2-B | 041, 005 |
-| 044 | 🔲 [open] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |
+| 044 | 🟡 [wip] | Submission operation and endpoints (SPA + internal) | FULL | opus / high | P2-C | 013, 040, 045, 029 |
 | 045 | ✅ [done] | Concurrency-safe tracking numbers `{invoice}.{n}` | FULL | sonnet / xhigh | P2-B | 029 |
 | 046 | ✅ [done] | Resolution and combined confidence | STANDARD | sonnet / xhigh | P2-B | 025, 029 |
 | 047 | ✅ [done] | UTBMS coding Action `INVOICE-LINE-CODE@v1` and code-set resolution | STANDARD | sonnet / xhigh | P2-B | 041, 018, 025, 029 |
-| 048 | 🔲 [open] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
+| 048 | 🟡 [wip] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | 🔲 [open] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050 | 🔲 [open] | Retire the legacy extraction path | STANDARD | sonnet / high | none | 042, 049 |
 | 051 | 🔲 [open] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
@@ -68,7 +68,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 070 | 🔲 [open] | Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal | FULL | opus / high | none | 019, 029 |
+| 070 | 🟡 [wip] | Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal | FULL | opus / high | none | 019, 029 |
 | 071 | 🔲 [open] | Rule handlers for the 11 billing rule types | FULL | sonnet / xhigh | P3-B | 070 |
 | 072 | 🔲 [open] | `InvoiceComplianceEvaluator` | FULL | opus / high | P3-C | 071, 017, 018 |
 | 073 | 🔲 [open] | Rejection rule and reject-eligibility at publish | FULL | sonnet / xhigh | none | 072, 025 |
@@ -89,7 +89,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 103 | 🔲 [open] | Approval: eligible approvers, worklist, approve | FULL | opus / high | P4-B | 100, 021, 024, 025, 074 |
 | 104 | 🔲 [open] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
 | 105 | 🔲 [open] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
-| 106 | 🔲 [open] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
+| 106 | 🟡 [wip] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | 🔲 [open] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 108 | ✅ [done] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
 | 109 | ✅ [done] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |

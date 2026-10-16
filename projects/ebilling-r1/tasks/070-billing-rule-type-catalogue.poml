@@ -4,7 +4,7 @@
     <title>Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal</title>
     <phase>3 Rules (WP3) — wave W3-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-class fail-closed guard (MUST "refuse unknown rule types fail-closed in every consumer") in ontology-owned code the nightly Signal job and the describer depend on.</rigor-reason>
     <model-tier>opus</model-tier>

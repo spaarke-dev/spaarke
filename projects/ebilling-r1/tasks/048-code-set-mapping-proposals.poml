@@ -4,7 +4,7 @@
     <title>AI code-set mapping proposals (admin-confirmed)</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Proposal generation plus admin-only confirm endpoints; nothing is applied without confirmation, so the risk is bounded to the confirm route's authorization.</rigor-reason>
     <model-tier>sonnet</model-tier>
