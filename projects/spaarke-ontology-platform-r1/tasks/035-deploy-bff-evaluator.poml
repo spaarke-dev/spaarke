@@ -4,7 +4,7 @@
     <title>Deploy the BFF with the evaluator to dev and verify</title>
     <phase>3 Evaluator and Signal lifecycle</phase>
     <gate>034 complete; 141 merged (Signal pair type written as a lookup — a BFF with the pre-141 Signal code fails every Signal write on any environment that has the 140 schema)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment to a shared environment; the silent-file-lock failure mode makes deploy success untrustworthy without hash verification.</rigor-reason>
     <model-tier>sonnet</model-tier>

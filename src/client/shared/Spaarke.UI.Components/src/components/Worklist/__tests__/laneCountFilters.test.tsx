@@ -270,8 +270,15 @@ describe('static guards', () => {
     expect(src).toMatch(/MetricCardConfig/);
     expect(src).not.toMatch(/import[^;]*StatTiles/);
     const files = fs.readdirSync(dir).filter(f => /\.tsx$/.test(f));
-    // the worklist folder still holds only MatterCard and IssueLine as components
-    expect(files.sort()).toEqual(['IssueLine.tsx', 'MatterCard.tsx']);
+    // the worklist folder holds MatterCard and IssueLine (the row) and, since task 059, the widget that arranges the cards and its
+    // two parts (lane panel, disclosures); the count filters are still MetricCardRow data, not a new card component
+    expect(files.sort()).toEqual([
+      'IssueLine.tsx',
+      'MatterCard.tsx',
+      'WorklistDisclosures.tsx',
+      'WorklistLanePanel.tsx',
+      'WorklistWidget.tsx',
+    ]);
   });
 
   it('has no colour literal (the colours come from MetricCard tokens)', () => {
