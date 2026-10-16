@@ -3981,28 +3981,20 @@ public static class ProvisionProjectEndpoint
     {
         logger.LogInformation("[PROVISION] Creating SPE container for {RecordType} {RecordId}", root.WireToken, recordId);
 
-        string? failure;
         try
         {
             var containerDisplayName = root.ContainerDisplayName(recordName);
             var containerDescription = root.ContainerDescription(recordName);
 
+            // Never null (#1755 round 2): a 2xx without a container is an unknown outcome, caught below.
             var container = await speFileStore.CreateContainerAsync(
                 containerTypeId, containerDisplayName, owningBusinessUnitId, containerDescription, ct);
 
-            if (container != null)
-            {
-                logger.LogInformation(
-                    "[PROVISION] Created SPE container {ContainerId} ('{DisplayName}') for {RecordType} {RecordId}",
-                    container.Id, containerDisplayName, root.WireToken, recordId);
+            logger.LogInformation(
+                "[PROVISION] Created SPE container {ContainerId} ('{DisplayName}') for {RecordType} {RecordId}",
+                container.Id, containerDisplayName, root.WireToken, recordId);
 
-                return new SpeContainerCreationResult(container.Id, null);
-            }
-
-            failure = "Graph API returned no container";
-            logger.LogError(
-                "[PROVISION] SpeFileStore.CreateContainerAsync returned null for {RecordType} {RecordId}",
-                root.WireToken, recordId);
+            return new SpeContainerCreationResult(container.Id, null);
         }
         catch (ContainerCreateOutcomeUnknownException ex)
         {
@@ -4025,17 +4017,16 @@ public static class ProvisionProjectEndpoint
         }
         catch (Exception ex)
         {
-            failure = "the container request failed";
             logger.LogError(ex,
                 "[PROVISION] Failed to create SPE container for {RecordType} {RecordId}", root.WireToken, recordId);
-        }
 
-        return new SpeContainerCreationResult(null, Problem(
-            StatusCodes.Status500InternalServerError, "Internal Server Error",
-            $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
-            $"creator, but its own SPE container could not be created ({failure}). Nothing needs undoing: calling " +
-            "provisioning again (the same caller may) resumes from here.",
-            traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+            return new SpeContainerCreationResult(null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
+                "creator, but its own SPE container could not be created (the container request failed). Nothing needs " +
+                "undoing: calling provisioning again (the same caller may) resumes from here.",
+                traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+        }
     }
 
     /// <summary>

@@ -1,11 +1,16 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Kiota.Abstractions.Authentication;
+using Polly.CircuitBreaker;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -261,6 +266,129 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         CreatePosts().Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("{\"displayName\":\"New\",\"status\":\"inactive\"}")]
+    public async Task ProvisioningCreate_WhenGraphAnswers201WithNoContainer_ReportsTheOutcomeUnknown(string body)
+    {
+        // #1755 round 2: a 2xx is Graph committing the create. With no body, or a body without an id, the container may
+        // exist and nothing names it. It used to come back as null, which the endpoint reported as "Nothing needs undoing".
+        _graph.StubPostExact(ContainersPath, body, 201);
+
+        var act = () => ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(1);
+        _graph.AllRequests.Should().OnlyContain(r => r.Method == "POST", "nothing is bound or deleted for a container with no id");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheCircuitIsOpen_IsNotAnUnknownOutcome()
+    {
+        // #1755 round 2: an open circuit throws before the create is sent, so nothing was created.
+        _graph.StubGetExact("/probe", GraphError, 503);
+        using var http = _graph.CreateHttpClient(ResilienceHandler(o => o.CircuitBreakerFailureThreshold = 1));
+        var opened = () => http.GetAsync("/probe");
+        await opened.Should().ThrowAsync<BrokenCircuitException>("one failure opens a circuit whose threshold is 1");
+        var client = _graph.CreateGraphClient(http);
+
+        var act = () => Operations(() => client).CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(0, "the open circuit refused the create before it was sent");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheTokenCannotBeAcquired_IsNotAnUnknownOutcome()
+    {
+        // #1755 round 2: the app-only token is acquired inside PostAsync, before the request is sent.
+        StubCreated();
+        var client = _graph.CreateGraphClient(
+            _graph.CreateHttpClient(ResilienceHandler()), new BaseBearerTokenAuthenticationProvider(new FailingTokenProvider()));
+
+        var act = () => Operations(() => client).CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheTimeoutFiresDuringA429Backoff_IsNotAnUnknownOutcome()
+    {
+        // #1755 round 2: every answer so far was a 429, which Graph sends for a request it did not process. The timeout
+        // fired while the handler waited out Retry-After, so nothing was created.
+        _graph.StubPostExact(ContainersPath, GraphError, 429, retryAfterSeconds: 30);
+        var operations = ResilientProvisioningOperations(o => { o.TimeoutSeconds = 1; o.HonorRetryAfterHeader = true; });
+
+        var act = () => operations.CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(1, "the handler was still waiting out the first 429 when the timeout fired");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheConnectionDropsAfterTheCreateArrived_ReportsTheOutcomeUnknown()
+    {
+        // A transport fault after the create reached the server: a server that reads the request and closes the
+        // connection without answering. (WireMock's faults still answer with a status line.)
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var baseUrl = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
+        var server = Task.Run(async () =>
+        {
+            using var socket = await listener.AcceptSocketAsync();
+            var received = await socket.ReceiveAsync(new byte[8192], SocketFlags.None);
+            socket.Close();
+            return received;
+        });
+        var handler = ResilienceHandler();
+        handler.InnerHandler = new HttpClientHandler();
+        var client = new GraphServiceClient(
+            new HttpClient(handler) { BaseAddress = new Uri(baseUrl) }, new AnonymousAuthenticationProvider(), baseUrl);
+
+        var act = () => Operations(() => client).CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        (await server).Should().BePositive("the create reached the server before the connection dropped");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheTimeoutFiresAfterTheCreateWasSent_ReportsTheOutcomeUnknown()
+    {
+        _graph.StubPostExact(ContainersPath, CreatedBody, 201, delay: TimeSpan.FromSeconds(4));
+        var operations = ResilientProvisioningOperations(o => o.TimeoutSeconds = 1);
+
+        var act = () => operations.CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenAThrottledCreateThenGets503_ReportsTheOutcomeUnknown()
+    {
+        // The LAST attempt decides: a 429 then a 503 is unknown.
+        _graph.StubPostExactSequence(ContainersPath, (GraphError, 429), (GraphError, 503));
+
+        var act = () => ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_AnUnknownOutcome_IsNotLoggedAtErrorHere()
+    {
+        // K4 (#1755 round 2): the endpoint logs it once at Error, with what finds the container. This class used to log
+        // it twice more (once where it was raised, once in its catch-all).
+        _graph.StubPostExact(ContainersPath, GraphError, 503);
+        var log = new CapturingLogger();
+
+        var act = () => ResilientProvisioningOperations(logger: log).CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        log.Levels.Should().NotContain(l => l >= LogLevel.Error);
+    }
+
     [Fact]
     public async Task AnOrdinaryGraphGet_WhenGraphAnswers503_IsStillRetried()
     {
@@ -300,11 +428,7 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         stamp.GetProperty("isSearchable").GetBoolean().Should().BeFalse();
     }
 
-    private ContainerOperations ProvisioningOperations()
-    {
-        var factory = new WireMockGraphFactory(_graph);
-        return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
-    }
+    private ContainerOperations ProvisioningOperations() => Operations(() => _graph.CreateGraphClient());
 
     private const int RetryCount = 3;
 
@@ -313,23 +437,34 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     private static readonly string CreatedBody =
         "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}";
 
-    /// <summary>Production's Graph resilience handler, with no backoff so retries are immediate.</summary>
-    private static GraphHttpMessageHandler ResilienceHandler() => new(
-        NullLogger<GraphHttpMessageHandler>.Instance,
-        Options.Create(new GraphResilienceOptions
+    /// <summary>
+    /// Production's Graph resilience handler, with no backoff so retries are immediate. <paramref name="tune"/> adjusts
+    /// the options (#1755 round 2: a short timeout, an honoured Retry-After, a circuit that opens at once).
+    /// </summary>
+    private static GraphHttpMessageHandler ResilienceHandler(Action<GraphResilienceOptions>? tune = null)
+    {
+        var options = new GraphResilienceOptions
         {
             RetryCount = RetryCount,
             RetryBackoffSeconds = 0,
             HonorRetryAfterHeader = false,
             TimeoutSeconds = 30,
             CircuitBreakerFailureThreshold = 100
-        }));
+        };
+        tune?.Invoke(options);
+        return new(NullLogger<GraphHttpMessageHandler>.Instance, Options.Create(options));
+    }
 
     /// <summary>The provisioning create, sending through production's Graph resilience handler (#1755).</summary>
-    private ContainerOperations ResilientProvisioningOperations()
+    private ContainerOperations ResilientProvisioningOperations(
+        Action<GraphResilienceOptions>? tune = null, ILogger<ContainerOperations>? logger = null) =>
+        Operations(() => _graph.CreateGraphClient(ResilienceHandler(tune)), logger);
+
+    /// <summary>The provisioning create over the client <paramref name="client"/> builds.</summary>
+    private static ContainerOperations Operations(Func<GraphServiceClient> client, ILogger<ContainerOperations>? logger = null)
     {
-        var factory = new WireMockGraphFactory(_graph, ResilienceHandler);
-        return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
+        var factory = new WireMockGraphClientFactory(client);
+        return new(factory, TestSpeOwnership.AllowAll(factory), logger ?? NullLogger<ContainerOperations>.Instance);
     }
 
     private int CreatePosts() => _graph.AllRequests.Count(r => r.Method == "POST" && r.Path == ContainersPath);
@@ -346,17 +481,27 @@ public sealed class ContainerCreationStampContractTests : IDisposable
             logger: NullLogger<SpeAdminGraphService>.Instance);
     }
 
-    /// <summary>The app-only client ContainerOperations asks for is the WireMock one.</summary>
-    private sealed class WireMockGraphFactory(GraphWireMockFixture graph, Func<DelegatingHandler>? pipeline = null)
-        : IGraphClientFactory
+    /// <summary>A token provider that cannot acquire a token: the failure happens inside the SDK's send, before any request.</summary>
+    private sealed class FailingTokenProvider : IAccessTokenProvider
     {
-        public GraphServiceClient ForApp() => graph.CreateGraphClient(pipeline?.Invoke());
+        public AllowedHostsValidator AllowedHostsValidator { get; } = new();
 
-        public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default) =>
-            throw new InvalidOperationException("Container creation is app-only.");
+        public Task<string> GetAuthorizationTokenAsync(
+            Uri uri, Dictionary<string, object>? additionalAuthenticationContext = null, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The app-only token could not be acquired (seeded).");
+    }
 
-        public Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default) =>
-            throw new InvalidOperationException("Container creation is app-only.");
+    /// <summary>What <see cref="ContainerOperations"/> logged, by level.</summary>
+    private sealed class CapturingLogger : ILogger<ContainerOperations>
+    {
+        public List<LogLevel> Levels { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
     }
 
     private sealed class UnusedHttpClientFactory : IHttpClientFactory

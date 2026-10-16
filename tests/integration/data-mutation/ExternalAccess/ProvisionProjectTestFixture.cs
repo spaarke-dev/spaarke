@@ -462,8 +462,17 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>A systemuser sitting in the Secure Record BU.</summary>
     public sealed record SecureBuUser(Guid Id, bool IsDisabled = false, bool IsApplicationUser = false);
 
-    /// <summary>When false, SPE container creation returns null (Graph failure). Default true.</summary>
+    /// <summary>
+    /// When false, SPE container creation fails as a create Graph refused does (nothing was created). Default true.
+    /// (It returned null until #1755 round 2; the create never returns null now.)
+    /// </summary>
     public bool SpeContainerCreationSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When set, container creation goes through this REAL <see cref="ContainerOperations"/> (a test's WireMock Graph)
+    /// instead of the stub (#1755 round 2: the endpoint's Step 6 over what Graph actually answered). Default none.
+    /// </summary>
+    internal ContainerOperations? SpeContainerOperations { get; set; }
 
     /// <summary>
     /// When set, container creation throws what this builds from the display name asked for (#1755: a failure before
@@ -741,6 +750,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         BusinessUnitUserReadSucceeds = true;
         SpeContainerCreationSucceeds = true;
         SpeContainerCreationFailsWith = null;
+        SpeContainerOperations = null;
         ContainerStampSucceeds = true;
         OnContainerRecord = null;
         OnContainerRecorded = null;
@@ -1712,24 +1722,27 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             _fixture = fixture;
         }
 
-        public override Task<ContainerDto?> CreateContainerAsync(
+        public override Task<ContainerDto> CreateContainerAsync(
             Guid containerTypeId, string displayName, Guid owningBusinessUnitId, string? description = null,
             CancellationToken ct = default)
         {
             _fixture.CreatedContainerDisplayNames.Add(displayName);
             _fixture.CreatedContainerBusinessUnits.Add(owningBusinessUnitId);
 
-            if (_fixture.SpeContainerCreationFailsWith is { } fails)
-                return Task.FromException<ContainerDto?>(fails(displayName));
+            if (_fixture.SpeContainerOperations is { } real)
+                return real.CreateContainerAsync(containerTypeId, displayName, owningBusinessUnitId, description, ct);
 
-            return Task.FromResult<ContainerDto?>(
-                _fixture.SpeContainerCreationSucceeds
-                    ? new ContainerDto(
-                        Id: ProvisionedContainerId,
-                        DisplayName: displayName,
-                        Description: description,
-                        CreatedDateTime: DateTimeOffset.UnixEpoch)
-                    : null);
+            if (_fixture.SpeContainerCreationFailsWith is { } fails)
+                return Task.FromException<ContainerDto>(fails(displayName));
+
+            return _fixture.SpeContainerCreationSucceeds
+                ? Task.FromResult(new ContainerDto(
+                    Id: ProvisionedContainerId,
+                    DisplayName: displayName,
+                    Description: description,
+                    CreatedDateTime: DateTimeOffset.UnixEpoch))
+                : Task.FromException<ContainerDto>(
+                    new InvalidOperationException("Failed to create SharePoint Embedded container: Graph refused it (seeded)."));
         }
     }
 

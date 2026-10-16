@@ -89,7 +89,19 @@ public sealed class GraphWireMockFixture : IDisposable
     /// </remarks>
     /// <param name="pipeline">A handler to send through, as production's <c>GraphApiClient</c> does (#1755: the Graph
     /// resilience handler). Its inner handler is set here. None by default: requests go straight to the fake.</param>
-    public GraphServiceClient CreateGraphClient(DelegatingHandler? pipeline = null)
+    public GraphServiceClient CreateGraphClient(DelegatingHandler? pipeline = null) =>
+        CreateGraphClient(CreateHttpClient(pipeline));
+
+    /// <summary>
+    /// A <see cref="GraphServiceClient"/> over <paramref name="httpClient"/> — for a test that sends through the same
+    /// pipeline before the client does (#1755 round 2: a request that opens the handler's circuit first).
+    /// <paramref name="auth"/> replaces the anonymous provider (a token provider that fails, inside the SDK's send).
+    /// </summary>
+    public GraphServiceClient CreateGraphClient(HttpClient httpClient, IAuthenticationProvider? auth = null) =>
+        new(httpClient, auth ?? new AnonymousAuthenticationProvider(), BaseUrl);
+
+    /// <summary>An <see cref="HttpClient"/> on this fake, through <paramref name="pipeline"/> if given (its inner handler is set here).</summary>
+    public HttpClient CreateHttpClient(DelegatingHandler? pipeline = null)
     {
         HttpClient httpClient;
         if (pipeline is null)
@@ -103,7 +115,7 @@ public sealed class GraphWireMockFixture : IDisposable
         }
 
         httpClient.BaseAddress = new Uri(BaseUrl);
-        return new GraphServiceClient(httpClient, new AnonymousAuthenticationProvider(), BaseUrl);
+        return httpClient;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -172,8 +184,10 @@ public sealed class GraphWireMockFixture : IDisposable
     /// <paramref name="delay"/> holds the answer back, as on <see cref="StubPatch"/>. <paramref name="onReceived"/> runs
     /// when the request arrives, before the answer is sent: a test acts mid-request without racing a timer (#1755).
     /// </summary>
+    /// <param name="retryAfterSeconds">Sent as a <c>Retry-After</c> header (a 429's backoff — #1755 round 2).</param>
     public GraphWireMockFixture StubPostExact(
-        string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null, Action? onReceived = null)
+        string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null, Action? onReceived = null,
+        int? retryAfterSeconds = null)
     {
         var response = onReceived is null
             ? Response.Create()
@@ -201,6 +215,11 @@ public sealed class GraphWireMockFixture : IDisposable
         if (delay is { } d)
         {
             response = response.WithDelay(d);
+        }
+
+        if (retryAfterSeconds is { } retryAfter)
+        {
+            response = response.WithHeader("Retry-After", retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         _server
@@ -478,6 +497,23 @@ public sealed class GraphWireMockFixture : IDisposable
         _server.Stop();
         _server.Dispose();
     }
+}
+
+/// <summary>
+/// An <see cref="Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory"/> whose app-only client is one a test built on a
+/// <see cref="GraphWireMockFixture"/> — for production classes that ask the factory for their client (#1755: the
+/// provisioning container create). Delegated clients are refused: these paths are app-only.
+/// </summary>
+internal sealed class WireMockGraphClientFactory(Func<GraphServiceClient> appOnly)
+    : Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory
+{
+    public GraphServiceClient ForApp() => appOnly();
+
+    public Task<GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+        throw new InvalidOperationException("This path is app-only.");
+
+    public Task<GraphServiceClient> ForUserBetaAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+        throw new InvalidOperationException("This path is app-only.");
 }
 
 /// <summary>One request observed by <see cref="GraphWireMockFixture"/>.</summary>

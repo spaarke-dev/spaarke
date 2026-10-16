@@ -44,12 +44,37 @@ public class GraphHttpMessageHandler : DelegatingHandler
     {
         // A request marked NoTransientRetryOption (#1755) is not re-sent after a 5xx, 408 or transport fault: Graph may
         // have carried it out, and a second create makes a second container. It shares the timeout and circuit breaker.
-        var policy = NoTransientRetryOption.IsSetOn(request) ? _nonIdempotentPolicy : _resiliencePolicy;
-        return await policy.ExecuteAsync(async ct =>
+        if (NoTransientRetryOption.TryGetFrom(request, out var nonIdempotent))
+        {
+            return await SendNonIdempotentAsync(request, nonIdempotent, cancellationToken);
+        }
+
+        return await _resiliencePolicy.ExecuteAsync(async ct =>
         {
             return await base.SendAsync(request, ct);
         }, cancellationToken);
     }
+
+    /// <summary>
+    /// The non-idempotent chain, recording on <paramref name="option"/> each attempt as it goes to the wire and the
+    /// answer it got (#1755 round 2), so the caller can tell a failure that never reached Graph (an open circuit throws
+    /// before this delegate runs) from one Graph may have carried out.
+    /// </summary>
+    private Task<HttpResponseMessage> SendNonIdempotentAsync(
+        HttpRequestMessage request, NoTransientRetryOption option, CancellationToken cancellationToken) =>
+        _nonIdempotentPolicy.ExecuteAsync(async ct =>
+        {
+            // The caller has already read the outcome (the timeout fired as a 429's backoff ended): sending now would
+            // change an outcome it has acted on.
+            if (!option.TryBeginAttempt())
+            {
+                throw new OperationCanceledException("The request's outcome was already read; this attempt was not sent.");
+            }
+
+            var response = await base.SendAsync(request, ct);
+            option.RecordAnswer(response.StatusCode);
+            return response;
+        }, cancellationToken);
 
     private (IAsyncPolicy<HttpResponseMessage> Standard, IAsyncPolicy<HttpResponseMessage> NonIdempotent) BuildResiliencePolicies()
     {

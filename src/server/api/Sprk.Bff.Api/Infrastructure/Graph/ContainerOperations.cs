@@ -50,7 +50,12 @@ public class ContainerOperations
     /// owner round 20 item 1). A container whose stamp cannot be written and read back is soft-deleted again and the
     /// call throws — no container this path makes is left active and unbound.
     /// </summary>
-    public async Task<ContainerDto?> CreateContainerAsync(
+    /// <remarks>
+    /// Never null: a create that does not come back with a container throws. When Graph may have created one anyway
+    /// (no answer, a server error, or a 2xx without a container) it throws <see cref="ContainerCreateOutcomeUnknownException"/>,
+    /// which this method does not log — its caller logs it once, with what finds the possible container (#1755).
+    /// </remarks>
+    public async Task<ContainerDto> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
         Guid owningBusinessUnitId,
@@ -95,26 +100,29 @@ public class ContainerOperations
             FileStorageContainer? createdContainer;
             using (var send = new CancellationTokenSource(UncancellableStepTimeout))
             {
+                // NoTransientRetryOption: the create is not idempotent, so the Graph handler does not re-send it after a
+                // 5xx, 408 or transport fault (Graph may have committed the first) — only after a 429 (#1755). The handler
+                // records on it whether an attempt reached Graph and what it answered, which is how a failure is classified.
+                var createOption = new NoTransientRetryOption();
                 try
                 {
-                    // NoTransientRetryOption: the create is not idempotent, so the Graph handler does not re-send it after
-                    // a 5xx, 408 or transport fault (Graph may have committed the first) — only after a 429 (#1755).
                     createdContainer = await graphClient.Storage.FileStorage.Containers
-                        .PostAsync(container, rc => rc.Options.Add(new NoTransientRetryOption()), send.Token);
+                        .PostAsync(container, rc => rc.Options.Add(createOption), send.Token);
                 }
-                catch (Exception ex) when (OutcomeIsUnknown(ex))
+                catch (Exception ex) when (OutcomeIsUnknown(createOption, ex))
                 {
-                    _logger.LogError(ex,
-                        "The create of SPE container {DisplayName} (type {ContainerTypeId}) was sent but got no answer that " +
-                        "settles it: a container may have been created that nothing names.", displayName, containerTypeId);
                     throw new ContainerCreateOutcomeUnknownException(displayName, ex);
                 }
             }
 
-            if (createdContainer == null)
+            // A 2xx is Graph committing the create. One that names no container leaves a container nothing names (#1755
+            // round 2): not "nothing was created".
+            if (string.IsNullOrEmpty(createdContainer?.Id))
             {
-                _logger.LogError("Failed to create container - Graph API returned null");
-                return null;
+                throw new ContainerCreateOutcomeUnknownException(displayName,
+                    new InvalidOperationException(createdContainer is null
+                        ? "Graph answered the create with success but no container."
+                        : "Graph answered the create with a container that has no id."));
             }
 
             _logger.LogInformation("Successfully created SPE container {ContainerId} with display name {DisplayName}",
@@ -134,6 +142,11 @@ public class ContainerOperations
                 createdContainer.Description,
                 createdContainer.CreatedDateTime ?? DateTimeOffset.UtcNow);
         }
+        catch (ContainerCreateOutcomeUnknownException)
+        {
+            // Logged once, at Error, by the caller that reports it (#1755 round 2) — not here as well.
+            throw;
+        }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
@@ -152,15 +165,19 @@ public class ContainerOperations
     }
 
     /// <summary>
-    /// True when a failed create POST leaves unknown whether Graph created the container (#1755): no answer at all (a
-    /// timeout, a transport fault), or a server error (5xx, 408), which Graph may send after committing. A 4xx other than
-    /// 408 is Graph refusing the request — nothing was created.
+    /// True when a failed create POST leaves unknown whether Graph created the container (#1755): an attempt reached the
+    /// wire and its answer was not a settled refusal — no answer at all (a timeout, a transport fault), or one Graph may
+    /// send after committing (a 2xx, a 5xx, a 408). The Graph handler records this on <paramref name="option"/>.
+    /// A failure before anything was sent (an open circuit, a token that could not be acquired, a timeout during a 429's
+    /// backoff), or a last answer that is a refusal (a 4xx other than 408, or a 429), means nothing was created.
     /// </summary>
-    private static bool OutcomeIsUnknown(Exception ex) => ex switch
-    {
-        ApiException api => api.ResponseStatusCode is >= 500 or 408,
-        _ => true
-    };
+    /// <remarks>
+    /// An <see cref="ApiException"/> carrying a 5xx or 408 is unknown even when no handler recorded it (a client built
+    /// without the Graph handler): an answer proves the request was sent. Reading the option closes it, so a retry
+    /// not yet sent cannot overtake the classification.
+    /// </remarks>
+    private static bool OutcomeIsUnknown(NoTransientRetryOption option, Exception ex) =>
+        option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 };
 
     /// <summary>
     /// Stamps the just-created container, reads the stamp back, and on any failure soft-deletes it and throws

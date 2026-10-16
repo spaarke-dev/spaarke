@@ -605,6 +605,39 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             "the operator finds the possible orphan by the record, the trace and the container's display name");
     }
 
+    /// <summary>
+    /// #1755 round 2, through the REAL <see cref="ContainerOperations"/> over a fake Graph: a 201 with no container used
+    /// to come back as null and be reported as "Nothing needs undoing"; a 503 was logged at Error three times. Both now say
+    /// a container may exist, and the outcome is logged at Error once — by the endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("", 201)]
+    [InlineData("{\"displayName\":\"x\"}", 201)]
+    [InlineData("{\"error\":{\"code\":\"serviceNotAvailable\",\"message\":\"x\"}}", 503)]
+    public async Task ProvisionProject_WhenGraphsAnswerToTheCreateDoesNotSettleIt_SaysAContainerMayExist_AndLogsItOnce(
+        string body, int status)
+    {
+        using var graph = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.GraphWireMockFixture();
+        graph.StubPostExact("/storage/fileStorage/containers", body, status);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graph.CreateGraphClient());
+        using var loggers = new LoggerFactory(new[] { _fixture.Logs });
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            loggers.CreateLogger<ContainerOperations>());
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await DetailOf(response)).Should().Contain("may have been created").And.NotContain("Nothing needs undoing");
+        _fixture.Logs.Entries.Where(e => e.Level >= LogLevel.Error).Should().ContainSingle(
+            "one unknown create is one Error, at the endpoint, with what finds the container")
+            .Which.Message.Should().Contain(projectId.ToString());
+    }
+
     private static async Task<string> DetailOf(HttpResponseMessage response)
     {
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
