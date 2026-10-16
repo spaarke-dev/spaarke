@@ -367,7 +367,9 @@ public sealed class CodeSetResolverSeamTests
     public async Task ASetLargerThanOnePage_IsLoadedInFull()
     {
         var big = _data.AddSet("UTBMS Litigation");
-        for (var i = 0; i < 1203; i++)
+        // More than the 5000 rows Dataverse returns for a query that sets no page size, so a resolver that does not page loses codes.
+        const int codeCount = 5203;
+        for (var i = 0; i < codeCount; i++)
         {
             _data.AddCode(big, $"T{i:0000}", BillingCodeKind.Task, $"Task {i}");
         }
@@ -376,8 +378,8 @@ public sealed class CodeSetResolverSeamTests
 
         var resolved = await Sut.ResolveAsync(core, [Line("1")]);
 
-        resolved.TaskCodes.Should().HaveCount(1203, "paging follows MoreRecords/PagingCookie until the set is complete");
-        resolved.TryGetCode(BillingCodeKind.Task, "T1202", out _).Should().BeTrue();
+        resolved.TaskCodes.Should().HaveCount(codeCount, "paging follows MoreRecords/PagingCookie until the set is complete");
+        resolved.TryGetCode(BillingCodeKind.Task, $"T{codeCount - 1:0000}", out _).Should().BeTrue();
     }
 
     // ── Argument contract ───────────────────────────────────────────────────────

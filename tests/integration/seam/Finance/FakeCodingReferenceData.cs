@@ -19,6 +19,9 @@ namespace Sprk.Bff.Api.Tests.Seam.Finance;
 /// </remarks>
 internal sealed class FakeCodingReferenceData
 {
+    /// <summary>What Dataverse returns per page when a query sets no page size (it silently truncates there).</summary>
+    private const int DataverseDefaultPageSize = 5000;
+
     private readonly List<Entity> _rows = [];
     private int _created;
 
@@ -178,7 +181,7 @@ internal sealed class FakeCodingReferenceData
         }
 
         var all = (ordered ?? rows).ToList();
-        var count = query.PageInfo?.Count > 0 ? query.PageInfo.Count : all.Count;
+        var count = query.PageInfo?.Count > 0 ? query.PageInfo.Count : DataverseDefaultPageSize;
         var page = Math.Max(1, query.PageInfo?.PageNumber ?? 1);
         var slice = all.Skip((page - 1) * count).Take(count).Select(r => Project(r, query.ColumnSet)).ToList();
 

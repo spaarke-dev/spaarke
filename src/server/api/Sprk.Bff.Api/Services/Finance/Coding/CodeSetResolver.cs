@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Services.Finance.Coding;
 /// "UTBMS Activity" / "UTBMS Expense" sets. A missing shared set leaves the list empty (the lines of that kind get no code).
 /// </para>
 /// <para>
-/// <b>Lifetime.</b> Scoped (holds the scoped <see cref="IGenericEntityService"/>). Reads reference data per call and caches
+/// <b>Lifetime.</b> Scoped (its <see cref="ICodeSetSuggestionProvider"/> is scoped: task 048's provider calls the AI). Reads reference data per call and caches
 /// nothing: one resolution per invoice is a handful of queries, and a stale code list must never outlive an admin edit (ADR-009
 /// has no applicable cache here).
 /// </para>
@@ -288,7 +288,8 @@ public sealed class CodeSetResolver
         var setId = await FindSetByNameAsync(setName, ct).ConfigureAwait(false);
         if (setId is null)
         {
-            _logger.LogWarning("Line coding: shared code set '{SetName}' not found; no {Kind} codes will be offered", setName, kind);
+            // A reference-data fault, not a normal condition: every line of that kind is sent without a list and comes back with no code.
+            _logger.LogError("Line coding: shared code set '{SetName}' not found; no {Kind} codes will be offered", setName, kind);
             return [];
         }
 

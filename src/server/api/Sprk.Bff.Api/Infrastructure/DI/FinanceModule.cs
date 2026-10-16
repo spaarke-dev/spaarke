@@ -82,9 +82,9 @@ public static class FinanceModule
         services.AddScoped<RateCardImportService>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
-        // Scoped (all three hold the scoped IGenericEntityService / IInvoiceAi); unconditional (flag rule above - IInvoiceAi is
-        // always registered, as NullInvoiceAi when AI is off). NoCodeSetSuggestionProvider is the FR-22 step 4 seam: task 048
-        // replaces this one registration with the AI provider.
+        // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
+        // unconditional (flag rule above - IInvoiceAi is always registered, as NullInvoiceAi when AI is off).
+        // NoCodeSetSuggestionProvider is the FR-22 step 4 seam: task 048 replaces this one registration with the AI provider.
         services.AddScoped<ICodeSetSuggestionProvider, NoCodeSetSuggestionProvider>();
         services.AddScoped<CodeSetResolver>();
         services.AddScoped<ILineCodingService, LineCodingService>();
