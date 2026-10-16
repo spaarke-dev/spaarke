@@ -1,6 +1,6 @@
 # Task 044 - Invoice submission operation (FR-17, NFR-10)
 
-Status: completed (fix round 1). Rigor FULL; step mode directional. Built on D-87 (the row is created by the allocator with its number) and D-91 (the firm
+Status: completed (fix round 2). Rigor FULL; step mode directional. Built on D-87 (the row is created by the allocator with its number) and D-91 (the firm
 invoice number is required at upload).
 
 ## 1. What was built
@@ -48,11 +48,32 @@ Multipart form (both POSTs): `file` (PDF), `firmInvoiceNumber` (required), `poNu
    submitter contact (SPA), core lookup, the five resolver fields, owner + creator person. Refused -> 503 `ebilling.tracking.unavailable`.
 9. Job `InvoiceSubmissionProcessing`, payload `{ "submissionId": ... }`, `SubjectId` = `IdempotencyKey` = submission id.
 
+**Idempotency is per submission, not per request.** The submission id is minted once per request; it de-duplicates the processing job of that
+submission and nothing else. A client that retries after losing the 202 sends a new request, gets a new submission id and creates a second
+submission with its own tracking number (INV.2). That is by design under D-37 / D-88; nothing here recognises a repeated upload.
+
+**Writes ignore the caller's token** (fix round 2). From the upload to the enqueue every call runs under `CancellationToken.None`: Graph, Dataverse
+and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply (the id compensation needs) is lost.
+A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans. A caller already gone before the upload
+writes nothing (`OperationCanceledException`, nothing to undo).
+
 Any failure after step 6 compensates in reverse order with its own token (submission row, document row, file); a failed compensation is logged and
-never masks the original. Cancellation compensates and rethrows. No path creates `sprk_invoice`. The document id is held as soon as the row exists
-(create, then a separate typing update), so a failed update removes the row. The submission is treated as possibly existing from the moment the
-allocator is asked (a lost reply may have committed it) and is deleted by its id; a not-found on that delete is ignored. An allocator refusal
-creates nothing and deletes nothing.
+never masks the original. No path creates `sprk_invoice`. Each write's compensation works without the write's reply:
+- File: by the id the upload returned; with no reply, by its path (`SpeFileStore.GetDriveItemByPathAsync`). The name carries the submission id, so
+  whatever sits at that path is this request's own upload.
+- Document, internal: the id is chosen before the create and sent with it (`CreateDocumentRequest.Id`); deleted by it, not-found ignored.
+- Document, SPA: the external create mints the id; with no reply, the row is found by `sprk_graphitemid` = the uploaded item and deleted.
+- Document typing update failing: the row id is already held, so the row is deleted.
+- Submission: treated as possibly existing from the moment the allocator is asked; deleted by its id, not-found ignored. An allocator refusal
+  creates nothing and deletes nothing.
+- 409 on the upload (fix round 2, choice: **delete and refuse**, not "look up and continue"): the name is unique to this submission, so the
+  conflict is the Graph handler's retried PUT colliding with its own committed first PUT. The file is found by its path and deleted, and the
+  request is refused 409 `failed` ("Nothing was saved; try again"). Continuing with the found item would trust bytes this request never saw
+  acknowledged; a retry is cheap and lands on a fresh name.
+
+Read faults (fix round 2): a firm read that faults is 503 `firm_unverifiable`; a submission read or list that faults is 503 `record_unavailable`
+(`InvoiceSubmissionService.ReadUnavailable`, rendered by the internal GET, the external read-one filter and the external list). A fault is never a
+500, a "not found" or "no firm".
 
 ## 2. Response contract (tasks 049 / 051 / 052)
 
@@ -91,6 +112,7 @@ creates nothing and deletes nothing.
 | `ExternalInvoiceSubmissionAuthorizationFilter` | `ContactGrantorAuthorizationFilter` (same principal + membership reads) | It decides grant eligibility, not a firm-scoped submit/read | NFR-10 would be enforced in handlers the route guard cannot see |
 | `finance.submit_invoice` | `finance.attach_invoice` | Lacks Read; reusing it misnames the act in deny logs | The internal submit has no least-privilege key |
 | Two entity-set constants | Same values elsewhere (`DecisionActionExecutors`, `SecureChildLineage`) | Finance filter constants are per-route by design | The routes would pluralize or inline set names |
+| `SpeFileStore.GetDriveItemByPathAsync` / `DriveItemOperations.GetDriveItemByPathAsync` (fix round 2) | `GetDriveItemAsync` (by item id), `ListChildrenAsync` | The by-id lookup builds `items/{id}`, which cannot carry a path; listing the root is unbounded. Same ownership gate and 404 handling, copied | An upload whose reply is lost, or a retried PUT answered 409, leaves a file in the matter's container with no row and no way to find it |
 
 Placement: BFF (the only backend; the write path and auth seams live here). No package, no background service, no new config key.
 
@@ -105,17 +127,22 @@ Placement: BFF (the only backend; the write path and auth seams live here). No p
 - Restored; the file matches the commit (`git status` clean).
 
 ### Tests
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionServiceTests.cs`: 28 passed (25 + 3 fix-round tests).
-- `tests/integration/contract/Api/Finance/InvoiceSubmissionEndpointsContractTests.cs`: 33 passed (real mappers, filters, kill switch and service;
-  + kill switch after authorization, + internal GET 200).
-- Fix-round before/after: the round-0 service against the new tests = 3 failed / 58 passed; the fixed service = 61 passed.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionServiceTests.cs`: 36 passed. The write doubles commit first, then
+  fail or honour the token, so a "failure" can leave a committed write whose reply never arrived.
+- `tests/integration/contract/Api/Finance/InvoiceSubmissionEndpointsContractTests.cs`: 37 passed (real mappers, filters, kill switch and service).
+  The membership double answers only for the test contact (fix round 2, F3).
+- Fix round 1 before/after: the round-0 service against the new tests = 3 failed / 58 passed; the fixed service = 61 passed.
+- Fix round 2 before/after: the round-1 service, filter and routes against the new tests = 12 failed / 61 passed; fixed = 73 passed. The
+  contact-blind membership double against `External_firms_are_those_of_the_callers_own_contact` = 1 failed / 72 passed. The round-1
+  `A_cancelled_request_is_compensated_and_rethrown` is replaced: a mid-write cancellation no longer compensates, it completes.
+- Fix round 2 runs: InvoiceSubmission + OperationAccessPolicyCompleteness 105 passed; `tests/Spaarke.ArchTests` 1056 passed; BFF build (-m:1) clean.
 - Full `Sprk.Bff.Api.Tests` run (stopped after about 74 failures): every failure was `TaskCanceledException` in WebApplicationFactory hosts
   unrelated to this task (Documents, Office, Ai, Rag ...), under machine load from parallel agents. Six of those classes re-run alone: 70 passed.
 - `OperationAccessPolicyCompletenessTests`: 32 passed (finance.submit_invoice pinned in three theories).
 - `tests/Spaarke.ArchTests`: 1052 passed (RouteAuthorizationGuard 126 -> 128 files, credited form; RecordOwnerAssignmentCensus Routed entry +
   PersonBearingWriter; SpeWriteSinkContainerProvenance two ServerDerivedRecord sites; SpeUploadPathIsFlat; ADR010 unchanged).
 - Beyond the stated contract (one line each): the two-firm and no-firm cases (escalation trigger 2's proposal); unreadable memberships 503 (fault
-  is never "no firm"); cancellation compensation (acceptance criterion 7 under a client disconnect).
+  is never "no firm"); a client disconnect mid-write completes the submission (acceptance criterion 7: no orphan, no Received row without a job).
 
 ### Publish size
 Framework-dependent linux-x64 `dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal`: fresh master `709101aa6` 192 files 37.149 MB;
@@ -126,14 +153,30 @@ No `.csproj` change, so no new package and no new CVE.
 Open PRs overlapping: #2019 (ontology-104) on `EndpointMappingExtensions.cs` and `RouteAuthorizationGuardTests.Ledger.cs` (the
 `ExpectedEndpointFileCount` line will need the sum on merge); #2017 (uac-1363) on `SpeWriteSinkContainerProvenanceGuardTests.cs` (append-only list).
 
-### Adversarial review (one pass)
+### Adversarial review, second pass (fix round 2)
+No authorization defect. Fixed:
+- F2: orphans after a client disconnect or a lost reply (document row with no file; Received submission with no job; uploaded file with no
+  id). Writes now ignore the caller's token; compensation finds each write without its reply (section 1). This also closes the first pass's K4
+  for the disconnect case.
+- F2: the 409 branch left the file its own retried PUT committed. Now deleted by path, then refused.
+- F1: firm and submission read faults escaped as 500. Now 503.
+- F3: the membership double ignored the contact id.
+
+Known limits recorded:
+- K2 (residual race): a slow write whose reply times out (an HttpClient or SDK timeout, not the caller) can still commit after compensation has
+  looked for it: a submission create landing after its delete leaves a Received row with no job, a document create after the sweep leaves a row,
+  an upload after the path lookup leaves a file. The window is the gap between the client-side timeout and the server's commit.
+- K1, K3, K4 of the second review: their text did not reach this task (the fix brief named them without content); to be added from the review report.
+
+### Adversarial review, first pass
 - F2 fixed: a failed document update orphaned the document row (the id was assigned only after create + update both returned).
 - F2 fixed: a submission create whose reply was lost (timeout after commit) left a Received row with no job.
 - K2 closed by tests: kill-switch ordering after authorization; internal GET 200.
 - K3: the list maps a row whose core lookups name two records to `coreRecord: null`. Reachable only if a writer bypasses FR-05 (one core
   lookup per row); this service always writes exactly one.
 - K4: Service Bus can accept the message while the enqueue call reports failure; compensation then deletes the row and the job later finds no
-  submission. 049 must treat a missing submission as done (stated in section 2).
+  submission. 049 must treat a missing submission as done (stated in section 2). Since fix round 2 a caller disconnect no longer triggers it;
+  a send that times out after the broker accepted it still can.
 
 ## 6. Known limits
 - Until task 049 lands, `InvoiceSubmissionProcessing` has no handler; the flag (`Ebilling:Enabled`, default off) keeps the routes closed.
