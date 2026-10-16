@@ -42,6 +42,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-91 (owner, 2026-10-16)">The internal channel also requires the firm invoice number at submission (shared Details step from 051).</constraint>
     <constraint source="ADR-002 / FR-17">No client path creates sprk_invoice or sprk_invoicesubmission; the wizard previews and calls the server only. grep for createRecord of sprk_invoice in src/client must find nothing after this task.</constraint>
     <constraint source="FR-19 / D-24">Override is offered only when the server signal from 105 says the caller holds the privilege; the reason field is mandatory before the call; the server remains authoritative (a 403 is shown, never bypassed). Return to firm calls the server route that 104 / 105 provide.</constraint>
     <constraint source="ADR-021 / ADR-012">Fluent v9 only, theme tokens, shared components; no new npm package (NFR-12).</constraint>

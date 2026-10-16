@@ -42,6 +42,7 @@
   </context>
 
   <constraints>
+    <constraint source="D-91 (owner, 2026-10-16)">The Details step requires the firm invoice number (cannot continue while blank); PO stays optional.</constraint>
     <constraint source="ADR-021">Fluent UI v9 only, tokens for every colour and spacing, no hard-coded colours; dark mode via the existing theme provider (style a wrapper div, not the FluentProvider — project gotcha F-10).</constraint>
     <constraint source="ADR-012">Compose existing shared components (WizardShell, FileUploadZone, UploadedFileList, StatusBadge, AiProgressStepper); the new shared component takes data callbacks as props and never imports SPA auth or Xrm.</constraint>
     <constraint source="ADR-002 / FR-17">The client never creates sprk_invoice or sprk_invoicesubmission directly and never decides authorization; it shows the server's 400 / 403 / 413 / 503 ProblemDetails messages by error code.</constraint>
@@ -122,7 +123,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">A firm user can choose an accessible core record, upload one PDF with optional firm invoice number and PO, see Processing, and see Accepted with tracking number or Rejected with the reason and a report placeholder.</criterion>
+    <criterion testable="true">A firm user can choose an accessible core record, upload one PDF with a required firm invoice number (D-91) and optional PO, see Processing, and see Accepted with tracking number or Rejected with the reason and a report placeholder.</criterion>
     <criterion testable="true">Leaving and returning shows the same result, read from the server (FR-18).</criterion>
     <criterion testable="true">Negative: server 400 / 403 / 413 responses show their message by error code and the flow does not advance; a 503 ebilling.disabled hides the Submit entry (FR-45).</criterion>
     <criterion testable="true">The shared component has no SPA-auth, Xrm or BFF URL import (props-injected callbacks only) and is exported from components/index.ts.</criterion>
