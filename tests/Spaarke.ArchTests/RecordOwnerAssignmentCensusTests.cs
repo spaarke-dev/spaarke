@@ -351,6 +351,8 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
+        // R3 task 047 (UAC re-check F3): the WorkforceHome contact create refuses an empty owning team.
+        new OwnerSeam("ContactIdentityStore.cs", "CreatePayload", Refusal),
     };
 
     /// <summary>The refusal every seam throws: "... refusing to create ... app-owned ..." (a stray throw elsewhere in

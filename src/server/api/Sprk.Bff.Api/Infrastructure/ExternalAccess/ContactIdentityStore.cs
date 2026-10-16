@@ -729,10 +729,16 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         // ADR-028 A9 (r3 task 047): a WorkforceHome create carries its home directory and its owner; no other plane may.
         var home = plane == IdentityPlaneMarker.WorkforceHome;
-        if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty
-                     || details.OwningTeamId is not { } team || team == Guid.Empty))
+        if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty))
         {
-            throw new ArgumentException("A WorkforceHome create needs the home tenant and the owning team.", nameof(details));
+            throw new ArgumentException("A WorkforceHome create needs the home tenant.", nameof(details));
+        }
+
+        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned contact.
+        if (home && (details.OwningTeamId is not { } team || team == Guid.Empty))
+        {
+            throw new InvalidOperationException(
+                "No owning team was resolved for the WorkforceHome contact; refusing to create an app-owned contact.");
         }
 
         if (!home && (details.ExternalTenantId is not null || details.OwningTeamId is not null))
@@ -921,6 +927,30 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// </summary>
     public static bool IsOptionValueOutOfRange(string? error)
         => error is not null && error.Contains("outside the valid range", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The <c>error.code</c> of a Dataverse error body (e.g. <c>0x80060888</c>), or null when the body is not that JSON shape.
+    /// Never the message: a syntax error's message echoes the request's whole <c>$filter</c> (r3 task 047, UAC re-check). Pure.
+    /// </summary>
+    public static string? ErrorCodeOf(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>True when a Dataverse error body says the alternate key in the URL is not defined.</summary>
     public static bool IsKeyMissing(string? body)
@@ -1496,7 +1526,17 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             var classified = ClassifyError(body);
-            _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", logLabel ?? path, (int)response.StatusCode, Trim(body));
+            if (logLabel is null)
+            {
+                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", path, (int)response.StatusCode, Trim(body));
+            }
+            else
+            {
+                // A labelled read carries the caller's email in its $filter, and Dataverse echoes the whole filter in a syntax
+                // error's message (UAC 047 re-check, probed on dev). Log the status and the error code only, never the body.
+                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {ErrorCode}", logLabel, (int)response.StatusCode,
+                    ErrorCodeOf(body) ?? "(no error code)");
+            }
             return (classified, response.StatusCode, null, $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

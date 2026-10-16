@@ -258,3 +258,22 @@ Known limits (K, not fixed here):
 - **removeUnverifiedEmailClaim = true** on the stamp's BFF app and on the multitenant SPA client is a stated prerequisite for 047 on every stamp other than dev, because registration binds by the token `email`. Dev: task 059 sets it in the same step that makes the BFF app multitenant. Other stamps: provisioning task 264 (ISS-013, #2001).
 - Option 100000012 'Inactive contact email match' applied to the stamp's sprk_identitycollisionreason (`Set-ContactIdentityBindingSchema.ps1 -Apply`) before the 047 BFF.
 - The owner-write census entry for `ContactIdentityStore.CreatePayload` (Seam) was added after master's census arrived with merge 344cb0cb3. UAC owns the census guard and should confirm the classification.
+
+## UAC re-check fixes (2026-10-16)
+
+UAC re-checked 344cb0cb3..9e860c692: F1 and K2 hold. One F remained.
+
+- **F3:** the census Seam entry for `ContactIdentityStore.CreatePayload` had no OwnerSeam guard.
+  - The empty-owning-team check now throws the standard owner-seam refusal (InvalidOperationException, "refusing to create an app-owned contact"). A missing tenant stays an ArgumentException.
+  - `CreatePayload` is listed in `Seams` with the shared `Refusal` regex.
+  - Seeding proof: with the wording removed, `EverySeamRefusesAnOwnerlessCreate` fails on CreatePayload; restored, it passes.
+- **K2 residual** (UAC probed dev: Dataverse echoes the whole `$filter`, email included, in a syntax error's message):
+  - A labelled read now logs the status and `error.code` only (the new pure `ErrorCodeOf`), never the body.
+  - The theory uses the probed shape.
+- **K3, open until the fold:** a fallback-wiring mutation survives (the tests drive `HomeBindConsumingInviteAsync` through a delegate). This closes when `BindHomeOidAsync` folds onto PR #2007's store-level fallback at the next master merge. #2007 has the same gap.
+- **K1, open until the fold:** the fallback is duplicated with #2007, and the static column arrays will collide on merge. Resolved by the same fold.
+
+Runs:
+- the full suite on 9e860c692 (23,856 passed, 1 TaskCanceled; it passes alone);
+- after this fix, 697/697 identity, registration and invite tests;
+- ArchTests 1052/1052.

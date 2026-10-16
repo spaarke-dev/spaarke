@@ -65,6 +65,18 @@ public class DataverseContactIdentityStoreTests
     public void IsOptionValueOutOfRange_RecognisesAnUnprovisionedChoiceOption_AndNothingElse(string? error, bool expected)
         => DataverseContactIdentityStore.IsOptionValueOutOfRange(error).Should().Be(expected);
 
+    // UAC 047 re-check: Dataverse echoes the whole $filter (the caller's email) in a syntax error's message, so a labelled
+    // read logs only the error code. The first case is the shape probed on dev.
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80060888\",\"message\":\"Expression expected at position 62 in 'emailaddress1 eq 'probe.uac@example.invalid' and (statecode eq'.\"}}", "0x80060888")]
+    [InlineData("{\"error\":{\"message\":\"no code\"}}", null)]
+    [InlineData("{\"error\":\"flat\"}", null)]
+    [InlineData("<html>Bad Request</html>", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void ErrorCodeOf_ReturnsOnlyTheCode_NeverTheMessage(string? body, string? expected)
+        => DataverseContactIdentityStore.ErrorCodeOf(body).Should().Be(expected);
+
     [Fact]
     public void TheReferenceLookup_CountsEverySystemUser_EnabledOrNot()
     {
@@ -669,7 +681,7 @@ public class DataverseContactIdentityStoreTests
         FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome, noTenant))
             .Should().Throw<ArgumentException>();
         FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome, noOwner))
-            .Should().Throw<ArgumentException>();
+            .Should().Throw<InvalidOperationException>().WithMessage("*refusing to create*");
         FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce, workforceWithTenant))
             .Should().Throw<ArgumentException>();
     }
