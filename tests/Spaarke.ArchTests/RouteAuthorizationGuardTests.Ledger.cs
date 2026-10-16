@@ -399,6 +399,10 @@ public partial class RouteAuthorizationGuardTests
             "POST /set-record-share-expiry under the DelegationRuleFilter admin group (task 098)."),
         new GovernedFile("Api/ExternalAccess/RecordAccessGateEndpoint.cs", Scope.GroupGated,
             "GET /can-manage-access — its whole purpose is to be gated by DelegationRuleFilter (task 118)."),
+        new GovernedFile("Api/ExternalAccess/RecordGrantsEndpoint.cs", Scope.GroupGated,
+            "GET /record-grants under the DelegationRuleFilter admin group (task 099a, #1010(a)): the record's active grant rows "
+            + "for Manage Access's Current Access, behind the /can-manage-access rule (Write and Share on the record, as the "
+            + "caller); the row read is app-only, so the filter is the whole authorization."),
         new GovernedFile("Api/ExternalAccess/InternalShareEndpoints.cs", Scope.GroupGated,
             "internal POA share/unshare/list under the DelegationRuleFilter admin group (task 063)."),
         new GovernedFile("Api/ExternalAccess/InviteExternalUserEndpoint.cs", Scope.GroupGated,
@@ -788,7 +792,17 @@ public partial class RouteAuthorizationGuardTests
     //
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
-    private const int ExpectedEndpointFileCount = 125;
+    //
+    // 125 -> 126 (2026-10-16, unified-access-control-r2 task 099a, #1010(a)):
+    //
+    //   099a +1  Api/ExternalAccess/RecordGrantsEndpoint.cs ADDED — GET /record-grants, the record's active
+    //            sprk_externalrecordaccess rows for Manage Access's Current Access (the PCF read them as the user, so a
+    //            Write-holder in a child business unit saw none of the root-owned rows). Governed GroupGated: it sits in
+    //            the external-access admin group and inherits AddDelegationRuleFilter(); DelegationRuleFilter's target map
+    //            gained the matching RecordGrantsQuery case in the same change (the /can-manage-access rule — Write and
+    //            Share on the RECORD; an unknown id and an unmanageable one are the same 403). Pinned through the real
+    //            pipeline by tests/integration/auth/UnifiedAccessControl/RecordGrantsEndpointTests.cs.
+    private const int ExpectedEndpointFileCount = 126;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
