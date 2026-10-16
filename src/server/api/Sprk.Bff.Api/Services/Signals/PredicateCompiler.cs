@@ -306,6 +306,39 @@ public sealed partial class PredicateCompiler
             [("sprk_matter", "sprk_budgetrevision")] = "sprk_matter",
         }.ToFrozenDictionary();
 
+    /// <summary>
+    /// The comparison operators a filter value may use (<c>{"op": v}</c>) and the FetchXML operator each compiles to. The ONE
+    /// operator table: <see cref="MapOperator"/>, the Threshold comparison and the D-40 date range all read it, and the task 101
+    /// authoring catalog offers exactly these, so the rule editor can offer nothing that does not compile (#46).
+    /// </summary>
+    internal static readonly FrozenDictionary<string, string> ComparisonOperators =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [">="] = "ge",
+            ["<="] = "le",
+            [">"] = "gt",
+            ["<"] = "lt",
+            ["<>"] = "ne",
+            ["="] = "eq",
+        }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>The lower bounds of a D-40 two-bound date range (a subset of <see cref="ComparisonOperators"/>).</summary>
+    internal static readonly FrozenSet<string> LowerBoundOperators = new[] { ">=", ">" }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The upper bounds of a D-40 two-bound date range (a subset of <see cref="ComparisonOperators"/>).</summary>
+    internal static readonly FrozenSet<string> UpperBoundOperators = new[] { "<=", "<" }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The operators a <see cref="RuleType.Threshold"/> comparison may use: the two bound sets together.</summary>
+    internal static readonly FrozenSet<string> ThresholdOperators =
+        LowerBoundOperators.Concat(UpperBoundOperators).ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The relative-date forms <see cref="RelativeDateToken"/> accepts, as the authoring catalog states them (task 101).
+    /// <c>{N}</c> is a whole number of days, 1 to <see cref="MaxRelativeDateDays"/>.</summary>
+    internal static readonly IReadOnlyList<string> RelativeDateForms = new[] { "now", "now-{N}d", "now+{N}d" };
+
+    /// <summary>The largest day count <see cref="RelativeDateToken"/> accepts (its <c>[0-9]{1,4}</c>).</summary>
+    internal const int MaxRelativeDateDays = 9999;
+
     /// <summary>Dataverse's limit on <c>link-entity</c> elements in one query. One clause = one link.</summary>
     public const int MaxClauses = 15;
 
@@ -647,15 +680,11 @@ public sealed partial class PredicateCompiler
                 ". Adding one is a schema check plus a code change with review.");
         }
 
-        var op = (opEl.ValueKind == JsonValueKind.String ? opEl.GetString() : null) switch
-        {
-            ">=" => "ge",
-            ">" => "gt",
-            "<=" => "le",
-            "<" => "lt",
-            var other => throw new PredicateCompilationException(
-                $"{at}.operator: '{other}' is not a threshold comparison; use one of >, >=, <, <=."),
-        };
+        var written = opEl.ValueKind == JsonValueKind.String ? opEl.GetString() : null;
+        var op = written is not null && ThresholdOperators.Contains(written)
+            ? ComparisonOperators[written]
+            : throw new PredicateCompilationException(
+                $"{at}.operator: '{written}' is not a threshold comparison; use one of >, >=, <, <=.");
 
         if (valueEl.ValueKind != JsonValueKind.Number)
         {
@@ -924,15 +953,10 @@ public sealed partial class PredicateCompiler
 
         foreach (var bound in ops)
         {
-            var op = bound.Name switch
-            {
-                ">=" => "ge",
-                ">" => "gt",
-                "<=" => "le",
-                "<" => "lt",
-                _ => throw new PredicateCompilationException(
-                    $"{at}: '{bound.Name}' cannot bound a date range; use one of >= / > plus one of <= / < (D-40)."),
-            };
+            var op = LowerBoundOperators.Contains(bound.Name) || UpperBoundOperators.Contains(bound.Name)
+                ? ComparisonOperators[bound.Name]
+                : throw new PredicateCompilationException(
+                    $"{at}: '{bound.Name}' cannot bound a date range; use one of >= / > plus one of <= / < (D-40).");
 
             if (bound.Value.ValueKind != JsonValueKind.String
                 || !TryResolveRelativeDate(bound.Value.GetString(), nowUtc, out var instant))
@@ -1019,16 +1043,10 @@ public sealed partial class PredicateCompiler
             new XAttribute("operator", op),
             new XAttribute("value", value));
 
-    private static string MapOperator(string op, string at) => op switch
-    {
-        ">=" => "ge",
-        "<=" => "le",
-        ">" => "gt",
-        "<" => "lt",
-        "<>" => "ne",
-        "=" => "eq",
-        _ => throw new PredicateCompilationException($"{at}: unsupported operator '{op}'."),
-    };
+    private static string MapOperator(string op, string at) =>
+        ComparisonOperators.TryGetValue(op, out var fetchOperator)
+            ? fetchOperator
+            : throw new PredicateCompilationException($"{at}: unsupported operator '{op}'.");
 
     private static string FormatScalar(JsonElement value, DateTimeOffset nowUtc, string at)
     {
