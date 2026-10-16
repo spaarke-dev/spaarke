@@ -301,6 +301,31 @@ public sealed class LineCodingSeamTests
     }
 
     [Fact]
+    public async Task AnEntryKeyedToALineOutsideItsChunk_IsIgnored_ItNeitherCodesThatLineNorMakesItsOwnAnswerAmbiguous()
+    {
+        var h = new Harness(chunkSize: 1);
+        var core = h.CoreRecordMappedTo(h.Utbms.Litigation);
+        // Call 1 sees only F1 but also answers for F2 and F3 (narratives it never saw). Call 2 answers F2 properly; call 3 answers nothing.
+        h.Respond = (_, call) => call switch
+        {
+            1 => Output(
+                Coding("F1", "L110", "A101", null, 0.8),
+                Coding("F2", "L120", "A102", null, 0.8),
+                Coding("F3", "L120", "A102", null, 0.8)),
+            2 => Output(Coding("F2", "L110", "A101", null, 0.9)),
+            _ => Output(),
+        };
+
+        var result = await h.Sut.CodeLinesAsync(Request(core, Fee("F1", "One"), Fee("F2", "Two"), Fee("F3", "Three")));
+
+        result.Lines[0].Status.Should().Be(LineCodingStatus.Coded);
+        result.Lines[1].Status.Should().Be(LineCodingStatus.Coded, "its own answer is not made ambiguous by a stray entry from another chunk");
+        result.Lines[1].Task.Code.Should().Be("L110", "the code comes from the chunk that carried its narrative, not from the stray entry (L120)");
+        result.Lines[2].Status.Should().Be(LineCodingStatus.NotReturned, "a stray entry is not an answer for a line whose own chunk returned none");
+        result.Lines[2].Task.Code.Should().BeNull();
+    }
+
+    [Fact]
     public async Task AnObservationWhoseQuotedTextIsNotInTheNarrative_IsDropped()
     {
         var h = new Harness();

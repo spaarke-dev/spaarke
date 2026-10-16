@@ -68,6 +68,7 @@ public sealed class LineCodingService : ILineCodingService
         var toSend = request.Lines.Where(l => !string.IsNullOrWhiteSpace(l.Narrative)).ToList();
         var returnedByKey = new Dictionary<string, List<InvoiceLineCoding>>(StringComparer.Ordinal);
         var chunkCount = 0;
+        var unexpected = 0;
 
         foreach (var chunk in toSend.Chunk(chunkSize))
         {
@@ -77,8 +78,17 @@ public sealed class LineCodingService : ILineCodingService
                 .ConfigureAwait(false);
             chunkCount++;
 
+            // Only an entry for a line of THIS chunk counts: the model saw only these narratives, so an entry keyed to any other
+            // line was not coded from that line's narrative and must neither be applied to it nor make its own answer ambiguous.
+            var chunkKeys = chunk.Select(l => l.LineKey).ToHashSet(StringComparer.Ordinal);
             foreach (var entry in result.Lines)
             {
+                if (!chunkKeys.Contains(entry.LineKey))
+                {
+                    unexpected++;
+                    continue;
+                }
+
                 if (!returnedByKey.TryGetValue(entry.LineKey, out var entries))
                 {
                     returnedByKey[entry.LineKey] = entries = [];
@@ -107,7 +117,8 @@ public sealed class LineCodingService : ILineCodingService
 
         _logger.LogInformation(
             "Line coding: {LineCount} lines, {ChunkCount} chunks of up to {ChunkSize}, code set {CodeSetId} via {Source}; "
-            + "{Refused} codes refused, {Mismatch} firm-code mismatches, {NotReturned} lines not returned, {NoNarrative} without narrative",
+            + "{Refused} codes refused, {Mismatch} firm-code mismatches, {NotReturned} lines not returned, {NoNarrative} without narrative, "
+            + "{Unexpected} entries ignored for lines outside their chunk",
             lines.Count,
             chunkCount,
             chunkSize,
@@ -116,7 +127,8 @@ public sealed class LineCodingService : ILineCodingService
             lines.Sum(l => l.RefusedCodes.Count),
             lines.Count(l => l.HasFirmCodeMismatch),
             lines.Count(l => l.Status == LineCodingStatus.NotReturned),
-            lines.Count(l => l.Status == LineCodingStatus.NoNarrative));
+            lines.Count(l => l.Status == LineCodingStatus.NoNarrative),
+            unexpected);
 
         return new InvoiceCodingResult { CodeSet = codeSet, Lines = lines, ChunkCount = chunkCount };
     }

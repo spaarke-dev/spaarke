@@ -213,7 +213,10 @@ public sealed record LineCodingResult
     /// <summary>Codes the model returned that were refused; each is a "code refused" finding input.</summary>
     public required IReadOnlyList<RefusedCode> RefusedCodes { get; init; }
 
-    /// <summary>Observations the model returned whose quoted text is not in the narrative; they are dropped, not stored.</summary>
+    /// <summary>
+    /// Observations the model returned that were dropped, not stored: the quoted text is not in the narrative, or another
+    /// observation of the same type was kept (one per type).
+    /// </summary>
     public int DroppedObservations { get; init; }
 
     public required Guid CodeSetId { get; init; }
