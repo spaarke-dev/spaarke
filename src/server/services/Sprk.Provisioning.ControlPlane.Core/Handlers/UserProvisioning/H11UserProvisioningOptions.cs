@@ -32,14 +32,28 @@ public sealed class H11UserProvisioningOptions
 
     /// <summary>
     /// The configured NativeAccount licence SKUs. Empty → H11 refuses a NativeAccount run before creating anyone
-    /// (task 232 — it used to create unlicensed users and report success). B2BGuest users get no licence: Spaarke pays
-    /// for their access pay-as-you-go on the stamp subscription (owner 2026-10-07, prerequisite PRQ-C-11).
+    /// (task 232 — it used to create unlicensed users and report success). B2BGuest users do not get this set: each
+    /// guest gets <see cref="GuestLicenseSkuId"/> (owner 2026-10-16, T186 L51 — Dataverse will not add an unlicensed
+    /// guest; the pay-as-you-go link of PRQ-C-11 still covers Dataverse capacity, not user access).
     /// </summary>
     public IReadOnlyList<string> LicenseSkuIds =>
         new[] { PowerAppsPlan2TrialSkuId, FabricFreeSkuId, PowerAutomateFreeSkuId }
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Select(s => s!)
             .ToList();
+
+    /// <summary>
+    /// The licence SKU id every B2B guest receives: Microsoft Power Apps Plan 2 Trial (part number POWERAPPS_VIRAL) —
+    /// Microsoft's global product SKU id, the same in every tenant. Owner 2026-10-16 (T186 L51): Dataverse will not add
+    /// an unlicensed guest. Null/empty → H11 refuses a B2BGuest run before inviting anyone.
+    /// </summary>
+    public string? GuestLicenseSkuId { get; set; } = "dcb1a3ae-b33f-4487-846a-a640262fadf4";
+
+    /// <summary>
+    /// Usage location set on a guest that has none (a licence cannot be assigned without one). Native users already get
+    /// "US" at creation (<see cref="GraphRestUserProvisioner"/>).
+    /// </summary>
+    public string GuestUsageLocation { get; set; } = "US";
 
     /// <summary>
     /// <c>inviteRedirectUrl</c> for B2B guest invitations — where the guest
@@ -79,4 +93,14 @@ public sealed class H11UserProvisioningOptions
 
     /// <summary>Delay between those attempts.</summary>
     public TimeSpan ReplicationRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Attempts for Dataverse's alternate-key read of a newly licensed guest who is a member of the environment security
+    /// group. Dataverse adds the user on this read only after its user sync catches up, which takes minutes (live T186:
+    /// more than 4 minutes) — far longer than Entra replication (<see cref="ReplicationRetryCount"/>).
+    /// </summary>
+    public int DataverseUserSyncRetryCount { get; set; } = 30;
+
+    /// <summary>Delay between those attempts.</summary>
+    public TimeSpan DataverseUserSyncRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
 }

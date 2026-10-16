@@ -282,6 +282,8 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         // Alternate key: Dataverse adds a security-group member who is not yet a user (Microsoft, group-team article).
         // T186 audit: the group add just before this read has not necessarily propagated to Dataverse — it answers 404 until it
         // does. Re-read while that is the answer; any other refusal, and the 404 once the attempts run out, fail as before.
+        // T186 L51: Dataverse's user sync takes minutes (> 4 min live), so this waits DataverseUserSyncRetry*, not the
+        // Entra-replication ReplicationRetry*.
         var reply = await H11ReplicationRetry.RunAsync(
             async attemptCt =>
             {
@@ -293,15 +295,16 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
                 return new H11ReplicationRetry.Reply(response.StatusCode, body);
             },
             H11ReplicationRetry.IsDataverseUserNotYetVisible,
-            _options.ReplicationRetryCount, _options.ReplicationRetryDelay, logger: null, "guest systemuser read",
+            _options.DataverseUserSyncRetryCount, _options.DataverseUserSyncRetryDelay, logger: null, "guest systemuser read",
             ct).ConfigureAwait(false);
         var text = reply.Body;
         if (!reply.IsSuccess)
         {
             var why = reply.Status == HttpStatusCode.NotFound
                 ? "Dataverse did not add the user — it adds one on this read only when it is a DIRECT member of the " +
-                  "environment security group, the environment allows guests and its billing (pay-as-you-go, PRQ-C-11) " +
-                  "covers the user; membership can take minutes to propagate (re-run)"
+                  "environment security group, the environment allows guest access (PRQ-C-12) and the guest holds a " +
+                  "Power Apps licence (H11 assigns Power Apps Plan 2 Trial); Dataverse's user sync can take several " +
+                  "minutes (re-run)"
                 : "Dataverse refused the read";
             throw new InvalidOperationException(
                 $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed: {(int)reply.Status} " +

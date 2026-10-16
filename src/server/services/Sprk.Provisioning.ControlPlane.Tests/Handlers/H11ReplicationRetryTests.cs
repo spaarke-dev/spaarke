@@ -14,6 +14,9 @@
 //        GraphRestUserProvisioner.AssignLicenseAsync — 404 / 400 "does not exist" / 400 usage location retried;
 //          "no available licenses", an invalid SKU and 403 are not; attempts bounded.
 //   3. group-membership add on a new user — the same AddMemberAsync (H11 adds only guests, right after consent).
+//   4. (T186 L51, owner 2026-10-16) guest licence — GraphRestUserProvisioner.AssignGuestLicenseAsync: idempotent read,
+//        usage location only when absent, only the guest SKU assigned; and the Dataverse alternate-key read waits
+//        DataverseUserSyncRetryCount (minutes), not the Entra ReplicationRetryCount.
 // Hand-rolled HttpMessageHandler (NOT Mock<HttpMessageHandler> — banned per testing.md), credential injected through
 // each class's internal test constructor, delays injected via the options (1 ms).
 // -----------------------------------------------------------------------------
@@ -40,6 +43,8 @@ public sealed class H11ReplicationRetryTests
     private const string SystemUserId = "dddddddd-1111-2222-3333-444444444444";
     private const string CustomerBuId = "eeeeeeee-1111-2222-3333-444444444444";
     private const int Attempts = 4;
+    private const int SyncAttempts = 6;   // deliberately != Attempts: the Dataverse read must use its own count
+    private const string GuestSkuId = "DCB1A3AE-B33F-4487-846A-A640262FADF4";   // upper-case: the compare is case-insensitive
 
     private const string NotFoundBody =
         """{"error":{"code":"Request_ResourceNotFound","message":"Resource 'aaaaaaaa' does not exist or one of its queried reference-property objects are not present."}}""";
@@ -161,7 +166,128 @@ public sealed class H11ReplicationRetryTests
 
         outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic
             .Should().Contain("DIRECT member of the environment security group");
-        http.Requests.Count(r => r.Uri.Contains("/systemusers(azureactivedirectoryobjectid=")).Should().Be(Attempts);
+        http.Requests.Count(r => r.Uri.Contains("/systemusers(azureactivedirectoryobjectid=")).Should().Be(
+            SyncAttempts, "Dataverse's user sync takes minutes — the read waits DataverseUserSyncRetryCount, not the Entra ReplicationRetryCount");
+        SyncAttempts.Should().NotBe(Attempts);
+    }
+
+    // ---------------- T186 L51: guest licence ----------------
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_AlreadyLicensed_OnlyReadsTheUser()
+    {
+        var http = new FakeHttp(_ => Json(HttpStatusCode.OK,
+            $$"""{"usageLocation":"US","assignedLicenses":[{"skuId":"{{GuestSkuId.ToLowerInvariant()}}","disabledPlans":[]}]}"""));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Success>();
+        http.Requests.Should().ContainSingle().Which.Should().Be((HttpMethod.Get,
+            $"https://graph.microsoft.com/v1.0/users/{UserId}?$select=usageLocation,assignedLicenses"));
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_NoUsageLocation_SetsItThenAssignsOnlyTheGuestSku()
+    {
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, """{"usageLocation":null,"assignedLicenses":[{"skuId":"11111111-2222-3333-4444-555555555555"}]}""")
+            : req.Method == HttpMethod.Patch ? new HttpResponseMessage(HttpStatusCode.NoContent) : Json(HttpStatusCode.OK, "{}"));
+
+        var outcome = await Licenser(http, sku: true).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Success>();
+        http.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Post);
+        http.Requests[1].Uri.Should().Be($"https://graph.microsoft.com/v1.0/users/{UserId}");
+        http.Bodies[1].Should().Contain("\"usageLocation\":\"US\"");
+        http.Requests[2].Uri.Should().EndWith($"/v1.0/users/{UserId}/assignLicense");
+        using var body = System.Text.Json.JsonDocument.Parse(http.Bodies[2]);
+        body.RootElement.GetProperty("addLicenses").EnumerateArray().Select(a => a.GetProperty("skuId").GetString())
+            .Should().Equal(
+                new[] { GuestSkuId }, "only the guest SKU — never the NativeAccount set (PowerAppsPlan2TrialSkuId is also configured)");
+        body.RootElement.GetProperty("removeLicenses").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_UsageLocationAlreadySet_DoesNotPatch()
+    {
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, """{"usageLocation":"GB","assignedLicenses":[]}""")
+            : Json(HttpStatusCode.OK, "{}"));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Success>();
+        http.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_NoAvailableLicences_FailsAndIsNotRetried()
+    {
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, """{"usageLocation":"US","assignedLicenses":[]}""")
+            : Json(HttpStatusCode.BadRequest, NoLicensesBody));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Failure>().Which.Diagnostic
+            .Should().Contain("assignLicense failed").And.Contain("400").And.Contain("no available licenses");
+        http.Requests.Count(r => r.Method == HttpMethod.Post).Should().Be(1, "a genuine licence error is not replication lag");
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_AGuestNotYetReplicated_IsReadAgainUntilItIs()
+    {
+        var reads = 0;
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? (++reads < 3 ? Json(HttpStatusCode.NotFound, NotFoundBody) : Json(HttpStatusCode.OK, """{"usageLocation":"US","assignedLicenses":[]}"""))
+            : Json(HttpStatusCode.OK, "{}"));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Success>();
+        reads.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_TheReadIsRefused_FailsWithTheStatus()
+    {
+        var http = new FakeHttp(_ => Json(HttpStatusCode.Forbidden, ForbiddenBody));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Failure>().Which.Diagnostic.Should().Contain("GET").And.Contain("403");
+        http.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AssignGuestLicenseAsync_ThePatchIsRefused_FailsWithoutAssigning()
+    {
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, """{"usageLocation":null,"assignedLicenses":[]}""")
+            : Json(HttpStatusCode.Forbidden, ForbiddenBody));
+
+        var outcome = await Licenser(http, sku: false).AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Failure>().Which.Diagnostic.Should().Contain("PATCH").And.Contain("403");
+        http.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task AssignGuestLicenseAsync_BlankGuestSku_FailsWithoutAnyHttpCall(string? sku)
+    {
+        var http = new FakeHttp(_ => Json(HttpStatusCode.OK, "{}"));
+        var provisioner = new GraphRestUserProvisioner(
+            new HttpClient(http),
+            Options.Create(new H11UserProvisioningOptions { GuestLicenseSkuId = sku }),
+            NullLogger<GraphRestUserProvisioner>.Instance, _ => new FakeCredential());
+
+        var outcome = await provisioner.AssignGuestLicenseAsync(UserId, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<LicenseAssignmentOutcome.Failure>().Which.Diagnostic.Should().Contain("GuestLicenseSkuId");
+        http.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -184,6 +310,19 @@ public sealed class H11ReplicationRetryTests
 
         options.ReplicationRetryCount.Should().BeInRange(2, 12);
         options.ReplicationRetryDelay.Should().BeGreaterThan(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void L51_DefaultsCoverDataverseUserSyncAndTheGuestLicence()
+    {
+        var options = new H11UserProvisioningOptions();
+
+        (options.DataverseUserSyncRetryCount * options.DataverseUserSyncRetryDelay)
+            .Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(3)).And.BeLessThanOrEqualTo(TimeSpan.FromMinutes(10),
+                "live T186 needed more than 4 minutes; the wait stays bounded");
+        options.GuestLicenseSkuId.Should().Be("dcb1a3ae-b33f-4487-846a-a640262fadf4");
+        options.GuestUsageLocation.Should().Be("US");
+        options.LicenseSkuIds.Should().NotContain("dcb1a3ae-b33f-4487-846a-a640262fadf4", "the NativeAccount set is separate");
     }
 
     [Theory]
@@ -213,6 +352,9 @@ public sealed class H11ReplicationRetryTests
         {
             ReplicationRetryCount = Attempts,
             ReplicationRetryDelay = TimeSpan.FromMilliseconds(1),
+            DataverseUserSyncRetryCount = SyncAttempts,
+            DataverseUserSyncRetryDelay = TimeSpan.FromMilliseconds(1),
+            GuestLicenseSkuId = GuestSkuId,
             PowerAppsPlan2TrialSkuId = sku ? "11111111-2222-3333-4444-555555555555" : null,
         });
 
@@ -270,10 +412,14 @@ public sealed class H11ReplicationRetryTests
     {
         public List<(HttpMethod Method, string Uri)> Requests { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        /// <summary>The request body text per request (parallel to <see cref="Requests"/>; empty when there is none).</summary>
+        public List<string> Bodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add((request.Method, request.RequestUri!.AbsoluteUri));
-            return Task.FromResult(respond(request));
+            Bodies.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken));
+            return respond(request);
         }
     }
 }

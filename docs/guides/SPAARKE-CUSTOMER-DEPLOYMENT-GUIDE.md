@@ -1380,8 +1380,13 @@ Model 1 run takes only `B2BGuest`):
    admin can see it. It also resolves the guests' security role(s) here, so a missing role sends no invitation.
 2. Each user becomes a guest: an existing guest with that address is **reused without a second invitation email**; an
    address that belongs to a member of the tenant is refused.
-3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`; re-run H11 to re-check).
-4. It adds each guest to the group, then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
+3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`). Microsoft sends the
+   invitation from `invites@microsoft.com` to the guest's own address; a demo-tenant user without an Exchange Online
+   mailbox never receives it (T186). A guest can redeem without the email: open
+   `https://myapps.microsoft.com/?tenantid=<Spaarke tenant id>` in a private window, sign in as the guest and accept the
+   permissions prompt. Then `POST /api/runs/{id}/gates/b2b-consent/advance?customerId={cid}` — it re-runs H11, which
+   reads each guest's `externalUserState` (`Accepted`).
+4. It adds each guest to the group, gives it the **Power Apps Plan 2 Trial** licence (below), then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
    alternate key — Dataverse adds a group member who is not yet a user on that read (Microsoft's documented app-only
    path; no Power Platform admin role). Dataverse adds the user to the **root** unit; H11 moves it to the customer's
    business unit (`customerBusinessUnitId`, T259) and reads the move back **before** it associates any role (a unit
@@ -1389,15 +1394,22 @@ Model 1 run takes only `B2BGuest`):
    User` — the copy in the customer's unit; resolved in step 1). A guest already in any other unit (for example
    `Secure Record`) is QuarantineRequired `userprov-guest-in-foreign-business-unit` and is never moved; a guest that
    holds a role of another unit (an organisation that keeps roles on a unit change) is QuarantineRequired
-   `userprov-guest-holds-role-outside-customer-unit` — no role is removed. A refusal right after the group add can be
-   membership propagation — resume. A guest who never redeems keeps the gate pending; resend the invitation from the
+   `userprov-guest-holds-role-outside-customer-unit` — no role is removed. Dataverse adds the guest only once its user
+   sync has seen the group membership **and** the licence, which takes minutes (T186: more than 4); H11 re-reads for up
+   to `DataverseUserSyncRetryCount × DataverseUserSyncRetryDelay` (5 min). A 404 after that is
+   `userprov-dataverse-user-failed` — check the group, guest access and the licence, then resume. A guest who never redeems keeps the gate pending; resend the invitation from the
    Entra admin center, then resume (H11 never re-invites — it would re-send mail on every re-check).
 
-**Licensing**: Model 1 guests get **no licence**. Spaarke pays for their access **pay-as-you-go** on the customer's
-stamp subscription (owner 2026-10-07): the operator links the environment to a billing policy on that subscription
-(`PRQ-C-11`, checked by the skill — L2 cannot see billing). Meter: Power Apps per app, **per active user per app per
-month**. `NativeAccount` (Model 2) still assigns the configured licence SKUs and refuses to create anyone when none is
-configured (`userprov-license-sku-not-configured`).
+**Licensing** (owner 2026-10-16, T186 L51): every Model 1 guest gets the **Microsoft Power Apps Plan 2 Trial** licence
+(`POWERAPPS_VIRAL`, skuId `dcb1a3ae-b33f-4487-846a-a640262fadf4`, the same id in every tenant) in Spaarke's tenant. H11
+sets the guest's usage location (`US`) when it has none and assigns the SKU (`H11UserProvisioningOptions:GuestLicenseSkuId`,
+defaulting to that id; blank refuses the run before any invitation, `userprov-license-sku-not-configured`). Dataverse
+does not add an unlicensed guest. Check that the tenant has free units before a run:
+`az rest --method get --url "https://graph.microsoft.com/v1.0/subscribedSkus" --query "value[?skuPartNumber=='POWERAPPS_VIRAL'].[prepaidUnits.enabled, consumedUnits]"`.
+The earlier design (owner 2026-10-07) had guests unlicensed, paid **pay-as-you-go**. That does not work as configured:
+the T186 billing policy (`PRQ-C-11`) had only the Dataverse storage meters on (`AppPass` off), so the guests were
+covered by nothing and Dataverse refused them. `PRQ-C-11` stays for Dataverse capacity. `NativeAccount` (Model 2)
+still assigns the configured licence SKUs and refuses to create anyone when none is configured.
 
 **B2B guests are flagged external** (unified-access-control-r2 task 114, owner round 67). A blank
 `systemuser.sprk_isexternal` means NOT external, so a B2B guest (`#EXT#` in its user name) that is genuinely external

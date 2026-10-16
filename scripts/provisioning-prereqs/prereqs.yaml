@@ -979,11 +979,11 @@ prereqs:
     related_findings: [T232, D2, G10]
 
   - id: PRQ-C-11
-    name: The customer's Dataverse environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Model 1 — Spaarke pays guest access)
+    name: The customer's Dataverse environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Model 1 — Dataverse capacity; guests are licensed by H11, T186 L51)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run
     owner: Spaarke platform admin (Power Platform admin of Spaarke's tenant)
-    consequence_of_absence: "Model 1 guests hold no licence (owner 2026-10-07: Spaarke pays pay-as-you-go, not per user). Without the link the environment has no way to bill their access: H11 still makes each guest a Dataverse user, but the guest is refused at sign-in. L2 cannot see billing (no Dataverse-visible setting; the licensing API needs a Power Platform admin, which L2 is not) — this check is the operator's."
+    consequence_of_absence: "The environment has no pay-as-you-go billing for its Dataverse capacity. User access is NOT paid this way any more: since owner 2026-10-16 (T186 L51) H11 gives every Model 1 guest the Power Apps Plan 2 Trial licence, because the T186 policy carried only the Dataverse storage meters (AppPass off) and Dataverse refused the unlicensed guests. L2 cannot see billing (no Dataverse-visible setting; the licensing API needs a Power Platform admin, which L2 is not) — this check is the operator's."
     check_recipe:
       cli: |
         set -o pipefail

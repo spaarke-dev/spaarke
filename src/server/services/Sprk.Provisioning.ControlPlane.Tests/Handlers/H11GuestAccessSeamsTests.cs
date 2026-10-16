@@ -414,9 +414,13 @@ public sealed class H11GuestAccessSeamsTests
         => new(new HttpClient(http), FastRetryOptions(), new FakeRootBusinessUnitReader(),
             _ => new FakeCredential());
 
-    // T186 audit: the replication retry waits ReplicationRetryDelay between attempts — keep the tests that end on a 404 fast.
+    // T186 audit: the retries wait ReplicationRetryDelay / DataverseUserSyncRetryDelay between attempts — keep the tests that end on a 404 fast.
     private static IOptions<H11UserProvisioningOptions> FastRetryOptions()
-        => Options.Create(new H11UserProvisioningOptions { ReplicationRetryDelay = TimeSpan.FromMilliseconds(1) });
+        => Options.Create(new H11UserProvisioningOptions
+        {
+            ReplicationRetryDelay = TimeSpan.FromMilliseconds(1),
+            DataverseUserSyncRetryDelay = TimeSpan.FromMilliseconds(1),   // T186 L51: the Dataverse read has its own (minutes-long) wait
+        });
 
     private sealed class FakeRootBusinessUnitReader : IDataverseRootBusinessUnitReader
     {
