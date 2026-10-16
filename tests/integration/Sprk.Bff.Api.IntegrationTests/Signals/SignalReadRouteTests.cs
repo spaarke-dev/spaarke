@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -57,6 +58,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     private static readonly Guid CarolContact = Guid.Parse("cccccccc-0000-0000-0000-0000000000c1");
     private static readonly Guid OtherBuUser = Guid.Parse("dddddddd-0000-0000-0000-000000000001");
     private static readonly Guid Team = Guid.Parse("eeeeeeee-0000-0000-0000-000000000001");
+
+    /// <summary>The ontology writer's own systemuserid (WhoAmI on its connection): the createdby of every genuine Decision Record.</summary>
+    private static readonly Guid WriterUser = Guid.Parse("ffffffff-0000-0000-0000-000000000001");
+    private static readonly Guid SomePerson = Guid.Parse("99999999-0000-0000-0000-000000000001");
 
     private readonly WorklistFactory _factory;
 
@@ -1087,6 +1092,280 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // Decision Records on closed items and the Decided set (task 045, D-47; #1959 item 2)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private const string StepsEnvelope =
+        "{\"reviewId\":\"b3ef2ba5-a61f-45ac-a474-664b6dc08720\",\"resolvedSignalIds\":[],\"steps\":["
+        + "{\"code\":\"reassign\",\"label\":\"Reassign\",\"taken\":true,\"values\":{\"person\":\"p-1\",\"note\":\"over to Sam\"},\"outcome\":\"Done\",\"written\":[]},"
+        + "{\"code\":\"extend\",\"label\":\"Extend\",\"taken\":false,\"values\":null,\"outcome\":\"Skipped\",\"written\":[]}]}";
+
+    [Fact]
+    public async Task ClosedItem_CarriesTheDecisionRecord_ReadByTheCaller()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var record = world.Decision(readers: [Alice], number: "DR-00042", recordClass: 100000000, outcome: 100000000,
+            decidedOn: "2026-10-12T09:30:00Z", by: "Dana Decider", reason: "Agreed with the firm", steps: StepsEnvelope,
+            followOns: "[{\"actionCode\":\"notify\",\"entity\":\"sprk_communication\",\"id\":\"11111111-2222-3333-4444-555555555555\"}]");
+        var s = world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49), decisionRecord: record);
+
+        var item = AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single();
+
+        item.GetProperty("signalId").GetGuid().Should().Be(s);
+        var decision = item.GetProperty("decision");
+        decision.GetProperty("recordId").GetGuid().Should().Be(record);
+        decision.GetProperty("number").GetString().Should().Be("DR-00042");
+        decision.GetProperty("recordClass").GetString().Should().Be("Judgement");
+        decision.GetProperty("outcome").GetString().Should().Be("Authorized");
+        decision.GetProperty("decidedOn").GetDateTimeOffset().Should().Be(DateTimeOffset.Parse("2026-10-12T09:30:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        decision.GetProperty("decidedByName").GetString().Should().Be("Dana Decider", "from the record's own sprk_confirmedby, never the owner (D-129)");
+        decision.GetProperty("reason").GetString().Should().Be("Agreed with the firm");
+        var steps = decision.GetProperty("steps").EnumerateArray().ToList();
+        steps.Select(x => x.GetProperty("code").GetString()).Should().Equal("reassign", "extend");
+        steps[0].GetProperty("taken").GetBoolean().Should().BeTrue();
+        steps[0].GetProperty("values").GetProperty("note").GetString().Should().Be("over to Sam");
+        steps[1].GetProperty("taken").GetBoolean().Should().BeFalse();
+        steps[1].GetProperty("values").ValueKind.Should().Be(JsonValueKind.Null, "a skipped step carries no values");
+        decision.GetProperty("followOns").EnumerateArray().Single().GetProperty("code").GetString().Should().Be("notify");
+        decision.TryGetProperty("factSnapshot", out _).Should().BeFalse("the fact snapshot holds witness values and is not returned");
+    }
+
+    [Fact]
+    public async Task ClosedItem_WhoseDecisionRecordTheCallerCannotRead_StaysListed_WithNoDecision()
+    {
+        // A secure-child (D-33/D-123) or owner-only (D-35/D-39) record: Dataverse's own read does not return it to this caller.
+        var world = new World();
+        var m = world.Matter(readers: [Alice, Bob]);
+        var secureRecord = world.Decision(readers: [Bob], number: "DR-00007");
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedToday"], resolvedOn: world.Now.AddSeconds(-1), decisionRecord: secureRecord);
+
+        var alice = AllItems(await OkAsync(world, Alice, "?set=closedToday")).Single();
+        alice.TryGetProperty("decision", out var aliceDecision).Should().BeTrue();
+        aliceDecision.ValueKind.Should().Be(JsonValueKind.Null, "omitted, not withheld by name");
+        alice.ToString().Should().NotContain("DR-00007");
+
+        AllItems(await OkAsync(world, Bob, "?set=closedToday")).Single().GetProperty("decision").GetProperty("number").GetString()
+            .Should().Be("DR-00007");
+    }
+
+    [Fact]
+    public async Task ClosedItem_ClosedBySystem_HasNoDecision_AndNoRecordIsRequested()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49));
+
+        var item = AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single();
+
+        item.GetProperty("decision").ValueKind.Should().Be(JsonValueKind.Null);
+        world.Requests.Should().NotContain(r => r.StartsWith("sprk_decisionrecords?", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OpenLanes_NeverReadDecisionRecords()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m));
+
+        await OkAsync(world, Alice);
+
+        world.Requests.Should().NotContain(r => r.StartsWith("sprk_decisionrecords?", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DecisionRecordReadFault_Is503_NotItemsWithoutTheirRecord()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var record = world.Decision(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49), decisionRecord: record);
+        world.FaultingTables.Add("sprk_decisionrecord");
+
+        var response = await GetAsync(world, Alice, "?set=closedEarlier");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task CallerWithNoDecisionRecordRead_GetsClosedItemsWithoutDecisions_AndAnEmptyDecidedSet()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var record = world.Decision(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddHours(-49), decisionRecord: record);
+        world.TableDenied[Alice] = ["sprk_decisionrecord"];
+
+        AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single().GetProperty("decision").ValueKind.Should().Be(JsonValueKind.Null);
+        AllItems(await OkAsync(world, Alice, "?set=decided")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DecidedSet_ListsOnlyItemsWhoseRecordAndCoreRecordTheCallerReads()
+    {
+        var world = new World();
+        var readable = world.Matter(readers: [Alice]);
+        var hiddenMatter = world.Matter(readers: [Bob]);
+        var good = world.Decision(readers: [Alice], number: "DR-00001");
+        var hiddenRecord = world.Decision(readers: [Bob], number: "DR-00002");
+        var onHiddenMatter = world.Decision(readers: [Alice], number: "DR-00003");
+        var listed = world.Signal(Decide, core: (MatterType, readable), sets: ["decided"], resolvedOn: world.Now.AddDays(-20), decisionRecord: good);
+        world.Signal(Decide, core: (MatterType, readable), sets: ["decided"], resolvedOn: world.Now.AddDays(-20), decisionRecord: hiddenRecord);
+        world.Signal(Decide, core: (MatterType, hiddenMatter), sets: ["decided"], resolvedOn: world.Now.AddDays(-20), decisionRecord: onHiddenMatter);
+        world.Signal(Decide, core: (MatterType, readable), sets: ["decided"], resolvedOn: world.Now.AddDays(-20)); // a system closure: no record
+
+        var body = await OkAsync(world, Alice, "?set=decided");
+
+        body.GetProperty("set").GetString().Should().Be("decided");
+        Ids(body).Should().Equal(listed);
+        AllItems(body).Single().GetProperty("decision").GetProperty("number").GetString().Should().Be("DR-00001");
+    }
+
+    [Fact]
+    public async Task DecidedSet_ReturnsEachRecordClass_AndNullForAnOptionValueItDoesNotKnow()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        foreach (var (cls, outcome) in new[] { (100000000, 100000000), (100000001, 100000000), (100000002, 100000002), (999, 999) })
+        {
+            world.Signal(Decide, core: (MatterType, m), sets: ["decided"], resolvedOn: world.Now.AddDays(-1),
+                decisionRecord: world.Decision(readers: [Alice], recordClass: cls, outcome: outcome));
+        }
+
+        var classes = AllItems(await OkAsync(world, Alice, "?set=decided"))
+            .Select(i => i.GetProperty("decision").GetProperty("recordClass").GetString()).ToList();
+
+        classes.Should().BeEquivalentTo(new string?[] { "Judgement", "Routine", "Dismissal", null });
+    }
+
+    [Fact]
+    public async Task UnreadableStepsEnvelope_GivesNullSteps_NotAnEmptyReplay()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49),
+            decisionRecord: world.Decision(readers: [Alice], steps: "not json {", followOns: "also not json"));
+
+        var decision = AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single().GetProperty("decision");
+
+        decision.GetProperty("steps").ValueKind.Should().Be(JsonValueKind.Null, "null means no replay; [] would show every action as Skipped");
+        decision.GetProperty("followOns").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public void ClosedAndDecidedQueries_SelectTheDecisionRecordLookup_WhateverTheLiveConfigurationVersion()
+    {
+        var json = File.ReadAllText(WorklistFactory.ConfigPath);
+        foreach (var set in new[] { WorklistSet.ClosedToday, WorklistSet.ClosedEarlier, WorklistSet.Decided })
+        {
+            SignalReadService.ParseFetches(json, set)!.Single().Should().Contain("<attribute name=\"sprk_decisionrecord\" />", set.ToString());
+        }
+
+        var decided = SignalReadService.ParseFetches(json, WorklistSet.Decided)!.Single();
+        decided.Should().Contain("operator=\"last-x-days\" value=\"90\"").And.Contain("attribute=\"sprk_decisionrecord\" operator=\"not-null\"");
+        decided.Should().NotContain("last-x-hours");
+        SignalReadService.ParseFetches(json, WorklistSet.Lanes)!.Should().OnlyContain(f => !f.Contains("sprk_decisionrecord"));
+        SignalReadService.ParseFetches(json.Replace("sprk_resolvedon' operator='last-x-hours' value='720'", "sprk_x' operator='last-x-hours' value='720'"), WorklistSet.Decided)
+            .Should().BeNull("a closedEarlier query with no resolved-on window cannot be widened: fail closed");
+    }
+
+    [Fact]
+    public async Task ADecisionRecordNotWrittenByTheWriter_IsOmitted_LikeAnUnreadableOne()
+    {
+        // F1 (review of #2014): Console User can Create a row and Write a Signal's lookup, so a person's forged "Judgement, decided by
+        // <partner>" must not be shown as a genuine record.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var forged = world.Decision(readers: [Alice], number: "DR-66666", by: "Pat Partner", createdBy: SomePerson);
+        var genuine = world.Decision(readers: [Alice], number: "DR-00001");
+        var forgedItem = world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddHours(-49), decisionRecord: forged);
+        var genuineItem = world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddHours(-49), decisionRecord: genuine);
+
+        var earlier = AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).ToDictionary(i => i.GetProperty("signalId").GetGuid());
+        earlier[forgedItem].GetProperty("decision").ValueKind.Should().Be(JsonValueKind.Null, "the item stays listed with no decision");
+        earlier[genuineItem].GetProperty("decision").GetProperty("number").GetString().Should().Be("DR-00001");
+
+        var decided = await OkAsync(world, Alice, "?set=decided");
+        Ids(decided).Should().Equal([genuineItem], "the decided set drops it");
+        decided.ToString().Should().NotContain("DR-66666").And.NotContain("Pat Partner");
+    }
+
+    [Fact]
+    public async Task DecidedSet_IncludesAnInquirySentRecord_WhoseSignalStaysAcknowledged_ButNotOneWithNoRecord()
+    {
+        // F1 (review of #2014): a review that leaves its Signal open (inquiry sent, reminder, follow-on only) writes a record and the
+        // Signal stays Acknowledged with the link.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var inquiry = world.Decision(readers: [Alice], number: "DR-00005", steps: StepsEnvelope);
+        var sent = world.Signal(Decide, core: (MatterType, m), sets: ["decided"], status: 100000001, decisionRecord: inquiry);
+        world.Signal(Decide, core: (MatterType, m), sets: ["decided"], status: 100000001); // acknowledged, no record
+        world.Signal(Decide, core: (MatterType, m), sets: ["decided"], status: 100000000, decisionRecord: world.Decision(readers: [Alice])); // still open
+
+        var item = AllItems(await OkAsync(world, Alice, "?set=decided")).Single();
+
+        item.GetProperty("signalId").GetGuid().Should().Be(sent);
+        item.GetProperty("status").GetString().Should().Be("Acknowledged");
+        item.GetProperty("decision").GetProperty("number").GetString().Should().Be("DR-00005");
+    }
+
+    [Fact]
+    public void OnlyTheDecidedQuery_WidensTheStatus_ClosedTodayAndClosedEarlierStayResolved()
+    {
+        var json = File.ReadAllText(WorklistFactory.ConfigPath);
+        SignalReadService.ParseFetches(json, WorklistSet.Decided)!.Single().Replace('\'', '"')
+            .Should().Contain("<condition attribute=\"sprk_signalstatus\" operator=\"in\"><value>100000001</value><value>100000002</value></condition>");
+        foreach (var set in new[] { WorklistSet.ClosedToday, WorklistSet.ClosedEarlier })
+        {
+            SignalReadService.ParseFetches(json, set)!.Single().Replace('\'', '"')
+                .Should().Contain("<condition attribute=\"sprk_signalstatus\" operator=\"eq\" value=\"100000002\" />").And.NotContain("operator=\"in\"");
+        }
+    }
+
+    [Fact]
+    public async Task WhoDecided_IsReadThroughTheConfirmingUserLink_AndTheRecordMustBeTheWriters()
+    {
+        // F3 (review of #2014): the fake returns a name only through an outer link to systemuser on sprk_confirmedby, so this fails if the
+        // query links any other column; and the createdby condition must be on the query, with the writer's id.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49),
+            decisionRecord: world.Decision(readers: [Alice], by: "Dana Decider"));
+
+        var item = AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single();
+
+        item.GetProperty("decision").GetProperty("decidedByName").GetString().Should().Be("Dana Decider");
+        var fetch = Uri.UnescapeDataString(world.Requests.Single(r => r.StartsWith("sprk_decisionrecords?", StringComparison.Ordinal))).Replace('\'', '"');
+        fetch.Should().Contain("<link-entity name=\"systemuser\" from=\"systemuserid\" to=\"sprk_confirmedby\" link-type=\"outer\" alias=\"by\">")
+            .And.Contain($"<condition attribute=\"createdby\" operator=\"eq\" value=\"{WriterUser:D}\" />");
+        fetch.Should().NotContain("ownerid");
+    }
+
+    [Fact]
+    public async Task DecisionRecordRead_401_Is503_And_403_IsOmittedWithAWarning()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m), sets: ["closedEarlier"], resolvedOn: world.Now.AddHours(-49), decisionRecord: world.Decision(readers: [Alice]));
+
+        world.UnauthorizedTables.Add("sprk_decisionrecord");
+        (await GetAsync(world, Alice, "?set=closedEarlier")).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "a 401 is a fault, not 'no Read'");
+        world.UnauthorizedTables.Clear();
+
+        world.TableDenied[Alice] = ["sprk_decisionrecord"];
+        _factory.Logs.Warnings.Clear();
+        AllItems(await OkAsync(world, Alice, "?set=closedEarlier")).Single().GetProperty("decision").ValueKind.Should().Be(JsonValueKind.Null);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("Decision Record read was refused (403)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ASetThatIsNotOneOfTheFive_IsStill400()
+    {
+        (await GetAsync(new World(), Alice, "?set=decisions")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------------------------------
 
@@ -1162,6 +1441,41 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public Dictionary<Guid, Guid> SubjectOf { get; } = [];
         public List<(Guid Id, string[] Sets, Dictionary<string, object?> Row)> Signals { get; } = [];
         public Dictionary<Guid, (string Table, Guid[] Readers, Dictionary<string, object?> Columns)> Records { get; } = [];
+
+        /// <summary>Task 045: Decision Records by id, with who may read each (Dataverse trims the caller's FetchXML read by this).</summary>
+        public Dictionary<Guid, (Guid[] Readers, Dictionary<string, object?> Row)> DecisionRecords { get; } = [];
+
+        /// <summary>Who created each Decision Record (the row's createdby): the writer's service identity for a genuine one.</summary>
+        public Dictionary<Guid, Guid> DecisionRecordCreator { get; } = [];
+
+        public Guid Decision(
+            Guid[] readers,
+            string number = "DR-00001",
+            int recordClass = 100000000,
+            int outcome = 100000000,
+            string decidedOn = "2026-10-14T09:30:00Z",
+            string? by = "Dana Decider",
+            string? reason = null,
+            string? steps = null,
+            string? followOns = null,
+            Guid? createdBy = null)
+        {
+            var id = Guid.NewGuid();
+            DecisionRecordCreator[id] = createdBy ?? WriterUser;
+            DecisionRecords[id] = (readers, new Dictionary<string, object?>
+            {
+                ["sprk_decisionrecordid"] = id,
+                ["sprk_decisionnumber"] = number,
+                ["sprk_recordclass"] = recordClass,
+                ["sprk_decisionoutcome"] = outcome,
+                ["sprk_decidedon"] = decidedOn,
+                ["sprk_reason"] = reason,
+                ["sprk_steps"] = steps,
+                ["sprk_followons"] = followOns ?? "[]",
+                ["by.fullname"] = by,
+            });
+            return id;
+        }
 
         public static readonly Dictionary<string, Guid> Contacts = new()
         {
@@ -1239,7 +1553,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             string[]? sets = null,
             DateTimeOffset? resolvedOn = null,
             DateTimeOffset? suppressedUntil = null,
-            string? sentence = null)
+            string? sentence = null,
+            Guid? decisionRecord = null,
+            int? status = null)
         {
             var id = Guid.NewGuid();
             var subjectPair = subject ?? (core is { } c ? (c.Type, c.Id) : (null, Guid.NewGuid()));
@@ -1249,7 +1565,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 ["sprk_signalid"] = id,
                 ["sprk_name"] = title ?? $"Signal {id:N}",
                 ["sprk_lane"] = lane,
-                ["sprk_signalstatus"] = resolvedOn is null ? 100000000 : 100000002,
+                ["sprk_signalstatus"] = status ?? (resolvedOn is null ? 100000000 : 100000002),
                 ["sprk_firstdetected"] = firstDetected,
                 ["sprk_regardingrecordid"] = subjectPair.Id.ToString("D"),
                 ["sprk_regardingrecordname"] = subjectName,
@@ -1261,6 +1577,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 ["policy.sprk_severity"] = severity,
                 ["sprk_resolvedon"] = resolvedOn?.ToString("o"),
                 ["sprk_suppresseduntil"] = suppressedUntil?.ToString("o"),
+                ["_sprk_decisionrecord_value"] = decisionRecord,
             };
             if (subjectPair.Type is { } st) row["_sprk_regardingrecordtype_value"] = st;
             if (core is { } pair)
@@ -1419,6 +1736,28 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 return SignalPage(XDocument.Parse(Uri.UnescapeDataString(path["sprk_signals?fetchXml=".Length..])), me2);
             }
 
+            if (path.StartsWith("sprk_decisionrecords?fetchXml=", StringComparison.Ordinal))
+            {
+                if (FaultingTables.Contains("sprk_decisionrecord")) return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
+                if (UnauthorizedTables.Contains("sprk_decisionrecord")) return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.AccessDenied, "token expired");
+                if (TableDenied.TryGetValue(me2, out var drDenied) && drDenied.Contains("sprk_decisionrecord"))
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
+                var drFetch = XDocument.Parse(Uri.UnescapeDataString(path["sprk_decisionrecords?fetchXml=".Length..]));
+                var wanted = drFetch.Descendants("value").Select(v => Guid.Parse(v.Value)).ToHashSet();
+                // Like Dataverse, evaluate the createdby condition, and return the confirming user's name only through the outer link to
+                // systemuser on sprk_confirmedby (so a link on any other column returns no name).
+                var createdByCondition = drFetch.Descendants("condition").FirstOrDefault(c => (string?)c.Attribute("attribute") == "createdby" && (string?)c.Attribute("operator") == "eq");
+                var createdBy = createdByCondition is null ? (Guid?)null : Guid.Parse((string)createdByCondition.Attribute("value")!);
+                var nameLinked = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "systemuser"
+                    && (string?)l.Attribute("to") == "sprk_confirmedby" && (string?)l.Attribute("link-type") == "outer" && (string?)l.Attribute("alias") == "by");
+                var found = DecisionRecords
+                    .Where(r => wanted.Contains(r.Key) && r.Value.Readers.Contains(me2))
+                    .Where(r => createdBy is null || DecisionRecordCreator[r.Key] == createdBy)
+                    .Select(r => nameLinked ? r.Value.Row : r.Value.Row.Where(kv => kv.Key != "by.fullname").ToDictionary(kv => kv.Key, kv => kv.Value))
+                    .ToList();
+                return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = found }));
+            }
+
             var set = path[..path.IndexOf('?')];
             var table = set[..^1];
             if (FaultingTables.Contains(table)) return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
@@ -1443,18 +1782,35 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
         }
 
+        private static bool StatusAllowed(XDocument fetch, Dictionary<string, object?> row)
+        {
+            var condition = fetch.Descendants("condition").FirstOrDefault(c => (string?)c.Attribute("attribute") == "sprk_signalstatus");
+            if (condition is null || row["sprk_signalstatus"] is not int status) return true;
+            return (string?)condition.Attribute("operator") switch
+            {
+                "in" => condition.Elements("value").Any(v => int.Parse(v.Value) == status),
+                "eq" => int.Parse((string)condition.Attribute("value")!) == status,
+                _ => true,
+            };
+        }
+
         private DataverseUserResponse SignalPage(XDocument fetch, Guid me)
         {
             var text = fetch.ToString(SaveOptions.DisableFormatting).Replace('\'', '"');
             var set = text.Contains("next-x-years") ? "suppressed"
                 : text.Contains("last-x-hours\" value=\"26\"") ? "closedToday"
                 : text.Contains("last-x-hours\" value=\"720\"") ? "closedEarlier"
+                : text.Contains("last-x-days\" value=\"90\"") ? "decided"
                 : text.Contains("\"sprk_lane\" operator=\"eq\" value=\"100000000\"") ? "decide"
                 : text.Contains("\"sprk_lane\" operator=\"eq\" value=\"100000001\"") ? "do"
                 : throw new InvalidOperationException("unrecognised worklist query");
             var all = Signals.Where(s => s.Sets.Contains(set))
                 .Where(s => !SignalReaders.TryGetValue(s.Id, out var readers) || readers.Contains(me))
-                .Select(s => s.Row).ToList();
+                .Select(s => s.Row)
+                // Task 045: the Decided query asks for Signals that HAVE a Decision Record, like Dataverse evaluating not-null.
+                .Where(r => set != "decided" || r["_sprk_decisionrecord_value"] is not null)
+                // ...and evaluates the status condition the query carries (in (Acknowledged, Resolved) for decided, eq Resolved for the closed sets).
+                .Where(r => StatusAllowed(fetch, r)).ToList();
             var page = int.TryParse(fetch.Root!.Attribute("page")?.Value, out var p) ? p : 1;
             if (DenySignalPagesFrom > 0 && page >= DenySignalPagesFrom)
             {
@@ -1467,6 +1823,12 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             {
                 slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_sentence").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
             }
+            // Task 045: the Decision Record lookup is returned only when the query selects it (the route adds it to the closed sets).
+            if (!text.Contains("<attribute name=\"sprk_decisionrecord\" />", StringComparison.Ordinal))
+            {
+                slice = slice.Select(r => r.Where(kv => kv.Key != "_sprk_decisionrecord_value").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+            }
+
             var body = new Dictionary<string, object?> { ["value"] = slice };
             if (all.Count > page * PageSize)
             {
@@ -1591,6 +1953,15 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 services.AddSingleton<IIdentityNormalizationService>(_ => new FakeIdentity(this));
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(new WorldClock(this));
+                // The writer's own identity (WhoAmI on its dedicated connection): the createdby of every genuine Decision Record.
+                services.RemoveAll<OntologyWriterDataverseClient>();
+                services.AddSingleton(_ =>
+                {
+                    var org = new Mock<IOrganizationServiceAsync2>();
+                    org.Setup(o => o.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+                        .ReturnsAsync(new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = WriterUser } });
+                    return new OntologyWriterDataverseClient(() => org.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<OntologyWriterDataverseClient>.Instance);
+                });
                 services.AddSingleton<ILoggerProvider>(Logs);
             });
         }

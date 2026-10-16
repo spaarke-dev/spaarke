@@ -44,6 +44,7 @@ import {
   MailRegular,
   DocumentSearchRegular,
   TaskListSquareLtrRegular,
+  DocumentBulletListClockRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -310,6 +311,17 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     description: 'Your Decide and Do lanes - open a line to decide or act on it',
     category: 'data',
     icon: TaskListSquareLtrRegular,
+    defaultHeight: '720px',
+  },
+  // spaarke-ontology-platform-r1 task 045 (D-47): Decision Records section - the Console's Decision Record
+  // tab (decided items + their record, class filter, Open = wizard read-only). Reads the Signal read route
+  // (`?set=decided`), not an entity, so no `entityName`. See `decisionRecords.registration.ts`.
+  {
+    id: 'decisionRecords',
+    label: 'Decision Records',
+    description: 'Decisions made on worklist items - open one to see it as it was recorded',
+    category: 'data',
+    icon: DocumentBulletListClockRegular,
     defaultHeight: '720px',
   },
   // ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis

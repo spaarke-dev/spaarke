@@ -25,3 +25,4 @@ export {
 export { emailRegistration } from "./email.registration";
 export { analysisHubRegistration } from "./analysisHub.registration";
 export { worklistRegistration } from "./worklist.registration";
+export { decisionRecordsRegistration } from "./decisionRecords.registration";

@@ -45,6 +45,14 @@ public enum WorklistSet
 
     /// <summary>Resolved within the configured window but not today in the item's own time zone.</summary>
     ClosedEarlier,
+
+    /// <summary>
+    /// Task 045 (D-47): the Decision Record tab. Every Signal a person resolved through a Decision Record whose record the caller
+    /// can read, within <see cref="SignalReadService.DecidedWindowDays"/> days, newest first on the client. Membership is the
+    /// configuration's <c>closedEarlier</c> query with its window widened and a "has a Decision Record" condition; an item whose
+    /// record the caller cannot read is absent.
+    /// </summary>
+    Decided,
 }
 
 /// <summary>What <see cref="SignalReadService.ReadAsync"/> decided.</summary>
@@ -97,6 +105,9 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
 /// a Decide-lane row.</param>
 /// <param name="SubjectRecordId">Do lane only: the subject's id, with <see cref="SubjectRecordType"/>. Null on a Decide-lane row.</param>
+/// <param name="Decision">Closed today, Closed earlier and Decided sets only (task 045, #1959 item 2): the Decision Record that closed
+/// the item, read AS THE CALLER. Null when the item was closed by the system (no record), or when the caller cannot read the record
+/// (omitted, never withheld by name).</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -115,7 +126,8 @@ public sealed record WorklistItemRow(
     DateTimeOffset? SuppressedUntil = null,
     string? Sentence = null,
     string? SubjectRecordType = null,
-    Guid? SubjectRecordId = null);
+    Guid? SubjectRecordId = null,
+    WorklistDecisionRecord? Decision = null);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -158,6 +170,13 @@ public sealed class SignalReadService
 
     /// <summary>Pages of Signals read per set before the route refuses (fails loudly) rather than ranking a partial list.</summary>
     internal const int MaxPages = 5;
+
+    /// <summary>How far back the <see cref="WorklistSet.Decided"/> set reaches (task 045). One number; the set is refused (503) past
+    /// <see cref="MaxPages"/> pages rather than truncated.</summary>
+    internal const int DecidedWindowDays = 90;
+
+    /// <summary>The Decision Record table's entity set.</summary>
+    internal const string DecisionRecordEntitySet = "sprk_decisionrecords";
 
     /// <summary>Ids per batched caller read (keeps the GET URL well under Dataverse's limit).</summary>
     internal const int IdChunk = 100;
@@ -246,15 +265,18 @@ public sealed class SignalReadService
     private readonly TimeProvider _clock;
     private readonly ILogger<SignalReadService> _logger;
     private readonly SignalSuppressionService _families;
+    private readonly DecisionRecordWriter _records;
 
     public SignalReadService(
         IDataverseUserClient user,
         IGenericEntityService entities,
         IIdentityNormalizationService identity,
         SignalSuppressionService families,
+        DecisionRecordWriter records,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
+        _records = records ?? throw new ArgumentNullException(nameof(records));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -384,10 +406,35 @@ public sealed class SignalReadService
             // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
 
+            // (10) Task 045 (#1959 item 2, D-47): the Decision Record of each closed item, read AS THE CALLER. A record the caller
+            // cannot read is omitted; in the Decided set an item without a readable record is not listed at all.
+            var decisions = new Dictionary<Guid, WorklistDecisionRecord>();
+            if (set is WorklistSet.ClosedToday or WorklistSet.ClosedEarlier or WorklistSet.Decided)
+            {
+                var records = await ReadDecisionRecordsAsync(visible.Select(v => v.Row.DecisionRecordId), ct).ConfigureAwait(false);
+                if (records.Outcome is { } recordFailure)
+                {
+                    return recordFailure;
+                }
+
+                foreach (var v in visible)
+                {
+                    if (v.Row.DecisionRecordId is { } recordId && records.ByRecord.TryGetValue(recordId, out var found))
+                    {
+                        decisions[v.Row.SignalId] = found;
+                    }
+                }
+
+                if (set == WorklistSet.Decided)
+                {
+                    visible = [.. visible.Where(v => decisions.ContainsKey(v.Row.SignalId))];
+                }
+            }
+
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
 
-            return Ok(set, Shape(set, visible, cores.Readable, catalog));
+            return Ok(set, Shape(set, visible, cores.Readable, catalog, decisions));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -406,6 +453,7 @@ public sealed class SignalReadService
         WorklistSet.ClosedToday => "closedToday",
         WorklistSet.Suppressed => "suppressed",
         WorklistSet.ClosedEarlier => "closedEarlier",
+        WorklistSet.Decided => "decided",
         _ => throw new ArgumentOutOfRangeException(nameof(set)),
     };
 
@@ -464,10 +512,12 @@ public sealed class SignalReadService
                 WorklistSet.ClosedToday => [("secondary", "closedToday")],
                 WorklistSet.Suppressed => [("secondary", "suppressed")],
                 WorklistSet.ClosedEarlier => [("secondary", "closedEarlier")],
+                // Task 045: the Decision Record tab derives from closedEarlier (same columns, same order), see DecidedFetch.
+                WorklistSet.Decided => [("secondary", "closedEarlier")],
                 _ => [],
             };
 
-            var fetches = new List<string>();
+            var fetches = new List<string?>();
             foreach (var (section, key) in paths)
             {
                 if (!root.TryGetProperty(section, out var s) || !s.TryGetProperty(key, out var entry)
@@ -482,15 +532,64 @@ public sealed class SignalReadService
                     return null;
                 }
 
-                fetches.Add(fetch);
+                fetches.Add(set switch
+                {
+                    WorklistSet.ClosedToday or WorklistSet.ClosedEarlier => WithDecisionRecordColumn(fetch),
+                    WorklistSet.Decided => DecidedFetch(fetch),
+                    _ => fetch,
+                });
             }
 
-            return fetches.Count == 0 ? null : fetches;
+            return fetches.Count == 0 || fetches.Any(f => f is null) ? null : fetches.Select(f => f!).ToList();
         }
         catch (Exception ex) when (ex is JsonException or System.Xml.XmlException)
         {
             return null;
         }
+    }
+
+    /// <summary>The query with <c>sprk_decisionrecord</c> selected (a no-op when the configuration already selects it), so a closed
+    /// item can be joined to its record whatever version of the configuration row is live (task 045).</summary>
+    private static string WithDecisionRecordColumn(string fetchXml)
+    {
+        var doc = XDocument.Parse(fetchXml);
+        var entity = doc.Root!.Element("entity")!;
+        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == "sprk_decisionrecord"))
+        {
+            var last = entity.Elements("attribute").LastOrDefault();
+            var column = new XElement("attribute", new XAttribute("name", "sprk_decisionrecord"));
+            if (last is null) entity.AddFirst(column); else last.AddAfterSelf(column);
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// The <see cref="WorklistSet.Decided"/> query: the configuration's closedEarlier query with its resolved-on window replaced by
+    /// <see cref="DecidedWindowDays"/> days and a "has a Decision Record" condition added. Null when the query has no resolved-on
+    /// window to replace (a configuration this build does not understand fails closed, 503, rather than reading everything).
+    /// </summary>
+    private static string? DecidedFetch(string closedEarlierFetch)
+    {
+        var doc = XDocument.Parse(WithDecisionRecordColumn(closedEarlierFetch));
+        var filter = doc.Root!.Element("entity")!.Elements("filter").FirstOrDefault();
+        var window = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_resolvedon");
+        var status = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_signalstatus");
+        if (filter is null || window is null || status is null)
+        {
+            return null;
+        }
+
+        // A review that leaves its Signal open (inquiry sent, reminder, follow-on only) writes a Decision Record and leaves the Signal
+        // Acknowledged: those records belong in the history too, so Acknowledged joins Resolved here (closedToday / closedEarlier unchanged).
+        status.SetAttributeValue("operator", "in");
+        status.SetAttributeValue("value", null);
+        status.Add(new XElement("value", "100000001"), new XElement("value", "100000002"));
+
+        window.SetAttributeValue("operator", "last-x-days");
+        window.SetAttributeValue("value", DecidedWindowDays.ToString(CultureInfo.InvariantCulture));
+        filter.Add(new XElement("condition", new XAttribute("attribute", "sprk_decisionrecord"), new XAttribute("operator", "not-null")));
+        return doc.ToString(SaveOptions.DisableFormatting);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -932,6 +1031,80 @@ public sealed class SignalReadService
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // (10) the Decision Records of the closed items, as the caller (task 045)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record DecisionRecordReads(Dictionary<Guid, WorklistDecisionRecord> ByRecord, SignalReadResult? Outcome);
+
+    /// <summary>
+    /// One caller read per <see cref="IdChunk"/> record ids (a FetchXML <c>in</c>, with an outer link to the confirming user's name).
+    /// Dataverse trims the answer by the caller's own security: a secure child reaches only its family's members through the mirrored
+    /// shares (D-33/D-123), an owner-only record (D-35/D-39) only its owner. A service identity is never used. No Read on the table at
+    /// all is an empty answer (the records are omitted); any other failure is a fault (503), never a shorter list.
+    /// </summary>
+    private async Task<DecisionRecordReads> ReadDecisionRecordsAsync(IEnumerable<Guid?> recordIds, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, WorklistDecisionRecord>();
+        var ids = recordIds.Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new DecisionRecordReads(found, null);
+        }
+
+        // Only a record the ontology writer itself created is a Decision Record here (the condition DecisionCommitService.FindRecordAsync
+        // uses): Console User can Create a row and Write a Signal's lookup, and no field is secured, so any other row could be a forgery
+        // ("Judgement, decided by <partner>"). Such a row is treated like an unreadable one. A WhoAmI fault throws to ReadAsync's catch (503).
+        var writerUserId = await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var fetch = new XElement("fetch",
+                new XElement("entity", new XAttribute("name", "sprk_decisionrecord"),
+                    WorklistDecisionRecordReader.Columns.Select(c => new XElement("attribute", new XAttribute("name", c))),
+                    new XElement("link-entity", new XAttribute("name", "systemuser"), new XAttribute("from", "systemuserid"),
+                        new XAttribute("to", "sprk_confirmedby"), new XAttribute("link-type", "outer"), new XAttribute("alias", "by"),
+                        new XElement("attribute", new XAttribute("name", "fullname"))),
+                    new XElement("filter", new XAttribute("type", "and"),
+                        new XElement("condition", new XAttribute("attribute", "sprk_decisionrecordid"), new XAttribute("operator", "in"),
+                            chunk.Select(id => new XElement("value", id.ToString("D")))),
+                        new XElement("condition", new XAttribute("attribute", DecisionRecordWriter.CreatedByColumn), new XAttribute("operator", "eq"),
+                            new XAttribute("value", writerUserId.ToString("D"))))));
+
+            var response = await _user.GetAsync(
+                $"{DecisionRecordEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
+            if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                if (response.StatusCode == 401)
+                {
+                    // The same mapped code, but the caller's token failed mid-request: a fault, not a verdict (as the witness read).
+                    _logger.LogWarning("Signal read: the Decision Record read was answered 401; unavailable.");
+                    return new DecisionRecordReads(found, SignalReadResult.Unavailable("decision record read unauthorized"));
+                }
+
+                // A 403 is "no Read on the table (or on the confirming user the query links to)": the records are omitted. Warning, not Debug:
+                // an empty tab from a refused read looks exactly like "no decisions".
+                _logger.LogWarning("Signal read: the caller's Decision Record read was refused (403); the records are omitted.");
+                return new DecisionRecordReads(found, null);
+            }
+
+            var result = ReadAccessRows(response, "decision record");
+            if (result.Outcome is { } failure)
+            {
+                return new DecisionRecordReads(found, failure);
+            }
+
+            foreach (var raw in result.Rows)
+            {
+                if (WorklistDecisionRecordReader.TryParse(raw, out var record) && chunk.Contains(record.RecordId))
+                {
+                    found[record.RecordId] = record;
+                }
+            }
+        }
+
+        return new DecisionRecordReads(found, null);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // (9) the witness rule at read time (D-123)
     // ---------------------------------------------------------------------------------------------------------------
 
@@ -1127,7 +1300,8 @@ public sealed class SignalReadService
         WorklistSet set,
         IReadOnlyList<VisibleRow> rows,
         IReadOnlyDictionary<(Guid TypeId, Guid CoreId), (string? Name, string? Number)> cores,
-        IReadOnlyDictionary<Guid, CatalogRow> catalog)
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        IReadOnlyDictionary<Guid, WorklistDecisionRecord> decisions)
     {
         var lanes = new List<WorklistLaneGroups>();
         foreach (var lane in new[] { DecisionLane.Decide, DecisionLane.Do })
@@ -1182,7 +1356,7 @@ public sealed class SignalReadService
             }
 
             lanes.Add(new WorklistLaneGroups(LaneName(lane), groups
-                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(ToItem).ToList()))
+                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r, decisions)).ToList()))
                 .ToList()));
         }
 
@@ -1216,7 +1390,7 @@ public sealed class SignalReadService
     private static int CompareNullableOrdinal(string? a, string? b) =>
         a is null ? (b is null ? 0 : 1) : b is null ? -1 : string.CompareOrdinal(a, b);
 
-    private static WorklistItemRow ToItem(VisibleRow visible)
+    private static WorklistItemRow ToItem(VisibleRow visible, IReadOnlyDictionary<Guid, WorklistDecisionRecord> decisions)
     {
         var row = visible.Row;
         var workType = row.WorkType is { } w && WorkTypeKeys.TryGetValue(w, out var key) ? key : null;
@@ -1241,7 +1415,8 @@ public sealed class SignalReadService
             row.SuppressedUntil,
             row.Sentence,
             subjectTable,
-            subjectTable is null ? null : row.SubjectId);
+            subjectTable is null ? null : row.SubjectId,
+            decisions.GetValueOrDefault(row.SignalId));
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1344,7 +1519,8 @@ public sealed class SignalReadService
         DateTimeOffset? ResolvedOn,
         int? ResolutionType,
         DateTimeOffset? SuppressedUntil,
-        string? Sentence)
+        string? Sentence,
+        Guid? DecisionRecordId)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -1383,7 +1559,9 @@ public sealed class SignalReadService
                 Int(raw, "sprk_resolutiontype"),
                 Instant(raw, "sprk_suppresseduntil"),
                 // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
-                ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null);
+                ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null,
+                // Task 045: the Decision Record that closed it (closed and decided sets select the column).
+                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null);
             return true;
         }
 
