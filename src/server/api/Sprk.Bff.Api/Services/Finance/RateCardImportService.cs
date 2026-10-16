@@ -107,6 +107,9 @@ public class RateCardImportService
 
     private const decimal MaxRate = 1_000_000_000m;
 
+    /// <summary>Rows per <see cref="IGenericEntityService.BulkUpdateAsync"/> call: one ExecuteTransaction, capped by Dataverse at 1,000 requests.</summary>
+    internal const int MaxApprovalsPerTransaction = 1000;
+
     private readonly IGenericEntityService _entities;
     private readonly IDocumentDataverseService _documents;
     private readonly SpeFileStore _spe;
@@ -344,9 +347,11 @@ public class RateCardImportService
             return RateCardOutcome<RateCardImportResult>.Done(new RateCardImportResult(
                 cardId, documentId, "Draft", validated.Rates.Count, createdTimekeepers, validated.Timekeepers.Count - createdTimekeepers));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The client went away mid-import: the half-written rows and the uploaded file must not outlive the request.
+            // (A Graph or HTTP timeout surfaces as an OperationCanceledException too, with the token NOT cancelled: it falls to the
+            // catch below, which also cleans up and answers ratecard.import_failed.)
             _logger.LogWarning("Rate card import cancelled after {Written} writes; removing what it created", created.Count);
             await CompensateAsync(created, driveId, uploadedItemId);
             throw;
@@ -475,9 +480,12 @@ public class RateCardImportService
                 .ToList();
         }
 
-        if (approvals.Count > 0)
+        // BulkUpdateAsync is ONE ExecuteTransaction, which Dataverse caps at 1,000 requests, and an import may name up to 5,000 new
+        // timekeepers. Each chunk is atomic; the whole is not. That is safe to retry: approving an Approved row changes nothing, and the
+        // card is set Published only after the last chunk, so a failure part-way leaves the card Draft and a second publish finishes.
+        foreach (var chunk in approvals.Chunk(MaxApprovalsPerTransaction))
         {
-            await _entities.BulkUpdateAsync(TimekeeperEntity, approvals, ct); // one transaction: all or none
+            await _entities.BulkUpdateAsync(TimekeeperEntity, chunk.ToList(), ct);
         }
 
         await _entities.UpdateAsync(RateCardEntity, rateCardId, new Dictionary<string, object>
@@ -565,9 +573,13 @@ public class RateCardImportService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The reference data the cell checks need, read once per import.</summary>
+    /// <summary>A roster row as stored, with the values a sheet row is compared with before it may reuse the row.</summary>
+    internal sealed record StoredTimekeeper(Guid Id, int? Classification, DateOnly? From, DateOnly? To, Guid? ContactId);
+
     internal sealed record ImportLookups(
         IReadOnlyDictionary<string, Guid> Roster,
         IReadOnlySet<string> AmbiguousRoster,
+        IReadOnlyDictionary<string, IReadOnlyList<StoredTimekeeper>> RosterRows,
         IReadOnlyDictionary<string, Guid> ContactsByEmail,
         IReadOnlySet<string> AmbiguousEmails,
         IReadOnlyDictionary<string, Guid> CurrenciesByIso);
@@ -665,14 +677,29 @@ public class RateCardImportService
                 }
             }
 
+            // A roster row is reused only when the sheet row says the same thing. A sheet period that overlaps no stored row of that name
+            // (the annual renewal, a promotion) is a NEW Pending row; an overlapping period with different values is refused, because
+            // reusing the row by name would silently discard the sheet's dates, classification or contact.
             Guid? existing = null;
-            if (ok && lookups.AmbiguousRoster.Contains(normalized))
+            if (ok && lookups.RosterRows.TryGetValue(normalized, out var stored))
             {
-                Fail(RateCardWorkbook.TkName, $"More than one timekeeper named '{name}' is on the firm's roster; resolve that first.");
-            }
-            else if (ok && lookups.Roster.TryGetValue(normalized, out var onRoster))
-            {
-                existing = onRoster;
+                var overlapping = stored.Where(s => Overlaps(s.From ?? DateOnly.MinValue, s.To, from!.Value, to)).ToList();
+                if (overlapping.Count > 1)
+                {
+                    Fail(RateCardWorkbook.TkName, $"More than one timekeeper named '{name}' is on the firm's roster for these dates; resolve that first.");
+                }
+                else if (overlapping.Count == 1)
+                {
+                    var difference = DescribeDifference(name!, overlapping[0], classification, from!.Value, to, contactId, email);
+                    if (difference is { } d)
+                    {
+                        Fail(d.Column, d.Message);
+                    }
+                    else
+                    {
+                        existing = overlapping[0].Id;
+                    }
+                }
             }
 
             if (ok)
@@ -798,6 +825,54 @@ public class RateCardImportService
             .ToList());
     }
 
+    /// <summary>
+    /// What the sheet row says differently from the stored roster row it overlaps, or <c>null</c> when they agree. A blank contact cell
+    /// says nothing about the contact, so it never differs; a blank Effective To is "open-ended" and does.
+    /// </summary>
+    private static (string Column, string Message)? DescribeDifference(
+        string name, StoredTimekeeper stored, int classification, DateOnly from, DateOnly? to, Guid? contactId, string? email)
+    {
+        var onRoster = new List<string>();
+        var onSheet = new List<string>();
+        string? column = null;
+
+        if (stored.From != from)
+        {
+            onRoster.Add($"Effective From {FormatDate(stored.From, "(none)")}");
+            onSheet.Add($"Effective From {FormatDate(from, "(none)")}");
+            column ??= RateCardWorkbook.TkEffectiveFrom;
+        }
+
+        if (stored.To != to)
+        {
+            onRoster.Add($"Effective To {FormatDate(stored.To, "(open-ended)")}");
+            onSheet.Add($"Effective To {FormatDate(to, "(open-ended)")}");
+            column ??= RateCardWorkbook.TkEffectiveTo;
+        }
+
+        if (stored.Classification != classification)
+        {
+            onRoster.Add($"classification {(stored.Classification is { } c ? TimekeeperClassifications.LabelOf(c) : "(none)")}");
+            onSheet.Add($"classification {TimekeeperClassifications.LabelOf(classification)}");
+            column ??= RateCardWorkbook.TkClassification;
+        }
+
+        if (contactId is { } sheetContact && stored.ContactId != sheetContact)
+        {
+            onRoster.Add(stored.ContactId is null ? "no contact" : "a different contact");
+            onSheet.Add($"contact {email}");
+            column ??= RateCardWorkbook.TkContactEmail;
+        }
+
+        return column is null
+            ? null
+            : (column, $"{name} is on the roster with {string.Join(" and ", onRoster)}; this sheet says {string.Join(" and ", onSheet)}. " +
+                "Correct the sheet or the roster row, or start the sheet row after the roster row ends.");
+    }
+
+    private static string FormatDate(DateOnly? date, string whenEmpty) =>
+        date is { } d ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : whenEmpty;
+
     private static (DateOnly? From, DateOnly? To) ReadRange(
         WorkbookRow row, string fromColumn, string toColumn, Action<string, string> fail)
     {
@@ -921,11 +996,18 @@ public class RateCardImportService
         return result.Entities.Count > 0;
     }
 
+    private static StoredTimekeeper StoredOf(Entity e) => new(
+        e.Id,
+        e.GetAttributeValue<OptionSetValue>("sprk_classification")?.Value,
+        e.GetAttributeValue<DateTime?>("sprk_effectivefrom") is { } from ? DateOnly.FromDateTime(from) : null,
+        e.GetAttributeValue<DateTime?>("sprk_effectiveto") is { } to ? DateOnly.FromDateTime(to) : null,
+        e.GetAttributeValue<EntityReference>("sprk_contact")?.Id);
+
     private async Task<(ImportLookups Lookups, bool RosterTruncated)> LoadLookupsAsync(Guid firmId, WorkbookRead read, CancellationToken ct)
     {
         var roster = await _entities.RetrieveMultipleAsync(new QueryExpression(TimekeeperEntity)
         {
-            ColumnSet = new ColumnSet("sprk_name"),
+            ColumnSet = new ColumnSet("sprk_name", "sprk_classification", "sprk_effectivefrom", "sprk_effectiveto", "sprk_contact"),
             Criteria =
             {
                 Conditions =
@@ -987,6 +1069,9 @@ public class RateCardImportService
         var lookups = new ImportLookups(
             byName.Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First().Id),
             byName.Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal),
+            byName.ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<StoredTimekeeper>)g.Select(StoredOf).ToList()),
             contactsByEmail,
             ambiguousEmails,
             currencies.Entities

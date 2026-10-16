@@ -26,31 +26,31 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </remarks>
 public sealed class RateCardImportServiceTests
 {
-    private static readonly Guid FirmId = Guid.NewGuid();
+    internal static readonly Guid FirmId = Guid.NewGuid();
     private static readonly Guid TeamId = Guid.NewGuid();
-    private static readonly Guid UsdId = Guid.NewGuid();
+    internal static readonly Guid UsdId = Guid.NewGuid();
     private static readonly Guid DocumentId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
     private const string Drive = "b!procedurelibrary";
 
     // ── Workbook helpers (rows are positional per RateCardWorkbook's column order) ──
 
-    private static object?[] Tk(string? name, string? classification = "Partner", string? from = "2026-01-01", string? to = "2026-12-31", string? email = null) =>
+    internal static object?[] Tk(string? name, string? classification = "Partner", string? from = "2026-01-01", string? to = "2026-12-31", string? email = null) =>
         new object?[] { name, classification, from, to, email };
 
-    private static object?[] Rate(string? timekeeper, string? classification, string? approved = "800", string? rack = "1000",
+    internal static object?[] Rate(string? timekeeper, string? classification, string? approved = "800", string? rack = "1000",
         string? currency = "USD", string? from = "2026-01-01", string? to = "2026-12-31") =>
         new object?[] { timekeeper, classification, approved, rack, currency, from, to };
 
-    private static byte[] Workbook(object?[][] timekeepers, object?[][] rates) => RateCardWorkbook.Build(timekeepers, rates);
+    internal static byte[] Workbook(object?[][] timekeepers, object?[][] rates) => RateCardWorkbook.Build(timekeepers, rates);
 
-    private static byte[] ValidWorkbook() => Workbook(
+    internal static byte[] ValidWorkbook() => Workbook(
         new[] { Tk("Jane Doe"), Tk("John Roe", "Associate") },
         new[] { Rate("Jane Doe", null), Rate("John Roe", null, "500", "600"), Rate(null, "Paralegal", "200", "250") });
 
     // ── Harness ──
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public readonly Mock<IGenericEntityService> Entities = new();
         public readonly Mock<IDocumentDataverseService> Documents = new();
@@ -210,7 +210,7 @@ public sealed class RateCardImportServiceTests
             a is string sa && b is string sb ? string.Equals(sa, sb, StringComparison.OrdinalIgnoreCase) : Equals(a, b);
     }
 
-    private static RateCardImportRequest Request(RateCardCoreRecord? core = null, Guid? firm = null) =>
+    internal static RateCardImportRequest Request(RateCardCoreRecord? core = null, Guid? firm = null) =>
         new(firm ?? FirmId, "2026 Acme rates", core, CallerOid);
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -477,6 +477,10 @@ public sealed class RateCardImportServiceTests
         var rostered = new Entity("sprk_timekeeper", rosterId);
         rostered["sprk_name"] = "Jane  Doe";
         rostered["sprk_firm"] = new EntityReference("sprk_organization", FirmId);
+        // The sheet row's values (the Tk defaults) equal the stored row's, so it is reused (a different value is the 078 review F1-2 rule).
+        rostered["sprk_classification"] = new OptionSetValue(100000001);
+        rostered["sprk_effectivefrom"] = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        rostered["sprk_effectiveto"] = new DateTime(2026, 12, 31, 0, 0, 0, DateTimeKind.Utc);
         var other = new Entity("sprk_timekeeper", Guid.NewGuid());
         other["sprk_name"] = "Pat Smith";
         other["sprk_firm"] = new EntityReference("sprk_organization", FirmId);
@@ -702,10 +706,16 @@ public sealed class RateCardImportServiceTests
     public async Task Import_WhenTheRequestIsCancelledPartWay_RemovesWhatItCreated_AndStillCancels()
     {
         var h = new Harness();
-        h.FailCreateWhen = e => e.LogicalName == "sprk_ratecard";
+        using var cts = new CancellationTokenSource();
+        h.FailCreateWhen = e =>
+        {
+            if (e.LogicalName != "sprk_ratecard") return false;
+            cts.Cancel(); // the client went away (a cancellation that is not the caller's goes to ratecard.import_failed)
+            return true;
+        };
         h.CreateFailure = new OperationCanceledException();
 
-        var act = () => h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+        var act = () => h.Service().ImportAsync(Request(), ValidWorkbook(), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         h.Rows["sprk_timekeeper"].Should().BeEmpty("the timekeepers written before the cancel are removed");
@@ -717,7 +727,7 @@ public sealed class RateCardImportServiceTests
     // Publish
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static Entity Card(Guid id, int status = RateCardImportService.CardDraft)
+    internal static Entity Card(Guid id, int status = RateCardImportService.CardDraft)
     {
         var e = new Entity("sprk_ratecard", id);
         e["statuscode"] = new OptionSetValue(status);
@@ -725,7 +735,7 @@ public sealed class RateCardImportServiceTests
         return e;
     }
 
-    private static Entity Tkp(Guid id, int status, Guid? firm = null)
+    internal static Entity Tkp(Guid id, int status, Guid? firm = null)
     {
         var e = new Entity("sprk_timekeeper", id);
         e["statuscode"] = new OptionSetValue(status);
@@ -733,7 +743,7 @@ public sealed class RateCardImportServiceTests
         return e;
     }
 
-    private static Entity StoredRate(Guid cardId, string name, Guid? timekeeper, int? classification, DateTime? from, DateTime? to)
+    internal static Entity StoredRate(Guid cardId, string name, Guid? timekeeper, int? classification, DateTime? from, DateTime? to)
     {
         var e = new Entity("sprk_ratecardrate", Guid.NewGuid());
         e["sprk_name"] = name;

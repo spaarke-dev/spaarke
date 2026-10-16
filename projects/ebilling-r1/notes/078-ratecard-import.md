@@ -58,4 +58,21 @@ Fixed in scope (F-class):
 - **K: classification list is hard-coded** (the 20 LEDES options of `sprk_timekeeperrole`); it must follow that global choice if it changes.
 - **K: more than 5,000 timekeeper or rate rows per workbook** are refused with "split the import".
 
+## 5. Review fixes (2026-10-16)
+
+Three confirmed F1 findings and two K1 items, fixed in `RateCardImportService.cs` and `RateCardImportEndpoints.cs`. Regression tests: `tests/integration/regression/Ebilling/RateCardImportRosterRenewalAndPublishChunkingTests.cs` and `RateCardImportMalformedMultipartReturns400Tests.cs`.
+
+- **F1-2, roster reuse by name discarded the sheet's values (broke the annual renewal).** The roster read now takes `sprk_classification`, `sprk_effectivefrom`, `sprk_effectiveto` and `sprk_contact`. A Timekeepers row is matched against the firm's stored rows of that name:
+  - **No stored row overlaps the sheet's period** (the 2027 card for Jane Doe whose stored row ends 2026-12-31; a promotion starting after the stored row ends): a NEW Pending row is created for the new period. The rates of the sheet point at it, and publish approves it as before. Needs the 046 matcher to pick the row eligible on the line date; verified and tested (see note 046 section 14).
+  - **One stored row overlaps and every value matches** (Effective From, Effective To, classification; contact when the sheet names one): the row is reused, as before.
+  - **One stored row overlaps and a value differs:** a per-row 400 in the existing `errors:[{sheet,row,column,message}]` shape, naming the difference: "Jane Doe is on the roster with Effective To 2026-12-31 and classification Associate; this sheet says Effective To 2027-12-31 and classification Partner. Correct the sheet or the roster row, or start the sheet row after the roster row ends." The column is the first differing one.
+  - **More than one stored row overlaps:** the existing "More than one timekeeper named ..." refusal (now "... for these dates").
+  - **Decision:** a blank Contact Email cell says nothing about the contact, so it never differs from a stored contact; a blank Effective To means open-ended and does differ from a stored end date.
+  - **Existing test changed:** `Import_ReusesTimekeepersAlreadyOnTheFirmRoster_...` seeded a roster row with no values; it now seeds values equal to the sheet row (the reuse-when-equal case).
+  - **Limit.** A rate row that names a roster-only timekeeper (not on the Timekeepers sheet) whose name has several stored rows is still refused as ambiguous; list the person on the Timekeepers sheet with the period to say which row. Unchanged behaviour.
+- **F1-3, publish approved every Pending timekeeper in one `BulkUpdateAsync` (one ExecuteTransaction, Dataverse cap 1,000 requests); an import allows 5,000 rows.** Approvals now go in chunks of at most `MaxApprovalsPerTransaction` = 1,000. Each chunk is atomic, the whole is not; safe to retry because approval is idempotent (only Pending rows are selected) and the card is set Published after the last chunk. Tests: 1,000 (one call), 1,001 (1,000 + 1), 2,500 (1,000 + 1,000 + 500), card last by call order, and a failed second chunk leaves the card Draft and a retry approves only the remaining 1,500.
+- **K1, `catch (OperationCanceledException)`** now has `when (ct.IsCancellationRequested)`: a Graph or HTTP timeout (token not cancelled) falls to the general catch, which also cleans up, and answers 500 `ratecard.import_failed`. The existing client-cancel test now really cancels its token.
+- **K1, `ReadFormAsync`** in the import endpoint catches `InvalidDataException` and `BadHttpRequestException` and answers 400 `ratecard.import_invalid` ("The request body is not valid multipart/form-data."), as `ChatDocumentEndpoints` does; the parser's message is not returned.
+- **Not changed, to check:** the publish read of the card's timekeepers uses one `In` condition over every timekeeper id the rates name (up to 5,000); whether Dataverse accepts that many `In` values in one query was not verified here.
+
 rework: none task 078

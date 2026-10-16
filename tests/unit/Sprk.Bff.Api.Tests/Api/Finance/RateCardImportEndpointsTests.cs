@@ -35,8 +35,8 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 public sealed class RateCardImportEndpointsTests
 {
     private const string Template = "/api/finance/ratecards/import-template";
-    private const string Import = "/api/finance/ratecards/import";
-    private static readonly Guid FirmId = Guid.NewGuid();
+    internal const string Import = "/api/finance/ratecards/import";
+    internal static readonly Guid FirmId = Guid.NewGuid();
     private static readonly Guid CardId = Guid.NewGuid();
 
     public static TheoryData<string, string> AllRoutes => new()
@@ -46,7 +46,7 @@ public sealed class RateCardImportEndpointsTests
         { "POST", $"/api/finance/ratecards/{CardId}/publish" },
     };
 
-    private sealed class Host : IAsyncDisposable
+    internal sealed class Host : IAsyncDisposable
     {
         public readonly Mock<RateCardImportService> Service;
         public readonly FinAuth.RecordingAccessDataSource Access = new();
@@ -128,7 +128,7 @@ public sealed class RateCardImportEndpointsTests
         }
     }
 
-    private static HttpRequestMessage Req(string method, string url, bool authenticated = true, HttpContent? content = null)
+    internal static HttpRequestMessage Req(string method, string url, bool authenticated = true, HttpContent? content = null)
     {
         var request = new HttpRequestMessage(new HttpMethod(method), url) { Content = content };
         if (authenticated)

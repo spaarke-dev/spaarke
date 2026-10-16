@@ -198,7 +198,19 @@ public static class RateCardImportEndpoints
             return FileTooLarge(ebilling.CurrentValue.MaxSubmissionFileSizeMb);
         }
 
-        var form = await request.ReadFormAsync(ct);
+        // A malformed multipart body (e.g. a section without Content-Disposition) is a CLIENT error: 400, not the parser's exception as a
+        // 500 (as ChatDocumentEndpoints answers). The parser's message can echo request content, so it is not returned. Cancellation is
+        // deliberately not caught here.
+        IFormCollection form;
+        try
+        {
+            form = await request.ReadFormAsync(ct);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
+        {
+            return InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The request body is not valid multipart/form-data.") });
+        }
+
         var file = form.Files.GetFile("file") ?? form.Files.FirstOrDefault();
         if (file is null || file.Length == 0)
         {
