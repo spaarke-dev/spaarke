@@ -336,3 +336,8 @@ export * from './Worklist';
 // mounted in-app (D-26), posting one review to the commit route (D-17). spaarke-ontology-platform-r1
 // task 058 (FR-26, FR-28).
 export * from './DecisionWizard';
+
+// OntologyAdmin - the "Ontology admin" workspace tab shell (Rules, Classification) and its capability probe client;
+// registered by the host only when the probe says the caller can author policies (D-22). spaarke-ontology-platform-r1
+// task 104 (FR-56).
+export * from './OntologyAdmin';
