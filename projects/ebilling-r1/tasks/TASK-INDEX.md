@@ -40,7 +40,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 023 | ✅ [done] | `sprk_billingexport` schema and invoice batch lookup | STANDARD | sonnet / high | P1-A | none |
 | 024 | ✅ [done] | `sprk_billingapproverrole` into source; firm billing contact | STANDARD | sonnet / high | P1-A | none |
 | 025 | ✅ [done] | eBilling settings table and BFF settings reader | STANDARD | sonnet / high | P1-A | none |
-| 026 | 🔲 [open] | Signal / Decision Record invoice-line subject and derivation | FULL | opus / high | none (p-safe false) | 010, 013, 029 |
+| 026 | 🟡 [wip] | Signal / Decision Record invoice-line subject and derivation | FULL | opus / high | none (p-safe false) | 010, 013, 029 |
 | 027 | ✅ [done] | Correction record schema | STANDARD | sonnet / high | P1-A | none |
 | 028 | ✅ [done] | Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off | STANDARD | sonnet / high | P1-A | none |
 | 029 | ✅ [done] | Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views | STANDARD | sonnet / high | none (deploy) | 010, 011, 012, 017, 018, 019, 020, 021, 022, 023, 024, 025, 027, 028 |
@@ -63,7 +63,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 051 | 🔲 [open] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | 🔲 [open] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
 | 053 | 🔲 [open] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 054 |
-| 054 | 🟡 [wip] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
+| 054 | ✅ [done] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
 
 ### Phase 3 — Rules (WP3)
 
