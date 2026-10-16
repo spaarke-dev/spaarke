@@ -1175,7 +1175,6 @@ public class InternalUserShareTests
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask);
     }
 
-    /// <summary>The positive twin: another enabled person keeps a share that can read it, so the removal proceeds.</summary>
     /// <summary>#1620 (review nit a): the S5 refusal comes BEFORE the owner read — a refused unshare makes no owner read.</summary>
     [Fact]
     public async Task Unshare_TheLastPersonOnASecureRecord_IsRefusedBeforeTheOwnerIsRead()
@@ -1189,6 +1188,7 @@ public class InternalUserShareTests
         _shares.Writes.Should().BeEmpty();
     }
 
+    /// <summary>The positive twin: another enabled person keeps a share that can read it, so the removal proceeds.</summary>
     [Fact]
     public async Task Unshare_OnASecureRecord_WhenAnotherEnabledPersonCanStillReadIt_Removes()
     {
