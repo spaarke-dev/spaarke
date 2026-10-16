@@ -112,8 +112,9 @@ Identity:
 - **K-101-2.** The dry run returns identity and display only (name, number, core). It returns no facts and no evidence: a row
   shows only what the caller can already read.
 - **K-101-3.** If the save's pointer PATCH fails (an answer or a throw) after the deep insert, the policy is left Off with v1
-  not current. It never evaluates (it is Off), and the nightly run reports it. Since fix round 1 (K6) the 503 (or 403) body
-  carries `policyId`, so the client can finish by publishing a version of that policy.
+  not current. It never evaluates (it is Off), and the nightly run reports it. Since fix round 1 (K6) the 503 body carries
+  `policyId`, so the client can finish by publishing a version of that policy; since review pass 2 (F1-b) every pointer
+  failure, a refusal or an unresolved caller included, is that 503.
 - **K-101-4 (K1).** The dry-run proof binds the BODY (lane, rule type, body, template) and the caller, not the data: it
   proves this caller ran this exact rule, not that the data is unchanged since.
 - **K-101-5.** A throw at publish step 1 (the version create itself, e.g. a timeout) is a 503 with no compensation: whether the
@@ -210,3 +211,62 @@ This conflicts at merge with any other lane that moves the ceiling: the result i
 | K6 orphaned policy id | the save's failed pointer write returns `policyId` in the problem body | `Save_WhenThePointerCannotBeSet_…` (x2) |
 | K1 proof binds body not data | stated (class remarks, K-101-4, PR body) | — |
 | F3-4 live seam tests | written, opt-in, not run (section 2, item 8) | — |
+
+## 10. Review pass 2 (PR #2039: adversarial pass 2 and the uac-r2 code pass)
+
+The adversarial pass found the dry-run gate sound. Fixed, each with a test that failed before the fix (proved by restoring the
+old service and endpoint: 5 failed, then passed):
+
+| Finding | Fix | Evidence |
+|---|---|---|
+| F1-a a concurrent publish wipes the end stamp of a version that has really ended | `ReadVersionsAsync` selects `sprk_inforceto` (`VersionRow.Ended`); a publish whose current version already carries an end stamp is refused 409 `policy_changed` before step 1, with no write (`OntologyAdminAuthoringService.cs:898`). `RestorePreviousAsync` (`:1157`) undoes the stamp only while `PointerOfAsync`, as the caller, still names the previous version; another version: the stamp stands; unreadable: left and logged as an Error (the unknown-pointer pattern) | `Publish_WhenAConcurrentPublishStampedTheCurrentVersion_ButHasNotMovedThePointer_Is409_AndTheEndStampStands` (the A/B interleaving), `Publish_WhenTheOldStampLanded_ButThePointerNoLongerNamesTheOldVersion_TheCompensationLeavesItsEndStamp`, `Publish_WhenThePointerMoveIs412_AndThePointerCannotBeReRead_TheOldStampIsLeft_NotUndoneOnAGuess` |
+| F1-b (uac-r2 F1) a refused or unresolved pointer PATCH after the save's creates read "Nothing was written" or a policy-less 403 | every pointer-write failure after the creates is `Failure.Unavailable` with `PolicyId` (`:805`), the "saved Off, publish a version to finish" 503. The endpoint's Refused problem no longer carries a policy id | `Save_WhenThePointerWriteIsRefusedOrTheCallerUnresolved_IsTheSavedOff503_WithThePolicyId` (AccessDenied, OboExchangeFailed) |
+| F3-a two claimed behaviours untested | tests only (mutation-checked: compensating in the default branch, or dropping the Retire guard, fails them) | `Publish_WhenThePointerMoveThrows_AndThePointerCannotBeReRead_Is503_AndNothingIsUndone`, `Publish_WhenTheOldStampIs412_RetireUnpublished_NeverStampsAVersionThePointerNamesOrMayName` (New, Unknown) |
+| F3-b WhoAmI 401/403 not pinned | tests only; the mapping is unchanged | `AWhoAmIDataverseRefuses_401Or403_IsTheSameSingle403_OnEveryRoute` (x4), `tests/unit/domain/Dataverse/DataverseUserClientErrorMappingTests.cs` (401, 403, 404, 400, 412, 429, 5xx) |
+| uac-r2 F3 privilege-read mapping coverage | tests only (mutation-checked) | `DryRun_EveryOtherPrivilegeAnswer_FailsClosed_AndNothingIsEvaluated`: 200 without `RolePrivileges` 503, a throw 503, 404 503, 400 503, a row naming another privilege 403 forbidden; the evaluator is never called |
+| live-test cleanup | `CleanUpAsync` PATCHes `sprk_enabled=false` (If-Match `*`, never an upsert) on every `ZZ-101` policy before any delete, so a failed delete leaves no enabled test rule for the nightly job | `OntologyAdminAuthoringLiveTests.cs` `DisableAsync`; not run |
+
+### 10.1 Role change pending owner approval (repo only, not applied live)
+
+Confirmed live by the main session on spaarkedev1: `prvAppendsprk_Policy` and `prvAppendsprk_PolicyVersion` are held only by
+Service Writer, System Administrator and System Customizer. Setting a lookup needs Append on the record being written (AppendTo
+on the target; on `systemuser` that comes from Basic User), so a non-sysadmin Ontology Administrator gets 403 on save and publish.
+
+`src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Ontology Administrator.xml` adds, at **Deep** (the depth the role already
+holds for Write, Create, Read and Delete on both tables):
+
+| Privilege | Why |
+|---|---|
+| `prvAppendsprk_Policy` | the save's and the publish's pointer PATCH sets `sprk_currentversion` on the policy (`sprk_CurrentVersion@odata.bind`) |
+| `prvAppendsprk_PolicyVersion` | the version create sets `sprk_policy` (`sprk_Policy@odata.bind`, or the deep insert's link) and `sprk_authoredby` (`sprk_AuthoredBy@odata.bind`) on the version |
+
+The main session applies it live after the owner approves. No repo doc lists this role's `prvAppendTosprk_Policy*` rows, so
+no doc table was changed (`notes/security-roles.md` records applied changes; it gains a row when this is applied).
+
+### 10.2 Known limits (not fixed)
+
+- **K-101-5** (above) stands: an orphan version from a throw at step 1 is harmless. Only `ReadVersionsAsync` reads versions
+  outside the pointer, and only to number the next one.
+- **K-101-6 (K6, save side).** The save's deep insert runs on the request token. A cancel after Dataverse commits leaves an Off
+  policy and no `policyId` is returned. Harmless: the policy is Off and never evaluates, and the next save creates a new one.
+- **K2.** Two consecutive Dataverse failures (an unknown pointer plus a failed re-read, or a failed restore PATCH) can leave the
+  current version stamped. The job then refuses that policy (EventId 50309) until it is fixed by hand. It is logged as an Error
+  and the request returns 503 (or 409).
+- **K3.** `CancellationToken.None` is bounded per call by HttpClient's 100 s default but not in total: about 7 calls, roughly 12
+  minutes worst case. `ReevaluateAsync(None)` has no overall deadline and cannot be amplified.
+- **K4.** The gate accepts any depth of `prvCreatesprk_PolicyVersion`. That is correct for "may author": Dataverse still
+  enforces the save and publish writes at the role's depth.
+- **uac-r2 K2.** A proof recorded before the deploy gets 409 `dry_run_required`, because the proof key moved to v2 (the lane).
+  It fails closed and lasts at most the proof's 1 h lifetime.
+- **uac-r2 K3.** A step-3 PATCH can time out on the client but commit after the pointer re-read saw "Other". The current version
+  then stays stamped, and EventId 50309 reports it nightly.
+- **uac-r2 K4.** Stamps are compared at one-second resolution (`CarriesStampAsync` `:1103`, `RestorePreviousAsync` `:1178`).
+  This predates review pass 2.
+- **Live tests:** written, opt-in; the main session runs them. Not run here.
+
+### 10.3 Merge of the docs branch
+
+`origin/docs/ontology-platform-design` (task 100, #2037) merged into this branch. Conflicts resolved keeping both lanes:
+`OntologyAdminEndpoints.cs` maps the Rules (100) and authoring (101) routes; the route ledger keeps both GovernedFiles and one
+Aggregator naming both bound files; `ExpectedEndpointFileCount` 127 → **128**. `SignalsModule.cs` auto-merged with both
+registrations. The ADR-010 ceiling stays 160 (100 added no 1:1 interface).
