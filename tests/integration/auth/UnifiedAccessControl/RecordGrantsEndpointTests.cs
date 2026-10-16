@@ -113,6 +113,31 @@ public class RecordGrantsEndpointTests : IClassFixture<DelegationRuleTestFixture
             "an unbounded legacy row confers nothing on the read path (task 107), so it is listed as lapsed");
     }
 
+    /// <summary>
+    /// Verifier F2 (pass 1): past the cap the answer states it. A record with <c>MaxGrantsListed + 1</c> active rows gets
+    /// exactly <c>MaxGrantsListed</c> grants and <c>truncated: true</c> — the flag the client turns into Current Access's
+    /// "Only the first N grants are shown." (NFR-03: a cap stated, never a silent under-listing). Its twin is the positive
+    /// above (three rows, <c>truncated: false</c>).
+    /// </summary>
+    [Fact]
+    public async Task GetRecordGrants_PastTheCap_ListsExactlyTheCapAndSaysTruncated()
+    {
+        var recordId = Guid.NewGuid();
+        var rows = Enumerable.Range(0, RecordGrantsEndpoint.MaxGrantsListed + 1)
+            .Select(_ => Row(ExternalGrantRootType.Matter, recordId, contactId: Guid.NewGuid(), expires: new DateOnly(2099, 1, 31)))
+            .ToArray();
+        _fixture.SeedRootGrantRows(recordId, rows);
+        using var client = _fixture.CreateClientWithRights(Delegator);
+
+        var response = await client.GetAsync($"{GrantsPath}?recordType=matter&recordId={recordId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue(
+            "a record with more rows than the cap must say its list is partial");
+        document.RootElement.GetProperty("grants").GetArrayLength().Should().Be(RecordGrantsEndpoint.MaxGrantsListed);
+    }
+
     /// <summary>The negative twin: a caller who can read the record but not write it is refused, and no grant row is read.</summary>
     [Fact]
     public async Task GetRecordGrants_ForCallerWithoutWrite_Is403AndReadsNothing()
