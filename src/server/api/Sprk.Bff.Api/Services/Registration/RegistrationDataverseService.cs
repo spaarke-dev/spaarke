@@ -677,12 +677,36 @@ public class RegistrationDataverseService : IDisposable
     /// <param name="systemUserId">Dataverse systemuser ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
+    /// <remarks>Idempotent (#1363): a user who is not a member is left as they are — demo expiry repeats every cleanup step
+    /// on its next run when any one failed, so a second removal must succeed without a change.</remarks>
     public async Task RemoveUserFromTeamAsync(
         string teamName, Guid systemUserId, CancellationToken ct = default,
         string? targetDataverseUrl = null)
     {
         // Removal is never guarded: taking a member OUT of any team cannot widen access (task 144 guards additions).
         var (teamId, _) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
+
+        // Idempotent: check whether the user is actually a member (the GraphUserService.RemoveFromGroupAsync shape).
+        using (var membership = await SendGetAsync(
+                   $"{TeamEntitySet}({teamId})/teammembership_association?$select=systemuserid&$filter=systemuserid eq {systemUserId}",
+                   ct, targetDataverseUrl))
+        {
+            membership.EnsureSuccessStatusCode();
+            var members = await membership.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (members?.Value is null)
+            {
+                // No collection is not "no members": the membership is unread, so the removal is not skipped on it.
+                throw new InvalidOperationException(
+                    $"Dataverse returned no membership collection for team {teamName}; systemuser {systemUserId} was not removed.");
+            }
+
+            if (members.Value.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Systemuser {UserId} is not a member of team {TeamName}, nothing to remove", systemUserId, teamName);
+                return;
+            }
+        }
 
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 

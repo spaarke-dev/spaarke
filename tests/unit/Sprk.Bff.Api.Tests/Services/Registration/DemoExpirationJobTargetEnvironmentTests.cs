@@ -99,7 +99,8 @@ public class DemoExpirationJobTargetEnvironmentTests
         registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId }, "the environment is read once per record and reused by Steps 2 and 4");
         registry.ActiveListReads.Should().Be(0, "no registry-wide pick is made");
         _dataverse.TeamRemovals.Should().Be(1);
-        _dataverse.ExpiredStatusWrites.Should().Be(1);
+        _dataverse.ExpiredStatusWrites.Should().Be(0,
+            "Steps 1 and 3 cannot reach Graph in this fixture, so the request stays Provisioned for the next run (#1363)");
     }
 
     /// <summary>
@@ -107,7 +108,7 @@ public class DemoExpirationJobTargetEnvironmentTests
     /// queries a team and asks about a container; the error log naming the request is also gone.
     /// </summary>
     [Fact]
-    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
     {
         _dataverse.Provisioned = ExpiredRequest(environmentId: null);
         var registry = Registry(byId: _ => Target, active: [FirstByName, Target]);
@@ -121,7 +122,7 @@ public class DemoExpirationJobTargetEnvironmentTests
 
     /// <summary>MUTATION: as above, when the lookup row no longer exists.</summary>
     [Fact]
-    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
     {
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(byId: _ => null, active: [FirstByName, Target]);
@@ -133,9 +134,9 @@ public class DemoExpirationJobTargetEnvironmentTests
         registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId });
     }
 
-    /// <summary>MUTATION: a registry read that throws escapes the per-step handling and the record is never marked Expired.</summary>
+    /// <summary>MUTATION: a registry read that throws escapes the per-step handling and the pass stops.</summary>
     [Fact]
-    public async Task ExpiredRecord_WhoseTargetEnvironmentCannotBeRead_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WhoseTargetEnvironmentCannotBeRead_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
     {
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(
@@ -207,7 +208,7 @@ public class DemoExpirationJobTargetEnvironmentTests
         _dataverse.TeamLookupHosts.Should().BeEmpty();
         _dataverse.TeamRemovals.Should().Be(0);
         ErrorsNaming(RequestId).Should().Contain(m => m.Contains("Failed to remove from Demo Team"));
-        _dataverse.ExpiredStatusWrites.Should().Be(1);
+        _dataverse.ExpiredStatusWrites.Should().Be(0, "the team removal failed, so the request is not expired (#1363)");
     }
 
     private void AssertSteps2And4Skipped(RegistryDouble registry)
@@ -217,7 +218,8 @@ public class DemoExpirationJobTargetEnvironmentTests
         _guard.ContainersAsked.Should().BeEmpty("Step 4 is skipped");
         registry.ActiveListReads.Should().Be(0, "no registry-wide pick is made");
         _graph.Verify(f => f.ForApp(), Times.Exactly(2)); // Steps 1 and 3 still run
-        _dataverse.ExpiredStatusWrites.Should().Be(1, "the record is still marked Expired");
+        _dataverse.ExpiredStatusWrites.Should().Be(0,
+            "Steps 2 and 4 could not run, so the record stays Provisioned and the next run retries it (#1363)");
     }
 
     private List<string> ErrorsNaming(Guid requestId) => _log.Entries

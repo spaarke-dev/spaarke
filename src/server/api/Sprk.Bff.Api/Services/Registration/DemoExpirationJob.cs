@@ -340,21 +340,13 @@ public sealed class DemoExpirationJob : IScheduledJob
             }
         }
 
-        // Step 6: Send expired notification email — after the status write, so it is sent once.
-        try
+        if (failedSteps.Count > 0)
         {
-            if (!string.IsNullOrWhiteSpace(request.Email) && !string.IsNullOrWhiteSpace(request.FirstName))
-            {
-                _logger.LogInformation("[Expire] Sending expired notification to {Email}", request.Email);
-                await _emailService.SendExpiredNotificationAsync(request.Email, request.FirstName, ct);
-                _logger.LogInformation("[Expire] Sent expired notification to {Email}", request.Email);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogError(ex,
-                "[Expire] Failed to send expired notification for request {RequestId}; the request is Expired, so it is not resent",
-                request.Id);
+            _logger.LogWarning(
+                "[Expire] Request {RequestId} was NOT expired this run: {FailedSteps} failed. It stays Provisioned and the next "
+                + "run repeats every step; no expired notice is sent until it completes.",
+                request.Id, string.Join("; ", failedSteps));
+            return false;
         }
 
         // Step 5: Update status to Expired — the request leaves the set the next run reads.
@@ -371,6 +363,23 @@ public sealed class DemoExpirationJob : IScheduledJob
                 + "next run repeats every step; no expired notice is sent until it completes.",
                 request.Id);
             return false;
+        }
+
+        // Step 6: Send expired notification email — after the status write, so it is sent once.
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(request.Email) && !string.IsNullOrWhiteSpace(request.FirstName))
+            {
+                _logger.LogInformation("[Expire] Sending expired notification to {Email}", request.Email);
+                await _emailService.SendExpiredNotificationAsync(request.Email, request.FirstName, ct);
+                _logger.LogInformation("[Expire] Sent expired notification to {Email}", request.Email);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[Expire] Failed to send expired notification for request {RequestId}; the request is Expired, so it is not resent",
+                request.Id);
         }
 
         return true;

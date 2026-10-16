@@ -74,6 +74,94 @@ public class DemoExpirationJobRetryTests
             .Returns(Task.CompletedTask);
     }
 
+    // ── A failed cleanup step is retried, and the request is expired only when all of them succeeded ────────────────
+
+    /// <summary>MUTATION: marking the request Expired after a failed step (the pre-#1363 behaviour) ends the expiry with
+    /// the grant still standing, and nothing ever retries it.</summary>
+    [Fact(DisplayName = "#1363: a failed SPE revoke keeps the request Provisioned; the next run completes it; one notice")]
+    public async Task FailedRevoke_KeepsTheRequestProvisioned_AndTheNextRunCompletesIt()
+    {
+        _dataverse.Expiring();
+        _container.ReadFault = new HttpRequestException("Graph unavailable");
+
+        var first = await Run();
+
+        first.Success.Should().BeFalse();
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned, "the grant may still stand, so the expiry is not over");
+        _dataverse.ExpiredWrites.Should().Be(0);
+        ExpiredNotices().Should().Be(0, "no notice before the expiry completes");
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains(RequestId.ToString()) && e.Message.Contains("revoke SPE container access"),
+            "each run that cannot finish names the request and the failed step");
+
+        _container.ReadFault = null;
+        var second = await Run();
+
+        second.Success.Should().BeTrue();
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+        _dataverse.ExpiredWrites.Should().Be(1);
+        _container.Roles.Should().BeEmpty();
+        _container.Markers.Should().BeEmpty();
+        ExpiredNotices().Should().Be(1);
+
+        await Run();
+        ExpiredNotices().Should().Be(1, "an Expired request is not read again, so the notice is never repeated");
+    }
+
+    /// <summary>MUTATION: a removal that is not idempotent (a second team or group DELETE for a user already removed)
+    /// fails every retry, so the request could never expire.</summary>
+    [Fact(DisplayName = "#1363: every step is idempotent on retry — steps that succeeded the first time change nothing the second")]
+    public async Task Retry_RepeatsEveryStep_WithoutRepeatingAChange()
+    {
+        _dataverse.Expiring();
+        _container.ReadFault = new HttpRequestException("Graph unavailable");
+
+        await Run();
+
+        _graph.Disabled.Should().BeTrue();
+        _graph.InGroup.Should().BeFalse();
+        _dataverse.InTeam.Should().BeFalse();
+
+        _container.ReadFault = null;
+        await Run();
+
+        _graph.UserPatches.Should().Be(1, "an account already disabled is not disabled again");
+        _graph.GroupRemovals.Should().Be(1, "a user no longer in the group is not removed again");
+        _dataverse.TeamRemovals.Should().Be(1, "a user no longer in the team is not removed again");
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+    }
+
+    [Fact(DisplayName = "#1363: a failed Entra disable keeps the request Provisioned too")]
+    public async Task FailedDisable_KeepsTheRequestProvisioned()
+    {
+        _dataverse.Expiring();
+        _graph.FailUserReads = true;
+
+        await Run();
+
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned);
+        ExpiredNotices().Should().Be(0);
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("disable Entra account"));
+    }
+
+    /// <summary>MUTATION: sending the notice before the status write repeats it on every run whose status write fails.</summary>
+    [Fact(DisplayName = "#1363: a failed status write sends no notice; the next run expires the request and sends it once")]
+    public async Task FailedStatusWrite_SendsNoNotice_AndTheNextRunSendsItOnce()
+    {
+        _dataverse.Expiring();
+        _dataverse.FailNextStatusWrites = 1;
+
+        await Run();
+
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned);
+        ExpiredNotices().Should().Be(0);
+
+        await Run();
+
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+        ExpiredNotices().Should().Be(1);
+    }
+
     // ── Warnings ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>MUTATION: no completion marker sends a second warning on every manual trigger or extra run that day.</summary>
