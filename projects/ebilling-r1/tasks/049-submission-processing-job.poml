@@ -59,6 +59,7 @@
     <constraint source="D-91 (owner, 2026-10-16)">The firm invoice number was typed at upload and the tracking number set at creation. Compare the number read from the PDF with the typed one (normalised: case, whitespace, punctuation); if they differ, record a finding that holds the invoice for review, citing both values. It never rejects on its own, and the tracking number is never changed.</constraint>
     <constraint source="ADR-015">Logs carry submission id, invoice id, counts, timings, reason codes — no extracted values or narratives.</constraint>
     <constraint source="044 K4 (2026-10-16)">A job whose submission row does not exist is Success, not a retry or failure: 044 compensation deletes the row when the enqueue call reports failure even though Service Bus may have accepted the message. Log it with the submission id.</constraint>
+    <constraint source="047/048 review (2026-10-16)">When line coding results are persisted, store each line's CodeSetSource / CodeSetNeedsReview (CodingModels.cs) with it, so a line coded under an AI-suggested (unconfirmed) code set stays flagged for review; never persist the suggested set as a mapping.</constraint>
   </constraints>
 
   <knowledge>
