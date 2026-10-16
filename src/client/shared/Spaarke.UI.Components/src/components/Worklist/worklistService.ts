@@ -74,6 +74,12 @@ export interface InquiryDispositionRequest {
   disposition: number;
 }
 
+/** The 200 body of `POST .../disposition`. */
+export interface RecordDispositionResult {
+  /** The "Record the outcome" To Do was completed server-side (false when none was found or it could not be completed). */
+  todoCompleted: boolean;
+}
+
 export interface WorklistService {
   read(set: WorklistSetName): Promise<WorklistData>;
   /**
@@ -81,8 +87,8 @@ export interface WorklistService {
    * To Do is not readable, or no open outbound inquiry matches it: there is no picker). Any other failure throws `InquiryRequestError`.
    */
   findInquiryForTodo(todoId: string): Promise<InquiryForTodo | null>;
-  /** Records the disposition. Resolves on 200; throws `InquiryRequestError` (status and reason code) otherwise. */
-  recordDisposition(serviceRequestId: string, request: InquiryDispositionRequest): Promise<void>;
+  /** Records the disposition. Resolves on 200 with whether the To Do was completed; throws `InquiryRequestError` (status and reason code) otherwise. */
+  recordDisposition(serviceRequestId: string, request: InquiryDispositionRequest): Promise<RecordDispositionResult>;
 }
 
 export interface WorklistServiceOptions {
@@ -332,15 +338,30 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
       return parseInquiryForTodo(body, response.status);
     },
 
-    async recordDisposition(serviceRequestId: string, request: InquiryDispositionRequest): Promise<void> {
-      await inquiryCall(`${root}${INQUIRY_ROUTE}/${encodeURIComponent(serviceRequestId)}/disposition`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          replyCommunicationId: request.replyCommunicationId,
-          disposition: request.disposition,
-        }),
-      });
+    async recordDisposition(
+      serviceRequestId: string,
+      request: InquiryDispositionRequest
+    ): Promise<RecordDispositionResult> {
+      const response = await inquiryCall(
+        `${root}${INQUIRY_ROUTE}/${encodeURIComponent(serviceRequestId)}/disposition`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            replyCommunicationId: request.replyCommunicationId,
+            disposition: request.disposition,
+          }),
+        }
+      );
+      // The outcome is recorded (200). A body that cannot be read only means we cannot say the To Do was completed.
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return { todoCompleted: false };
+      }
+      const flag = (body as { todoCompleted?: unknown } | null)?.todoCompleted;
+      return { todoCompleted: flag === true };
     },
   };
 }

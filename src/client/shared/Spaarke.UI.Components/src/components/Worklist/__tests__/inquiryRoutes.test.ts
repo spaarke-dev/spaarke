@@ -177,7 +177,7 @@ describe('the inquiry routes (task 154 read, task 071 write)', () => {
     });
     await expect(
       service.recordDisposition(SERVICE_REQUEST_ID, { replyCommunicationId: REPLY.newest, disposition: 100000001 })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ todoCompleted: true });
     expect(calls[0][0]).toBe(`https://bff.test/api/v1/inquiries/${SERVICE_REQUEST_ID}/disposition`);
     expect(calls[0][1]).toMatchObject({ method: 'POST' });
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({
@@ -185,6 +185,23 @@ describe('the inquiry routes (task 154 read, task 071 write)', () => {
       disposition: 100000001,
     });
     expect(calls[0][1]?.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('reads todoCompleted from the 200 body; false, missing or an unreadable body is "not completed"', async () => {
+    const send = { replyCommunicationId: 'r', disposition: 100000000 };
+    const answer = (readBody: () => Promise<unknown>) =>
+      createWorklistService({
+        fetch: async () => ({ ok: true, status: 200, json: readBody }) as unknown as Response,
+        baseUrl: 'https://bff.test',
+      }).recordDisposition('s', send);
+    await expect(answer(async () => ({ todoCompleted: true }))).resolves.toEqual({ todoCompleted: true });
+    await expect(answer(async () => ({ todoCompleted: false }))).resolves.toEqual({ todoCompleted: false });
+    await expect(answer(async () => ({}))).resolves.toEqual({ todoCompleted: false });
+    await expect(
+      answer(async () => {
+        throw new SyntaxError('no body');
+      })
+    ).resolves.toEqual({ todoCompleted: false });
   });
 
   it('a refused disposition carries the status and the reason code, returned or thrown', async () => {

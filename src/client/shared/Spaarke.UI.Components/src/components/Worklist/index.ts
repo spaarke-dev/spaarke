@@ -18,6 +18,7 @@ export type {
   InquiryDispositionRequest,
   InquiryForTodo,
   InquiryReply,
+  RecordDispositionResult,
   WorklistData,
   WorklistGroupData,
   WorklistRouteItem,

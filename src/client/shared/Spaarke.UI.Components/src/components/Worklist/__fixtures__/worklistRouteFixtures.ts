@@ -8,7 +8,13 @@
  *    widget renders the route's order and never its own, which a test proves with a separate body that puts Not filed first
  */
 
-import type { InquiryDispositionRequest, InquiryForTodo, WorklistService, WorklistSetName } from '../worklistService';
+import type {
+  InquiryDispositionRequest,
+  InquiryForTodo,
+  RecordDispositionResult,
+  WorklistService,
+  WorklistSetName,
+} from '../worklistService';
 import { parseWorklistResponse } from '../worklistService';
 
 export const ID = {
@@ -300,12 +306,16 @@ export const ROUTE_BODIES: Record<WorklistSetName, Raw> = {
 export function fakeService(bodies: Partial<Record<WorklistSetName, Raw>> = ROUTE_BODIES): WorklistService & {
   read: jest.Mock<ReturnType<WorklistService['read']>, [WorklistSetName]>;
   findInquiryForTodo: jest.Mock<Promise<InquiryForTodo | null>, [string]>;
-  recordDisposition: jest.Mock<Promise<void>, [string, InquiryDispositionRequest]>;
+  recordDisposition: jest.Mock<Promise<RecordDispositionResult>, [string, InquiryDispositionRequest]>;
 } {
   return {
     read: jest.fn(async (set: WorklistSetName) => parseWorklistResponse(bodies[set] ?? body(set, [], []), set)),
     // No To Do is an inquiry's unless a test says so (the route answers 404).
     findInquiryForTodo: jest.fn(async (_todoId: string): Promise<InquiryForTodo | null> => null),
-    recordDisposition: jest.fn(async (_id: string, _request: InquiryDispositionRequest): Promise<void> => undefined),
+    recordDisposition: jest.fn(
+      async (_id: string, _request: InquiryDispositionRequest): Promise<RecordDispositionResult> => ({
+        todoCompleted: true,
+      })
+    ),
   };
 }

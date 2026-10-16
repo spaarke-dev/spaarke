@@ -11,7 +11,7 @@ import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
@@ -154,7 +154,7 @@ describe('the picker (D-111)', () => {
 
   it('an inquiry with no reply filed yet cannot be recorded against nothing', async () => {
     await openPicker(inquiryService({ serviceRequestId: SERVICE_REQUEST_ID, replies: [] }));
-    expect(screen.getByTestId('disposition-no-replies')).toHaveTextContent('No reply has been filed');
+    expect(screen.getByTestId('disposition-no-replies')).toHaveTextContent('No reply you can see has been filed');
     await userEvent.click(radio('No Action'));
     expect(recordButton()).toBeDisabled();
   });
@@ -172,7 +172,6 @@ describe('a refused disposition keeps the To Do open and says why in plain words
   it.each([
     [403, 'inquiry.denied', /don't have permission/],
     [404, null, /couldn't be found/],
-    [409, 'inquiry.already_resolved', /already been recorded/],
     [409, 'inquiry.reply_mismatch', /isn't filed against this inquiry/],
     [409, 'inquiry.not_a_reply', /isn't a reply/],
     [409, 'inquiry.not_an_inquiry', /isn't an open inquiry/],
@@ -326,24 +325,260 @@ describe('a lookup that could not be answered', () => {
   });
 });
 
+/** A lookup the test releases by hand, per To Do id. */
+function gatedLookups(service: ReturnType<typeof inquiryService>) {
+  const gates = new Map<string, (value: InquiryForTodo | null) => void>();
+  service.findInquiryForTodo.mockImplementation(
+    todoId =>
+      new Promise<InquiryForTodo | null>(resolve => {
+        gates.set(todoId, resolve);
+      })
+  );
+  return gates;
+}
+
 describe('while a lookup is in flight', () => {
-  it('a second click on a To Do row does not start a second lookup or a second picker', async () => {
+  it('a second click on the same To Do row does not start a second lookup or a second picker', async () => {
     const service = inquiryService();
-    const gate = { release: (_: InquiryForTodo | null) => {} };
-    service.findInquiryForTodo.mockImplementation(
-      () =>
-        new Promise<InquiryForTodo | null>(resolve => {
-          gate.release = resolve;
-        })
-    );
+    const gates = gatedLookups(service);
     renderWidget(service);
     await ready();
     await userEvent.click(line(T1));
-    await userEvent.click(line(T2));
+    await userEvent.click(line(T1));
     expect(service.findInquiryForTodo).toHaveBeenCalledTimes(1);
-    gate.release(inquiryForTodo);
+    gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
     expect(await screen.findByTestId('disposition-picker')).toBeInTheDocument();
     expect(screen.getAllByTestId('disposition-picker')).toHaveLength(1);
+  });
+
+  it('a Decide row opened meanwhile gets the wizard, and the late lookup never opens the picker on top of it', async () => {
+    const service = inquiryService();
+    const gates = gatedLookups(service);
+    const { launchWizard } = renderWidget(service);
+    await ready();
+    await userEvent.click(line(T1));
+    await waitFor(() => expect(service.findInquiryForTodo).toHaveBeenCalledTimes(1));
+    await userEvent.click(line(A1));
+    await waitFor(() => expect(launchWizard).toHaveBeenCalledTimes(1));
+    expect(launchWizard.mock.calls[0][0]).toMatchObject({ itemId: A1 });
+
+    await act(async () => {
+      gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
+    });
+    expect(screen.queryByTestId('disposition-picker')).not.toBeInTheDocument();
+    expect(launchWizard).toHaveBeenCalledTimes(1);
+  });
+
+  it('a late lookup that finds no inquiry does not open the wizard for the old row either', async () => {
+    const service = inquiryService();
+    const gates = gatedLookups(service);
+    const { launchWizard } = renderWidget(service);
+    await ready();
+    await userEvent.click(line(T1));
+    await userEvent.click(line(A1));
+    await waitFor(() => expect(launchWizard).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      gates.get(TODO_ID.inquiry)?.(null);
+    });
+    expect(launchWizard).toHaveBeenCalledTimes(1);
+    expect(launchWizard.mock.calls[0][0]).toMatchObject({ itemId: A1 });
+  });
+
+  it.each([['t1-first'], ['t2-first']])(
+    'a second To Do opened meanwhile wins, whichever lookup answers first (%s)',
+    async order => {
+      const service = inquiryService();
+      const gates = gatedLookups(service);
+      renderWidget(service);
+      await ready();
+      await userEvent.click(line(T1));
+      await userEvent.click(line(T2));
+      await waitFor(() => expect(service.findInquiryForTodo).toHaveBeenCalledTimes(2));
+      const releaseT1 = () => gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
+      const releaseT2 = () => gates.get(TODO_ID.other)?.(inquiryForTodo);
+      await act(async () => {
+        if (order === 't1-first') {
+          releaseT1();
+          releaseT2();
+        } else {
+          releaseT2();
+          releaseT1();
+        }
+      });
+      const picker = await screen.findByTestId('disposition-picker');
+      expect(screen.getAllByTestId('disposition-picker')).toHaveLength(1);
+      // The picker is T2's: it names T2's subject, not T1's.
+      expect(picker).toHaveTextContent('Call the client back');
+      expect(picker).not.toHaveTextContent('Record the outcome of the budget inquiry');
+    }
+  );
+
+  it('a lookup that fails after a newer open says nothing about the old row', async () => {
+    const service = inquiryService();
+    const fail = { t1: (_: unknown) => {} };
+    service.findInquiryForTodo.mockImplementation(todoId =>
+      todoId === TODO_ID.inquiry
+        ? new Promise<InquiryForTodo | null>((_, reject) => {
+            fail.t1 = reject;
+          })
+        : Promise.resolve(null)
+    );
+    const { launchWizard } = renderWidget(service);
+    await ready();
+    await userEvent.click(line(T1));
+    await userEvent.click(line(A1));
+    await waitFor(() => expect(launchWizard).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      fail.t1(new InquiryRequestError('x', 503, 'inquiry.unavailable'));
+    });
+    expect(screen.queryByTestId('worklist-notice')).not.toBeInTheDocument();
+  });
+
+  it('after the lookup was superseded the same To Do can be opened again', async () => {
+    const service = inquiryService();
+    const gates = gatedLookups(service);
+    renderWidget(service);
+    await ready();
+    await userEvent.click(line(T1));
+    await userEvent.click(line(A1));
+    await userEvent.click(line(T1));
+    expect(service.findInquiryForTodo).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
+    });
+    expect(await screen.findByTestId('disposition-picker')).toBeInTheDocument();
+  });
+});
+
+describe('a recorded outcome says so, and the row that stays is not opened again', () => {
+  const RECORDED_DONE = "Outcome recorded. This item stays in the list until tonight's check closes it.";
+  const RECORDED_OPEN = 'Outcome recorded, but the To Do could not be completed. Complete it from the To Do.';
+
+  async function record(todoCompleted: boolean) {
+    const service = inquiryService();
+    service.recordDisposition.mockResolvedValue({ todoCompleted });
+    const utils = renderWidget(service);
+    await ready();
+    await userEvent.click(line(T1));
+    await screen.findByTestId('disposition-picker');
+    await userEvent.click(radio('No Action'));
+    await userEvent.click(recordButton());
+    await waitFor(() => expect(screen.queryByTestId('disposition-picker')).not.toBeInTheDocument());
+    return { service, ...utils };
+  }
+
+  it('todoCompleted true: says the item stays until the nightly check closes it', async () => {
+    await record(true);
+    expect(await screen.findByTestId('worklist-notice')).toHaveTextContent(RECORDED_DONE);
+  });
+
+  it('todoCompleted false: says the To Do could not be completed', async () => {
+    await record(false);
+    expect(await screen.findByTestId('worklist-notice')).toHaveTextContent(RECORDED_OPEN);
+  });
+
+  it.each([
+    [true, RECORDED_DONE],
+    [false, RECORDED_OPEN],
+  ])(
+    'clicking the recorded row again (todoCompleted %s) repeats the notice and opens no picker, wizard or lookup',
+    async (done, text) => {
+      const { service, launchWizard } = await record(done);
+      await waitFor(() => expect(service.read).toHaveBeenCalledTimes(4));
+      await userEvent.click(line(T1));
+      expect(await screen.findByTestId('worklist-notice')).toHaveTextContent(text);
+      expect(screen.queryByTestId('disposition-picker')).not.toBeInTheDocument();
+      expect(launchWizard).not.toHaveBeenCalled();
+      expect(service.findInquiryForTodo).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('other rows are unaffected, and opening one clears the notice', async () => {
+    const { launchWizard } = await record(true);
+    expect(await screen.findByTestId('worklist-notice')).toBeInTheDocument();
+    await userEvent.click(line(T3));
+    await waitFor(() => expect(launchWizard).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('worklist-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('an inquiry that already has an outcome cannot be recorded again', () => {
+  it('turns Record off and offers Close and refresh, which closes the picker and reads the lanes again', async () => {
+    const { service } = await openPicker();
+    await waitFor(() => expect(service.read).toHaveBeenCalledTimes(2));
+    service.recordDisposition.mockRejectedValueOnce(new InquiryRequestError('x', 409, 'inquiry.already_resolved'));
+    await userEvent.click(radio('Write-off'));
+    await userEvent.click(recordButton());
+    expect(await screen.findByTestId('disposition-error')).toHaveTextContent('already been recorded');
+    expect(recordButton()).toBeDisabled();
+    await userEvent.click(radio('Scope Approved'));
+    expect(recordButton()).toBeDisabled();
+    expect(service.recordDisposition).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close and refresh' }));
+    await waitFor(() => expect(screen.queryByTestId('disposition-picker')).not.toBeInTheDocument());
+    await waitFor(() => expect(service.read).toHaveBeenCalledTimes(4));
+    expect(screen.queryByTestId('worklist-notice')).not.toBeInTheDocument();
+  });
+
+  it('every other refusal still lets the person try again, with no Close and refresh', async () => {
+    const { service } = await openPicker();
+    service.recordDisposition.mockRejectedValueOnce(new InquiryRequestError('x', 409, 'inquiry.reply_mismatch'));
+    await userEvent.click(radio('Write-off'));
+    await userEvent.click(recordButton());
+    await screen.findByTestId('disposition-error');
+    expect(recordButton()).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Close and refresh' })).not.toBeInTheDocument();
+  });
+});
+
+describe('nothing is set after the widget has gone', () => {
+  it('a lookup that answers after unmount sets no state', async () => {
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const service = inquiryService();
+      const gates = gatedLookups(service);
+      const utils = renderWidget(service);
+      await ready();
+      await userEvent.click(line(T1));
+      utils.unmount();
+      await act(async () => {
+        gates.get(TODO_ID.inquiry)?.(inquiryForTodo);
+      });
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('a record that answers after unmount sets no state and reads nothing', async () => {
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const service = inquiryService();
+      const finish = { run: (_: { todoCompleted: boolean }) => {} };
+      service.recordDisposition.mockImplementation(
+        () =>
+          new Promise(resolve => {
+            finish.run = resolve;
+          })
+      );
+      const utils = renderWidget(service);
+      await ready();
+      await userEvent.click(line(T1));
+      await screen.findByTestId('disposition-picker');
+      await userEvent.click(radio('No Action'));
+      await userEvent.click(recordButton());
+      await waitFor(() => expect(service.recordDisposition).toHaveBeenCalledTimes(1));
+      const reads = service.read.mock.calls.length;
+      utils.unmount();
+      await act(async () => {
+        finish.run({ todoCompleted: true });
+      });
+      expect(service.read).toHaveBeenCalledTimes(reads);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 

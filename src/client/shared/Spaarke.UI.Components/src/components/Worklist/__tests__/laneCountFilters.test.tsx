@@ -271,7 +271,7 @@ describe('static guards', () => {
     expect(src).not.toMatch(/import[^;]*StatTiles/);
     const files = fs.readdirSync(dir).filter(f => /\.tsx$/.test(f));
     // the worklist folder holds MatterCard and IssueLine (the row) and, since task 059, the widget that arranges the cards and its
-    // two parts (lane panel, disclosures) and, since task 155, the disclosure picker dialog (a FormModal, not a card); the count
+    // two parts (lane panel, disclosures) and, since task 155, the disposition picker (a FormModal, not a card); the count
     // filters are still MetricCardRow data, not a new card component
     expect(files.sort()).toEqual([
       'InquiryDispositionPicker.tsx',
