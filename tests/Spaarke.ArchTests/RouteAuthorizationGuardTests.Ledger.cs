@@ -305,6 +305,12 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (ebilling-r1 task 107, FR-34) -- the Related work pane of one fee line. "
+            + "The route carries AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; "
+            + "the eBilling kill switch runs after it. The line must belong to the invoice (uniform 404); the core record, author and window are read from "
+            + "the line, so no core, container or document id comes from the request, and every candidate document is put to the caller's own Read "
+            + "(sprk_documents, \"read\") before it is searched or returned."),
         new GovernedFile("Api/Finance/InvoiceSubmissionEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/{matters|projects|workassignments}/{id}/invoice-submissions and /api/finance/invoice-submissions/{id} "
             + "(ebilling-r1 task 044, FR-17 internal channel). The submits run AddFinanceAuthorizationFilter as the caller: Read and "
@@ -824,7 +830,10 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/code-set-mappings/proposals and POST /api/finance/code-set-mappings/{table}/{id}/confirm. Classified by GovernedFiles
     // (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse table privilege, D-76); the
     // kill-switch filter and the errorCode-stamping filter are classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 130;
+    // 130 -> 131 (2026-10-16, ebilling-r1 task 107, FR-34). Net +1: Api/Finance/InvoiceRelatedWorkEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter,
+    // finance.read on the route's invoice); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 131;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

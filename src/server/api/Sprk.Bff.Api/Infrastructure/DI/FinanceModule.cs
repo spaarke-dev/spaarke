@@ -85,6 +85,11 @@ public static class FinanceModule
         // one invoice (core record, budget rollups, other invoices, disallow history, rate history). Concrete (ADR-010: no interface, no second
         // implementation). Scoped: per-request, holds the (singleton) generic Dataverse client. Unconditional (flag rule above); the route carries the kill switch.
         services.AddScoped<InvoiceContextService>();
+        // Invoice Review related work product (ebilling-r1 task 107, FR-34): candidate documents of one fee line from Dataverse (core record,
+        // author, window), each checked for Read as the caller, ranked by ISemanticSearchService in documentIds scope. Concrete (ADR-010).
+        // Scoped (holds the scoped AuthorizationService and search). Unconditional (flag rule above); ISemanticSearchService resolves to its
+        // Null-Object (AnalysisServicesModule, ADR-032 P3) when AI is off, so the answer is "unavailable", never a silent empty.
+        services.AddScoped<InvoiceRelatedWorkService>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
         // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
