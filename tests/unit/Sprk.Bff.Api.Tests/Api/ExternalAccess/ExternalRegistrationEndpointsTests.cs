@@ -188,6 +188,28 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         _store.Writes.Select(w => w.Op).Should().Equal("bind");
     }
 
+    /// <summary>
+    /// UAC review F1 (task 185's invariant): a bound contact never holds an unused invite-code hash. A contact with a pending
+    /// invite that the registration binds ends with the hash cleared (so an operator unbind later cannot reopen the
+    /// forwarded invite link). The marker is left as it was.
+    /// </summary>
+    [Fact]
+    public async Task OneBindableContact_WithAPendingInvite_WithConfirmation_IsBound_AndTheInviteCodeHashIsCleared()
+    {
+        var invitedOn = DateTimeOffset.Parse("2026-10-14T09:30:00Z");
+        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        existing.InvitedOn = invitedOn;
+        existing.InviteCodeHash = "pending-invite-code-hash";
+
+        var response = await Post(Body(confirm: true));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        existing.Oid.Should().Be(_oid.ToString("D"));
+        existing.InviteCodeHash.Should().BeNull("a bound contact must not keep an unused invite-code hash");
+        existing.InvitedOn.Should().Be(invitedOn, "only the hash is consumed; the marker is untouched");
+        _store.Writes.Select(w => w.Op).Should().Equal("bind");
+    }
+
     [Fact]
     public async Task OneBindableContact_WithoutConfirmation_Is409ExistingRecordFound_NoWrite()
     {

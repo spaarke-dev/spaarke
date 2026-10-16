@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -683,6 +684,129 @@ public class DataverseContactIdentityStoreTests
                 ["sprk_identityplane"] = 100000002,
                 ["sprk_externaltenantid"] = "bbbbbbbb-0000-4000-8000-000000000002",
             });
+
+    /// <summary>
+    /// UAC review F1: the registration's home bind consumes the invite-code hash in the same request (task 185's invariant:
+    /// a bound contact never holds an unused hash). The marker column is never touched.
+    /// </summary>
+    [Fact]
+    public void TheHomeBindThatConsumesTheInvite_CarriesTheHashAsNull_TheTenantTheOidTheMirrorAndThePlane_AndNoMarker()
+    {
+        var payload = DataverseContactIdentityStore.HomeBindAndConsumeInvitePayload(HomeTenant, Oid);
+
+        payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_externalobjectid"] = "aaaaaaaa-0000-4000-8000-000000000001",
+            ["sprk_externalobjectidkey"] = "aaaaaaaa-0000-4000-8000-000000000001",
+            ["sprk_identityplane"] = 100000002,
+            ["sprk_externaltenantid"] = "bbbbbbbb-0000-4000-8000-000000000002",
+            ["sprk_externalinvitecodehash"] = null,
+        });
+        JsonSerializer.Serialize(payload).Should().Contain("\"sprk_externalinvitecodehash\":null",
+            "the request body clears the hash; a missing key would leave it in place");
+        payload.Keys.Should().NotContain("sprk_externalinvitedon");
+        DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid).Keys.Should().NotContain("sprk_externalinvitecodehash",
+            "the plain home payload is the fallback for an environment without the column");
+    }
+
+    private DataverseContactIdentityStore NewStoreWithNoTransport(ILogger? logger = null)
+        => new(new CountingHttpClientFactory(() => { }), _ => Task.FromResult("token"), "https://org.test.invalid",
+            logger ?? NullLogger.Instance);
+
+    /// <summary>
+    /// UAC review F1, column-missing case: an environment without the hash column can hold no hash. The first write (naming
+    /// the hash column) is refused for it, so the bind is retried ONCE with the plain payload and that result returned.
+    /// </summary>
+    [Fact]
+    public async Task TheHomeBind_WhenTheHashColumnIsMissing_IsRetriedOnceWithThePlainPayload_AndIsWritten()
+    {
+        var sent = new List<(Dictionary<string, object?> Payload, IReadOnlyList<string>? Missing)>();
+        var store = NewStoreWithNoTransport();
+
+        var result = await store.HomeBindConsumingInviteAsync(HomeTenant, Oid, (payload, missing) =>
+        {
+            sent.Add((payload, missing));
+            return Task.FromResult(sent.Count == 1
+                ? new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "sprk_externalinvitecodehash does not exist on type")
+                : StoreWriteResult.Written);
+        });
+
+        result.Status.Should().Be(StoreWriteStatus.Written);
+        sent.Should().HaveCount(2);
+        sent[0].Payload.Should().ContainKey("sprk_externalinvitecodehash");
+        sent[0].Missing.Should().BeEquivalentTo(new[] { "sprk_externalinvitecodehash" },
+            "the first write names the hash column so a refusal for it is ColumnMissing");
+        sent[1].Missing.Should().BeNull();
+        sent[1].Payload.Should().BeEquivalentTo(DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid));
+        sent[1].Payload.Should().NotContainKey("sprk_externalinvitecodehash");
+    }
+
+    [Theory]
+    [InlineData(StoreWriteStatus.Written)]
+    [InlineData(StoreWriteStatus.PreconditionFailed)]
+    [InlineData(StoreWriteStatus.KeyConflict)]
+    [InlineData(StoreWriteStatus.Forbidden)]
+    [InlineData(StoreWriteStatus.Failed)]
+    public async Task TheHomeBind_ForAnyStatusButColumnMissing_IsSentOnce_AndReturnedAsIs(StoreWriteStatus status)
+    {
+        var calls = 0;
+        var store = NewStoreWithNoTransport();
+
+        var result = await store.HomeBindConsumingInviteAsync(HomeTenant, Oid, (_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new StoreWriteResult(status));
+        });
+
+        result.Status.Should().Be(status);
+        calls.Should().Be(1, "only a missing hash column is retried, never a precondition failure or a conflict");
+    }
+
+    /// <summary>
+    /// UAC review K2: a read whose OData filter carries the caller's email logs a fixed label, never the path (which holds
+    /// the URL-escaped email, PII). The fault here is the token source throwing, which reaches the same GetAsync warning as
+    /// a refused response without an HTTP double.
+    /// </summary>
+    [Fact]
+    public async Task AReadThatCarriesTheEmail_LogsAFixedLabel_NeverTheEmail()
+    {
+        const string email = "o'brien@firm.example";
+        var logger = new CapturingLogger();
+        var store = new DataverseContactIdentityStore(new CountingHttpClientFactory(() => { }),
+            _ => throw new InvalidOperationException("token source down"), "https://org.test.invalid", logger);
+
+        (await store.FindActiveContactsByEmailAsync(email, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+        (await store.FindInactiveContactsByEmailAsync(email, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+        (await store.FindEnabledSystemUsersByEmailAsync(email, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+
+        logger.Messages.Should().HaveCount(3);
+        logger.Messages.Should().OnlyContain(m =>
+            !m.Contains("brien", StringComparison.OrdinalIgnoreCase) && !m.Contains("firm.example", StringComparison.OrdinalIgnoreCase)
+            && !m.Contains(Uri.EscapeDataString(email), StringComparison.OrdinalIgnoreCase));
+        logger.Messages.Should().Contain(m => m.Contains("contacts by email"))
+            .And.Contain(m => m.Contains("inactive contacts by email"))
+            .And.Contain(m => m.Contains("systemusers by email"));
+
+        // Control: a read with no email keeps logging its path (the warning is not silenced wholesale).
+        logger.Messages.Clear();
+        await store.FindContactsByOidAsync(Oid, CancellationToken.None);
+        logger.Messages.Should().ContainSingle().Which.Should().Contain("aaaaaaaa-0000-4000-8000-000000000001");
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Warning) Messages.Add(formatter(state, exception));
+        }
+    }
 
     [Fact]
     public void TheWriteRequest_NeverOptsInToDuplicateDetection()

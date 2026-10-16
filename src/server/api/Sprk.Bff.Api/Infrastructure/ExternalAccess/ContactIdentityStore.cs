@@ -583,6 +583,19 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
+    /// ADR-028 A9 (r3 task 047, UAC review F1): the registration's home bind payload — exactly <see cref="HomeBindPayload"/>
+    /// plus the invite-code hash set to null, in the one request (task 185's invariant: a bound contact never holds an
+    /// unused invite-code hash, or a later unbind would let a forwarded invite link bind the contact through the CIAM
+    /// path). The marker (<c>sprk_externalinvitedon</c>) is not touched. Pure.
+    /// </summary>
+    public static Dictionary<string, object?> HomeBindAndConsumeInvitePayload(Guid homeTenantId, Guid oid)
+    {
+        var payload = HomeBindPayload(homeTenantId, oid);
+        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        return payload;
+    }
+
+    /// <summary>
     /// The one write request every store write sends. Pure, so its headers are pinned directly: OData versions, the
     /// optional precondition, JSON — and never <c>MSCRM.SuppressDuplicateDetection</c> (r3 task 047, owner 2026-10-15:
     /// API writes do not opt in to duplicate-detection rules; email is the canonical duplicate check).
@@ -932,14 +945,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
-        return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct);
+        return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct, logLabel: "contacts by email");
     }
 
     /// <inheritdoc />
     public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
-        return ReadContactsAsync(BuildInactiveEmailLookupPath(email.Trim()), "inactive email lookup", ct);
+        return ReadContactsAsync(BuildInactiveEmailLookupPath(email.Trim()), "inactive email lookup", ct,
+            logLabel: "inactive contacts by email");
     }
 
     /// <inheritdoc />
@@ -1077,7 +1091,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public async Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct)
     {
-        var (status, _, body, _) = await GetAsync(BuildLicensedUserEmailLookupPath(email), ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(BuildLicensedUserEmailLookupPath(email), ct, logLabel: "systemusers by email")
+            .ConfigureAwait(false);
         using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
         if (doc is null)
         {
@@ -1152,8 +1167,37 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
         => RowVersionPrecondition(etag) is { } version
-            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", HomeBindPayload(homeTenantId, oid), ("If-Match", version), ct)
+            ? HomeBindConsumingInviteAsync(homeTenantId, oid, (payload, missingColumns) =>
+                WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", payload, ("If-Match", version), ct, missingColumns))
             : Task.FromResult(NoRowVersion("bind", contactId));
+
+    private static readonly IReadOnlyList<string> InviteHashColumnOnly = new[] { ContactBindingDecision.ExternalInviteCodeHashColumn };
+
+    /// <summary>
+    /// UAC review F1: the home bind consumes the invite-code hash in the SAME conditional PATCH
+    /// (<see cref="HomeBindAndConsumeInvitePayload"/>). An environment without the hash column can hold no hash, so when
+    /// the platform refuses that write for the hash column (<see cref="StoreWriteStatus.ColumnMissing"/>) it is retried
+    /// ONCE with the plain <see cref="HomeBindPayload"/> (same row version, carried by <paramref name="write"/>) and that
+    /// result returned. Any other status returns as is. <paramref name="write"/> sends one payload and answers
+    /// ColumnMissing for the columns it is given when the platform says one does not exist.
+    /// </summary>
+    public async Task<StoreWriteResult> HomeBindConsumingInviteAsync(
+        Guid homeTenantId, Guid oid,
+        Func<Dictionary<string, object?>, IReadOnlyList<string>?, Task<StoreWriteResult>> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        var first = await write(HomeBindAndConsumeInvitePayload(homeTenantId, oid), InviteHashColumnOnly).ConfigureAwait(false);
+        if (first.Status != StoreWriteStatus.ColumnMissing)
+        {
+            return first;
+        }
+
+        _logger.LogWarning(
+            "[ID-BIND] {Hash} is not provisioned in this environment: the home bind is retried once without clearing it "
+            + "(an environment without the column holds no invite-code hash). Apply scripts/Set-ExternalInviteCodeHashSchema.ps1.",
+            ContactBindingDecision.ExternalInviteCodeHashColumn);
+        return await write(HomeBindPayload(homeTenantId, oid), null).ConfigureAwait(false);
+    }
 
     private void LogHomeSchemaMissing(string what)
         => _logger.LogError(
@@ -1289,9 +1333,9 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     // ── Plumbing ───────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task<ContactLookup> ReadContactsAsync(string path, string what, CancellationToken ct)
+    private async Task<ContactLookup> ReadContactsAsync(string path, string what, CancellationToken ct, string? logLabel = null)
     {
-        var (status, _, body, _) = await GetAsync(path, ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(path, ct, logLabel: logLabel).ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -1418,8 +1462,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <param name="path">The request path (never logged when <paramref name="logLabel"/> is given).</param>
+    /// <param name="logLabel">
+    /// UAC review K2: a FIXED label logged in place of the path by a read whose OData filter carries the caller's email
+    /// (PII, URL-escaped in the path). Null for every other read, which logs its path.
+    /// </param>
     private async Task<(LookupStatus Status, HttpStatusCode Code, string? Body, string? Error)> GetAsync(
-        string path, CancellationToken ct, string? prefer = null)
+        string path, CancellationToken ct, string? prefer = null, string? logLabel = null)
     {
         try
         {
@@ -1447,7 +1496,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             var classified = ClassifyError(body);
-            _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", path, (int)response.StatusCode, Trim(body));
+            _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", logLabel ?? path, (int)response.StatusCode, Trim(body));
             return (classified, response.StatusCode, null, $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1456,7 +1505,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[ID-BIND] GET {Path} threw — treated as could-not-read (deny)", path);
+            _logger.LogWarning(ex, "[ID-BIND] GET {Path} threw — treated as could-not-read (deny)", logLabel ?? path);
             return (LookupStatus.Failed, default, null, ex.Message);
         }
     }

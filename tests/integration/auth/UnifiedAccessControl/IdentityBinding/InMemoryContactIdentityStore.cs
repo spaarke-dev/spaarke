@@ -537,9 +537,14 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
-    /// <summary>A9 (r3 task 047): the home bind — the plain bind on plane WorkforceHome plus the home directory, one write.</summary>
+    /// <summary>
+    /// A9 (r3 task 047): the home bind — the plain bind on plane WorkforceHome plus the home directory, one write. UAC
+    /// review F1: it also clears the invite-code hash in that write (as the real store's first attempt does). Where the hash
+    /// column is not provisioned the real store retries once without it, so here the bind simply leaves the (absent) hash.
+    /// </summary>
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
-        => Task.FromResult(Bind(contactId, etag, oid, IdentityPlaneMarker.WorkforceHome, consumeInvite: false, homeTenantId));
+        => Task.FromResult(Bind(contactId, etag, oid, IdentityPlaneMarker.WorkforceHome,
+            consumeInvite: !(InviteCodeHashColumnMissing || InviteMarkerStatus == LookupStatus.ColumnMissing), homeTenantId));
 
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct)
     {
@@ -656,9 +661,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             }
 
             c.Version = NextVersion();
-            Writes.Add(("bind", contactId,
-                consumeInvite ? $"{c.Oid}|{plane}|invite-code-hash=null"
-                : homeTenantId is { } t ? $"{c.Oid}|{plane}|tenant={t:D}" : $"{c.Oid}|{plane}"));
+            var detail = homeTenantId is { } t ? $"{c.Oid}|{plane}|tenant={t:D}" : $"{c.Oid}|{plane}";
+            Writes.Add(("bind", contactId, consumeInvite ? $"{detail}|invite-code-hash=null" : detail));
             return StoreWriteResult.Written;
         }
     }
