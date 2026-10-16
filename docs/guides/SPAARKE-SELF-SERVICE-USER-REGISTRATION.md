@@ -530,6 +530,7 @@ To modify a template:
 
 - If the Provisioned list cannot be read, the run fails and the scheduler retries it (nothing was done or sent)
 - If a cleanup step fails for a record, the record stays `Provisioned`; a Warning naming the request and the failed step(s) is logged each run, and the next daily run repeats every step (each is idempotent: an account already disabled, a user no longer in the team or group, a grant already removed change nothing)
+- Target environment: if the request names none, or the registry read succeeds and finds no such `sprk_dataverseenvironment` row, there is nothing in that environment to clean — the team removal and SPE revoke are done, a Warning names the request (and the environment id), and the request expires once the Entra disable and group removal succeed. If the registry read itself fails (error, timeout, throttle, auth), that is transient: the request stays `Provisioned` and the next run retries it
 - Cancellation (app shutdown) is honoured; the host drains the run
 
 ---

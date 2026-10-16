@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Graph;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -105,39 +106,64 @@ public class DemoExpirationJobTargetEnvironmentTests
 
     /// <summary>
     /// MUTATION: falling back to the registry's default / first active row when the request has no target environment
-    /// queries a team and asks about a container; the error log naming the request is also gone.
+    /// queries a team and asks about a container; the warning naming the request is also gone. An absent environment
+    /// holds nothing to clean, so once Steps 1 and 3 succeed the request is expired (the outcome T186 pinned; #1363).
     /// </summary>
     [Fact]
-    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
+    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAWarning_AndExpires()
     {
+        EntraReachable();
         _dataverse.Provisioned = ExpiredRequest(environmentId: null);
         var registry = Registry(byId: _ => Target, active: [FirstByName, Target]);
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
-        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("no target environment"));
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 1, "an absent environment holds nothing to clean");
+        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("no target environment"));
+        ErrorsNaming(RequestId).Should().BeEmpty();
         registry.ReadIds.Should().BeEmpty();
     }
 
-    /// <summary>MUTATION: as above, when the lookup row no longer exists.</summary>
+    /// <summary>MUTATION: as above, when a successful registry read finds that the lookup row no longer exists.</summary>
     [Fact]
-    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
+    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAWarning_AndExpires()
+    {
+        EntraReachable();
+        _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
+        var registry = Registry(byId: _ => null, active: [FirstByName, Target]);
+
+        await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
+
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 1, "an absent environment holds nothing to clean");
+        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("does not exist") && m.Contains(TargetEnvironmentId.ToString()));
+        ErrorsNaming(RequestId).Should().BeEmpty();
+        registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId });
+    }
+
+    /// <summary>
+    /// MUTATION: letting an absent environment stand in for the tenant-side steps. The environment is gone, but the
+    /// Entra disable and group removal still failed, so the request is not expired.
+    /// </summary>
+    [Fact]
+    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_ButEntraIsUnreachable_IsNotExpired()
     {
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(byId: _ => null, active: [FirstByName, Target]);
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
-        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("was not found") && m.Contains(TargetEnvironmentId.ToString()));
-        registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId });
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 0, "Steps 1 and 3 failed");
     }
 
-    /// <summary>MUTATION: a registry read that throws escapes the per-step handling and the pass stops.</summary>
+    /// <summary>
+    /// MUTATION: treating a faulted registry read as "the environment is gone" expires the request with its team
+    /// membership and SPE grant possibly intact. A fault is transient: the request stays Provisioned for the next run.
+    /// Entra is reachable here, so the unreadable environment alone keeps it Provisioned.
+    /// </summary>
     [Fact]
     public async Task ExpiredRecord_WhoseTargetEnvironmentCannotBeRead_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
     {
+        EntraReachable();
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(
             byId: _ => throw new HttpRequestException("registry unavailable"),
@@ -145,8 +171,9 @@ public class DemoExpirationJobTargetEnvironmentTests
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 0, "an unreadable environment is retried on the next run (#1363)");
         ErrorsNaming(RequestId).Should().Contain(m => m.Contains("Failed to read target environment"));
+        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("NOT expired") && m.Contains("read target environment"));
     }
 
     /// <summary>An environment deactivated after the demo was provisioned still holds the user's access; expiry removes it.</summary>
@@ -211,19 +238,26 @@ public class DemoExpirationJobTargetEnvironmentTests
         _dataverse.ExpiredStatusWrites.Should().Be(0, "the team removal failed, so the request is not expired (#1363)");
     }
 
-    private void AssertSteps2And4Skipped(RegistryDouble registry)
+    private void AssertSteps2And4Skipped(RegistryDouble registry, int expiredStatusWrites, string because)
     {
         _dataverse.TeamNamesQueried.Should().BeEmpty("Step 2 is skipped");
         _dataverse.TeamRemovals.Should().Be(0);
         _guard.ContainersAsked.Should().BeEmpty("Step 4 is skipped");
         registry.ActiveListReads.Should().Be(0, "no registry-wide pick is made");
         _graph.Verify(f => f.ForApp(), Times.Exactly(2)); // Steps 1 and 3 still run
-        _dataverse.ExpiredStatusWrites.Should().Be(0,
-            "Steps 2 and 4 could not run, so the record stays Provisioned and the next run retries it (#1363)");
+        _dataverse.ExpiredStatusWrites.Should().Be(expiredStatusWrites, because);
     }
 
-    private List<string> ErrorsNaming(Guid requestId) => _log.Entries
-        .Where(e => e.Level == LogLevel.Error && e.Message.Contains(requestId.ToString()))
+    /// <summary>Steps 1 and 3 succeed: Entra answers through an in-memory Graph (the retry tests' double).</summary>
+    private void EntraReachable()
+        => _graph.Setup(f => f.ForApp()).Returns(() => new GraphServiceClient(new DemoExpirationJobRetryTests.StatefulGraph()));
+
+    private List<string> ErrorsNaming(Guid requestId) => LogsNaming(LogLevel.Error, requestId);
+
+    private List<string> WarningsNaming(Guid requestId) => LogsNaming(LogLevel.Warning, requestId);
+
+    private List<string> LogsNaming(LogLevel level, Guid requestId) => _log.Entries
+        .Where(e => e.Level == level && e.Message.Contains(requestId.ToString()))
         .Select(e => e.Message)
         .ToList();
 

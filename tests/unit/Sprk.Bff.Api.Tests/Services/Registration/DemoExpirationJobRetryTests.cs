@@ -62,6 +62,9 @@ public class DemoExpirationJobRetryTests
     private readonly CapturingLogger<DemoExpirationJob> _log = new();
     private readonly FakeTimeProvider _time = new(Today);
 
+    /// <summary>The registry's answer for the request's target environment; null is a successful "no such row".</summary>
+    private Func<DataverseEnvironmentRecord?> _environment = () => ZetaDemo;
+
     public DemoExpirationJobRetryTests()
     {
         // The user holds the demo grant Step 8 made.
@@ -129,6 +132,56 @@ public class DemoExpirationJobRetryTests
         _graph.GroupRemovals.Should().Be(1, "a user no longer in the group is not removed again");
         _dataverse.TeamRemovals.Should().Be(1, "a user no longer in the team is not removed again");
         _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+    }
+
+    /// <summary>MUTATION: counting an environment the registry says does not exist as a failed step leaves the request
+    /// Provisioned for ever, retried daily, though there is nothing in that environment to clean.</summary>
+    [Fact(DisplayName = "#1363: an ABSENT target environment has nothing to clean; the request expires once Entra is done")]
+    public async Task AbsentTargetEnvironment_ExpiresOnceTheTenantStepsSucceed()
+    {
+        _dataverse.Expiring();
+        _environment = () => null;
+
+        var result = await Run();
+
+        result.Success.Should().BeTrue();
+        _graph.Disabled.Should().BeTrue();
+        _graph.InGroup.Should().BeFalse();
+        _dataverse.TeamRemovals.Should().Be(0, "there is no environment to remove the user from");
+        _container.Roles.Should().NotBeEmpty("no container of an absent environment is touched");
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+        ExpiredNotices().Should().Be(1);
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning
+            && e.Message.Contains(RequestId.ToString()) && e.Message.Contains(EnvironmentId.ToString())
+            && e.Message.Contains("does not exist"));
+    }
+
+    /// <summary>MUTATION: treating a faulted registry read as "absent" expires the request with its team membership and
+    /// SPE grant still standing, and nothing retries them.</summary>
+    [Fact(DisplayName = "#1363: an UNREADABLE target environment keeps the request Provisioned; the next run completes it")]
+    public async Task UnreadableTargetEnvironment_KeepsTheRequestProvisioned_AndTheNextRunCompletesIt()
+    {
+        _dataverse.Expiring();
+        _environment = () => throw new HttpRequestException("Dataverse throttled (429)");
+
+        var first = await Run();
+
+        first.Success.Should().BeFalse();
+        _dataverse.Status.Should().Be(RegistrationStatus.Provisioned);
+        _dataverse.InTeam.Should().BeTrue();
+        _container.Roles.Should().NotBeEmpty();
+        ExpiredNotices().Should().Be(0);
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains(RequestId.ToString()) && e.Message.Contains("read target environment"));
+
+        _environment = () => ZetaDemo;
+        var second = await Run();
+
+        second.Success.Should().BeTrue();
+        _dataverse.Status.Should().Be(RegistrationStatus.Expired);
+        _dataverse.InTeam.Should().BeFalse();
+        _container.Roles.Should().BeEmpty();
+        ExpiredNotices().Should().Be(1);
     }
 
     [Fact(DisplayName = "#1363: a failed Entra disable keeps the request Provisioned too")]
@@ -242,23 +295,25 @@ public class DemoExpirationJobRetryTests
             _email.Object,
             TestSpeOwnership.AllowAll(graphFactory.Object),
             _container,
-            new Registry(configuration),
+            new Registry(configuration, () => _environment()),
             scopes,
             _time,
             options,
             _log);
     }
 
-    /// <summary>The environment registry at its virtual read: the request's target environment.</summary>
-    private sealed class Registry(IConfiguration configuration)
+    private static DataverseEnvironmentRecord ZetaDemo => new()
+    {
+        Id = EnvironmentId, Name = "Zeta Demo", DataverseUrl = TargetDataverse, IsActive = true,
+        TeamName = "Zeta Team", SpeContainerId = Container,
+    };
+
+    /// <summary>The environment registry at its virtual read: the request's target environment (or none, or a fault).</summary>
+    private sealed class Registry(IConfiguration configuration, Func<DataverseEnvironmentRecord?> read)
         : DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance)
     {
         public override Task<DataverseEnvironmentRecord?> GetByIdAsync(Guid environmentId, CancellationToken ct = default)
-            => Task.FromResult<DataverseEnvironmentRecord?>(new DataverseEnvironmentRecord
-            {
-                Id = EnvironmentId, Name = "Zeta Demo", DataverseUrl = TargetDataverse, IsActive = true,
-                TeamName = "Zeta Team", SpeContainerId = Container,
-            });
+            => Task.FromResult(read());
     }
 
     /// <summary>The admin and target Dataverse: one registration request, its user and team membership, with state.</summary>
@@ -343,7 +398,7 @@ public class DemoExpirationJobRetryTests
     }
 
     /// <summary>Graph for one user: the account (enabled until disabled) and its demo-group membership.</summary>
-    private sealed class StatefulGraph : IRequestAdapter
+    internal sealed class StatefulGraph : IRequestAdapter
     {
         public bool Disabled { get; private set; }
         public bool InGroup { get; private set; } = true;

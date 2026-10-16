@@ -22,6 +22,11 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// that failed leaves the request Provisioned: a Warning naming the request and the failed steps is logged, and the next
 /// run repeats every step. Each step is idempotent on repeat — an account already disabled, a user no longer in the team
 /// or group, a grant already removed all succeed without a change.</para>
+/// <para><b>Target environment</b> (Steps 2 and 4) — read once, with a typed outcome (<see cref="TargetEnvironmentState"/>).
+/// ABSENT (the request names none, or a successful registry read finds no such row): there is nothing in it to clean,
+/// so Steps 2 and 4 are done and the request expires once Steps 1 and 3 succeed. UNREADABLE (the registry read
+/// faulted): transient, so Steps 2 and 4 count as failed and the next run retries. Absence is never inferred from an
+/// exception.</para>
 /// <para><b>Each email once.</b> The expired notice is sent AFTER the status write, so a request is notified only once it
 /// has left the Provisioned set the run reads (a status write that fails sends nothing; the next run repeats). A notice
 /// that then fails to send is logged and not retried. The warning is sent at most once per request per UTC day — its
@@ -231,12 +236,13 @@ public sealed class DemoExpirationJob : IScheduledJob
                     aadObjectId, request.Id);
             }
 
-            // The request's own target environment, resolved once for Steps 2 and 4. Null means it could not
-            // be resolved (already logged as an error): those two steps cannot run, never redirected.
-            var environment = await ResolveTargetEnvironmentAsync(request, ct);
-            if (environment == null)
+            // The request's own target environment, resolved once for Steps 2 and 4 (never redirected). Absent: there is
+            // nothing in it to clean, so both steps are done. Unreadable: both are failed, and the next run retries.
+            var lookup = await ResolveTargetEnvironmentAsync(request, ct);
+            var environment = lookup.Environment;
+            if (lookup.State == TargetEnvironmentState.Unreadable)
             {
-                failedSteps.Add("resolve target environment (team removal and SPE revoke)");
+                failedSteps.Add("read target environment (team removal and SPE revoke)");
             }
 
             // Step 2: Remove from Demo Team in Dataverse
@@ -568,37 +574,64 @@ public sealed class DemoExpirationJob : IScheduledJob
     /// <para>The row's <c>IsActive</c> flag is deliberately not checked: an environment deactivated after the demo
     /// was provisioned still holds the user's team membership and container grant, and expiry must remove them.</para>
     /// </remarks>
-    /// <returns>The environment, or <c>null</c> after logging an error naming the request when the request has no
-    /// target environment, the row is gone, or the lookup failed. The caller skips Steps 2 and 4.</returns>
-    private async Task<DataverseEnvironmentRecord?> ResolveTargetEnvironmentAsync(
+    /// <returns>
+    /// <see cref="TargetEnvironmentState.Found"/> with the row; <see cref="TargetEnvironmentState.Absent"/> when the request
+    /// names no environment or the registry answered that the row does not exist (a Warning naming the request);
+    /// <see cref="TargetEnvironmentState.Unreadable"/> when the registry read faulted (an Error naming the request).
+    /// </returns>
+    private async Task<TargetEnvironmentLookup> ResolveTargetEnvironmentAsync(
         RegistrationRequestRecord request, CancellationToken ct)
     {
         if (!request.DataverseEnvironmentId.HasValue)
         {
-            _logger.LogError(
-                "[Expire] Request {RequestId} has no target environment; skipping team removal (Step 2) and SPE revoke (Step 4)",
+            _logger.LogWarning(
+                "[Expire] Request {RequestId} has no target environment; team removal (Step 2) and SPE revoke (Step 4) have nothing to clean",
                 request.Id);
-            return null;
+            return TargetEnvironmentLookup.Absent;
         }
 
+        DataverseEnvironmentRecord? environment;
         try
         {
-            var environment = await _environmentService.GetByIdAsync(request.DataverseEnvironmentId.Value, ct);
-            if (environment == null)
-            {
-                _logger.LogError(
-                    "[Expire] Target environment {EnvironmentId} of request {RequestId} was not found; skipping team removal (Step 2) and SPE revoke (Step 4)",
-                    request.DataverseEnvironmentId.Value, request.Id);
-            }
-
-            return environment;
+            // GetByIdAsync answers null only for a 404 on a successful call; every fault throws.
+            environment = await _environmentService.GetByIdAsync(request.DataverseEnvironmentId.Value, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex,
-                "[Expire] Failed to read target environment {EnvironmentId} of request {RequestId}; skipping team removal (Step 2) and SPE revoke (Step 4)",
+                "[Expire] Failed to read target environment {EnvironmentId} of request {RequestId}; team removal (Step 2) and SPE revoke (Step 4) are retried on the next run",
                 request.DataverseEnvironmentId.Value, request.Id);
-            return null;
+            return TargetEnvironmentLookup.Unreadable;
         }
+
+        if (environment == null)
+        {
+            _logger.LogWarning(
+                "[Expire] Target environment {EnvironmentId} of request {RequestId} does not exist; team removal (Step 2) and SPE revoke (Step 4) have nothing to clean",
+                request.DataverseEnvironmentId.Value, request.Id);
+            return TargetEnvironmentLookup.Absent;
+        }
+
+        return new TargetEnvironmentLookup(TargetEnvironmentState.Found, environment);
+    }
+
+    /// <summary>What the target-environment read established (#1363): a fact (found, absent) or a fault (unreadable).</summary>
+    private enum TargetEnvironmentState
+    {
+        /// <summary>The row was read.</summary>
+        Found,
+
+        /// <summary>Affirmatively absent: the request names none, or a successful read found no such row.</summary>
+        Absent,
+
+        /// <summary>The read faulted (error, timeout, throttle, auth); says nothing about whether the row exists.</summary>
+        Unreadable,
+    }
+
+    private readonly record struct TargetEnvironmentLookup(TargetEnvironmentState State, DataverseEnvironmentRecord? Environment)
+    {
+        public static TargetEnvironmentLookup Absent => new(TargetEnvironmentState.Absent, null);
+
+        public static TargetEnvironmentLookup Unreadable => new(TargetEnvironmentState.Unreadable, null);
     }
 }
