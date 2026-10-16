@@ -13,7 +13,7 @@
 |---|---|
 | **Task** | 155 (#1990) Opus adversarial review running (head `c99052c09`, worktree `C:\wts-155`). Docs branch is on master: #1989 merged `7315b3e85`. |
 | **Blocker** | 055 BFF deploy: dev runs R3's `c20bff283`, NOT an ancestor of master (89 R3-only commits). A master-only BFF deploy would remove R3's work. Asked R3 (twice) for a plan; preferred (a) R3 merges master and redeploys the dev BFF from R3, ontology deploys only the Console + grid config. |
-| **Next Action** | (1) 155 review, then fixes, then re-check, then merge (merge-when-green3.sh 1990 <sha> docs/ontology-platform-design); mark 155 done. (2) R3's answer, then 055: before any deploy run `git merge-base --is-ancestor <live sha> <deploy sha>`; Console solution from master; `Apply-WorklistGridConfiguration.ps1` (-WhatIf, -Verify, apply, -Verify -RequireRow); notices before/after to word-add-in, R3, uac-r2. (3) After the owner answers: dev policies, then the 144/148 report-only pass; 049 role removals. |
+| **Next Action** | (1) 155 review, then fixes, then re-check, then merge (merge-when-green3.sh 1990 <sha> docs/ontology-platform-design); mark 155 done. (2) R3's answer, then 055: before any deploy run `git merge-base --is-ancestor <live sha> <deploy sha>`; Console solution from master; `Apply-WorklistGridConfiguration.ps1` (-WhatIf, -Verify, apply, -Verify -RequireRow); notices before/after to word-add-in, R3, uac-r2. (3) D-146: once R3 confirms the BFF live, PATCH `sprk_enabled=true` on the five policies, trigger `POST /api/admin/jobs/signal-reevaluation/trigger` (token: `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`), read history; then the 144/148 report-only pass, then uac-r2, then the writes. 049 (D-17/D-62/D-147) after 055. |
 
 ## Lanes in flight (PRs into `docs/ontology-platform-design`)
 
@@ -33,7 +33,7 @@ Merged into the docs branch today: #1926, #1903 (151), #1905 (150), #1907 (149),
 
 1. 155 review → merge.
 2. 055 deploy (coordinated with R3, above).
-3. Owner answers → policies → 144/148 report-only pass → uac-r2 → writes.
+3. D-146 policies on (after R3's BFF) → evaluator pass → 144/148 report-only pass → uac-r2 → writes.
 4. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), close #1882.
 5. 049 (with the DR Create removal if approved), 062, 063, 064, 105, 045, 104.
 6. ebilling: their ConsoleKit PR plus 070, 013, 015, 026, 050, 074 come to us for review.
@@ -45,8 +45,7 @@ Merged into the docs branch today: #1926, #1903 (151), #1905 (150), #1907 (149),
 
 ## Open owner questions
 
-- **Enable the five dev policies?** (Do: 6101, 6102, 6103, 6104; Decide: `4d204810…`). Needed for the 144/148 report-only pass, 055's real-data check and UAT.
-- **Remove `prvCreatesprk_DecisionRecord`** (Deep) from Console User (`Roles/Spaarke Console User.xml:17`) and Ontology Administrator (`:20`) in task 049? Only Ontology Service needs it.
+- None. Answered 2026-10-15: D-146 (enable the five dev policies after R3's BFF is live, then one manual `signal-reevaluation` pass) and D-147 (049 also removes DR Create from Ontology Administrator).
 
 ## Peers (current session names)
 
