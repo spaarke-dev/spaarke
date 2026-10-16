@@ -27,8 +27,8 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// }
 /// </code>
 /// <para>
-/// Priority values follow Dataverse appnotification convention:
-///   100000000 = Informational, 200000000 = Important (default), 300000000 = Urgent
+/// Priority values are the live appnotification options (AppNotificationOptions.Priority):
+///   200000000 = Normal (default), 200000001 = High. Any other value is refused before the create.
 /// </para>
 /// <para>
 /// Uses the canonical <see cref="IGenericEntityService"/> shared library
@@ -42,15 +42,15 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>
-    /// Default priority for notifications when not specified in config (Important = 200000000).
+    /// Default priority for notifications when not specified in config (Normal = 200000000).
     /// </summary>
-    private const int DefaultPriority = 200_000_000;
+    private const int DefaultPriority = Sprk.Bff.Api.Services.AppNotificationOptions.Priority.Normal;
 
     /// <summary>
     /// Dataverse <c>toasttype</c> option-set default value ("Timed") — visible toast that auto-dismisses.
     /// Used when no explicit ToastType is supplied in config.
     /// </summary>
-    private const int DefaultToastType = 200_000_000;
+    private const int DefaultToastType = Sprk.Bff.Api.Services.AppNotificationOptions.ToastType.Timed;
 
     private readonly ITemplateEngine _templateEngine;
     private readonly IGenericEntityService _entityService;
@@ -112,13 +112,13 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 Name: "priority",
                 Type: SchemaFieldType.Number,
                 Required: false,
-                Description: "Priority: 100000000=Informational, 200000000=Important (default), 300000000=Urgent.",
+                Description: "Priority: 200000000=Normal (default), 200000001=High.",
                 Default: 200000000),
             new(
                 Name: "toastType",
                 Type: SchemaFieldType.Number,
                 Required: false,
-                Description: "Toast visibility: 100000000=Hidden, 200000000=Timed (default), 300000000=Standard.",
+                Description: "Toast visibility: 200000000=Timed (default), 200000001=Hidden.",
                 Default: 200000000),
             new(
                 Name: "actionUrl",
@@ -753,14 +753,14 @@ internal sealed record NotificationNodeConfig
     public string? Category { get; init; }
 
     /// <summary>
-    /// Priority value: 100000000=Informational, 200000000=Important, 300000000=Urgent.
-    /// Defaults to 200000000 (Important) when not specified.
+    /// Priority value: 200000000=Normal, 200000001=High.
+    /// Defaults to 200000000 (Normal) when not specified.
     /// </summary>
     public int? Priority { get; init; }
 
     /// <summary>
-    /// Dataverse appnotification <c>toasttype</c> option-set value: 100000000=Hidden (no toast),
-    /// 200000000=Timed (auto-dismiss; default), 300000000=Standard (persistent).
+    /// Dataverse appnotification <c>toasttype</c> option-set value: 200000000=Timed (auto-dismiss; default),
+    /// 200000001=Hidden (no toast).
     /// Per FR-18 (P3): when this value is Hidden, <c>data.actions[]</c> is NOT populated
     /// because the MDA native bell surface that would render the "Open" action is not shown.
     /// </summary>

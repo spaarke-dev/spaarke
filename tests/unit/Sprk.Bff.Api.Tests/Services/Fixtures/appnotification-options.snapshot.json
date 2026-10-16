@@ -1,0 +1,13 @@
+{
+  "_source": "Read-only describe of the live appnotification table, 2026-10-09 (Dataverse MCP, tables/appnotification). Refresh from the live metadata when Microsoft changes the table; the unit test AppNotificationOptionsTests compares it with AppNotificationOptions.",
+  "priority": { "Normal": 200000000, "High": 200000001 },
+  "toasttype": { "Timed": 200000000, "Hidden": 200000001 },
+  "icontype": {
+    "Info": 100000000,
+    "Success": 100000001,
+    "Failure": 100000002,
+    "Warning": 100000003,
+    "Mention": 100000004,
+    "Custom": 100000005
+  }
+}

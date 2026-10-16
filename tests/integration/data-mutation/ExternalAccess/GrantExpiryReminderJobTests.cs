@@ -119,6 +119,23 @@ public class GrantExpiryReminderJobTests
         RecipientOf(_notifications[0]).Should().Be(Granter);
         TitleOf(_notifications[0]).Should().Be(
             daysLeft == 1 ? "External access ends tomorrow" : $"External access ends in {daysLeft} days");
+
+        // appnotification.priority accepts only Normal / High. 200000002 ("Critical") made the last-day reminder fail.
+        var priority = _notifications[0].GetAttributeValue<OptionSetValue>("priority").Value;
+        AppNotificationOptions.IsValidPriority(priority).Should().BeTrue($"{priority} must be an appnotification priority option");
+        priority.Should().Be(
+            daysLeft <= 7 ? AppNotificationOptions.Priority.High : AppNotificationOptions.Priority.Normal,
+            "the reminders inside the final week are High, the earlier ones Normal");
+    }
+
+    [Fact]
+    public void IsTransient_AnArgumentException_IsNotRetried_ButAnUnknownFaultStillIs()
+    {
+        // A request the writer built wrongly (an option outside the table's set) fails identically on every attempt.
+        GrantExpiryReminderJob.IsTransient(new ArgumentOutOfRangeException("priority")).Should().BeFalse();
+        GrantExpiryReminderJob.IsTransient(new InvalidOperationException("wrapped", new ArgumentException("bad"))).Should().BeFalse();
+        GrantExpiryReminderJob.IsTransient(new InvalidOperationException("unrecognised")).Should().BeTrue();
+        GrantExpiryReminderJob.IsTransient(new TimeoutException()).Should().BeTrue();
     }
 
     [Theory]

@@ -537,6 +537,9 @@ public class SecureChildOwnershipTests
         notifications.Should().OnlyContain(n =>
             n.GetAttributeValue<string>("body").Contains(RecordOwnerRefusal.SecureParentNotIsolated)
             && n.GetAttributeValue<string>("body").Contains("corr-146"));
+        // 200000002 ("Critical") is not an appnotification priority option; Dataverse rejects it and the alert was lost.
+        notifications.Should().OnlyContain(n =>
+            n.GetAttributeValue<OptionSetValue>("priority").Value == AppNotificationOptions.Priority.High);
     }
 
     [Fact]
