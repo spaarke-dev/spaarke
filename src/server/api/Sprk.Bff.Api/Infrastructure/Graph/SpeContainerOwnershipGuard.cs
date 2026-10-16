@@ -236,7 +236,9 @@ public class SpeContainerOwnershipGuard
     /// Writes this stamp's marker on a container the BFF has JUST created. Custom properties cannot be set
     /// in the create call, so this is a PATCH on the <c>customProperties</c> sub-resource (it merges; other
     /// properties are untouched). When Graph refuses it the new container is deleted (best effort) and the
-    /// creation fails: an unmarked container would be unreachable through this guard and orphaned.
+    /// creation fails: an unmarked container would be unreachable through this guard and orphaned. The failure is an
+    /// <see cref="InvalidOperationException"/>; when the delete fails too it is the
+    /// <see cref="ContainerLeftActiveException"/> subtype, naming the container left active (#1755 round 3).
     /// </summary>
     public async Task MarkOwnedAsync(string containerId, CancellationToken ct = default)
     {
@@ -273,13 +275,18 @@ public class SpeContainerOwnershipGuard
             var status = ex is ODataError odata ? odata.ResponseStatusCode.ToString(CultureInfo.InvariantCulture) : ex.GetType().Name;
             var detail = ex is ODataError odataError ? odataError.Error?.Message ?? odataError.Message : ex.Message;
             var removed = await TryDeleteUnmarkedAsync(graph, containerId).ConfigureAwait(false);
-            throw new InvalidOperationException(
+            var message =
                 $"Created SharePoint Embedded container '{containerId}' but could not write its ownership marker " +
                 $"'{MarkerPropertyName}' ({status}: {detail}). " +
                 (removed
                     ? "The new container was deleted again."
-                    : "Deleting it failed too: it is unreachable from this environment until it carries the marker."),
-                ex);
+                    : "Deleting it failed too: it is unreachable from this environment until it carries the marker.");
+
+            // Not removed: a live container exists that nothing names, and the caller must be able to say so with its id
+            // (#1755 round 3). Still an InvalidOperationException with the same message, for every other caller.
+            throw removed
+                ? new InvalidOperationException(message, ex)
+                : new ContainerLeftActiveException(containerId, message, ex);
         }
 
         if (_cache is not null)

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -461,11 +462,53 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>A systemuser sitting in the Secure Record BU.</summary>
     public sealed record SecureBuUser(Guid Id, bool IsDisabled = false, bool IsApplicationUser = false);
 
-    /// <summary>When false, SPE container creation returns null (Graph failure). Default true.</summary>
+    /// <summary>
+    /// When false, SPE container creation fails as a create Graph refused does (nothing was created). Default true.
+    /// (It returned null until #1755 round 2; the create never returns null now.)
+    /// </summary>
     public bool SpeContainerCreationSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When set, container creation goes through this REAL <see cref="ContainerOperations"/> (a test's WireMock Graph)
+    /// instead of the stub (#1755 round 2: the endpoint's Step 6 over what Graph actually answered). Default none.
+    /// </summary>
+    internal ContainerOperations? SpeContainerOperations { get; set; }
+
+    /// <summary>
+    /// When set, container creation throws what this builds from the display name asked for (#1755: a failure before
+    /// the create was sent, or <see cref="ContainerCreateOutcomeUnknownException"/> after it). Default none.
+    /// </summary>
+    internal Func<string, Exception>? SpeContainerCreationFailsWith { get; set; }
 
     /// <summary>When false, an UPDATE that RECORDS a container (a non-null <c>sprk_containerid</c>) throws. Default true.</summary>
     public bool ContainerStampSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When set, an UPDATE that RECORDS a container awaits this with the token the endpoint passed, before it is applied
+    /// (#1755). A hold that throws leaves the container unrecorded, as a cancelled or timed-out PATCH would. Default none.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnContainerRecord { get; set; }
+
+    /// <summary>
+    /// When set, an UPDATE that RECORDS a container awaits this AFTER it is applied (#1755). A hook that throws is a write
+    /// Dataverse committed whose answer failed or came too late. Default none.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnContainerRecorded { get; set; }
+
+    /// <summary>
+    /// When true, the read-back of the container a record names (a query selecting only <c>sprk_containerid</c>, after a
+    /// Step 7 write reported a failure — #1755) throws. Default false.
+    /// </summary>
+    public bool RecordedContainerReadBackFails { get; set; }
+
+    private readonly ConcurrentBag<Task> _serverRequests = new();
+
+    /// <summary>
+    /// Completes when every request the host has received so far has finished on the SERVER — including one whose client
+    /// already gave up (#1755: the server goes on after a disconnect). Await it before a test ends so its request cannot
+    /// run into the next test's <see cref="Reset"/>.
+    /// </summary>
+    internal Task ServerRequestsCompleted => Task.WhenAll(_serverRequests.ToArray());
 
     /// <summary>
     /// When false, an UPDATE that CLEARS <c>sprk_containerid</c> (a null value) throws — the unlinking of a shared
@@ -706,7 +749,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         SecureBuUsers.Clear();
         BusinessUnitUserReadSucceeds = true;
         SpeContainerCreationSucceeds = true;
+        SpeContainerCreationFailsWith = null;
+        SpeContainerOperations = null;
         ContainerStampSucceeds = true;
+        OnContainerRecord = null;
+        OnContainerRecorded = null;
+        RecordedContainerReadBackFails = false;
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
@@ -809,6 +857,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
         builder.ConfigureTestServices(services =>
         {
+            // #1755: every request the host serves is tracked to its end on the server (ServerRequestsCompleted).
+            services.AddSingleton<IStartupFilter>(new TrackServerRequests(_serverRequests));
+
             // The delegation gate (task 008) answers Write unless a test turns it off, and RECORDS what it was asked
             // about — task 144's "the record authorized is the record re-owned" is asserted on that record.
             services.RemoveAll<CallerRecordAccessProbe>();
@@ -884,6 +935,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     var top = invocation.Arguments[3] as int?;
 
                     Queries.Add((entitySet, filter));
+                    if (RecordedContainerReadBackFails && select == "sprk_containerid")
+                        throw new InvalidOperationException("Dataverse 503: simulated failure reading the recorded container back.");
                     var json = RowsJsonFor(entitySet, filter, select, top);
                     var listType = typeof(List<>).MakeGenericType(rowType);
                     var rows = JsonSerializer.Deserialize(json, listType)
@@ -906,8 +959,24 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             client
                 .Setup(c => c.UpdateAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
-                .Returns((string entitySet, Guid id, object payload, CancellationToken _) =>
-                    ApplyUpdate(entitySet, id, payload));
+                .Returns(async (string entitySet, Guid id, object payload, CancellationToken ct) =>
+                {
+                    // #1755: the write that records a container, held on the token the endpoint gave it — the stand-in for
+                    // an HTTP PATCH honouring its token. It lands only when the hold returns.
+                    if (OnContainerRecord is { } hold
+                        && Flatten(payload).TryGetValue("sprk_containerid", out var recorded) && recorded is not null)
+                    {
+                        await hold(ct);
+                    }
+
+                    await ApplyUpdate(entitySet, id, payload);
+
+                    if (OnContainerRecorded is { } after
+                        && Flatten(payload).TryGetValue("sprk_containerid", out var landed) && landed is not null)
+                    {
+                        await after(ct);
+                    }
+                });
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton(client.Object);
@@ -1617,6 +1686,28 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         return client;
     }
 
+    /// <summary>Records a task per request that completes when the server has finished it (<see cref="ServerRequestsCompleted"/>).</summary>
+    private sealed class TrackServerRequests(ConcurrentBag<Task> requests) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (context, inner) =>
+            {
+                var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                requests.Add(done.Task);
+                try
+                {
+                    await inner(context);
+                }
+                finally
+                {
+                    done.TrySetResult();
+                }
+            });
+            next(app);
+        };
+    }
+
     /// <summary>Container creation without Graph, recording what was asked for.</summary>
     private sealed class StubSpeFileStore : SpeFileStore
     {
@@ -1631,21 +1722,27 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             _fixture = fixture;
         }
 
-        public override Task<ContainerDto?> CreateContainerAsync(
+        public override Task<ContainerDto> CreateContainerAsync(
             Guid containerTypeId, string displayName, Guid owningBusinessUnitId, string? description = null,
             CancellationToken ct = default)
         {
             _fixture.CreatedContainerDisplayNames.Add(displayName);
             _fixture.CreatedContainerBusinessUnits.Add(owningBusinessUnitId);
 
-            return Task.FromResult<ContainerDto?>(
-                _fixture.SpeContainerCreationSucceeds
-                    ? new ContainerDto(
-                        Id: ProvisionedContainerId,
-                        DisplayName: displayName,
-                        Description: description,
-                        CreatedDateTime: DateTimeOffset.UnixEpoch)
-                    : null);
+            if (_fixture.SpeContainerOperations is { } real)
+                return real.CreateContainerAsync(containerTypeId, displayName, owningBusinessUnitId, description, ct);
+
+            if (_fixture.SpeContainerCreationFailsWith is { } fails)
+                return Task.FromException<ContainerDto>(fails(displayName));
+
+            return _fixture.SpeContainerCreationSucceeds
+                ? Task.FromResult(new ContainerDto(
+                    Id: ProvisionedContainerId,
+                    DisplayName: displayName,
+                    Description: description,
+                    CreatedDateTime: DateTimeOffset.UnixEpoch))
+                : Task.FromException<ContainerDto>(
+                    new InvalidOperationException("Failed to create SharePoint Embedded container: Graph refused it (seeded)."));
         }
     }
 
