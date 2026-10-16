@@ -4,7 +4,7 @@
     <title>Concurrency-safe tracking numbers {invoice}.{n}</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Concurrency guarantee (two parallel submissions never share a number) enforced against a Dataverse alternate key; a wrong retry rule double-creates or loses rows.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -41,7 +41,8 @@
   <constraints>
     <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
     <constraint source="D-37">Format exactly {firm invoice number}.{n}: firm invoice number trimmed as submitted, n a positive integer without padding. Sequence is per (firm, firm invoice number) — never global, never across firms.</constraint>
-    <constraint source="concurrency">Uniqueness comes from the alternate key, not from a read-then-write check. Next n = 1 + highest sprk_submissionsequence for that firm and firm invoice number (read), then write; on IsAlternateKeyDuplicate re-read and retry; at most 5 attempts, then fail with stable code ebilling.tracking.unavailable. Any other fault propagates on the first attempt (a timeout may have written the row).</constraint>
+    <constraint source="concurrency">Uniqueness comes from the alternate key, not from a read-then-write check. Next n = 1 + highest sprk_submissionsequence for that firm and firm invoice number (read), then write; on IsAlternateKeyDuplicate re-read and retry; at most 10 attempts (raised from 5 by the owner, D-87: k parallel callers need at most k attempts, and the ten-way case must all get a number), then fail with stable code ebilling.tracking.unavailable. Any other fault propagates on the first attempt (a timeout may have written the row).</constraint>
+    <constraint source="D-87 (owner, 2026-10-16)">The tracking number is assigned when the submission is first saved, so it is never blank: the allocator CREATES the sprk_invoicesubmission row with {firm invoice number}.{n} already set (sprk_trackingnumber stays SystemRequired: no placeholder, no schema change). There is no update path. A redelivered create is idempotent by the caller's submission id (the new row's id). D-88: the allocator never refuses because a firm invoice number was seen before.</constraint>
     <constraint source="ADR-002">The allocator is the only writer of sprk_trackingnumber and sprk_submissionsequence.</constraint>
     <constraint source="ADR-015">Logs carry submission id, attempt count and outcome — the firm invoice number is business data, log it only at Debug.</constraint>
   </constraints>
@@ -89,7 +90,7 @@
 
   <outputs>
     <output type="code">Services/Finance/Submission/TrackingNumberAllocator.cs, ITrackingNumberAllocator, FinanceModule.cs registration</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/TrackingNumberAllocatorTests.cs and the dev concurrency test</output>
+    <output type="test">tests/integration/data-mutation/FinanceSubmission/TrackingNumberAllocatorTests.cs (ADR-038 KEEP path; compiled into Sprk.Bff.Api.Tests) and TrackingNumberAllocatorLiveTests.cs (the dev concurrency and redelivery tests)</output>
   </outputs>
 
   <acceptance-criteria>
@@ -103,7 +104,7 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-10, D-37, D-43, NFR-07. Shared append point: FinanceModule.cs (one registration — re-read before editing). Tracking number may be allocated after extraction when the SPA user did not type a firm invoice number (044 returns null; 049 allocates).</notes>
+  <notes>Spec FR-10, D-37, D-43, NFR-07. Shared append point: FinanceModule.cs (one registration — re-read before editing). Tracking number may be allocated after extraction when the SPA user did not type a firm invoice number (044 returns null; 049 allocates) - SUPERSEDED by D-87: the number is set at create, 044 creates through the allocator and 049 never allocates. Done 2026-10-16; details, live evidence and the owner decisions in projects/ebilling-r1/notes/045-tracking-number-allocator.md. rework: fix-round-1 task 045</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
