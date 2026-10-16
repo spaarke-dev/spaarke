@@ -34,6 +34,10 @@ public partial class RouteAuthorizationGuardTests
         new Aggregator("Api/ComposeEndpoints.cs",
             "/api/compose + RequireAuthorization (ComposeEndpoints.cs:30-32), bound into the eight Compose*Endpoints files. "
             + "MapComposeSyncEndpoints also receives the ROOT builder `routes`, so its webhook is a root registration."),
+        new Aggregator("Api/Ontology/OntologyAdminEndpoints.cs",
+            "/api/v1/ontology/admin + RequireAuthorization + the dataverse-query rate limit (OntologyAdminEndpoints.cs:38-41), bound into "
+            + "Api/Ontology/OntologyAdminRulesEndpoints.cs by group.MapOntologyAdminRulesEndpoints() (ontology platform R1 task 100). The "
+            + "file also registers its own route, GET /capabilities."),
         new Aggregator("Api/ExternalAccess/ExternalAccessEndpoints.cs",
             "externalGroup /api/v1/external + RequireAuthorization(ExternalCollaboration) + CallerPrincipal (:54-57) and "
             + "adminGroup /api/v1/external-access + RequireAuthorization + AddDelegationRuleFilter (:123-126), bound into "
@@ -298,6 +302,14 @@ public partial class RouteAuthorizationGuardTests
             + "every read and write runs AS THE CALLER through IDataverseUserClient, so Dataverse enforces the Spaarke Ontology Administrator role "
             + "(a Console User's write is refused 403) and the audit names the human; an unresolved caller is the single 403. Nothing reads the "
             + "task 104 capability answer (OntologyAdminCallerBoundaryGuardTests)."),
+        new GovernedFile("Api/Ontology/OntologyAdminRulesEndpoints.cs", Scope.GroupGated,
+            "/api/v1/ontology/admin/rules/* (ontology platform R1 task 100, D-22, FR-57) -- the Rules area of the Ontology admin tab: the "
+            + "rule list and rule page (reads), PUT /{policyId}/enabled (On/Off) and POST /{policyId}/retire. The group is bound by "
+            + "OntologyAdminEndpoints (RequireAuthorization). Every Dataverse read and write is made AS THE CALLER through IDataverseUserClient "
+            + "by OntologyAdminRulesService (Dataverse enforces the Spaarke Ontology Administrator role on each write and the audit names the "
+            + "human); a rule whose sprk_domain is not empty or Ontology (Billing, Docketing) is the same 404 as a missing one, with no write. "
+            + "No route reads the capability answer (rule A of OntologyAdminCallerBoundaryGuardTests). Retire's only service-identity work is "
+            + "task 033's closure of the rule's Signals, called after the caller's own write succeeded."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -803,11 +815,15 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
     // The main session reconciles the count with the other ontology routes at integration.
     //
-    // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 103). Net +1: Api/Ontology/OntologyAdminClassificationEndpoints.cs ADDED --
+    // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 100). Net +1: Api/Ontology/OntologyAdminRulesEndpoints.cs ADDED --
+    // GET /api/v1/ontology/admin/rules, GET /rules/{policyId}, PUT /rules/{policyId}/enabled, POST /rules/{policyId}/retire. Bound by the
+    // new Aggregator OntologyAdminEndpoints.cs (GroupGated). Classified by GovernedFiles and four HandlerDecisions below.
+    //
+    // 127 -> 128 (2026-10-16, spaarke-ontology-platform-r1 task 103). Net +1: Api/Ontology/OntologyAdminClassificationEndpoints.cs ADDED --
     // GET/POST /api/v1/ontology/admin/classification/categories, PATCH /categories/{categoryId:guid} and PUT /categories/{categoryId:guid}/enabled.
     // Classified by GovernedFiles (RouteLevelGate, its own group) and one HandlerDecision per route below. The main session reconciles
-    // the count with the other ontology routes (tasks 100/101) at integration.
-    private const int ExpectedEndpointFileCount = 127;
+    // the count with the other ontology routes (task 101) at integration.
+    private const int ExpectedEndpointFileCount = 128;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1863,6 +1879,33 @@ public partial class RouteAuthorizationGuardTests
             "Ontology task 103: SetEnabledAsync (OntologyAdminClassificationEndpoints.cs:147) reads the row (OntologyAdminClassificationService.cs:745), "
             + "re-checks the name among the active categories when turning On, then PATCHes sprk_enabled AS THE CALLER through IDataverseUserClient, "
             + "version-conditional (:761, from :320), so Dataverse enforces prvWritesprk_TriageCategory."),
+        new HandlerDecision("GET /api/v1/ontology/admin/rules", "ListRulesAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminRulesService.ListAsync" },
+            "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.ListAsync (OntologyAdminRulesEndpoints.cs:83). It lists the "
+            + "policies, their version rows and the user-visible Signal numbers through IDataverseUserClient AS THE CALLER (GetRowsAsync, "
+            + "OntologyAdminRulesService.cs:441), each policy query carrying the Ontology-only domain condition (:142, :152); a caller no "
+            + "user context names is the single 403 (Classify, :487), a fault 503, never a shorter list (:153-162). Takes no id."),
+        new HandlerDecision("GET /api/v1/ontology/admin/rules/{policyId:guid}", "GetRuleAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminRulesService.GetAsync" },
+            "Ontology task 100: the handler's only I/O is OntologyAdminRulesService.GetAsync (OntologyAdminRulesEndpoints.cs:89), whose first act "
+            + "is ReadPolicyAsync (OntologyAdminRulesService.cs:202): the policy by id through IDataverseUserClient AS THE CALLER with the "
+            + "Ontology-only domain condition (:476). A rule the caller cannot read, that does not exist or is a Billing/Docketing rule is the "
+            + "uniform 404 before the versions, names or numbers are read (:203-206)."),
+        new HandlerDecision("PUT /api/v1/ontology/admin/rules/{policyId:guid}/enabled", "SetRuleEnabledAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminRulesService.SetEnabledAsync" },
+            "Ontology task 100 (D-22): the handler's only I/O is OntologyAdminRulesService.SetEnabledAsync (OntologyAdminRulesEndpoints.cs:96). "
+            + "It reads the policy by id AS THE CALLER with the Ontology-only domain condition (OntologyAdminRulesService.cs:281, :476; a missing, "
+            + "invisible or Billing rule is the uniform 404 with no write), refuses an inactive rule (:287-291), then PATCHes sprk_enabled through "
+            + "IDataverseUserClient (WriteAsync, :294, :410-412) so Dataverse enforces the Ontology Administrator role: a refusal is 403 (:425-427). "
+            + "The PATCH is issued even when the value is unchanged, so Dataverse decides every call."),
+        new HandlerDecision("POST /api/v1/ontology/admin/rules/{policyId:guid}/retire", "RetireRuleAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminRulesService.RetireAsync" },
+            "Ontology task 100 (D-22, FR-16): the handler's only I/O is OntologyAdminRulesService.RetireAsync (OntologyAdminRulesEndpoints.cs:103). "
+            + "A missing reason is refused before any I/O (:311-322). It reads the policy by id AS THE CALLER with the Ontology-only domain "
+            + "condition (OntologyAdminRulesService.cs:324, :476; uniform 404, no write), PATCHes statecode/statuscode/sprk_retiredreason through "
+            + "IDataverseUserClient conditional on the row version it read (WriteAsync, :350, :410-411; a concurrent change is a 412, returned as a 409 "
+            + "with no closure, :427; a Console User is refused by Dataverse, 403), and ONLY THEN calls task 033's PolicyRetired closure "
+            + "(CloseOpenSignalsAsync, :361): a refused write returns before the closure (:351-358)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
