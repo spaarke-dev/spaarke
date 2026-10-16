@@ -33,7 +33,7 @@ namespace Spaarke.ArchTests;
 ///   <item>a FILTER on <c>isdisabled</c>: <c>isdisabled eq false</c> / <c>eq 0</c>, a <c>"isdisabled", ConditionOperator</c>
 ///   condition, or a FetchXML <c>condition attribute="isdisabled"</c>; or</item>
 ///   <item>the value READ AND CHECKED: <c>GetAttributeValue&lt;bool?&gt;("isdisabled")</c>, a <c>GetProperty</c> /
-///   <c>TryGetProperty("isdisabled")</c> read, a DTO's <c>.IsDisabled</c> read, or <c>IsStandingEligible(</c> (which
+///   <c>TryGetProperty("isdisabled")</c> read, a DTO's <c>.IsDisabled</c> / <c>.isdisabled</c> read, or <c>IsStandingEligible(</c> (which
 ///   rejects disabled users).</item>
 /// </list>
 /// <para>Selecting the column alone (<c>ColumnSet</c>, <c>$select</c>) is NOT evidence: a selected value nobody checks
@@ -63,8 +63,6 @@ public class SystemUserOidLookupDisabledGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> Baseline = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessMaterializer.cs"] =
-            "open PR #2016 (fix/uac-1620-unshare-owner) edits this file",
         ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/UserProvisioning/DataverseWebApiGuestUserWriter.cs"] =
             "active project customer-provisioning-orchestration-r1 (branch work/customer-provisioning-orchestration-r1) edits "
             + "this file. Expected disposition once it merges: a deliberate exception — the alternate-key read is how Dataverse "
@@ -105,7 +103,7 @@ public class SystemUserOidLookupDisabledGuardTests
         // Read and checked.
         new(@"GetAttributeValue\s*<\s*bool\??\s*>\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"\b(?:Try)?GetProperty\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
-        new(@"\.IsDisabled\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        new(@"\.IsDisabled\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
         new(@"\bIsStandingEligible\s*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant),
     };
 

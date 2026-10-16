@@ -1129,6 +1129,9 @@ public static class GrantExternalAccessEndpoint
     internal sealed class SystemUserRow
     {
         public Guid? systemuserid { get; set; }
+
+        /// <summary>Read only where selected (AssignedAccessMaterializer's actor read, issue #1576); null otherwise.</summary>
+        public bool? isdisabled { get; set; }
     }
 
     // =========================================================================
