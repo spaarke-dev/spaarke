@@ -1470,7 +1470,9 @@ Two sub-steps, in order (H14m is not attempted when H14a fails — its authoriza
   - **A second run writes nothing** (mailbox `AlreadyCompliant`, row already Verified).
   - **Quarantine, nothing changed** (`h14m-mailbox-drift`): a recipient with that name, alias or address that is not a
     shared mailbox, has another name/address (another customer's or a person's), sits outside the scope group or in any
-    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}`. `h14m-account-row-conflict`: the stamp
+    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}` (optionally followed by exactly 14
+    digits: a group created in the admin center gets its Exchange Name from the alias plus its creation time, e.g.
+    `Spaarke-AppAccess-acme20261014194847` — T186 L59). `h14m-account-row-conflict`: the stamp
     has several rows for the address, an inactive one, or one of another type.
   - **Resumable**: `h14m-mailbox-ensure-failed` (sidecar / Exchange / **the T263 Exchange roles not applied — §4.2.1 step 5,
     pending owner decision D32**; nothing is created), `h14m-mailbox-unverified` (a role not yet in scope; no row written),
