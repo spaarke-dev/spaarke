@@ -561,6 +561,7 @@ Optionally add defence in depth at runtime, independent of app configuration: re
 **Estimated effort**: provisioning, hours. Runtime check: a day, including tests.
 **Blockers**: none.
 **Related**: ADR-028 A9; R3 tasks 047, 059; customer-provisioning-orchestration-r1 (H3, H13).
+**Owner**: customer-provisioning-orchestration-r1 task 264 (post-T186 follow-up; accepted 2026-10-16). It first checks Learn for Graph beta-only, then H3 sets with get-before-set and a read-back, and H13 verifies both apps.
 
 ---
 
