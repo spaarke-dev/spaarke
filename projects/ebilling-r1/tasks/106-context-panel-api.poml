@@ -4,7 +4,7 @@
     <title>Context panel API</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only, deterministic aggregation behind an existing authorization pattern; no writes.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,7 +98,8 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Parallel group P4-A with 100, 107, 108, 109: own files; FinanceModule.cs and EndpointMappingExtensions.cs are shared append points. NFR-02 timing in dev is measured by 112. The Context pane UI is 111's. RequireEbillingEnabled() comes from 040 (wave W2-1), which is not a declared dependency: confirm it exists at Step 0, else STOP.</notes>
+  <notes>Completed 2026-10-16. GET /api/finance/invoices/{invoiceId}/context: five independent sections (core record, budget rollups as stored, other invoices, disallow history, rate history), finance.read on the invoice then RequireEbillingEnabled, 200 unless authorization fails, per-section unavailable code, Work Assignment budget notTracked. 9 Dataverse reads independent of line count. Concrete InvoiceContextService (ADR-010 ceiling unchanged at 166). Publish size +0.031 MB (37.325 vs 37.294 MB), no vulnerable packages. Assumptions (decided invoices only for disallow history, core record ambiguity, classification rates) and known limits in notes/106-context-panel-api.md. Rollup staleness in dev is the already-filed #1663.
+rework: fix-round-1 task 106</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
