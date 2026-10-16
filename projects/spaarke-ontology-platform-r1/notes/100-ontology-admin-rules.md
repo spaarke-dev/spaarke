@@ -80,6 +80,16 @@ GET teams?$select=name,teamtype&$filter=teamroles_association/any(o:o/roleid eq 
 
 Result on spaarkedev1, 2026-10-16: the privilege is held by System Administrator, Spaarke Ontology Administrator, System Customizer and Service Writer. System Administrator is held by two enabled humans (Ralph Schroeder, Delegated Admin) and app identities; Spaarke Ontology Administrator by Ralph Schroeder. **System Customizer is held only by app identities on dev** (Microsoft Copilot Studio, github-actions-spe-infrastructure) and **Service Writer only by app identities** (Power Platform first-party applications and managed identities); neither role is assigned to any team. So no human other than a System Administrator or an Ontology Administrator can write a policy today. Re-run it whenever a role is assigned or a team is given a role; System Customizer is the one to watch (it is a standard role an admin might hand to a person).
 
+## Re-check (2026-10-16, Sonnet, head `1dc3f082a`): merge, no F-class
+
+Known limits (K4), not fixed:
+- On/Off is unconditional (`OntologyAdminRulesService.cs:294`, `expectedVersion: null`): last write wins by intent. Against a racing Retire, Dataverse refuses the write on the inactive row or Retired still wins in display; closure unaffected. Optional: pass `versionnumber` as Retire does.
+- Server Retire accepts an Inactive, non-retired rule (only checks `statuscode == Retired`, :330). Harmless: the nightly Off/Retired closure step already closes those Signals. Optional: `statecode != Active` → 409 NotActive.
+- The 409 text says "changed since you opened it" but the version is read at request time, so only a read-to-write race is caught (:359).
+- `rulesService.ts` `messageFor`: a 408/429 on a write reads "could not be reached" with `outcomeUnknown` false; server faults map to 503 so this is unlikely.
+- After a 409 or unknown outcome the page behind the Retire dialog is not reloaded; the message tells the admin to reload.
+- Earlier jest flake not reproduced in 7 runs; likely cause is the Retire dialog `findBy` calls on the default 1 s `asyncUtilTimeout` under a cold, CPU-starved first render. Hardening: `{ timeout: 5000 }` on those two calls.
+
 ## Out-of-scope observations
 
 - `InboundBodyDtoMappingGuardTests` fails on the base for `OntologyAdminCapabilities.CanAuthorPolicies` (task 104); fixed on the docs branch at `58e810405`. Not fixed here.

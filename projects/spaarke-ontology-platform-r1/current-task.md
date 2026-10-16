@@ -28,7 +28,6 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 | 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
 | 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
 | 049 revoke Signal Write + DR Create [uac] | `C:\wts-049` | sonnet/high | PR #2022 MERGED into docs (2 adversarial passes + uac-r2 OK + re-check). LIVE APPLY PENDING owner: after the 055 check and the Ontology Administrator answer (Q6; `$A5Waiver = $null` if removed). Run from a checkout of the docs branch: `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Apply` then `-Verify` (expect exit 0). Notify uac-r2 before/after. Rollback: security-roles.md §14 |
-| 100 admin rules read-only + On/Off + Retire | `C:\wts-100` `task/ontology-100` | sonnet/high | implementing (launched 2026-10-16); routes in OntologyAdminRulesEndpoints.cs; interim sprk_domain filter until ebilling RuleDomains lands |
 | 101 admin authoring BFF [auth] | `C:\wts-101` `task/ontology-101` | opus/high | implementing; 2 adversarial passes + uac-r2 later; routes in OntologyAdminAuthoringEndpoints.cs |
 | 103 classification admin | `C:\wts-103` `task/ontology-103` | sonnet/high | implementing; routes in OntologyAdminClassificationEndpoints.cs |
 
