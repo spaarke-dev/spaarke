@@ -533,8 +533,10 @@ public sealed record BindingDecision(
     IReadOnlyList<Guid>? FlagContactIds = null)
 {
     /// <summary>
-    /// Task 185: set on a CIAM-plane <see cref="BindingAction.BindByEmail"/> made through E11's marker leg. The binder must
-    /// clear the contact's invite-code hash in the SAME conditional write as the oid bind, so the code is single-use.
+    /// Task 185: set on a CIAM-plane <see cref="BindingAction.BindByEmail"/> made through E11's marker leg: the bind was
+    /// proven by a presented invite code, which the bind's SAME conditional write clears, so the code is single-use. #2005:
+    /// the binder clears a pending hash on EVERY bind onto an existing contact, whatever the plane, so this flag records
+    /// the E11 proof; it no longer selects the write.
     /// </summary>
     public bool ConsumeInviteCode { get; init; }
 
@@ -1422,7 +1424,8 @@ public static class ContactBindingDecision
     /// <summary>
     /// <c>contact.sprk_externalinvitedon</c> — the pending-invite marker (task 184, owner round 96: the one column the
     /// no-schema rule was lifted for). A UTC date-and-time the BFF's invite flow writes BEFORE it creates the CIAM account,
-    /// overwritten by a re-invite, never cleared. "Pending" = set AND no oid binding. FIELD-SECURED so only the BFF can
+    /// overwritten by a re-invite, never cleared. "Pending" = current (<see cref="IsInviteMarkerCurrent"/>) AND its code
+    /// hash (<see cref="ExternalInviteCodeHashColumn"/>) not yet consumed by a bind (#2005). FIELD-SECURED so only the BFF can
     /// write it (<c>scripts/Set-ExternalInviteMarkerSchema.ps1</c>): a user who could set it could open E11's email bind.
     /// Read in its OWN query, never in <c>ContactSelect</c>, so a BFF deployed before the column keeps every binding read.
     /// It is NOT a binding and never touches <see cref="IdentityPlaneColumn"/>: "plane marker with no oid" stays Unreadable.

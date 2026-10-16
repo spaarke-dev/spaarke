@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="156" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Make the Worklist reachable in the Console: LegalWorkspace section shim + "Worklist" workspace layout row</title>
+    <phase>5 The worklist surface</phase>
+    <gate>Blocks 055's browser verification</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a section registration (code) and a Dataverse seed script; gates a deploy verification.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy of an existing, recent shim + seed script (reconciliation, 2026-10).</model-tier-reason>
+    <effort>high</effort>
+    <deps>059, 155</deps>
+    <tags>frontend,react,fluent-ui,dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Found at the 055 deploy (2026-10-16): the `worklist` direct widget is registered (`src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts:1055`) but no Console path opens it. The workspace dropdown lists `sprk_workspacelayout` rows, not the registry (docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md §3.1); each row mounts ONE LegalWorkspace section by id; there is no `worklist` section or row. Make "Worklist" appear in the dropdown and open the worklist, exactly as "Reconciliation" was made reachable.</prompt>
+  <role>SPAARKE frontend engineer.</role>
+  <goal>A user opening https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai sees "Worklist" in the workspace dropdown; picking it shows the worklist (both lanes, read only through the BFF route), and opening a line launches the decision wizard in the Console's in-app host.</goal>
+
+  <context>
+    <background>Canonical reference to copy (Pattern D, dual-use): `src/solutions/LegalWorkspace/src/sections/reconciliation.registration.ts` plus `scripts/seed-reconciliation-workspace-layout.ps1` (email-communication-intelligence-r2 UAT Fix #6). Also `calendar.registration.ts` (62-line shim) and docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md §1 Pattern D. The worklist component is `WorklistWidget` (`@spaarke/ui-components`, Worklist folder); the Console's direct-widget wrapper is `WorklistWorkspaceWidget.tsx` in Spaarke.AI.Widgets (it builds `createWorklistService({ fetch, baseUrl })` from `useAiSession()` and passes `launchWizard`). The decision wizard launcher is module-level: `launchDecisionWizard` in `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionWizardLauncher.ts`, served by `DecisionWizardHost`, which the Console mounts once in `ThreePaneShell.tsx` (about line 975).</background>
+    <relevant-files>
+      <file role="create">src/solutions/LegalWorkspace/src/sections/worklist.registration.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/index.ts, plus the section registry or metadata catalog the reconciliation shim was added to</file>
+      <file role="create">scripts/seed-worklist-workspace-layout.ps1</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/reconciliation.registration.ts</file>
+      <file role="canonical-reference">scripts/seed-reconciliation-workspace-layout.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: copy the reconciliation shim's shape exactly (a `.ts` file using `React.createElement`, `SectionRegistration`/`ContentSectionConfig`, registered wherever reconciliation is registered, plus any section metadata catalog entry). Section id `worklist`, label "Worklist", icon `TaskListSquareLtrRegular` (the direct widget's icon).</constraint>
+    <constraint source="D-15">Scope: the shim renders the SAME `WorklistWidget` with a service from `createWorklistService({ fetch, baseUrl })`, where fetch is LegalWorkspace's `authenticatedFetch` (`../services/authInit`) and baseUrl is `getBffBaseUrl()` (`../config/runtimeConfig`), resolved as the reconciliation shim resolves them. No Xrm or Dataverse reads of Signals. If `WorklistWorkspaceWidget` can be reused unchanged in this host, prefer it; if it depends on `useAiSession()` that is not available inside the embedded LegalWorkspace tree, build the service in the shim instead, and say which in the PR.</constraint>
+    <constraint source="D-26">Scope: opening a line launches the decision wizard through `launchDecisionWizard` (the in-app host), never navigateTo and never WizardModal. Pass the same `launchWizard` the direct widget passes. In the standalone LegalWorkspace code page (no `DecisionWizardHost`), the launch result is whatever the launcher already returns there; do not add a host there.</constraint>
+    <constraint source="project">Scope (seed): `scripts/seed-worklist-workspace-layout.ps1` is a copy of the reconciliation seed with name "Worklist", `sprk_sectionsjson` in the reconciliation row's shape with `["worklist"]`, and the system flag set as reconciliation sets it. Idempotent by name; `-WhatIf` supported; default `-DataverseUrl https://spaarkedev1.crm.dynamics.com`. Do NOT run it against Dataverse except with `-WhatIf`; the main session runs it.</constraint>
+    <constraint source="project">Scope: no change to `WorklistWidget`, the BFF, or the registry entry. Build with the LegalWorkspace and SpaarkeAi solution builds (`npm install --legacy-peer-deps --no-audit --no-fund`, then `npm run build`).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`reconciliation.registration.ts` and its seed script (the same reachability fix for a sibling widget); the `worklist` direct widget.</existing>
+    <extension>The widget and the dropdown both exist; the only missing pieces are the one-screen section shim and the layout row, which is how every dropdown entry is reached.</extension>
+    <cost-of-doing-nothing>The deployed worklist cannot be opened by any user, so 055's real-Dataverse verification and UAT cannot happen.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read the two canonical references.</step>
+    <step order="1">Section shim and registration, with a registration test if the reconciliation shim has one.</step>
+    <step order="2">Seed script (WhatIf only).</step>
+    <step order="3">LegalWorkspace and SpaarkeAi builds pass; PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the section cannot render the worklist inside the embedded LegalWorkspace tree without changing `WorklistWidget`, the registry or the Console shell, STOP and report what is missing.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">The LegalWorkspace section registry includes `worklist`, rendering `WorklistWidget` with a BFF-route service (the same registration test pattern reconciliation uses, if any).</criterion>
+    <criterion testable="true">`scripts/seed-worklist-workspace-layout.ps1 -WhatIf` describes one create of a "Worklist" `sprk_workspacelayout` row with sections `["worklist"]`; with the row present it reports no change (idempotent by name).</criterion>
+    <criterion testable="true">Negative: the new shim reads no `sprk_signal` or `sprk_decisionrecord` through Xrm or Dataverse.</criterion>
+    <criterion testable="true">LegalWorkspace and SpaarkeAi `npm run build` succeed. Tests cover the criteria above only.</criterion>
+  </acceptance-criteria>
+
+  <notes>Found by the main session at the 055 deploy (code map 2026-10-16). Task 064 later replaces the Briefing tab; this task only makes the worklist reachable.</notes>
+
+  <completion date="2026-10-16">PR #2004 merged `2160308e6` into docs/ontology-platform-design. Shim builds the service from LegalWorkspace's authenticatedFetch + getBffBaseUrl (WorklistWorkspaceWidget's useAiSession throws on the standalone page) and fills lookup + aggregateRow exactly as the direct widget does (review F1: without lookup, Revise budget / Reassign / Add To Do / Assign Work could not complete). Opus review, one fix round, re-check clean; seeding proof on the lookup case. Seed not yet run on dev (main session, after the Console redeploy). Follow-up DI-103 #2006 (provisioned environments).</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

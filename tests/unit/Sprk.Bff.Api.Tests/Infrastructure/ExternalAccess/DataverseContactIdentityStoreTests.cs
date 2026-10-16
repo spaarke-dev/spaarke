@@ -603,6 +603,139 @@ public class DataverseContactIdentityStoreTests
         requests.Should().Be(0);
     }
 
+    // ── #2005: the consuming bind on an environment without the hash column ──────────────────────────────
+    // The fallback is the store's own orchestration of two PATCHes, with no pure seam, so these use a hand-written fake
+    // HTTP handler that records each request and answers from a script (testing.md B1 bans Mock<HttpMessageHandler>, not a
+    // fake; the same shape as ExternalDataServiceServiceRequestCreateTests).
+
+    private const string HashColumnMissingBody =
+        "{\"error\":{\"code\":\"0x80048d19\",\"message\":\"Error identified in Payload provided by the user for Entity :'contacts'. "
+        + "The property 'sprk_externalinvitecodehash' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}";
+
+    /// <summary>
+    /// #2005: every bind now names the hash column. Where it is not provisioned, the platform refuses the whole PATCH as a
+    /// missing property (nothing written); the store re-sends the PLAIN bind under the SAME row version, so the bind
+    /// succeeds exactly as it did before the schema. MUTATION PROOF: without the fallback the bind answers Failed after
+    /// one request.
+    /// </summary>
+    [Fact]
+    public async Task TheConsumingBind_WhereTheHashColumnIsMissing_SendsThePlainBind_UnderTheSameRowVersion()
+    {
+        var http = new ScriptedHttp(
+            (HttpStatusCode.BadRequest, HashColumnMissingBody),
+            (HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().BindOidAndConsumeInviteAsync(IntentContact, "W/\"42\"", Oid,
+            IdentityPlaneMarker.Workforce, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        http.Requests.Should().HaveCount(2);
+        http.Requests.Should().AllSatisfy(r =>
+        {
+            r.Method.Should().Be(HttpMethod.Patch);
+            r.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+            r.IfMatch.Should().Be("W/\"42\"", "the retry is conditional on the version the decision was made on");
+        });
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[0].Body)!.Keys
+            .Should().Contain("sprk_externalinvitecodehash");
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[1].Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane");
+    }
+
+    /// <summary>
+    /// #2005: the fallback is ONLY for the hash column being missing. A provisioned column binds and consumes in one
+    /// request; a 412, a duplicate key or any other fault is returned as it is, with no second request.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.NoContent, null, StoreWriteStatus.Written)]
+    [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060882\",\"message\":\"The version of the existing record doesn't match\"}}", StoreWriteStatus.PreconditionFailed)]
+    [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060892\",\"message\":\"A record that has the attribute values External Object ID already exists.\"}}", StoreWriteStatus.KeyConflict)]
+    [InlineData(HttpStatusCode.BadRequest, "{\"error\":{\"message\":\"The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", StoreWriteStatus.Failed)]
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"message\":\"Principal user is missing prvWriteContact privilege (sprk_externalinvitecodehash)\"}}", StoreWriteStatus.Failed)]
+    public async Task TheConsumingBind_FallsBackOnlyForAMissingHashColumn(HttpStatusCode code, string? body, StoreWriteStatus expected)
+    {
+        var http = new ScriptedHttp((code, body));
+
+        var write = await http.Store().BindOidAndConsumeInviteAsync(IntentContact, "W/\"42\"", Oid,
+            IdentityPlaneMarker.External, CancellationToken.None);
+
+        write.Status.Should().Be(expected);
+        http.Requests.Should().ContainSingle().Which.Body.Should().Contain("\"sprk_externalinvitecodehash\":null");
+    }
+
+    // ── #2005 K1: the invite mark is never unconditional ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// #2005 K1: without a row version (null, empty or <c>*</c>) the marker-and-hash write is refused before any request:
+    /// <c>If-Match: *</c> would land on a contact a workforce sign-in bound since it was read. MUTATION PROOF: the former
+    /// <c>?? "*"</c> fallback sends a request and fails this test.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    public async Task TheInviteMark_WithoutARowVersion_SendsNothing(string? etag)
+    {
+        var requests = 0;
+        var store = new DataverseContactIdentityStore(
+            new CountingHttpClientFactory(() => requests++),
+            _ => { requests++; throw new InvalidOperationException("no request may be made"); },
+            "https://org.test.invalid",
+            NullLogger.Instance);
+
+        var write = await store.MarkInvitedAsync(IntentContact, etag, DateTimeOffset.UtcNow, StoredHash, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Failed);
+        write.Error.Should().Be("no row version for the invite mark");
+        requests.Should().Be(0);
+    }
+
+    /// <summary>#2005 K1: with a row version the mark is ONE PATCH conditional on exactly that version, never <c>*</c>.</summary>
+    [Fact]
+    public async Task TheInviteMark_IsConditionalOnTheRowVersion_NeverStar()
+    {
+        var http = new ScriptedHttp((HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().MarkInvitedAsync(IntentContact, "W/\"7\"", DateTimeOffset.UtcNow, StoredHash,
+            CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        var request = http.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Patch);
+        request.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+        request.IfMatch.Should().Be("W/\"7\"").And.NotBe("*");
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(request.Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalinvitedon", "sprk_externalinvitecodehash");
+    }
+
+    /// <summary>Answers each request with the next scripted response and records what was sent.</summary>
+    private sealed class ScriptedHttp(params (HttpStatusCode Code, string? Body)[] responses) : IHttpClientFactory
+    {
+        private readonly Queue<(HttpStatusCode Code, string? Body)> _responses = new(responses);
+
+        public List<(HttpMethod Method, string Uri, string? IfMatch, string Body)> Requests { get; } = new();
+
+        public DataverseContactIdentityStore Store()
+            => new(this, _ => Task.FromResult("token"), "https://org.test.invalid", NullLogger.Instance);
+
+        public HttpClient CreateClient(string name) => new(new Handler(this));
+
+        private sealed class Handler(ScriptedHttp owner) : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+            {
+                var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
+                var ifMatch = request.Headers.TryGetValues("If-Match", out var values) ? values.Single() : null;
+                owner.Requests.Add((request.Method, request.RequestUri!.ToString(), ifMatch, body));
+                var (code, text) = owner._responses.Dequeue();
+                return new HttpResponseMessage(code)
+                {
+                    Content = new StringContent(text ?? string.Empty),
+                };
+            }
+        }
+    }
+
     /// <summary>Fails the test's count if the store ever asks for an HTTP client (no HTTP double: nothing is answered).</summary>
     private sealed class CountingHttpClientFactory(Action onCreate) : IHttpClientFactory
     {
