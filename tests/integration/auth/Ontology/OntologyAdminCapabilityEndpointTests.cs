@@ -188,7 +188,7 @@ public class OntologyAdminCapabilityEndpointTests : IClassFixture<OntologyAdminC
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("exp", now.AddSeconds(expInSeconds).ToUnixTimeSeconds().ToString())], "test"));
 
-        OntologyAdminEndpoints.CacheLifetime(principal, now)
+        OntologyAdminCapabilityProbe.CacheLifetime(principal, now)
             .Should().Be(expectedSeconds is { } s ? TimeSpan.FromSeconds(s) : null);
     }
 
@@ -201,7 +201,7 @@ public class OntologyAdminCapabilityEndpointTests : IClassFixture<OntologyAdminC
         var claims = exp is null ? Array.Empty<Claim>() : [new Claim("exp", exp)];
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
 
-        OntologyAdminEndpoints.CacheLifetime(principal, DateTimeOffset.UtcNow).Should().BeNull();
+        OntologyAdminCapabilityProbe.CacheLifetime(principal, DateTimeOffset.UtcNow).Should().BeNull();
     }
 }
 

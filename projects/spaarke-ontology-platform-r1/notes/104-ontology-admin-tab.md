@@ -113,6 +113,10 @@ Through the BFF route, the live leg `OntologyAdminCapabilityLiveTests` returned:
   and rate limit already on it); 100 and 101 map their routes on that group. 103's POML names its own
   `OntologyAdminClassificationEndpoints.cs`. Every write authorizes itself as the caller; **no route may read the
   capability answer**.
+  The probe, its cache and `OntologyAdminCapabilities` live in `OntologyAdminCapabilityProbe.cs`, the only file rule A of
+  `OntologyAdminCallerBoundaryGuardTests` exempts: a route file reaches it through the one
+  `OntologyAdminCapabilityProbe.ResolveAsync` call in `GetCapabilitiesAsync` and nothing else, so a new handler in
+  `OntologyAdminEndpoints.cs` cannot call the probe or read its cache without failing the guard.
 - **UI.**
   - `OntologyAdminTab` (`@spaarke/ui-components`) has two slots: `rules` (100) and `classification` (103).
   - `OntologyAdminWorkspaceWidget` (`@spaarke/ai-widgets`) is where those areas are built from `useAiSession()` and

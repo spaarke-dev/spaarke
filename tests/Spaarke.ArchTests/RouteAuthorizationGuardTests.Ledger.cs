@@ -2785,9 +2785,9 @@ public partial class RouteAuthorizationGuardTests
             "Constant module status plus the caller's OWN privilege level from their role claims "
             + "(ReportingEndpoints.cs:141-148). Reads no report, takes no id."),
         Permanent("GET /api/v1/ontology/admin/capabilities", PermanentBasis.CallerScopedOnly, "ontology-104",
-            "The caller's OWN privilege set: WhoAmI() as the caller (OntologyAdminEndpoints.cs:154), then "
-            + "RetrieveUserPrivilegeByPrivilegeName on the systemuserid WhoAmI returned, also as the caller (:169, :189). Takes no id; "
-            + "returns one boolean. An unresolved caller is the single 403 (:104-113). Display only (D-22): every admin write "
+            "The caller's OWN privilege set: WhoAmI() as the caller (OntologyAdminCapabilityProbe.cs:103), then "
+            + "RetrieveUserPrivilegeByPrivilegeName on the systemuserid WhoAmI returned, also as the caller (:118, :137-138). Takes no id; "
+            + "returns one boolean. An unresolved caller is the single 403 (OntologyAdminEndpoints.cs:71-80). Display only (D-22): every admin write "
             + "authorizes itself as the caller."),
         Permanent("GET /api/workspace/portfolio", PermanentBasis.CallerScopedOnly, "167",
             "Portfolio summary for the caller's own oid (WorkspaceEndpoints.cs:121, :140). Takes no id."),
