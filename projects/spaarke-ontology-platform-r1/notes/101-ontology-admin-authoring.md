@@ -54,7 +54,7 @@ Identity:
    - The wizard cannot rebuild the flagship rule from catalog entries alone. Widening the catalog is a compiler-list change
      with its own review, not a 101 change.
 6. **The dry-run proof** is a tenant-cache entry (TTL 1 h) keyed by caller, policy (or "new") and a length-prefixed SHA-256 of
-   rule type, rule body and template.
+   lane (fix round 1, K2), rule type, rule body and template.
    - Save and publish require it for the exact text: any edit needs a new test run.
    - The headline, proposed action and plan are not part of the key, because they do not change what the rule raises.
    - An unreadable cache fails closed (409).
@@ -67,9 +67,40 @@ Identity:
    Compensation:
    - A 412 at step 2 marks the new version never in force (`inforceto = inforcefrom`) and returns 409.
    - A failure at step 3 also undoes our stamp on the old version, but only if the stamp is still ours.
+   - Fix round 1 (F2-2, F2-3): after step 1 everything runs on `CancellationToken.None`. A non-412 answer or a throw at step 2
+     or 3 re-reads the row as the caller first: a stamp or pointer move that landed is a success (no compensation, step 4
+     runs); a pointer that cannot be re-read is a 503 with nothing undone (logged). The new version is never stamped while
+     the pointer names it.
    - A reevaluation failure after the pointer moved returns 200 with `reevaluation: "failed"`. The version stands, and the
      nightly run retries. The job's summary is logged, not returned.
-8. **Engine seam (§11).**
+8. **The POML's live seam tests are written but NOT run in this lane (fix round 1, F3-4).** The lane allows no live writes.
+   `tests/integration/Sprk.Bff.Api.IntegrationTests/Ontology/OntologyAdminAuthoringLiveTests.cs` holds them, opt-in
+   (skip-via-return, the `BusinessOwnedAppendToLiveTests` pattern), self-cleaning (`zz-101-test` names, policy code
+   `ZZ-101-…`; Signals, Decision Records, versions and the policy deleted in `finally`; zero-count check):
+   - `LiveMode_AnAdminPublish_SupersedesTheOneOpenSignal_AndReRaisesItAsEpisode2`: admin dry run + save (Off) of a rule
+     that holds for one configured matter; the operator turns it On; the job's single-policy pass raises episode 1; the
+     admin dry-runs and publishes v2; asserts `reevaluation: completed`, superseded 1, raised 1, and a `|2` Signal citing v2.
+   - `LiveMode_AConsoleUser_DryRunIs403_AndSaveIsRefusedByDataverse_403`: the Console User's dry run is 403
+     `ontology.admin.forbidden`. A Console User can no longer obtain a proof, so the test plants one in the test host's own
+     tenant cache; the save then reaches the deep insert and Dataverse refuses it as that user (403
+     `ontology.admin.refused`, zero rows).
+   - One shared change: `WorkAssignmentCreateLiveTests.LiveUserClient` gains the version-conditional `PatchAsync`
+     overload (If-Match `W/"n"`, as production), which publish needs.
+
+   To run them (the main session; they WRITE to spaarkedev1, then delete what they wrote):
+   ```
+   az login   # an identity that may create policies and impersonate (System Administrator)
+   export SPAARKE_LIVE_101_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com
+   export SPAARKE_LIVE_101_ADMIN_ID=<systemuserid holding Spaarke Ontology Administrator>
+   export SPAARKE_LIVE_101_CONSOLE_USER_ID=<systemuserid of a Spaarke Console User without it, e.g. Chelsea Friez>
+   export SPAARKE_LIVE_101_MATTER_ID=<sprk_matterid of an ACTIVE matter the admin can read>
+   export SPAARKE_LIVE_101_WRITER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc
+   dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ --filter "FullyQualifiedName~OntologyAdminAuthoringLiveTests" --logger "console;verbosity=detailed"
+   ```
+   Substitutions: the inbound token (the user's real oid), the OBO exchange (operator token + MSCRMCallerID), the app identity
+   (operator `az` credential), and the Signal writer (operator ServiceClient impersonating the writer principal, the
+   `SignalWriterSeamTests` method). Without the variables both tests return at once (verified: 2 pass, no network).
+9. **Engine seam (§11).**
    - *Existing:* `SignalEvaluator` and `SignalReevaluationJob`.
    - *Extension:* they are sealed concrete singletons over the app identity.
    - *Cost of doing nothing:* the dry run's caller filtering and the publish ordering could only be tested live.
@@ -80,12 +111,18 @@ Identity:
   planner itself. Two cases are approximate: a Signal the admin cannot read, and quiet-window edge cases at the second.
 - **K-101-2.** The dry run returns identity and display only (name, number, core). It returns no facts and no evidence: a row
   shows only what the caller can already read.
-- **K-101-3.** If the save's pointer PATCH fails after the deep insert, the policy is left Off with v1 not current, and the
-  route returns 503. It never evaluates (it is Off), and the nightly run reports it.
+- **K-101-3.** If the save's pointer PATCH fails (an answer or a throw) after the deep insert, the policy is left Off with v1
+  not current. It never evaluates (it is Off), and the nightly run reports it. Since fix round 1 (K6) the 503 (or 403) body
+  carries `policyId`, so the client can finish by publishing a version of that policy.
+- **K-101-4 (K1).** The dry-run proof binds the BODY (lane, rule type, body, template) and the caller, not the data: it
+  proves this caller ran this exact rule, not that the data is unchanged since.
+- **K-101-5.** A throw at publish step 1 (the version create itself, e.g. a timeout) is a 503 with no compensation: whether the
+  version row exists is unknown, and it is never current. Steps 2 to 4 and every compensation run on `CancellationToken.None`
+  (F2-2), re-read the pointer before deciding (F2-3), and never stamp the current version.
 
 ## 4. Tests
 
-`tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs`, 35 cases. They run through the real pipeline with
+`tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs`, 35 cases at first, 55 after fix round 1 (section 9). They run through the real pipeline with
 the real `PolicyVersionValidator`; Dataverse-as-caller and the engine seam are faked.
 - With the route mapping removed, 28 fail. The 7 that pass split two ways:
   - the four 401 cases: the fallback policy answers 401 for an unmapped path too, so these are regression guards on the group's
@@ -159,3 +196,17 @@ This conflicts at merge with any other lane that moves the ceiling: the result i
 - The full `Spaarke.ArchTests` run on this base fails
   `InboundBodyDtoMappingGuardTests` (`OntologyAdminCapabilities.CanAuthorPolicies`). This is the known 104 issue, already
   fixed on the docs branch at `58e810405`, and is not touched here.
+
+## 9. Fix round 1 (review of PR #2039)
+
+| Finding | Fix | Evidence |
+|---|---|---|
+| F1-1 any signed-in user can run the dry run | `CheckAuthoringPrivilegeAsync`: WhoAmI, then `RetrieveUserPrivilegeByPrivilegeName` as the caller, fresh per request; not held 403 `ontology.admin.forbidden`, unresolved the single 403, fault 503. Catalog not gated (static lists + the caller's own read). Never the probe or its cache (104 rule A, D-22) | `DryRun_AsAConsoleUser_…` (x2), `DryRun_WhenThePrivilegeCannotBeRead_…` (x3), `DryRun_AsksThePrivilegeFresh_…`; seeding: gate removed, both Console User cases fail (200 with rows) |
+| F2-2 timeout/disconnect skips compensation | `StampAndMoveAsync`: steps 2-4 and compensation on `CancellationToken.None`, wrapped in try/catch | `Publish_WhenThePointerMoveTimesOut_…`, `Publish_WhenTheRequestIsAbandoned…` |
+| F2-3 compensation can end the current version | re-read (`PointerOfAsync`, `CarriesStampAsync`) before compensating; `RetireUnpublishedAsync` refuses to stamp unless the pointer names another version | `Publish_WhenThePointerMoveAnswers5xxButLanded_…`, `Publish_WhenTheOldVersionsStampAnswers5xx…` (x2) |
+| F3-5 untested security claims | tests only | `Publish_AnotherCallersDryRun_IsNotAProof_409`, `DryRun_WhenTheProofCacheThrows_…` |
+| K2 lane not in the proof | `ProofKey` canonical v2 includes the lane | `Save_ADryRunInTheOtherLane_IsNotAProof_409`, `ProofKey_BindsTheLane` |
+| K5 no-subject-type tables fail only at save | dry run of a NEW rule runs `TrySubjectType` (400) | `DryRun_ANewRuleAboutATableWithNoPolicySubjectType_…` (x3) |
+| K6 orphaned policy id | the save's failed pointer write returns `policyId` in the problem body | `Save_WhenThePointerCannotBeSet_…` (x2) |
+| K1 proof binds body not data | stated (class remarks, K-101-4, PR body) | — |
+| F3-4 live seam tests | written, opt-in, not run (section 2, item 8) | — |

@@ -554,11 +554,18 @@ public sealed class WorkAssignmentCreateLiveTests
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
             SendAsync(HttpMethod.Patch, $"/api/data/v9.2/{relativePath.TrimStart('/')}", jsonBody, cancellationToken, ifMatch: true);
 
+        // The production client's version-conditional PATCH (If-Match: the row's versionnumber as a weak ETag). Ontology task 101's
+        // live publish test drives it (OntologyAdminAuthoringLiveTests).
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
+            SendAsync(HttpMethod.Patch, $"/api/data/v9.2/{relativePath.TrimStart('/')}", jsonBody, cancellationToken,
+                ifMatchValue: $"W/\"{expectedVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"");
+
         public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
             SendAsync(HttpMethod.Delete, $"/api/data/v9.2/{relativePath.TrimStart('/')}", null, cancellationToken);
 
         private async Task<DataverseUserResponse> SendAsync(
-            HttpMethod method, string apiPath, string? jsonBody, CancellationToken ct, bool preferRepresentation = false, bool ifMatch = false)
+            HttpMethod method, string apiPath, string? jsonBody, CancellationToken ct, bool preferRepresentation = false, bool ifMatch = false,
+            string? ifMatchValue = null)
         {
             using var request = new HttpRequestMessage(method, $"{factory.DataverseUrl}{apiPath}");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await factory.DataverseTokenAsync(ct));
@@ -571,6 +578,8 @@ public sealed class WorkAssignmentCreateLiveTests
                 request.Headers.Add("Prefer", "return=representation");
             if (ifMatch)
                 request.Headers.TryAddWithoutValidation("If-Match", "*");
+            if (ifMatchValue is not null)
+                request.Headers.TryAddWithoutValidation("If-Match", ifMatchValue);
             if (jsonBody is not null)
                 request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
