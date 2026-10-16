@@ -480,6 +480,7 @@ public sealed class AssignedAccessMaterializer
 
         if (root is null)
             return run.ToOutcome(AssignedAccessStatus.NotFound);
+        run.RootOwner = root.Owner;
 
         // ── The ledger ────────────────────────────────────────────────────────────────
         IReadOnlyList<AssignedAccessLedgerRow> ledger;
@@ -1744,12 +1745,26 @@ public sealed class AssignedAccessMaterializer
     {
         var entitySet = ExternalGrantRoot.BindFor(run.Request.RootType).EntitySet;
         var principal = DataversePrincipalRef.User(user);
+
+        // #1620: Dataverse refuses an app-only revoke of the owning user's own share (0x80040223), so the revoke names the
+        // root's owner and the seam sends THAT one as the owner. An owner the root read did not carry is a failure here
+        // (fail closed) — never a fall-back to the app-only revoke.
+        if (restoreTo == 0 && run.RootOwner is null)
+        {
+            _logger.LogError("[ASSIGNED-ACCESS] Ending {User}'s auto share on {Type} {RootId}: the record's owner was not read; " +
+                "nothing was removed.", user, run.Logical, run.RootId);
+            run.Fail(subject, "owner-unreadable",
+                $"Who owns this record could not be read, so the automatic share of user {user} was not removed. The next " +
+                "update will try again.");
+            return false;
+        }
+
         int? remaining = null;
         Exception? failure = null;
         try
         {
             if (restoreTo == 0)
-                await _recordShare.RevokeAccessAsync(entitySet, run.RootId, principal, ct).ConfigureAwait(false);
+                await _recordShare.RevokeAccessAsync(entitySet, run.RootId, principal, run.RootOwner!.Value, ct).ConfigureAwait(false);
             else
                 await _recordShare.ModifyAccessAsync(entitySet, run.RootId, principal, RecordShareLevels.RightsCsvForMask(restoreTo), ct)
                     .ConfigureAwait(false);
@@ -2322,6 +2337,10 @@ public sealed class AssignedAccessMaterializer
 
         /// <summary>Task 174 (F1-c): the record's OWN stored Secure flag (unreadable counts as secure), for the S5 keep only.</summary>
         public bool OwnIsSecure { get; set; } = true;
+
+        /// <summary>#1620: the root's CURRENT owner as the root read returned it — <c>null</c> when it carried neither owner
+        /// column. Named on every revoke of an auto share, so the owning user's own share is revoked as that user.</summary>
+        public DataversePrincipalRef? RootOwner { get; set; }
 
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();

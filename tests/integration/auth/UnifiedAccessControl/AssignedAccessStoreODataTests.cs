@@ -576,6 +576,61 @@ public class AssignedAccessStoreODataTests
         };
     }
 
+    /// <summary>
+    /// #1620: the root read carries the record's CURRENT owner — its owning user, else its owning team, else none — for the
+    /// owner-aware revoke of an auto share.
+    /// </summary>
+    [Theory]
+    [InlineData("user")]
+    [InlineData("team")]
+    [InlineData("neither")]
+    public async Task TheRootRead_CarriesTheRecordsOwner(string owner)
+    {
+        var table = new RootTable(new Dictionary<string, object?>
+        {
+            ["sprk_matterid"] = Matter,
+            ["_sprk_assignedattorney1_value"] = Contact,
+            ["_owninguser_value"] = owner == "user" ? User : null,
+            ["_owningteam_value"] = owner == "team" ? Team : null,
+        });
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var root = await store.ReadRootAsync(ExternalGrantRootType.Matter, Matter, new[] { "sprk_assignedattorney1" }, CancellationToken.None);
+
+        table.Select.Should().Be("sprk_matterid,_owninguser_value,_owningteam_value,_sprk_assignedattorney1_value");
+        root!.Values["sprk_assignedattorney1"].Should().Be(Contact);
+        root.Owner.Should().Be(owner switch
+        {
+            "user" => DataversePrincipalRef.User(User),
+            "team" => DataversePrincipalRef.Team(Team),
+            _ => (DataversePrincipalRef?)null,
+        });
+    }
+
+    /// <summary>One <c>sprk_matters</c> row, returned as Dataverse returns it; records the <c>$select</c> sent.</summary>
+    private sealed class RootTable : DataverseWebApiClient
+    {
+        private readonly Dictionary<string, object?> _row;
+
+        public RootTable(Dictionary<string, object?> row)
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+            => _row = row;
+
+        public string? Select { get; private set; }
+
+        public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        {
+            entitySetName.Should().Be("sprk_matters");
+            Select = select;
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(new[] { _row }))!);
+        }
+    }
+
     private sealed class NoCredential : TokenCredential
     {
         public static readonly NoCredential Instance = new();
