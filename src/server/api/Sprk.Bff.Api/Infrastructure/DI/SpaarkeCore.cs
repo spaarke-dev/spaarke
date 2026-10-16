@@ -43,12 +43,14 @@ public static class SpaarkeCore
         //   1. Promoting a typed HttpClient to singleton pins one HttpMessageHandler for process
         //      lifetime, defeating the handler rotation and DNS refresh IHttpClientFactory provides.
         //      (On its own this is arguable — PooledConnectionLifetime can address it.)
-        //   2. DECISIVE: DataverseAccessDataSource holds MUTABLE, NON-THREAD-SAFE PER-INSTANCE AUTH
-        //      STATE — the _currentToken field and _httpClient.DefaultRequestHeaders.Authorization,
-        //      both written in EnsureAuthenticatedAsync. A singleton would share one Authorization
-        //      header across all concurrent requests, which is a data race that can BLEED A TOKEN
-        //      BETWEEN USERS. Not a performance tradeoff — a correctness and security defect.
-        //      Do not promote this registration without first removing that per-instance state.
+        //   2. DataverseAccessDataSource used to hold MUTABLE, NON-THREAD-SAFE PER-INSTANCE AUTH STATE
+        //      in _httpClient.DefaultRequestHeaders.Authorization (written by EnsureAuthenticatedAsync
+        //      and by the OBO branch of GetUserAccessAsync). Issue #1576 removed both writes: every
+        //      request now carries its token on its own HttpRequestMessage. What remains per instance
+        //      is the cached app-only _currentToken — one identity (the service principal), read into
+        //      a local before use, so sharing it would not bleed a user's token. The registration
+        //      still STAYS transient: reason 1 stands, and nothing gained from a singleton has been
+        //      measured. Re-review this class for per-instance state before promoting it.
         //
         // The DI-lifetime hazard the task targets is the credential objects rebuilt per resolution —
         // fixed inside the class by static (tenant|client|secret-fingerprint) caches for both the OBO
