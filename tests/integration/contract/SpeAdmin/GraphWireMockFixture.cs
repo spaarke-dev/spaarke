@@ -87,9 +87,22 @@ public sealed class GraphWireMockFixture : IDisposable
     /// accident. Production's own auth providers are out of scope for a mapping test — what is under
     /// test is the request the SDK emits and the mapping of the response, not how a token was obtained.
     /// </remarks>
-    public GraphServiceClient CreateGraphClient()
+    /// <param name="pipeline">A handler to send through, as production's <c>GraphApiClient</c> does (#1755: the Graph
+    /// resilience handler). Its inner handler is set here. None by default: requests go straight to the fake.</param>
+    public GraphServiceClient CreateGraphClient(DelegatingHandler? pipeline = null)
     {
-        var httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+        HttpClient httpClient;
+        if (pipeline is null)
+        {
+            httpClient = new HttpClient();
+        }
+        else
+        {
+            pipeline.InnerHandler = new HttpClientHandler();
+            httpClient = new HttpClient(pipeline);
+        }
+
+        httpClient.BaseAddress = new Uri(BaseUrl);
         return new GraphServiceClient(httpClient, new AnonymousAuthenticationProvider(), BaseUrl);
     }
 
@@ -156,14 +169,35 @@ public sealed class GraphWireMockFixture : IDisposable
 
     /// <summary>
     /// Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).
-    /// <paramref name="delay"/> holds the answer back, as on <see cref="StubPatch"/>.
+    /// <paramref name="delay"/> holds the answer back, as on <see cref="StubPatch"/>. <paramref name="onReceived"/> runs
+    /// when the request arrives, before the answer is sent: a test acts mid-request without racing a timer (#1755).
     /// </summary>
-    public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null)
+    public GraphWireMockFixture StubPostExact(
+        string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null, Action? onReceived = null)
     {
-        var response = Response.Create()
-            .WithStatusCode(statusCode)
-            .WithHeader("Content-Type", "application/json")
-            .WithBody(jsonBody);
+        var response = onReceived is null
+            ? Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody)
+            : Response.Create().WithCallback(_ =>
+            {
+                onReceived();
+                return new WireMock.ResponseMessage
+                {
+                    StatusCode = statusCode,
+                    Headers = new Dictionary<string, WireMock.Types.WireMockList<string>>
+                    {
+                        ["Content-Type"] = new("application/json")
+                    },
+                    BodyData = new WireMock.Util.BodyData
+                    {
+                        BodyAsString = jsonBody,
+                        DetectedBodyType = WireMock.Types.BodyType.String,
+                        Encoding = System.Text.Encoding.UTF8
+                    }
+                };
+            });
         if (delay is { } d)
         {
             response = response.WithDelay(d);
@@ -172,6 +206,40 @@ public sealed class GraphWireMockFixture : IDisposable
         _server
             .Given(Request.Create().WithPath(path).UsingPost())
             .RespondWith(response);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Serves a DIFFERENT response to each successive POST on EXACTLY <paramref name="path"/>, in order; the last one
+    /// repeats. Used to show what a retrying client sends (#1755: a 429, then the create's 201).
+    /// </summary>
+    public GraphWireMockFixture StubPostExactSequence(string path, params (string Body, int StatusCode)[] responses)
+    {
+        if (responses.Length == 0)
+        {
+            throw new ArgumentException("At least one response is required.", nameof(responses));
+        }
+
+        var scenario = $"post-seq:{path}:{responses.Length}";
+        for (var i = 0; i < responses.Length; i++)
+        {
+            var step = _server.Given(Request.Create().WithPath(path).UsingPost()).InScenario(scenario);
+            if (i > 0)
+            {
+                step = step.WhenStateIs($"{scenario}#{i}");
+            }
+
+            if (i < responses.Length - 1)
+            {
+                step = step.WillSetStateTo($"{scenario}#{i + 1}");
+            }
+
+            step.RespondWith(Response.Create()
+                .WithStatusCode(responses[i].StatusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(responses[i].Body));
+        }
 
         return this;
     }

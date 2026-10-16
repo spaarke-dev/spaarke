@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -464,6 +465,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>When false, SPE container creation returns null (Graph failure). Default true.</summary>
     public bool SpeContainerCreationSucceeds { get; set; } = true;
 
+    /// <summary>
+    /// When set, container creation throws what this builds from the display name asked for (#1755: a failure before
+    /// the create was sent, or <see cref="ContainerCreateOutcomeUnknownException"/> after it). Default none.
+    /// </summary>
+    internal Func<string, Exception>? SpeContainerCreationFailsWith { get; set; }
+
     /// <summary>When false, an UPDATE that RECORDS a container (a non-null <c>sprk_containerid</c>) throws. Default true.</summary>
     public bool ContainerStampSucceeds { get; set; } = true;
 
@@ -472,6 +479,27 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// (#1755). A hold that throws leaves the container unrecorded, as a cancelled or timed-out PATCH would. Default none.
     /// </summary>
     internal Func<CancellationToken, Task>? OnContainerRecord { get; set; }
+
+    /// <summary>
+    /// When set, an UPDATE that RECORDS a container awaits this AFTER it is applied (#1755). A hook that throws is a write
+    /// Dataverse committed whose answer failed or came too late. Default none.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnContainerRecorded { get; set; }
+
+    /// <summary>
+    /// When true, the read-back of the container a record names (a query selecting only <c>sprk_containerid</c>, after a
+    /// Step 7 write reported a failure — #1755) throws. Default false.
+    /// </summary>
+    public bool RecordedContainerReadBackFails { get; set; }
+
+    private readonly ConcurrentBag<Task> _serverRequests = new();
+
+    /// <summary>
+    /// Completes when every request the host has received so far has finished on the SERVER — including one whose client
+    /// already gave up (#1755: the server goes on after a disconnect). Await it before a test ends so its request cannot
+    /// run into the next test's <see cref="Reset"/>.
+    /// </summary>
+    internal Task ServerRequestsCompleted => Task.WhenAll(_serverRequests.ToArray());
 
     /// <summary>
     /// When false, an UPDATE that CLEARS <c>sprk_containerid</c> (a null value) throws — the unlinking of a shared
@@ -712,8 +740,11 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         SecureBuUsers.Clear();
         BusinessUnitUserReadSucceeds = true;
         SpeContainerCreationSucceeds = true;
+        SpeContainerCreationFailsWith = null;
         ContainerStampSucceeds = true;
         OnContainerRecord = null;
+        OnContainerRecorded = null;
+        RecordedContainerReadBackFails = false;
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
@@ -816,6 +847,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
         builder.ConfigureTestServices(services =>
         {
+            // #1755: every request the host serves is tracked to its end on the server (ServerRequestsCompleted).
+            services.AddSingleton<IStartupFilter>(new TrackServerRequests(_serverRequests));
+
             // The delegation gate (task 008) answers Write unless a test turns it off, and RECORDS what it was asked
             // about — task 144's "the record authorized is the record re-owned" is asserted on that record.
             services.RemoveAll<CallerRecordAccessProbe>();
@@ -891,6 +925,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     var top = invocation.Arguments[3] as int?;
 
                     Queries.Add((entitySet, filter));
+                    if (RecordedContainerReadBackFails && select == "sprk_containerid")
+                        throw new InvalidOperationException("Dataverse 503: simulated failure reading the recorded container back.");
                     var json = RowsJsonFor(entitySet, filter, select, top);
                     var listType = typeof(List<>).MakeGenericType(rowType);
                     var rows = JsonSerializer.Deserialize(json, listType)
@@ -924,6 +960,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     }
 
                     await ApplyUpdate(entitySet, id, payload);
+
+                    if (OnContainerRecorded is { } after
+                        && Flatten(payload).TryGetValue("sprk_containerid", out var landed) && landed is not null)
+                    {
+                        await after(ct);
+                    }
                 });
 
             services.RemoveAll<DataverseWebApiClient>();
@@ -1634,6 +1676,28 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         return client;
     }
 
+    /// <summary>Records a task per request that completes when the server has finished it (<see cref="ServerRequestsCompleted"/>).</summary>
+    private sealed class TrackServerRequests(ConcurrentBag<Task> requests) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (context, inner) =>
+            {
+                var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                requests.Add(done.Task);
+                try
+                {
+                    await inner(context);
+                }
+                finally
+                {
+                    done.TrySetResult();
+                }
+            });
+            next(app);
+        };
+    }
+
     /// <summary>Container creation without Graph, recording what was asked for.</summary>
     private sealed class StubSpeFileStore : SpeFileStore
     {
@@ -1654,6 +1718,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         {
             _fixture.CreatedContainerDisplayNames.Add(displayName);
             _fixture.CreatedContainerBusinessUnits.Add(owningBusinessUnitId);
+
+            if (_fixture.SpeContainerCreationFailsWith is { } fails)
+                return Task.FromException<ContainerDto?>(fails(displayName));
 
             return Task.FromResult<ContainerDto?>(
                 _fixture.SpeContainerCreationSucceeds

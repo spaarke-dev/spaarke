@@ -21,6 +21,7 @@ public class GraphHttpMessageHandler : DelegatingHandler
     private readonly GraphResilienceOptions _options;
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly IAsyncPolicy<HttpResponseMessage> _resiliencePolicy;
+    private readonly IAsyncPolicy<HttpResponseMessage> _nonIdempotentPolicy;
 
     public GraphHttpMessageHandler(
         ILogger<GraphHttpMessageHandler> logger,
@@ -34,25 +35,35 @@ public class GraphHttpMessageHandler : DelegatingHandler
         // Register with circuit breaker registry
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.MicrosoftGraph);
 
-        _resiliencePolicy = BuildResiliencePolicy();
+        (_resiliencePolicy, _nonIdempotentPolicy) = BuildResiliencePolicies();
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        return await _resiliencePolicy.ExecuteAsync(async ct =>
+        // A request marked NoTransientRetryOption (#1755) is not re-sent after a 5xx, 408 or transport fault: Graph may
+        // have carried it out, and a second create makes a second container. It shares the timeout and circuit breaker.
+        var policy = NoTransientRetryOption.IsSetOn(request) ? _nonIdempotentPolicy : _resiliencePolicy;
+        return await policy.ExecuteAsync(async ct =>
         {
             return await base.SendAsync(request, ct);
         }, cancellationToken);
     }
 
-    private IAsyncPolicy<HttpResponseMessage> BuildResiliencePolicy()
+    private (IAsyncPolicy<HttpResponseMessage> Standard, IAsyncPolicy<HttpResponseMessage> NonIdempotent) BuildResiliencePolicies()
     {
         // 1. Retry Policy: Handle transient errors (429, 503, 504, 5xx)
-        var retryPolicy = HttpPolicyExtensions
+        var retryPolicy = WithRetry(HttpPolicyExtensions
             .HandleTransientHttpError() // 5xx and 408
-            .OrResult(response => response.StatusCode == HttpStatusCode.TooManyRequests) // 429
+            .OrResult(response => response.StatusCode == HttpStatusCode.TooManyRequests)); // 429
+
+        // 1b. A non-idempotent request (NoTransientRetryOption) is retried on 429 only: Graph did not process it.
+        var nonIdempotentRetryPolicy = WithRetry(Policy
+            .HandleResult<HttpResponseMessage>(response => response.StatusCode == HttpStatusCode.TooManyRequests));
+
+        // The retry both chains use: Retry-After honoured, exponential backoff otherwise, each retry logged and counted.
+        IAsyncPolicy<HttpResponseMessage> WithRetry(PolicyBuilder<HttpResponseMessage> handles) => handles
             .WaitAndRetryAsync(
                 retryCount: _options.RetryCount,
                 sleepDurationProvider: (retryAttempt, response, context) =>
@@ -144,9 +155,11 @@ public class GraphHttpMessageHandler : DelegatingHandler
                     await Task.CompletedTask;
                 });
 
-        // Combine policies: Timeout -> Retry -> Circuit Breaker (inner to outer)
-        // Order matters: timeout applies per attempt, retry wraps attempts, circuit breaker is outermost
-        return Policy.WrapAsync(timeoutPolicy, retryPolicy, circuitBreakerPolicy);
+        // Combine policies, outermost first: Timeout -> Retry -> Circuit Breaker. The pessimistic timeout is OUTSIDE the
+        // retry, so it bounds the request as a whole — every attempt and every backoff together — not each attempt. The
+        // circuit breaker is innermost and sees each attempt. Both chains share the one timeout and circuit breaker.
+        return (Policy.WrapAsync(timeoutPolicy, retryPolicy, circuitBreakerPolicy),
+                Policy.WrapAsync(timeoutPolicy, nonIdempotentRetryPolicy, circuitBreakerPolicy));
     }
 
     private void RecordRetryAttempt(HttpStatusCode statusCode, int attempt)

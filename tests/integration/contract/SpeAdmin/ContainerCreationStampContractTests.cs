@@ -4,9 +4,12 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Http;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -140,12 +143,13 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         // #1735/#1755: once the create POST is sent, Graph may commit the container. A client disconnect mid-POST used to
         // throw TaskCanceledException before the answer (the only place the new id is) was read — a container nothing
         // names, binds, marks or compensates.
+        // The caller cancels when the POST reaches Graph, before Graph answers: no timer to race.
+        using var caller = new CancellationTokenSource();
         _graph.StubPostExact(ContainersPath,
             "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}", 201,
-            delay: TimeSpan.FromSeconds(2));
+            onReceived: caller.Cancel);
         _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
         _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
-        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
 
         var created = await ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, caller.Token);
 
@@ -217,6 +221,61 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ProvisioningCreate_WhenGraphAnswers503AfterTheCreate_SendsItOnce_AndReportsTheOutcomeUnknown()
+    {
+        // #1755: through production's Graph resilience handler. A 503 may come after Graph committed the container, so
+        // re-sending the create would make a second one; the first would never be seen. It is sent once, and the caller
+        // is told the outcome is unknown, not that nothing was created.
+        _graph.StubPostExact(ContainersPath, GraphError, 503);
+
+        var act = () => ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(1, "a create Graph may have committed is never re-sent");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenGraphAnswers429_RetriesTheCreate()
+    {
+        // A 429 means Graph did not process the request, so the create is retried as before.
+        _graph.StubPostExactSequence(ContainersPath, (GraphError, 429), (CreatedBody, 201));
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        created!.Id.Should().Be("c-new");
+        CreatePosts().Should().Be(2, "the throttled create is sent again");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenGraphRefusesTheCreate_IsNotAnUnknownOutcome()
+    {
+        // A 4xx is Graph refusing the request: nothing was created, and the caller may say so.
+        _graph.StubPostExact(ContainersPath, GraphError, 400);
+
+        var act = () => ResilientProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryGraphGet_WhenGraphAnswers503_IsStillRetried()
+    {
+        // The opt-out is per request: every other Graph call keeps the handler's transient retry.
+        _graph.StubGetExact($"{ContainersPath}/c-any", GraphError, 503);
+        var handler = ResilienceHandler();
+        handler.InnerHandler = new HttpClientHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(_graph.BaseUrl) };
+
+        using var response = await http.GetAsync($"{ContainersPath}/c-any");
+
+        ((int)response.StatusCode).Should().Be(503);
+        _graph.AllRequests.Count(r => r.Method == "GET").Should().Be(1 + RetryCount, "a GET is retried on 503");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private void StubCreated() =>
@@ -247,6 +306,34 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
     }
 
+    private const int RetryCount = 3;
+
+    private const string GraphError = "{\"error\":{\"code\":\"serviceNotAvailable\",\"message\":\"x\"}}";
+
+    private static readonly string CreatedBody =
+        "{\"id\":\"c-new\",\"displayName\":\"New\",\"containerTypeId\":\"" + TypeId + "\",\"status\":\"inactive\"}";
+
+    /// <summary>Production's Graph resilience handler, with no backoff so retries are immediate.</summary>
+    private static GraphHttpMessageHandler ResilienceHandler() => new(
+        NullLogger<GraphHttpMessageHandler>.Instance,
+        Options.Create(new GraphResilienceOptions
+        {
+            RetryCount = RetryCount,
+            RetryBackoffSeconds = 0,
+            HonorRetryAfterHeader = false,
+            TimeoutSeconds = 30,
+            CircuitBreakerFailureThreshold = 100
+        }));
+
+    /// <summary>The provisioning create, sending through production's Graph resilience handler (#1755).</summary>
+    private ContainerOperations ResilientProvisioningOperations()
+    {
+        var factory = new WireMockGraphFactory(_graph, ResilienceHandler);
+        return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
+    }
+
+    private int CreatePosts() => _graph.AllRequests.Count(r => r.Method == "POST" && r.Path == ContainersPath);
+
     private static SpeAdminGraphService AdminGraph()
     {
         var configuration = new ConfigurationBuilder()
@@ -260,9 +347,10 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     }
 
     /// <summary>The app-only client ContainerOperations asks for is the WireMock one.</summary>
-    private sealed class WireMockGraphFactory(GraphWireMockFixture graph) : IGraphClientFactory
+    private sealed class WireMockGraphFactory(GraphWireMockFixture graph, Func<DelegatingHandler>? pipeline = null)
+        : IGraphClientFactory
     {
-        public GraphServiceClient ForApp() => graph.CreateGraphClient();
+        public GraphServiceClient ForApp() => graph.CreateGraphClient(pipeline?.Invoke());
 
         public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default) =>
             throw new InvalidOperationException("Container creation is app-only.");

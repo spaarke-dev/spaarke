@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Kiota.Abstractions;
+using Sprk.Bff.Api.Infrastructure.Http;
 using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
@@ -34,10 +36,11 @@ public class ContainerOperations
     }
 
     /// <summary>
-    /// Bounds the create POST (#1735) and the bind of the container it made (#1652 round 1). Each runs on its own token
-    /// with this timeout, never the caller's: a client disconnect mid-POST could leave a container whose id was never
-    /// read, and one mid-bind used to skip the compensating delete and leave a live, unbound container. Settable for
-    /// tests only.
+    /// The token the create POST (#1735) and the bind of the container it made (#1652 round 1) run on, instead of the
+    /// caller's: a client disconnect mid-POST could leave a container whose id was never read, and one mid-bind used to
+    /// skip the compensating delete and leave a live, unbound container. The POST itself is bounded sooner, by the Graph
+    /// handler's pessimistic timeout (<c>GraphResilience:TimeoutSeconds</c>, 30 s across all its attempts); this bounds
+    /// the bind and anything the handler does not. Settable for tests only.
     /// </summary>
     internal TimeSpan UncancellableStepTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
@@ -74,7 +77,8 @@ public class ContainerOperations
 
         // The caller's last chance to stop the create (#1735/#1755): once the POST is sent, Graph may commit a container
         // whose id only its answer carries, so a cancel during the POST would leave one nothing can find or compensate.
-        // From the send on, the POST runs on its own token bounded by UncancellableStepTimeout, like the bind below.
+        // From the send on, the POST runs on its own token, not the caller's. It is bounded by the Graph handler's
+        // pessimistic timeout (30 s across all attempts); UncancellableStepTimeout bounds the bind below.
         ct.ThrowIfCancellationRequested();
 
         try
@@ -91,8 +95,20 @@ public class ContainerOperations
             FileStorageContainer? createdContainer;
             using (var send = new CancellationTokenSource(UncancellableStepTimeout))
             {
-                createdContainer = await graphClient.Storage.FileStorage.Containers
-                    .PostAsync(container, cancellationToken: send.Token);
+                try
+                {
+                    // NoTransientRetryOption: the create is not idempotent, so the Graph handler does not re-send it after
+                    // a 5xx, 408 or transport fault (Graph may have committed the first) — only after a 429 (#1755).
+                    createdContainer = await graphClient.Storage.FileStorage.Containers
+                        .PostAsync(container, rc => rc.Options.Add(new NoTransientRetryOption()), send.Token);
+                }
+                catch (Exception ex) when (OutcomeIsUnknown(ex))
+                {
+                    _logger.LogError(ex,
+                        "The create of SPE container {DisplayName} (type {ContainerTypeId}) was sent but got no answer that " +
+                        "settles it: a container may have been created that nothing names.", displayName, containerTypeId);
+                    throw new ContainerCreateOutcomeUnknownException(displayName, ex);
+                }
             }
 
             if (createdContainer == null)
@@ -134,6 +150,17 @@ public class ContainerOperations
             throw;
         }
     }
+
+    /// <summary>
+    /// True when a failed create POST leaves unknown whether Graph created the container (#1755): no answer at all (a
+    /// timeout, a transport fault), or a server error (5xx, 408), which Graph may send after committing. A 4xx other than
+    /// 408 is Graph refusing the request — nothing was created.
+    /// </summary>
+    private static bool OutcomeIsUnknown(Exception ex) => ex switch
+    {
+        ApiException api => api.ResponseStatusCode is >= 500 or 408,
+        _ => true
+    };
 
     /// <summary>
     /// Stamps the just-created container, reads the stamp back, and on any failure soft-deletes it and throws
