@@ -54,6 +54,16 @@ public class DataverseContactIdentityStoreTests
             .Should().Contain("statecode eq 0", "the active read is unchanged");
     }
 
+    [Theory]
+    [InlineData("400: {\"error\":{\"code\":\"0x80048d19\",\"message\":\"The value 100000012 of 'sprk_identitycollisionreason' on record of type 'contact' is outside the valid range.\"}}", true)]
+    [InlineData("400: ... IS OUTSIDE THE VALID RANGE ...", true)]
+    [InlineData("503: {\"error\":{\"message\":\"Service unavailable\"}}", false)]
+    [InlineData("412: precondition failed", false)]
+    [InlineData("injected", false)]
+    [InlineData(null, false)]
+    public void IsOptionValueOutOfRange_RecognisesAnUnprovisionedChoiceOption_AndNothingElse(string? error, bool expected)
+        => DataverseContactIdentityStore.IsOptionValueOutOfRange(error).Should().Be(expected);
+
     [Fact]
     public void TheReferenceLookup_CountsEverySystemUser_EnabledOrNot()
     {

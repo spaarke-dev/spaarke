@@ -900,6 +900,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
                && (body.Contains("privilege", StringComparison.OrdinalIgnoreCase)
                    || body.Contains("0x80040220", StringComparison.OrdinalIgnoreCase)));
 
+    /// <summary>
+    /// True when a write's error text says a choice value is not an option of its choice - Dataverse's "The value N of 'col'
+    /// ... is outside the valid range" (seen live on <c>sprk_event.sprk_priority</c>, task 097). On a flag write that means
+    /// the collision-reason option is not provisioned yet (r3 task 047, fix round 3). Pure; the store's write error is
+    /// <c>"{status}: {body}"</c>.
+    /// </summary>
+    public static bool IsOptionValueOutOfRange(string? error)
+        => error is not null && error.Contains("outside the valid range", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>True when a Dataverse error body says the alternate key in the URL is not defined.</summary>
     public static bool IsKeyMissing(string? body)
         => body is not null && body.Contains("key in the request URI is not valid", StringComparison.OrdinalIgnoreCase);

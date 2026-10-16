@@ -1380,10 +1380,14 @@ public sealed class ContactIdentityBinder
                 }
             }
 
-            if (party.Reason == IdentityCollisionReason.InactiveContactEmailMatch)
+            if (party.Reason == IdentityCollisionReason.InactiveContactEmailMatch
+                && write.Status == StoreWriteStatus.Failed
+                && DataverseContactIdentityStore.IsOptionValueOutOfRange(write.Error))
             {
-                // Fix round 2: the choice option is added by the schema script. Until it is applied the platform refuses the
-                // reason value; the registration is still refused (the deny stands) and this line is the operator's marker.
+                // Fix rounds 2 and 3: the choice option is added by the schema script. Until it is applied the platform
+                // refuses the reason value ("outside the valid range"); the registration is still refused (the deny stands)
+                // and this line is the operator's marker. Any other failure (a throttle, a 5xx, a 412) is not a schema fault,
+                // so it gets no schema hint - the error log below carries its status and text.
                 _logger.LogWarning(
                     "[ID-BIND] The InactiveContactEmailMatch flag on contact {ContactId} was not written ({Status}); the "
                     + "'Inactive contact email match' option may not be provisioned in this environment. Apply "

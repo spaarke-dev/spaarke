@@ -351,6 +351,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         // not depend on it, and the operator must learn which script adds the option.
         var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
         _store.FailFlagWrites = true;
+        _store.FlagWriteError = "400: {\"error\":{\"message\":\"The value 100000012 of 'sprk_identitycollisionreason' is outside the valid range.\"}}";
         var log = new BindingLogCapture<ContactIdentityBinder>();
         var binder = IdentityBindingTestKit.Binder(_store, log);
 
@@ -370,6 +371,30 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
             && e.Message.Contains("scripts/Set-ContactIdentityBindingSchema.ps1")
             && e.Message.Contains("InactiveContactEmailMatch"));
+    }
+
+    [Fact]
+    public async Task InactiveMatch_WhenTheFlagWriteFailsForAnotherReason_StillRefuses403_ButGivesNoSchemaHint()
+    {
+        // The other side: a throttle or a 5xx on the flag write is not a schema fault, so the schema script is not blamed.
+        var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        _store.FailFlagWrites = true;
+        _store.FlagWriteError = "503: service unavailable";
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var binder = IdentityBindingTestKit.Binder(_store, log);
+
+        var response = await Post(Body());
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ExternalRegistrationEndpoints.ReasonContactConflict);
+        var result = await binder.RegisterHomeContactAsync(
+            new HomeRegistrationRequest(HomeTenant, _oid, Email, "Mike", "Okafor", null, false, BusinessUnit, "Secure Record"),
+            CancellationToken.None);
+
+        result.Outcome.Should().Be(HomeRegistrationOutcome.Conflict);
+        inactive.Flag.Should().BeNull();
+        _store.Contacts.Should().ContainSingle();
+        log.Entries.Should().NotContain(e => e.Message.Contains("Set-ContactIdentityBindingSchema"));
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("503: service unavailable"),
+            "the generic error log still carries the status and text");
     }
 
     // ── The bind's own faults (fix round 1 leftover) ───────────────────────────────────────────────

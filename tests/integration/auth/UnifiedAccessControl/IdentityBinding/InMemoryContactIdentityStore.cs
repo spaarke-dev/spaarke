@@ -197,6 +197,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>A9 (r3 task 047, fix round 1): a create ends with this status instead of writing (e.g. <c>Forbidden</c>).</summary>
     public StoreWriteStatus? CreateStatusOverride { get; set; }
 
+    /// <summary>A9 (r3 task 047, fix round 3): the error text of an injected flag-write failure (default <c>injected</c>).</summary>
+    public string? FlagWriteError { get; set; }
+
     /// <summary>A9 (r3 task 047, fix round 2): the inactive-contact-by-email read fails.</summary>
     public bool FailInactiveEmailLookup { get; set; }
 
@@ -242,6 +245,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             HomeProbeColumnMissing = FailBusinessUnitLookup = false;
             CreateStatusOverride = null;
             FailInactiveEmailLookup = false;
+            FlagWriteError = null;
             BindStatusOverride = null;
             BusinessUnitsByName.Clear();
             DefaultTeams.Clear();
@@ -722,7 +726,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     {
         lock (_gate)
         {
-            if (FailFlagWrites) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected"));
+            if (FailFlagWrites) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: FlagWriteError ?? "injected"));
             if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
             RunBeforeFlagWrite(c);
             // Mirrors DataverseContactIdentityStore: conditional on the version when there is one, "*" otherwise.

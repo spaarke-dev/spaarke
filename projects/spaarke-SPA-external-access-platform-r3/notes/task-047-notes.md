@@ -218,3 +218,17 @@ Section 11 for `FindInactiveContactsByEmailAsync`. Existing: `FindActiveContacts
 - Final filtered set (ExternalRegistration, ContactBindingDecision, IdentityLink, ContactIdentityBinder, DataverseContactIdentityStore, WorkforcePrincipalResolver, plus ContactIdentitySchemaAgreement and ExternalAccessContract): 512 passed, 0 failed. ArchTests `AuthenticationSchemeCensus|RouteAuthorizationGuard`: 93 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors. `ContactIdentitySchemaAgreementTests` (the enum equals the script's option list) passes with the new value.
 
 **Deployment prerequisite.** Run `scripts/Set-ContactIdentityBindingSchema.ps1` (owner approval) on every environment that serves the registration route before 047 deploys.
+
+## Fix round 3
+
+From the scoped re-check of round 2 (no F-class finding; two small fixes and four known limits).
+
+- **Solution option set.** `src/dataverse/solutions/SpaarkeMaster/OptionSets/sprk_identitycollisionreason.xml` stopped at 100000011; it now carries `100000012` in the siblings' exact shape (the solution export leaves every label description empty, so the new entry does too). `ContactIdentitySchemaAgreementTests.TheSolutionOptionSet_CarriesEveryCollisionReason_AsTheScriptDoes` compares the enum, the schema script's `$ReasonOptions` and this XML. Seeding proof: with the XML entry removed the test fails (1 of 157); restored, it passes.
+- **Schema hint only for an unprovisioned option.** The store's flag-write failure text is `"{status}: {body}"`. New pure `DataverseContactIdentityStore.IsOptionValueOutOfRange` recognises Dataverse's "The value N of 'col' ... is outside the valid range" (seen live on `sprk_event.sprk_priority`, task 097; the exact text for a collision-reason column was not captured live, so the match is on the phrase only). The binder emits the "apply `scripts/Set-ContactIdentityBindingSchema.ps1`" warning only for a plain `Failed` status carrying that text; any other failure (a throttle, a 5xx) gets the generic error log with its status and text. Tests: `InactiveMatch_WhenTheFlagOptionIsNotProvisioned_...` (hint present), `InactiveMatch_WhenTheFlagWriteFailsForAnotherReason_...` (no hint, error log kept), and `IsOptionValueOutOfRange_...` (6 cases). Seeding proof: relaxing the condition fails the no-hint test; restored, it passes.
+
+Known limits (K, not fixed here):
+- K1: An unclassified 403 on the business-unit read (`FindBusinessUnitsByNameAsync`) is a plain read failure, so it answers 503 (retryable) although a permission fault would be permanent.
+- K2: The business-unit name is not URL-encoded in the filter (`FindBusinessUnitsByNameAsync`, and the same in `RegistrationDataverseService.cs:830`). Harmless for the default name "Secure Record"; a name with a reserved character would break the read.
+- K2: The inactive-contact read is `$top=2`, so with three or more deactivated contacts on one email only two are flagged. The refusal itself is unaffected.
+- K2: When the base binding column is missing, the schema hint names `Set-ContactIdentityBindingSchema.ps1`, but the A9 script is the one that adds the home columns; the operator may need both.
+
