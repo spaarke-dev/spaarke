@@ -68,6 +68,10 @@ namespace Spaarke.ArchTests;
 ///   <c>AddAttributeValue(…)</c> and <c>new EntityReference("systemuser", "azureactivedirectoryobjectid", oid)</c> are
 ///   caught only as helper-shaped calls (no such helper in the file → violation); an OData parameter alias
 ///   (<c>PropertyName=@p1</c>) and a column name supplied at run time are not seen at all.</item>
+///   <item>A <c>const string</c> alias of the column is recognised in a <c>ConditionOperator</c> condition only, not inside a
+///   <c>KeyAttributeCollection</c> (<c>{ [OidColumn] = oid }</c>) or <c>KeyAttributes[OidColumn]</c>.</item>
+///   <item>The ratchet counts sites per file: a baselined file that loses one site and gains another in the same change
+///   keeps its count and passes.</item>
 /// </list>
 /// <para><b>Ratchet.</b> <see cref="Baseline"/> lists lookups left unfixed because another open PR edits the file, keyed by
 /// file AND the number of flagged sites in it. A new violation fails — including a new site in a baselined file (its count
@@ -116,8 +120,9 @@ public class SystemUserOidLookupDisabledGuardTests
         new(@"[/""']systemusers\(\s*" + Column + @"\s*=", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         // OData query function: Microsoft.Dynamics.CRM.In(PropertyName='azureactivedirectoryobjectid',PropertyValues=[…]).
         new(@"\bPropertyName\s*=\s*(?:'|\\""|"""")" + Column + @"\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
-        // QueryByAttribute { Attributes = { "azureactivedirectoryobjectid" }, Values = { oid } }.
-        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*""" + Column + @"""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        // QueryByAttribute { Attributes = { "azureactivedirectoryobjectid" }, Values = { oid } }. A bare string element only: an
+        // Entity write's { ["…"] = v } indexer is a write, not a lookup.
+        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*(?<!\[\s*)""" + Column + @"""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         // SDK alternate key: new KeyAttributeCollection { ["…"] = oid } or { { "…", oid } }; or KeyAttributes["…"] = oid.
         new(@"\bKeyAttributeCollection\b[^;]*?\{\s*(?:\[\s*""" + Column + @"""\s*\]\s*=|\{\s*""" + Column + @"""\s*,)",
             RegexOptions.Compiled | RegexOptions.CultureInvariant),
@@ -136,7 +141,7 @@ public class SystemUserOidLookupDisabledGuardTests
         new(@"""isdisabled""\s*,\s*ConditionOperator\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"attribute\s*=\s*(?:""""|\\""|')isdisabled", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"\bPropertyName\s*=\s*(?:'|\\""|"""")isdisabled\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
-        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+        new(@"\bAttributes\s*=\s*(?:new\b[^{;]*)?\{[^{}]*(?<!\[\s*)""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         // Read and checked.
         new(@"GetAttributeValue\s*<\s*bool\??\s*>\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
         new(@"\b(?:Try)?GetProperty\s*\(\s*""isdisabled""", RegexOptions.Compiled | RegexOptions.CultureInvariant),
@@ -415,6 +420,11 @@ public class SystemUserOidLookupDisabledGuardTests
 
     public static TheoryData<string> MustFire => new()
     {
+        // (re-check) An Entity WRITE of isdisabled in the same method is not evidence for an unfiltered lookup.
+        """
+        var url = $"systemusers?$filter=azureactivedirectoryobjectid eq {oid}";
+        var update = new Entity("systemuser") { Attributes = { ["isdisabled"] = true } };
+        """,
         // OData through a typed client, no isdisabled clause.
         """
         var rows = await client.QueryAsync<Row>("systemusers",
@@ -561,6 +571,10 @@ public class SystemUserOidLookupDisabledGuardTests
 
     public static TheoryData<string> MustNotFire => new()
     {
+        // (re-check) An Entity WRITE keyed by the column (an indexer initializer) is a write, not a lookup.
+        """
+        var user = new Entity("systemuser") { Attributes = { ["azureactivedirectoryobjectid"] = oid } };
+        """,
         // OData with the clause.
         """
         var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{oid}' and isdisabled eq false&$select=systemuserid";
@@ -684,6 +698,17 @@ public class SystemUserOidLookupDisabledGuardTests
 
         Assert.Empty(unexpected);
         Assert.Empty(stale);
+    }
+
+    [Fact(DisplayName = "Issue #1576 ratchet control: a baselined file with fewer sites than recorded (not zero) is stale")]
+    public void Ratchet_BaselinedFileBelowItsCount_IsStale()
+    {
+        var twoSiteBaseline = new Dictionary<string, BaselineEntry> { [BaselinedFile] = new(Sites: 2, "kept by work/some-project") };
+
+        var (unexpected, stale) = Ratchet([(BaselinedFile, [282])], twoSiteBaseline);
+
+        Assert.Empty(unexpected);
+        Assert.Single(stale);
     }
 
     [Fact(DisplayName = "Issue #1576 ratchet control: a baseline entry whose file no longer violates is stale")]

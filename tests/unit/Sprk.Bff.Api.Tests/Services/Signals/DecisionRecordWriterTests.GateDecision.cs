@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
@@ -389,7 +390,15 @@ public sealed partial class DecisionRecordWriterTests
         h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.WriteRefused);
         var ownerReads = h.Lookups.Where(q => q.EntityName == "sprk_communication").ToList();
         ownerReads.Should().ContainSingle("isdisabled comes with the owner row: no second request");
-        ownerReads[0].LinkEntities.Should().ContainSingle().Which.Columns.Columns.Should().Contain("isdisabled");
+        // The fixture seeds "owner.isdisabled" whatever the query asks for, so pin the link that produces that key: a renamed
+        // alias or re-pointed link would leave the value missing in production, and every user-owned gate would then skip.
+        var ownerLink = ownerReads[0].LinkEntities.Should().ContainSingle().Which;
+        ownerLink.Columns.Columns.Should().Contain("isdisabled");
+        ownerLink.EntityAlias.Should().Be("owner");
+        ownerLink.LinkFromAttributeName.Should().Be("ownerid");
+        ownerLink.LinkToEntityName.Should().Be("systemuser");
+        ownerLink.LinkToAttributeName.Should().Be("systemuserid");
+        ownerLink.JoinOperator.Should().Be(JoinOperator.LeftOuter);
     }
 
     [Fact]
