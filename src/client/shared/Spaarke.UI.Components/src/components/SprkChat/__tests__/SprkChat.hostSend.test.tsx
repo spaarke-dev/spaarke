@@ -26,7 +26,7 @@ if (typeof (globalThis as { TextEncoder?: unknown }).TextEncoder === 'undefined'
 }
 
 import * as React from 'react';
-import { waitFor, act } from '@testing-library/react';
+import { waitFor, act, screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SprkChat } from '../SprkChat';
 import type { ISprkChatProps } from '../types';
@@ -198,5 +198,66 @@ describe('SprkChat — one-shot host→send seam (task 042c-fr-c4 / FR-C4)', () 
       await new Promise(r => setTimeout(r, 10));
     });
     expect(messagesCalls()).toHaveLength(0);
+  });
+});
+
+/**
+ * Host harness for a client-answered turn: onDecorateOutboundBody injects the host's own
+ * reply and returns null (the send is cancelled), as ConversationPane does for
+ * client-orchestrated commands.
+ */
+let armCancelled: (value: string | null) => void = () => undefined;
+function CancellingHarness(): React.JSX.Element {
+  const [pending, setPending] = React.useState<string | null>(null);
+  const [injected, setInjected] = React.useState<ISprkChatProps['injectLocalMessage']>(null);
+  armCancelled = setPending;
+  return (
+    <SprkChat
+      {...apiProps}
+      pendingOutboundMessage={pending}
+      onOutboundConsumed={() => setPending(null)}
+      injectLocalMessage={injected}
+      onLocalMessageInjected={() => setInjected(null)}
+      onDecorateOutboundBody={() => {
+        setInjected({ role: 'Assistant', content: 'Answered by the host.', timestamp: '2026-10-15T00:00:00Z' });
+        return null;
+      }}
+    />
+  );
+}
+
+describe('SprkChat — host-cancelled send (#1906 review)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.endsWith('/sessions') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ sessionId: 'session-hostsend-1', createdAt: '2026-08-06T00:00:00Z' }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+  });
+
+  it('leaves no empty assistant bubble and puts the host answer right after the user message', async () => {
+    await act(async () => {
+      renderWithProviders(<CancellingHarness />);
+    });
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/api/ai/chat/sessions',
+        expect.objectContaining({ method: 'POST' })
+      )
+    );
+
+    await act(async () => {
+      armCancelled('/help');
+    });
+
+    await waitFor(() => expect(screen.getByText('Answered by the host.')).toBeInTheDocument());
+    expect(messagesCalls()).toHaveLength(0);
+    const items = screen
+      .getAllByRole('listitem')
+      .filter(el => /^(User|Assistant) message$/.test(el.getAttribute('aria-label') ?? ''));
+    expect(items.map(el => el.getAttribute('aria-label'))).toEqual(['User message', 'Assistant message']);
+    expect(items[1].textContent).toContain('Answered by the host.');
   });
 });

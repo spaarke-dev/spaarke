@@ -8,8 +8,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// <summary>
 /// Task 061 (D-54) end to end at unit level: the REAL job, evaluator, compiler, writer and closure service over the in-memory
 /// Dataverse seams of <see cref="SignalReevaluationJobTests"/>. An active work assignment past <c>sprk_responseduedate</c> with
-/// <c>sprk_respondedon</c> null raises a Signal; once a response is recorded the next pass closes it ConditionCleared (no Decision
-/// Record), and a response recorded BEFORE the first pass raises nothing.
+/// <c>sprk_respondedon</c> null raises a Signal; once a response is recorded the next pass closes it ConditionCleared (and, task 153,
+/// records the closure in one Routine Decision Record), and a response recorded BEFORE the first pass raises nothing.
 /// </summary>
 /// <remarks>
 /// The seam models the null test the way Dataverse answers it (<c>HoldsNullTests</c>: a root-filter <c>null</c> / <c>not-null</c> with
@@ -63,7 +63,7 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task Run_WorkAssignmentWhoseResponseIsRecordedAfterTheSignal_ClosesItConditionCleared_WithNoDecisionRecord()
+    public async Task Run_WorkAssignmentWhoseResponseIsRecordedAfterTheSignal_ClosesItConditionCleared_AndRecordsTheClosure()
     {
         var h = WithWorkAssignmentResponsePolicy();
         var assignment = AddWorkAssignment(h, responseDue: new DateTime(2026, 10, 1));
@@ -75,12 +75,17 @@ public partial class SignalReevaluationJobTests
         var second = await h.RunAsync();
 
         second.Success.Should().BeTrue();
-        var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
+        h.Org.ConditionalUpdates.Should().HaveCount(2, "the close, then (task 153) the link to its Decision Record");
+        var update = h.Org.ConditionalUpdates[0];
         update.Id.Should().Be(signalId);
         update.Fields["sprk_signalstatus"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.SignalStatusResolved));
         update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
-        update.Fields.Should().NotContainKey("sprk_decisionrecord", "a system closure has no Decision Record (FR-16)");
-        h.Org.CreateCalls.Should().Be(0);
+        update.Fields.Should().NotContainKey("sprk_decisionrecord", "the close itself writes no Decision Record (FR-16)");
+        // Task 153 (D-145b): a Do-lane ConditionCleared closure gets ONE Routine record, filed under the assignment, linked to the Signal.
+        var record = h.Org.DecisionRecordRows.Values.Should().ContainSingle().Subject;
+        record.GetAttributeValue<EntityReference>("sprk_regardingworkassignment")!.Id.Should().Be(WorkAssignmentId);
+        h.Org.ConditionalUpdates[1].Fields["sprk_decisionrecord"].Should().BeEquivalentTo(new EntityReference("sprk_decisionrecord", record.Id));
+        h.Org.CreateCalls.Should().Be(0, "no Signal is raised");
     }
 
     [Fact]

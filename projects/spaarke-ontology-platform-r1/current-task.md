@@ -1,49 +1,53 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-14 (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-16 ~02:45Z (main session; 055 deployed, worklist unreachable → task 156 running). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
-> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; **D-138 owner approvals**) and §6 gotchas.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-138). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-78**; lanes may take 78+).
+> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-147). Deferred work: one self-contained GitHub issue per item,
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-104**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology lanes toward the 035 BFF deploy → 146 live gate → 059/055 Console deploy. |
-| **Blocker** | None from the owner (D-138 answered everything). |
-| **Next Action** | Wait for agents 038, 042, 145 (PRs → uac-r2 review → merge). Merge watchers run for #1865 (041) and #1869 (061). When 145 merges: run **035** (deploy BFF to dev, D-126 procedure below). |
+| **Task** | 156 — make the worklist reachable in the Console (section shim + "Worklist" `sprk_workspacelayout` row). Gates 055's browser check. |
+| **Status** | Implementer (sonnet/high) running in `C:\wts-156`, branch `task/ontology-156-worklist-reachable`; it opens a PR into `docs/ontology-platform-design` and does not merge. |
+| **Next Action** | On its report: independent review → fix round → re-check → merge (`merge-when-green3.sh`, run_in_background) → docs→master PR → update `C:\wts-055` to new master, rebuild Console, before-notices (word-add-in, R3, uac-r2), `pwsh scripts/Deploy-SpaarkeAi.ps1`, hash check, after-notices → run `scripts/seed-worklist-workspace-layout.ps1 -WhatIf` then for real on dev → owner browser check (below). |
 
-## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
+## Lanes in flight
 
-| Lane | PR | State | Next |
-|---|---|---|---|
-| **038** Signal read route (opus) | — | running; also adds read-time evidence redaction (145 F1 option B) | PR → uac-r2 → merge |
-| **042** gate → DR writer | — | running; main-session decision A+C: additive `WriteGateDecisionAsync`, Judgement both paths, confirmedby/policyversion/gatesessionid null, correlation id in factsnapshot, criterion 4 amended (owner may override) | PR → uac-r2 → merge |
-| **145** matter readers, evidence leak | — (local `fcb930525`) | running; F1 → option A (monotonic redaction pass in the job); DR snapshot redaction deferred to the owner as a new issue | PR → uac-r2 → merge |
-| **041** append-only live test | #1865 `7bc1ab688` | main-session review CLEAN; merging on green | mark done |
-| **061** Do-lane policies | #1869 `f34f50058` | merging on green; 4 policies on dev, `sprk_enabled=No`; grammar gained a null test (`9b382ede0`) | mark done |
+- 156 (above). Nothing else.
 
-Merge: `scratchpad/merge-when-green3.sh <pr> <full sha> docs/ontology-platform-design` (ignores the informational Code Quality job; exits on HEAD MOVED).
+## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-## Deploy plan (D-126, D-138 approved)
+- BFF `1.0.0+eb5ba4011` (R3 + master `7315b3e85`), deployed by R3. Ontology does not deploy the BFF.
+- Console (`sprk_spaarkeai`) live from master `44b6a72c1`, 01:56:32Z, hash `0470e7f1…f23f2`. The worklist widget is in the bundle but no dropdown entry reaches it (task 156).
+- Grid config row `…5010` in sync.
+- D-146: five policies enabled; manual evaluator pass 01:56Z wrote 87 Signals (Open task 21, To Do 43, WA 19, Decide 4, Coming due 0), all team-owned.
+- 144/148 writes ON since 02:26:42Z (D-138 + owner "yes approve"). 144 repaired 50 at 02:30, then 0 stale of 130 at 02:35; 148 0 stale. Nightly evaluator 02:30: 87 unchanged, 0 written. Notices sent to R3, word-add-in, uac-r2.
 
-1. **035 BFF** after 145 merges: merge current master into the deploy branch (dev runs master `8a1f3bb11` exactly, uac-r2 confirmed, so nothing of theirs is off master), schema pre-flight on the target, hash-verify. **Before deploying, message word-add-in (`spaarke-wt-spaarkeai-word-add-in-r1-ea`) with the SHA and the restart time — the owner is UATing add-ins on dev.** Also tell uac-r2, and R3 external access (`spaarke-wt-spa-external-access-platform-e0`): R3 deployed `4e23edeb2` (master + unmerged R3 tasks 062–065) to dev on 2026-10-14; our master-based deploy removes those, so message R3 before AND after so it can redeploy on top.
-2. After 035: run 144's stamp job and 148's reconciler **report-only** on dev, record it, and send it to uac-r2. If CLEAN, enable on dev (D-138 delegates this): `CoreAncestor__StampReconciliation__ReportOnlyTables=","` (= 145's `scripts/Invoke-OntologyStampBackfill.ps1 -Apply`) and `Ontology__TodoAssigneeOwner__WritesEnabled=true`.
-3. **146** live gate after 035 and the 6 h DR metadata cache key.
-4. **059** worklist widget (needs 038) → **055** Console deploy (needs 059, 043, 035) → 049, 064, 105.
+## 055 owner browser check (after 156 deploy)
 
-## Done today (2026-10-14)
+Open https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai → workspace dropdown → Worklist. Check: both lanes render; one full review (Send budget inquiry with recipient = self, Revise budget, Next step Add To Do); network log; no console errors; Daily Briefing still fine. Then the main session verifies the DR, budget revision, To Do and Signal = Acted in Dataverse, marks 055 done and updates `notes/deploy-log.md`.
 
-#1844 (050, row live on dev), #1858 (148), #1862 (144), #1854 (143 K1/K2; #1855 closed), #1856 (058). DI-77 (#1868): the dev `sprk_recordtype_ref` row for `sprk_workassignment` was fixed to `sprk_name` (other environments are still open).
+## Next, in order (after 055)
 
-## Owner items still open
+1. 049 (Signal Write + DR Create removals from users and Ontology Administrator, D-147; PR to uac-r2 first).
+2. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), close #1882.
+3. 062, 063, 064, 105, 045, 104.
+4. ebilling: their ConsoleKit PR plus 070, 013, 015, 026, 050, 074 come to us for review.
 
-- The DR `sprk_factsnapshot` after a re-file into secure (145 F1): redact via a service write, or store references only. 145 files it as an issue.
-- **D-140:** #1111 to master NOW (supersedes Q8). Sync lane `C:/wts-sync` (branch `sync/ontology-master-2026-10-14`, opus agent) merges master into the branch → PR into docs → then #1111. The master push auto-deploys the dev BFF = the 035 deploy (pre-flight + notify first; alerts after).
+## Promises to peers
 
-## Coordination
+- **R3** owns the dev BFF line: message first for any BFF change; `git merge-base --is-ancestor <live> <deploy>` before any deploy. R3 asked how to read ProductVersion (asked them back).
+- **word-add-in** (owner UAT on the Console): before/after notices with start/finish times for any Console or BFF change.
+- **uac-r2:** notify before/after deploys; PR for 049 before the live role removal.
 
-- uac-r2 = `spaarke-wt-unified-access-control-r2-ac` (also post on #1355). Security F (#1857) is fixed by them in master `8a1f3bb11` (PR #1861). Secure-family owner team per family = their project uac-secure-project-r3 (owner round 100b).
-- word-add-in = `spaarke-wt-spaarkeai-word-add-in-r1-ea` (notify before any dev BFF deploy).
+## Open owner questions
+
+- None.
+
+## Peers (current session names)
+
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-45`; R3 `spaarke-wt-spa-external-access-platform-49`; uac-r2 `spaarke-wt-unified-access-control-r2-19`; ebilling `spaarke-wt-ebilling-r1-de`; provisioning `spaarke-wt-customer-provisioning-orchest-db`. Quality alert #1906 (client-tests) is not ours.

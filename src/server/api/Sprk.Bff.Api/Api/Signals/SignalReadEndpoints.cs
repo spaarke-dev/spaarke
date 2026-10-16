@@ -35,6 +35,7 @@ public static class SignalReadEndpoints
             .WithDescription("set = lanes (default; Decide and Do, ordered severity, high priority, oldest, record number), closedToday, "
                 + "suppressed or closedEarlier. Membership comes from the worklist grid configuration; a Signal whose core record the "
                 + "caller cannot read is absent, and a Do-lane Signal is returned only when its subject is the caller's own work. "
+                + "Each row carries its sentence; a Do-lane row also carries its subject reference; Not filed is the Do lane's last group. "
                 + "403 when the caller cannot be resolved; 503 when the list cannot be read.")
             .Produces<WorklistResponse>(200)
             .ProducesValidationProblem()

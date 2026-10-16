@@ -18,6 +18,7 @@
     <RolePrivilege name="prvAppendTosprk_Signal" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Global" />
     <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Global" />
+    <RolePrivilege name="prvAppendToContact" level="Global" />
     <RolePrivilege name="prvAppendToUser" level="Global" />
     <RolePrivilege name="prvAssignsprk_BudgetRevision" level="Global" />
     <RolePrivilege name="prvAssignsprk_DecisionRecord" level="Global" />
