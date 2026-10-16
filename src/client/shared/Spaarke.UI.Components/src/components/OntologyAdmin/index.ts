@@ -4,3 +4,6 @@ export { OntologyAdminTab, ONTOLOGY_ADMIN_AREAS } from './OntologyAdminTab';
 export type { OntologyAdminAreaId, OntologyAdminTabProps } from './OntologyAdminTab';
 export { fetchOntologyAdminCapability, ONTOLOGY_ADMIN_CAPABILITIES_ROUTE } from './ontologyAdminCapability';
 export type { OntologyAdminCapabilityOptions } from './ontologyAdminCapability';
+// Rules area (task 100; FR-57): the host builds the service from its authenticated fetch and passes `<RulesArea>` as the tab's `rules` slot.
+export { RulesArea, createOntologyRulesService, ONTOLOGY_ADMIN_RULES_ROUTE } from './Rules';
+export type { OntologyRulesService, OntologyRulesServiceOptions, RulesAreaProps } from './Rules';
