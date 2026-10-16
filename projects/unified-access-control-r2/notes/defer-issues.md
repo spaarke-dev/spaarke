@@ -1190,14 +1190,61 @@ Wrap-up candidate: make the 401 answer a ProblemDetails like every other refusal
 
 `sdap-ci.yml:799` calls `listComments` unpaginated; the `createComment` branch may be broken; two redundant `continue-on-error` full-suite runs remain (archive L1712). Tracked on #969 (open, the CI lane). UAC-r2 does not take CI-workflow work (owner 2026-09-07).
 
-## Closed
+## Release disposition review (2026-10-16, owner directive)
 
-*(none yet)*
+> **Owner, 2026-10-16:** *"ensure that none of these are required or important for uac-r2 release; if any are determined that they should be addressed now then move into open work items; otherwise determine if they are never important then remove and if should be done in the future then clearly mark why deferred and add to github issues / deferred list".*
+> Every item below has a GitHub issue; the reason is also on the issue. **NEVER**: none. Every deferred item is a real gap or capability, not noise.
+
+### NOW (moved into open work)
+
+| Issue | Item | Where |
+|---|---|---|
+| #1755 | Secure provisioning: a client disconnect after the container create leaves it unrecorded (Step 7) | PR #2024 |
+| #1735 (create-POST site) | Caller cancel during the create POST strands a container | PR #2024. The `SpeAdminGraphService` site goes to sdap-SPE-admin-app-r2. Orphan sweep: FUTURE (below) |
+| #1350, #1752 (link half) | Share-link route dead (502) and a latent Secure / No Access bypass | **Done**, PR #2021 `b1eaecb49` (task 012 closed) |
+| #1010 / ISS-030 | Manage Access shows no grants to non-root users; a failed read looks like "no grants" | Task 099 amendment 4 (D-11 ownership plus gated BFF read) |
+| #1576 | Disabled users resolve; the shared OBO default header | PR #2025 |
+| #1620 | Owner unshare via the owner-aware revoke | PR #2016 |
+| #1363 | Demo SPE writer marker and expiry | PR #2017 |
+| #994 | Playbook Share bit | **Done**, PR #2013 `0ccc75b4c` |
+| #1077 / 153 §7, 062 NFR-05 | Owner live checks | UAT checklist |
+
+### FUTURE (deferred, with the reason and the trigger)
+
+| Issue | Item | Why it is not needed for the uac-r2 release | Trigger / owner |
+|---|---|---|---|
+| #1303 (absorbs #1304) | 088/089 evaluator versioning, point-in-time replay, attestation | No history is lost while Dataverse auditing is on for the access tables. "Who could see X on date D" is answered by audit review. The FR-32 known gap is stated in spec/README | The first attestation or legal-hold request; after uac-secure-project-r3's family model |
+| #1305 | 094 upload collision: ask before the bytes move | Owner round 59: a capability, not a defect. The server refuses duplicates (`Fail`) and the 409 dialog exists, so no data is lost | A future project; "Use existing" needs #1306 |
+| #1306 | 095 document-to-many-records intersection entity | Owner round 59: a capability. Two lookup slots per type work today | A product decision on whether a link grants access |
+| #1307 | Two record-target authorization filters | Both are caller-scoped and fail closed (`AuthorizationService.cs:265-278`). Maintainability, not a leak | After task 036 (the FR-20 swap on the same seam), or uac-secure-project-r3 |
+| #1313 | The 165 binding backfill skips a secret-less (MI-FIC) config | Fails closed. New environments stamp the binding at container create (`ContainerCreationStampContractTests`), so the backfill is only for pre-165 containers. The dev Model 1 container belongs to the untouchable secure project `65a3fab2` | The BFF SPE admin plane supports MI-FIC configs (D16). Shares its fix with the #1735 orphan sweep |
+| #1735 (orphan sweep) | Reconciliation sweep for containers committed but never bound | #2024 closes the cancel windows. Only a create-POST timeout after Graph commits remains | With #1313's code fix |
+| #962 | PrivilegeGroupResolver counts page 1 twice | RAG uses it as a membership filter, so duplicates change no answer | No active owner (ai-architecture-redesign-r2 dormant). A two-line fix for the next editor of `Services/Ai/Security` |
+| #971 | Singleton ServiceClient `LastException` crosstalk | No access path branches on exception text. Re-check under client 1.2.26 first | Needs an owner (Board #2) |
+| #972 | Workspace layout: a failed default-clear still writes a new default (two defaults) | Workspace UI correctness, not access control. The user can reset it | Needs an owner: the next Workspace/dashboard round |
+| #989 | `JobContract` typed requester (oid + tid) | Prerequisite P2 of ADR-052 §6 conditional impersonation. No uac-r2 handler impersonates the requester | The first job handler that impersonates |
+| #991 | TipTap 2.x GHSA-cp6q-959q-f8rh | Compose editor dependency, unrelated to access control. Fixed only in 3.x (a major upgrade) | The next active Compose round (compose-r7 never started) |
+| #992 | `@xmldom/xmldom` 0.8.13 (8 HIGH) and dompurify 3.4.7 in LegalWorkspace's lockfile | Pre-existing on master and unrelated to access control. **HIGH CVEs, so it needs an owner soon** | Needs an owner for front-end dependency hygiene (Board #2) |
+
+### OTHER PROJECT (owned and active elsewhere; not needed for the uac-r2 release)
+
+| Issue | Item | Owner |
+|---|---|---|
+| #1072 | 056 remainder: external event create, communications, memos, analyses | SPA-external-access-platform-r3. FR-27's acceptance is met |
+| #988 | Service Bus Entra-only (remaining: the connection-string fallback, dev/platform namespaces) | customer-provisioning-orchestration-r1. Done for customer stamps by T244 |
+| #993 | SpeAdmin `DataverseWebApiClient` takes the singleton `TokenCredential` | sdap-SPE-admin-app-r2 |
+| #1574 | BFF auth pipeline hardening (agent audience, single Admin role, CORS echo, token logger) | spaarke-auth-system-of-record-r1 (ISS-017) |
+| #1355 | Register sprk_signal / sprk_decisionrecord as secure children; D-113 | spaarke-ontology-platform-r1 (D-113 amended 2026-10-16) |
+| #1752 (hard-delete half) | Hard-delete relocated sources on secure transition | The secure-transition container-migration project (scoped out 2026-08-31; `notes/finding-secure-transition-container-migration.md`) |
+
+### ALREADY DONE (closed)
+#1563 (Model 1 guests, auth-system-of-record), #1364 (the provisioning hand-off for `sprk_noaccessentry`), #1350.
+
 ### ISS-030 — the Manage Access modal's existing-grants list is invisible to non-root users, and the failure looks like "no grants"
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project** |
+| **Status** | Open — **scheduled in task 099, amendment 4 (2026-10-16)**: D-11 team ownership on create plus a backfill, and a gated BFF read |
 | **Urgency** | next-round (access-control UI correctness; not a data-loss or privilege-escalation path) |
 | **Filed** | 2026-09-22 |
 | **Source** | Tip from the `spaarkeai-word-add-in-r1` session during BFF deploy coordination; **verified independently here against code AND live dev data** |
@@ -1437,3 +1484,7 @@ direction 2026-09-09.
 **Unchanged and still severable**: fix direction **3**, the `catch { return [] }` at
 `TrackingFieldTrio/index.ts:805`. It has no dependency on any of the above and should be scheduled on
 its own.
+
+## Closed
+
+*(none yet)*
