@@ -801,6 +801,34 @@ Measured on 120 lines: 55.0% task top-1 on gpt-4.1-mini and 63.3% on gpt-5.4-min
 
 ---
 
+### DEF-022 — FR-05 invoice-family guard missing on three generic update paths (pre-existing)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before any playbook or field-mapping rule targets `sprk_invoice` / `sprk_billingevent` core lookups (none configured today) |
+| **Filed** | 2026-10-17 |
+| **Source** | ebilling-r1 task 026 fix-round-1 (K7) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2056 |
+
+**Description**: `InvoiceFamilyCoreRecordGuard` runs from the shared write core (`OwnedChildWrite`; ISS-010). Three paths can write an invoice's or line's core lookups without going through it:
+
+- `UpdateRecordActionCore.cs:251` (the playbook update);
+- `DataverseUpdateHandler.cs:95` (the output orchestrator);
+- `FieldMappingEndpoints.cs:1068` (the field-mapping push).
+
+Each restamps afterwards, but none refuses any of these:
+
+- a two-core invoice;
+- a line with no core;
+- a line whose invoice has another core record.
+
+**Suggested fix**: on each path, call `CheckWriteAsync` for tables in `GuardedLookups` before the write. Alternatively, route the paths through `OwnedChildWrite`; unified-access-control-r2 was asked which.
+
+**Estimated effort**: 0.5 day. **Related**: FR-05, D-75, ISS-010 (#1973), task 026.
+
+---
+
 ### DEF-021 — SpaarkeMaster export blocked by the F12 dependency guard (pre-existing)
 
 | Field | Value |
