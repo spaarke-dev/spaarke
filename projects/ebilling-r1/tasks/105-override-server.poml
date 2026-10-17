@@ -102,7 +102,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Override returns 403 ebilling.override.not_permitted for a caller without the privilege, and also when the privilege probe fails; seeding proof recorded.</criterion>
-    <criterion testable="true">A privileged override with a reason on a blocked internal submission creates the invoice through 049's path, writes exactly one Decision Record, and the blocking finding is visible on the invoice marked Overridden with who, when and reason.</criterion>
+    <criterion testable="true">A privileged override with a reason on a blocked internal submission releases the already-persisted held invoice (D-101) to approval, so it starts counting toward spend (D-102), writes exactly one Decision Record, and the blocking finding is visible on the invoice marked Overridden with who, when and reason.</criterion>
     <criterion testable="true">Override without a reason is 400; on an SPA, Failed or already accepted submission it is 409; a repeat writes nothing new.</criterion>
     <criterion testable="true">A failure inside the accept path leaves no invoice and the submission still Rejected.</criterion>
     <criterion testable="true">GET blocked returns canOverride true only for privileged callers; Return behaves per the recorded F-7 answer.</criterion>
