@@ -655,6 +655,8 @@ Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetc
 | DI-109 | [#2058](https://github.com/spaarke-dev/spaarke/issues/2058) | Repoint the Assistant "Daily Briefing" card (`surfaceLaunchRegistry.ts`, dev GUID) to the Worklist after the Briefing is removed |
 | DI-110 | [#2057](https://github.com/spaarke-dev/spaarke/issues/2057) | Remove the Daily Briefing section, registry entry and layout row after the 064 revert window (keep `/api/ai/daily-briefing/narrate`) |
 | DI-111 | [#2059](https://github.com/spaarke-dev/spaarke/issues/2059) | Know awareness (Briefing TL;DR Know counts, Monitored records) has no Console surface once the Briefing is retired |
+| DI-112 | [#2069](https://github.com/spaarke-dev/spaarke/issues/2069) | Rule dry run ignores tenant/matter scope while re-evaluation skips scoped policies, so publish counts overstate a scoped rule |
+| DI-113 | [#2070](https://github.com/spaarke-dev/spaarke/issues/2070) | Authoring catalog lacks a per-lane quiet-window flag and the clause kinds, so the wizard holds `Decide`, `exists`/`notExists`, `Threshold` |
 | 034 test gaps | [#1729](https://github.com/spaarke-dev/spaarke/issues/1729) | Dismissal-count tests do not pin the window cutoff or a walled-but-known caller (uac-r2 NIT-b/NIT-c on #1654) |
 
 **Closed as fixed (verified 2026-10-12):** DI-50 (none (fixed; PR-only)), DI-52 ([#1575](https://github.com/spaarke-dev/spaarke/issues/1575)), DI-56 (none (fixed; PR-only)), DI-53 ([#1584](https://github.com/spaarke-dev/spaarke/issues/1584)), ISS-011 ([#1420](https://github.com/spaarke-dev/spaarke/issues/1420)), ISS-012 ([#1421](https://github.com/spaarke-dev/spaarke/issues/1421)), ISS-003 ([#1050](https://github.com/spaarke-dev/spaarke/issues/1050)), ISS-005 ([#1112](https://github.com/spaarke-dev/spaarke/issues/1112)), ISS-006 ([#1113](https://github.com/spaarke-dev/spaarke/issues/1113)), ISS-013 ([#1402](https://github.com/spaarke-dev/spaarke/issues/1402)), ISS-017 ([#1447](https://github.com/spaarke-dev/spaarke/issues/1447)). ISS-010 (#1387) is fixed only on this branch and closes when #1111 reaches master.
@@ -783,6 +785,8 @@ Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetc
 | DI-109 | **Found in the task 064 review (PR #2055).** The card still opens the Briefing row by id; valid until DI-110 because it is also the revert target | Task 064 review | [#2058](https://github.com/spaarke-dev/spaarke/issues/2058) |
 | DI-110 | **Found in the task 064 review (PR #2055).** Section and row kept only as the one-release revert path; `briefingCutoverLayouts.test.ts` guards them | Task 064 review | [#2057](https://github.com/spaarke-dev/spaarke/issues/2057) |
 | DI-111 | **Found in the task 064 review (PR #2055).** Needs its own design (where Know surfaces); off the R1 critical path (D-106); must land before or with DI-110 | Task 064 review | [#2059](https://github.com/spaarke-dev/spaarke/issues/2059) |
+| DI-112 | **Found in the task 102 review (PR #2066).** BFF gap from 101; the wizard warns on a scoped rule's confirmation. All dev rules are unscoped | Task 102 review | [#2069](https://github.com/spaarke-dev/spaarke/issues/2069) |
+| DI-113 | **Found in the task 102 review (PR #2066).** Works today; a lane rename would silently drop a Decide rule's quiet window on New version | Task 102 review | [#2070](https://github.com/spaarke-dev/spaarke/issues/2070) |
 
 ### Closed by the owner, 2026-10-11 (no work needed)
 

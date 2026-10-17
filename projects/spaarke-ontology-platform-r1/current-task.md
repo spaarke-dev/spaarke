@@ -4,7 +4,7 @@
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-159). Deferred work: one self-contained GitHub issue per item, label
-> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-112**). Sub-agents never edit this file.
+> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-114**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -21,7 +21,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
 | 064 replace Briefing tab | `C:\wts-064` `task/ontology-064` | — | **PR #2055 merged `640794bf2`** (reviewed, fix round, re-check). Task stays wip: the switch (`Set-DefaultWorkspaceLayout.ps1 -To Worklist`, runbook `notes/briefing-cutover.md` §6.2) waits on the §6.1 non-admin checks or an owner waiver, then owner approval; notify word-add-in, R3, uac-r2 before/after. Follow-ups DI-109..DI-111 (#2058, #2057, #2059) + #2006 comment |
-| 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh (lane done) | **PR #2066** head `2b88ba472`; opus adversarial review running. Lane deviations: scope shown read-only (save route takes no tenant/matter; HANDOFF §8 has it authored, owner to confirm); confidence threshold, draft preview in words and Actions sidebar preview not built (contract lacks them); browser UI tests left for 105 UAT |
+| 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh (lane done) | **PR #2066** head `2b88ba472`; review done (F1 x3 + F3); fix round 1 running (agent `fix-102`). DI-112 #2069, DI-113 #2070 filed. Lane deviations: scope shown read-only (save route takes no tenant/matter; HANDOFF §8 has it authored, owner to confirm); confidence threshold, draft preview in words and Actions sidebar preview not built (contract lacks them); browser UI tests left for 105 UAT |
 
 ## Open owner questions
 
