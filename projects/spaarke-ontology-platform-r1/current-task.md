@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-17 ~05:40Z (main session; #2054 102a merged, 102 relaunched). State only — history is in git log,
+> **Last Updated**: 2026-10-17 ~07:30Z (main session; #2066 102 merged). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-159). Deferred work: one self-contained GitHub issue per item, label
@@ -10,9 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 102 in review (PR #2066); 064 merged, switch pending owner |
-| **Status** | 055 done, 073 deferred (#2051), admin Append live (§16), 049 done (§17, #2050 `32a923ca4`), #2048 merged `adc213d9b` (#2046 closed) |
-| **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. 063 done: POL-MATTER-NOBUDGET on dev Off; enabling is the owner's call (~58 Signals) |
+| **Task** | No lane running. 102 done (#2066 `b9603bab3`); 064 merged, switch pending owner |
+| **Next Action** | docs→master sync PR (#2048, #2050, #2053, 102a, 064, 102; full ArchTests; endpoint census; sync branch in `C:\wts-sync`), then ask R3 for a BFF deploy (063 join + 102a routes). Owner questions below |
 
 ## Lanes in flight
 
@@ -21,8 +20,6 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
 | 064 replace Briefing tab | `C:\wts-064` `task/ontology-064` | — | **PR #2055 merged `640794bf2`** (reviewed, fix round, re-check). Task stays wip: the switch (`Set-DefaultWorkspaceLayout.ps1 -To Worklist`, runbook `notes/briefing-cutover.md` §6.2) waits on the §6.1 non-admin checks or an owner waiver, then owner approval; notify word-add-in, R3, uac-r2 before/after. Follow-ups DI-109..DI-111 (#2058, #2057, #2059) + #2006 comment |
-| 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh (lane done) | **PR #2066** head `2b88ba472`; review done (F1 x3 + F3); fix round 1 running (agent `fix-102`). DI-112 #2069, DI-113 #2070 filed. Lane deviations: scope shown read-only (save route takes no tenant/matter; HANDOFF §8 has it authored, owner to confirm); confidence threshold, draft preview in words and Actions sidebar preview not built (contract lacks them); browser UI tests left for 105 UAT |
-
 ## Open owner questions
 
 1. **D-160 (relayed by uac-r2): keep admin Assign/Delete on `sprk_signal`.** Recorded; ask the owner to confirm directly (peer relay is not an approval, but it is a no-change decision).
@@ -30,6 +27,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 3. **101(c) A/B** (102a pass 1 F4): related-table filter columns are a value oracle, not one bit. A = amend + re-sign the spec §6 tension and D-151 (recommended); B = narrow the allow-list (breaks POL-COMMIT-BUDGET).
 4. **POL-MATTER-NOBUDGET** enable (~58 Signals)?
 5. **064 switch**: §6.1 non-admin checks done or waived, then approve the switch.
+6. **Rule scope in R1** (102 review): the save route takes no tenant/matter, so the wizard shows scope read-only. Accept for R1, or add scope to the BFF?
 
 ## Next, in order
 

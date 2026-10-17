@@ -4,7 +4,7 @@
     <title>Ontology admin slice (b), UI: the rule-authoring wizard</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>056, 101, 102a, 057, 058 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New multi-step authoring UI over admin write routes.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,4 +116,5 @@
   <notes>spec.md FR-58; D-22, D-26; reconciliation M-6, M-7.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">PR #2066 merged into docs `b9603bab3` (head `add4ec25f`). Seven-step RuleWizard on WizardShell (in-app, explicit dismiss), opened from the Rules area (New rule / New version) and the admin widget; every list from the 102a catalog (D-149), validate 200 and save/publish 400 reasonCodes placed on their fields. Review (opus): wire shapes and publish gating clean; fix round 1 fixed close during/after a write, stale hidden filter values, duplicate messages, expired proof, scoped-count warning; 183 OntologyAdmin tests. Not run here: the three browser UI tests and keyboard/screen-reader access after a confirmation closes, carried to 105 UAT. Scope is shown read-only (save route takes none; owner question). Follow-ups DI-112 #2069, DI-113 #2070. Ships to dev with the next docs-to-master sync (Console from master).</completion>
 </task>
