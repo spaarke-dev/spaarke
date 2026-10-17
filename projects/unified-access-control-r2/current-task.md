@@ -16,7 +16,7 @@
 | PR | Issue | Worktree / branch | Head | State |
 |---|---|---|---|---|
 | (099b, pending) | #1010 D-11 half | C:/wt099b `feat/uac-099b-grant-team-ownership` from bed14dd67 | — | Executor running (Opus high). Then 2 adversarial passes (auth) and owner sign-off; the main session runs backfill -Apply after merge. |
-| (186, draft pending) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` @ b59e7e2a1 (master + R3 61e74ef64) | — | Executor running (Opus high). DRAFT; merges after R3's interim → master PR; R3 reviews any R3-file hunks. |
+| #2061 (186, DRAFT) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` (base b59e7e2a1 = master + R3 61e74ef64) | a6d12a0b5 | Built: 44/44 new tests, 1598 external-access tests, guard 87, +0.008 MB, no R3-file hunks. **Adversarial pass 1 running.** Still owed: pass 2, a full integration run before merge, owner questions K1 (unmapped routes) and K2 (/me/entitlements), the owner's role edit, and R3's interim PR merging first. |
 | #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 1def4ee06 | **OWNER SIGNED OFF (round 101).** Master (bed14dd67) merged again 2026-10-17: guards 126/126, ledger 130, 107/107 unit tests. Merge watcher bn1vqa55m running. After merge: send R3 the SHA; start **099c**; live check after the R3 deploy (child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.50 import). |
 
 ## Merged (2026-10-16/17)
