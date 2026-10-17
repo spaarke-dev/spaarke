@@ -98,12 +98,13 @@ internal static class WorkforceRoleCeilingGate
         if (!Applies(principal))
             return null;
 
+        // A null answer (a checker that returned nothing) is treated exactly like an unreadable role: fail closed.
         var ceiling = await privileges.GetWorkforceRoleCeilingAsync(ct).ConfigureAwait(false);
-        if (!ceiling.IsAvailable)
+        if (ceiling is not { IsAvailable: true })
         {
             logger.LogWarning(
                 "[WF-CEILING] DENY contact {ContactId}: the workforce role is unavailable ({Reason}).",
-                principal.ContactId, ceiling.UnavailableReason);
+                principal.ContactId, ceiling?.UnavailableReason ?? "no_answer");
             return ProblemDetailsHelper.Forbidden(
                 DenyBaselineUnavailable, "Access for this account cannot be determined right now.");
         }

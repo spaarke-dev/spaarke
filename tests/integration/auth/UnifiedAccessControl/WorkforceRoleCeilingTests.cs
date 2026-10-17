@@ -219,6 +219,18 @@ public sealed class WorkforceRoleCeilingTests
     }
 
     [Fact]
+    public async Task ACheckerThatAnswersNothing_IsTreatedAsAnUnavailableRole()
+    {
+        var privileges = new Mock<IDataversePrivilegeChecker>();
+        privileges.Setup(p => p.GetWorkforceRoleCeilingAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforceRoleCeiling)null!);
+
+        var denied = await Gate(WorkforceContact(), privileges.Object, WorkforceRoleCeilingGate.SubmitServiceRequest);
+
+        ShouldBe403(denied, WorkforceRoleCeilingGate.DenyBaselineUnavailable);
+    }
+
+    [Fact]
     public async Task AWorkforceContact_WhoseRoleLacksThePrivilege_Is403_PrivilegeMissing()
     {
         var privileges = new WorkforceCeilingDouble
