@@ -105,7 +105,7 @@ a matter cannot be searched here.
 | # | Criterion | Evidence |
 |---|---|---|
 | 1 | Save and publish persist `sprk_matter`; tenant stays blank; publish raises only for M | `Scope_SaveWithAMatter_BindsTheMatterAsTheCaller_AndNeverWritesATenant`, `Scope_PublishWithAMatter_MovesThePointerAndTheScopeInOneConditionalWrite_ThenReevaluatesOnce`, `Publish_FromAllMattersToM_ClosesTheOpenSignalsOutsideM_Superseded_AndReraisesOnlyM` |
-| 2 | Nightly: evaluated within M; Signals written/closed only for M; N gets none; run succeeds | `Run_AMatterScopedRule_IsEvaluatedWithinItsMatter_AndAQualifyingSubjectOnAnotherMatterGetsNoSignal` (Success, raised 1, no key for the other matter), `Run_AMatterScopedRule_ClosesOnlyInsideItsMatter_AndNamesAnOpenSignalOutsideItInsteadOfClosingIt`; control `Run_TheSameDataWithoutAScope_RaisesForBothMatters` |
+| 2 | Nightly: evaluated within M; Signals written/closed only for M; N gets none; run succeeds | `Run_AMatterScopedRule_IsEvaluatedWithinItsMatter_AndAQualifyingSubjectOnAnotherMatterGetsNoSignal` (Success, raised 1, no key for the other matter), `Run_AMatterScopedRule_ClosesConditionClearedOnlyInsideItsMatter_AndClosesAnOpenSignalOutsideIt_Superseded` (fix round 1); control `Run_TheSameDataWithoutAScope_RaisesForBothMatters` |
 | 3 | Dry-run counts equal publish counts, in one test | `DryRunWithinAMatter_CountsExactlyWhatThePublishSupersedesAndReraises`: the real `OntologyAdminAuthoringService` and the production engine over the same world; dry run (wouldSupersede 3, wouldReraise 1, wouldClose 0) equals the publish pass (superseded 3, re-raised 1, closed 0) |
 | 4a | Unreadable and nonexistent matters get the same answer | `Scope_AMatterThatDoesNotExist_AndOneTheCallerCannotRead_GetTheSameAnswer` (Theory over validate, dry run, dry run of a new rule, save, publish; also `Guid.Empty`): same status, same body, matter read as the caller |
 | 4b | Mismatch on all four routes | `Scope_AMatterScopeOnARuleThatIsNotAboutMatters_IsScopeSubjectMismatch` (same Theory; reasonCode `ontology.admin.scope_subject_mismatch`, no matter read) |
@@ -162,13 +162,8 @@ newer work). Well under +5 MB; total far below 55 MB. No package changes, so no 
 
 ### Known limits (not defects on a real path)
 
-- A Signal citing no version is not superseded by a scope change (the existing supersede rule); the job's "outside its matter
-  scope" warning names it so it is not silent. All Signals written since versioning cite a version.
-- Redaction (D-123) still covers out-of-scope Signals of the policy; it only ever removes detail (design §4).
 - A stored non-blank `sprk_tenant` (written outside the BFF) is not cleared by a publish; the policy stays `ScopedNotEvaluated`.
-- A publish without `matterId` un-scopes the policy; the wizard always sends the scope it shows, so this is the "All matters"
-  choice. A non-wizard caller must send the scope it wants kept.
-- `RuleSubjectOf` in the authoring service duplicates the job's private `RuleSubjectEntity` (both read the body's `subject`).
+- The other limits are listed under "Fix round 1" below (K2 to K5, uac K3, the `RuleSubjectOf` duplicate).
 - No live UI check (no deploy in this lane); dark-mode and browser runs not done. `tsc` for Spaarke.AI.Widgets cannot resolve
   `@spaarke/ui-components` locally (pre-existing; affects unchanged files too). Spaarke.UI.Components `tsc` shows 9 pre-existing
   module-resolution errors, none in changed files.
@@ -178,3 +173,79 @@ newer work). Well under +5 MB; total far below 55 MB. No package changes, so no 
 - `sprk_policy` relationship metadata: the ManyToOne lookup to `sprk_matter`, navigation property `sprk_Matter`.
 - `sprk_policies?$select=sprk_code,_sprk_matter_value,sprk_tenant`: all six policies have no matter and a blank tenant, so
   nothing in dev changes behaviour on deploy.
+
+## Fix round 1 (PR #2075 review)
+
+Model: Sonnet-tier implementer brief, executed literally. F1 (the cascade RemoveLink on `sprk_policy_matter` widens the rule when its
+matter is deleted or archived) **awaits the owner's schema decision and is not in this round**; nothing under `src/dataverse/**` changed.
+
+### F4. A publish without a scope intent no longer clears the scope
+
+- `OntologyDryRunRequest` and `OntologyPublishRequest` gain `bool? AllMatters`. In the shared `CheckScopeAsync` (dry run and publish
+  pass the policy's stored `_sprk_matter_value`; validate and save pass none): a stored scope with neither `matterId` nor
+  `allMatters: true` is a 400 on `matterId`, reasonCode `ontology.admin.scope_intent_required` ("This rule is limited to a matter. Send
+  that matter to keep the limit, or all matters to remove it."); `matterId` with `allMatters: true` is a 400 with the same code ("Send a
+  matter or all matters, not both."), whatever is stored; a stored null with neither keeps today's unscoped behaviour.
+- The dry-run proof's cached payload is now `DryRunProof(At, StoredMatter)` (payload version 2): the policy's stored scope when the dry
+  run ran. Publish answers the existing 409 `ontology.admin.policy_changed` when the stored scope differs (two admins), before any write.
+  The live test that plants a proof was updated to the new payload.
+- The dry run of an existing policy returns `storedMatterId`, and `storedMatterName` when the caller's read of the matter returns it
+  (the `OntologyAdminRulesService` query shape; a failed or refused read gives null, never a failed dry run).
+- Wizard: the test and the publish send `scopeIntentRequest(draft)`: `{ matterId }` or `{ allMatters: true }` (validate and save still
+  send only `matterId`). The publish confirmation adds `scopeChangeSentence`, e.g. "This changes the rule from Matter Nine to all
+  matters.", comparing the chosen scope with the stored scope the test read (falling back to the page's scope). The new code is placed on
+  the scope field.
+
+Tests (`OntologyAdminAuthoringScopeEndpointTests.cs`): `Scope_AStaleClientWithNoIntent_OnAScopedPolicy_IsRefused_AndTheScopeIsKept`,
+`Scope_AllMattersFalse_IsNoIntent_OnAScopedPolicy`, `Scope_AMatterAndAllMattersTogether_IsRefused_WithTheIntentCode` (dry run, dry run
+of a new rule, publish), `Scope_TwoAdmins_AStoredScopeChangedSinceTheDryRun_IsPolicyChanged_AndNothingIsWritten`,
+`Scope_TwoAdmins_AScopeAddedSinceAnUnscopedDryRun_IsPolicyChanged`, `Scope_DryRun_ReturnsTheStoredScope_WithItsNameWhenTheCallerCanReadIt`;
+`Scope_PublishFromOneMatterToAllMatters_WithAllMatters_ClearsTheScopeWithANullBind` (allMatters clears); the unscoped rule with no intent
+is `Scope_None_DryRunSaveAndPublishBehaveAsBefore_NoMatterIsReadOrBound` (unchanged, green). Jest: `ruleDraft.test.ts` (intent, sentence),
+`authoringService.test.ts` (code on `matterId`), `RuleWizard.test.tsx` (allMatters on test and publish, the sentence for M to all, M to
+N, the stored scope the test read, none when kept or unscoped).
+
+### uac-r2 F2. Open Signals outside the scope are closed, not only warned about
+
+`SignalClosureService.SupersedeInPassAsync` takes an optional outside-scope predicate: on a matter-scoped policy's own pass every OPEN
+Signal outside the scope closes `Superseded` through the same `CloseAsync` the version supersede uses, whatever version it cites. The
+Warning is gone; the job counts them as `outOfScopeSuperseded` (part of `supersededClosed`) and logs at Information with their ids. A close
+that fails is a refusal and fails the run, as for any supersede. Tests: the flipped
+`Run_AMatterScopedRule_ClosesConditionClearedOnlyInsideItsMatter_AndClosesAnOpenSignalOutsideIt_Superseded`; route (a)
+`Run_AScopeChangedInDataverseFromMToN_WithoutAPublish_ClosesMsOpenSignal_Superseded_AndRaisesN`; route (b)
+`Publish_Narrowing_ClosesANoVersionOpenSignalOutsideTheNewScope_Superseded`; `Publish_FromMToN_...` now also asserts the Information line.
+
+### uac-r2 F3. The job's fail-closed hit guard has a must-fire test
+
+Harness switch `World.IgnoreSubjectIdCondition` (the fake Dataverse ignores the scoped root condition, so the evaluation returns every
+matter). `Run_AScopedEvaluationThatReturnsAnotherSubject_FailsThePolicy_AndWritesNothing`: Success false, `policyFailures` 1, no create
+or write, the "returned another subject" Error. Must-not-fire control: `Run_AMatterScopedRule_IsEvaluatedWithinItsMatter_...`.
+
+### Fail before, pass after
+
+- F2: the job and closure service from `5152cabea` restored: 4 fail (the three new or flipped closure tests and `Publish_FromMToN`).
+- F3: the guard disabled (`if (false && ...)`): the new test fails; restored, it passes.
+- F4 server: the service and models from `5152cabea` restored: the 8 new endpoint cases fail (the renamed allMatters-clears test passes,
+  as a regression guard).
+- F4 wizard: `authoringService.ts`, `ruleDraft.ts`, `RuleWizard.tsx` from `5152cabea` restored: 8 jest tests fail.
+
+### Tests run (fix round 1)
+
+| Suite | Result |
+|---|---|
+| BFF, filtered (`Ontology\|Signal\|Reevaluation\|PolicyVersion`) | 2406 passed, 3 skipped, 0 failed |
+| `Spaarke.ArchTests`, full | 1076 passed, 0 failed |
+| Jest, Spaarke.UI.Components (OntologyAdmin) | 8 suites, 205 passed |
+| Jest, Spaarke.AI.Widgets (OntologyAdminWorkspaceWidget, ontologyAdminGate) | 2 suites, 18 passed |
+
+### Known limits after fix round 1
+
+- K2: the D-123 redaction still writes to out-of-scope Signals of the policy. It only removes detail, and the D-123 sweep covers them
+  anyway. Accepted explicitly as a deviation from the POML wording "never write".
+- K3: a tenant stored outside the BFF is not read by the dry run; publish then reports `reevaluation=failed` and the run fails visibly.
+  #2069's tenant-counts clause is met by refusing a tenant in the request.
+- K4: an admin who cannot read the current matter cannot keep it (fails closed); they can only change or clear the scope.
+- K5: a failed matter search shows as no results (pre-existing `searchLookupTarget` behaviour).
+- uac K3: a reader who cannot read the matter sees its id but not its name.
+- `RuleSubjectOf` in the authoring service duplicates the job's private `RuleSubjectEntity` (both read the body's `subject`).
+- Validate carries no `allMatters` (the brief's closed set is dry run and publish); it checks a scope as save does.
